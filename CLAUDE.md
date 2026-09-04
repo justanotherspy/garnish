@@ -135,8 +135,11 @@ user's OK first.
 | toml | the TOML config file (parse); config *generation* is hand-written in `docs.rs` | `config/` |
 | jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
 | itertools | iterator helpers (interspersing, joining, grouping) | rendering |
-| command-run | running external commands where a timeout is not needed (`git --version` in `doctor`) | `git.rs` |
-| std::process + `git::run_program` | every git command the worker runs (status, rev-list, fetch): kill-on-timeout, pipes drained on threads | `git.rs` |
+| std::process + `git::run_program` | every external command (status, rev-list, fetch, `--version`): kill-on-timeout, pipes drained on threads | `git.rs` |
+
+`command-run` (from the toolkit) is deliberately **not** used: every subprocess
+in garnish needs kill-on-timeout, which it does not offer. Do not add it back
+for a "quick" command; route through `git::run_program`.
 | rayon | data parallelism: `refresh --all`, `preview --all`, docs generation; **never on the tick path** | `cli.rs`, `docs.rs` |
 | unicode-width | terminal cell width of text | `ansi.rs` |
 | criterion (dev) | micro-benchmarks | `benches/` |

@@ -8,9 +8,15 @@ use crate::config;
 use crate::icons::IconSet;
 use crate::modules::SCHEMAS;
 
-/// Build the report.
+/// Build the report from the process environment.
 #[must_use]
 pub fn report(config_path: Option<&Path>) -> String {
+    report_with(config_path, &Cache::from_env(), &crate::install::default_settings_path())
+}
+
+/// Build the report against explicit cache and settings locations.
+#[must_use]
+pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: &Path) -> String {
     let mut o = String::new();
     let _ = writeln!(o, "garnish {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(
@@ -26,17 +32,16 @@ pub fn report(config_path: Option<&Path>) -> String {
     );
     let _ = writeln!(o, "git      {}", git_version());
     let _ = writeln!(o);
-    settings_section(&mut o);
+    settings_section(&mut o, settings);
     config_section(&mut o, config_path);
-    cache_section(&mut o);
+    cache_section(&mut o, cache);
     environment_section(&mut o);
     o
 }
 
-fn settings_section(o: &mut String) {
-    let settings = crate::install::default_settings_path();
+fn settings_section(o: &mut String, settings: &Path) {
     let _ = writeln!(o, "claude settings  {}", settings.display());
-    match std::fs::read_to_string(&settings) {
+    match std::fs::read_to_string(settings) {
         Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
             Ok(v) => match v.get("statusLine") {
                 Some(sl) => {
@@ -96,11 +101,11 @@ fn config_section(o: &mut String, config_path: Option<&Path>) {
     let _ = writeln!(o);
 }
 
-fn cache_section(o: &mut String) {
-    let cache = Cache::from_env();
+fn cache_section(o: &mut String, cache: &Cache) {
     let root = cache.root();
-    let writable = std::fs::create_dir_all(root).is_ok()
-        && std::fs::metadata(root).is_ok_and(|m| !m.permissions().readonly());
+    let probe = root.join(format!(".probe.{}", std::process::id()));
+    let writable = std::fs::create_dir_all(root).is_ok() && std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
     let _ = writeln!(
         o,
         "cache    {} ({})",
@@ -124,6 +129,19 @@ fn cache_section(o: &mut String) {
             );
         }
     }
+    if let Ok(log) = std::fs::read_to_string(root.join("debug.log")) {
+        let lines: Vec<&str> = log.lines().collect();
+        let tail = lines.iter().rev().take(10).rev();
+        let _ = writeln!(
+            o,
+            "         debug.log (last {} of {} lines):",
+            tail.len().min(10),
+            lines.len()
+        );
+        for line in tail {
+            let _ = writeln!(o, "           {line}");
+        }
+    }
     let _ = writeln!(o);
 }
 
@@ -139,8 +157,11 @@ fn environment_section(o: &mut String) {
         "GARNISH_NOW",
         "GARNISH_NO_SPAWN",
         "GARNISH_COLUMNS",
+        "GARNISH_DEBUG",
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         "DISABLE_AUTO_COMPACT",
+        "DISABLE_COMPACT",
     ] {
         if let Ok(v) = std::env::var(key) {
             let _ = writeln!(o, "         {key}={v}");
@@ -215,7 +236,15 @@ mod tests {
 
     #[test]
     fn report_mentions_every_section() {
-        let r = report(None);
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::at(dir.path().join("cache"));
+        std::fs::create_dir_all(cache.root()).unwrap();
+        std::fs::write(cache.root().join("debug.log"), "1 pid=1 spawn sync failed: x\n").unwrap();
+        let settings = dir.path().join("settings.json");
+        let r = report_with(Some(&dir.path().join("none.toml")), &cache, &settings);
+        assert!(r.contains("settings file not found"), "{r}");
+        assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");
+        assert!(r.contains("(writable)"), "{r}");
         for needle in [
             "garnish ",
             "claude settings",

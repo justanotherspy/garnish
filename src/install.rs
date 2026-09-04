@@ -4,6 +4,7 @@
 //! touches the `statusLine` object (keeping any keys it does not own, such as
 //! `hideVimModeIndicator`), backs the file up first, and writes atomically.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
@@ -57,6 +58,7 @@ fn is_executable(_p: &Path) -> bool {
 /// # Errors
 /// When the existing text is not a JSON object.
 pub fn merge(existing: &str, plan: &Plan) -> Result<String, String> {
+    let existing = existing.strip_prefix('\u{feff}').unwrap_or(existing);
     let mut root: Map<String, Value> = if existing.trim().is_empty() {
         Map::new()
     } else {
@@ -82,36 +84,80 @@ pub fn merge(existing: &str, plan: &Plan) -> Result<String, String> {
     Ok(text)
 }
 
+/// Read the settings file: `Ok(None)` when it does not exist, `Err` for any
+/// other problem (a directory, unreadable), so a dry run reports exactly what
+/// the real run would hit.
+///
+/// # Errors
+/// Any I/O error other than "not found".
+pub fn read_existing(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("reading {}: {e}", path.display())),
+    }
+}
+
 /// Back the settings file up (if it exists) and write the merged text atomically.
+///
+/// A symlinked settings file is updated through the link (the target is
+/// rewritten, the link stays), the new file keeps the old file's permissions,
+/// and backups never overwrite each other.
 ///
 /// # Errors
 /// Propagates I/O errors and invalid existing JSON.
 pub fn apply(plan: &Plan) -> Result<Outcome, String> {
-    let existing = match std::fs::read_to_string(&plan.settings) {
-        Ok(t) => Some(t),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("reading {}: {e}", plan.settings.display())),
-    };
+    let existing = read_existing(&plan.settings)?;
     let merged = merge(existing.as_deref().unwrap_or(""), plan)?;
     if existing.as_deref() == Some(merged.as_str()) {
         return Ok(Outcome { backup: None, changed: false });
     }
-    let backup = existing.as_ref().map(|_| {
-        let stamp = crate::time::now_secs();
-        plan.settings.with_file_name(format!("settings.json.bak-{stamp}"))
-    });
-    if let Some(b) = &backup {
-        std::fs::copy(&plan.settings, b)
-            .map_err(|e| format!("backing up to {}: {e}", b.display()))?;
-    }
-    if let Some(dir) = plan.settings.parent() {
+    let target = if existing.is_some() {
+        std::fs::canonicalize(&plan.settings).unwrap_or_else(|_| plan.settings.clone())
+    } else {
+        plan.settings.clone()
+    };
+    let backup = if existing.is_some() { Some(write_backup(&target)?) } else { None };
+    if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     }
-    let tmp = plan.settings.with_extension(format!("json.tmp.{}", std::process::id()));
+    let tmp = target.with_extension(format!("json.tmp.{}", std::process::id()));
     std::fs::write(&tmp, &merged).map_err(|e| format!("writing {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &plan.settings)
-        .map_err(|e| format!("replacing {}: {e}", plan.settings.display()))?;
+    if let Ok(meta) = std::fs::metadata(&target) {
+        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    }
+    std::fs::rename(&tmp, &target).map_err(|e| format!("replacing {}: {e}", target.display()))?;
     Ok(Outcome { backup, changed: true })
+}
+
+/// Copy `target` to `settings.json.bak-<epoch>[-n]`, never clobbering an
+/// existing backup. Uses the wall clock (not `GARNISH_NOW`).
+fn write_backup(target: &Path) -> Result<PathBuf, String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let name = target
+        .file_name()
+        .map_or_else(|| "settings.json".to_owned(), |n| n.to_string_lossy().into_owned());
+    for attempt in 0..1000_u32 {
+        let suffix = if attempt == 0 { String::new() } else { format!("-{attempt}") };
+        let path = target.with_file_name(format!("{name}.bak-{stamp}{suffix}"));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                let bytes = std::fs::read(target)
+                    .map_err(|e| format!("reading {}: {e}", target.display()))?;
+                f.write_all(&bytes)
+                    .map_err(|e| format!("backing up to {}: {e}", path.display()))?;
+                if let Ok(meta) = std::fs::metadata(target) {
+                    let _ = std::fs::set_permissions(&path, meta.permissions());
+                }
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("backing up to {}: {e}", path.display())),
+        }
+    }
+    Err("too many backups with the same timestamp".to_owned())
 }
 
 /// What `apply` did.
@@ -179,6 +225,39 @@ mod tests {
                 .flatten()
                 .all(|e| !e.file_name().to_string_lossy().contains(".tmp."))
         );
+    }
+
+    #[test]
+    fn apply_keeps_permissions_backups_and_symlinks() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles").join("settings.json");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, "\u{feff}{\"dot\":1}").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = dir.path().join("settings.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let p = Plan { settings: link.clone(), ..plan(dir.path()) };
+        let first = apply(&p).unwrap();
+        assert!(first.changed);
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "link kept");
+        let text = std::fs::read_to_string(&real).unwrap();
+        assert!(text.contains("\"dot\": 1") && text.contains("\"command\": \"garnish\""), "{text}");
+        assert!(!text.starts_with('\u{feff}'));
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        let backup = first.backup.unwrap();
+        assert!(backup.starts_with(real.parent().unwrap()));
+        assert_eq!(std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
+        // a second change in the same second gets its own backup
+        std::fs::write(&real, "{\"dot\":2}").unwrap();
+        let second = apply(&p).unwrap();
+        let b2 = second.backup.unwrap();
+        assert_ne!(b2, backup);
+        assert!(std::fs::read_to_string(&b2).unwrap().contains("\"dot\":2"));
+        assert!(std::fs::read_to_string(&backup).unwrap().contains("\"dot\":1"));
+        // read_existing distinguishes missing from unreadable
+        assert_eq!(read_existing(&dir.path().join("nope.json")).unwrap(), None);
+        assert!(read_existing(dir.path()).is_err());
     }
 
     #[test]

@@ -5,7 +5,7 @@
 # disabled so only the tick itself is measured):
 #   warm-default  seeded cache, default preset, inside a git repo
 #   warm-full     seeded cache, full preset (every module, every option)
-#   cold          empty cache each run (first tick of a session)
+#   cold          empty cache each run, workers really spawned (first tick of a session)
 #   refresh-sync  the background worker for one cached module
 #
 # Budgets (SPEC § 8): warm mean < 3 ms and p99 < 8 ms; cold mean < 30 ms;
@@ -18,6 +18,9 @@ RUNS="${RUNS:-300}"
 OUT=bench/results
 mkdir -p "$OUT"
 
+for tool in hyperfine jq git; do
+  command -v "$tool" >/dev/null || { echo "bench: $tool is required (cargo install hyperfine)"; exit 1; }
+done
 cargo build --release --quiet
 BIN="$PWD/target/release/garnish"
 
@@ -26,10 +29,10 @@ trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 origin="$work/origin.git"
 git init -q --bare -b main "$origin"
-git clone -q "$origin" "$repo"
+git init -q -b main "$repo"
 (
   cd "$repo"
-  git checkout -q -b main
+  git remote add origin "$origin"
   for i in $(seq 1 50); do echo "$i" > "f$i.txt"; done
   git add . && git -c user.name=b -c user.email=b@b commit -qm init
   git push -q -u origin main
@@ -61,10 +64,15 @@ hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
   --export-json "$OUT/warm-full.json" \
   -n warm-full "$BIN --config $full_cfg"
 
-hyperfine --warmup 5 --runs 100 -N --input "$payload" \
-  --prepare "rm -rf $cache" \
+# Cold: empty cache, and the tick really spawns its detached workers (that
+# spawn is the dominant cold cost). Each run gets its own cache dir so a
+# worker still finishing cannot race the next run's cleanup.
+cold_cache="$work/cold-cache"
+hyperfine --warmup 5 --runs 100 --input "$payload" \
+  --prepare "rm -rf $cold_cache || true" \
   --export-json "$OUT/cold.json" \
-  -n cold "$BIN --config $empty_cfg"
+  -n cold "env -u GARNISH_NO_SPAWN GARNISH_CACHE_DIR=$cold_cache $BIN --config $empty_cfg"
+sleep 1
 
 hyperfine --warmup 5 --runs 50 -N \
   --export-json "$OUT/refresh-sync.json" \

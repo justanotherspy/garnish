@@ -17,7 +17,7 @@ while read -r name mean_max p99_max; do
   line="$(jq -r --argjson mm "$mean_max" --argjson pm "$p99_max" '
       .results[0] | (.times | sort) as $t
       | (.mean * 1000) as $mean
-      | ($t[(($t | length) * 0.99 | floor)] * 1000) as $p99
+      | ($t[((($t | length) * 0.99 | ceil) - 1)] * 1000) as $p99
       | (.max * 1000) as $max
       | (if $mean > $mm or ($pm > 0 and $p99 > $pm) then "OVER" else "ok" end) as $status
       | [($mean * 1000 | round / 1000), ($p99 * 1000 | round / 1000), ($max * 1000 | round / 1000), $status]

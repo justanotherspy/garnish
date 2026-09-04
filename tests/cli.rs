@@ -70,8 +70,15 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
         run(&["install", "--absolute", "--refresh-interval", "2", "--padding", "1"], home, &[]);
     assert!(ok && out.contains("already up to date"), "{out}");
 
-    let (out, _, _) = run(&["install", "--dry-run"], home, &[("PATH", "/nonexistent")]);
-    assert!(out.contains("not on PATH"), "{out}");
+    let (out, err, _) = run(&["install", "--dry-run"], home, &[("PATH", "/nonexistent")]);
+    assert!(err.contains("not on PATH"), "{err}");
+    assert!(!out.contains("not on PATH"), "the JSON preview stays clean: {out}");
+    // a dry run reports the same read errors the real run would
+    let bad = home.join("dir.json");
+    std::fs::create_dir_all(&bad).unwrap();
+    let (_, err, ok) =
+        run(&["install", "--dry-run", "--settings", bad.to_str().unwrap()], home, &[]);
+    assert!(!ok && err.contains("reading"), "{err}");
 }
 
 #[test]

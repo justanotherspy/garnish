@@ -362,15 +362,13 @@ pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> 
     run_git(cwd, &["fetch", "--quiet", remote], timeout).map(|_| ())
 }
 
-/// `git --version`, for `doctor`; no timeout is needed here.
+/// `git --version`, for `doctor` (killed after two seconds like every other
+/// git call: a hung `git` wrapper must not hang the report).
 ///
 /// # Errors
-/// When git is missing or fails.
+/// When git is missing, fails, or hangs.
 pub fn version() -> Result<String, String> {
-    let mut cmd = command_run::Command::with_args("git", ["--version"]);
-    cmd.enable_capture();
-    cmd.log_command = false;
-    cmd.run().map(|o| o.stdout_string_lossy().trim().to_owned()).map_err(|e| e.to_string())
+    run_git(Path::new("."), &["--version"], Duration::from_secs(2)).map(|v| v.trim().to_owned())
 }
 
 #[cfg(test)]

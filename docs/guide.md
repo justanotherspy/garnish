@@ -34,7 +34,12 @@ or by hand:
 `refreshInterval: 1` makes the clock tick and the countdowns move; garnish
 keeps that cheap by rendering payload data directly and everything slow
 (git, worktrees) from a cache that a detached worker refreshes in the
-background. A tick never waits on git and never runs a process.
+background. A warm tick never waits on git and never runs a process; when a
+cached value has expired the tick spawns one detached worker and moves on.
+garnish makes no network calls of its own; only `[modules.sync]
+fetch_interval` opts into a background `git fetch`. `garnish install` rewrites
+`settings.json` in one read-modify-write with no lock, so run it while no
+other tool is editing that file.
 
 ## 3. Try it before you commit
 

@@ -2,7 +2,7 @@
 
 <p align="center">
   <em>A fast, cached, beautifully themed status line for Claude Code.</em><br>
-  <sub>Rust · nightly · zero network · &lt; 3 ms per tick</sub>
+  <sub>Rust · nightly · no network calls of its own · &lt; 3 ms per tick</sub>
 </p>
 
 ```text

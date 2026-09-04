@@ -75,8 +75,12 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     let _ = writeln!(out, "style = {}", toml_string(cfg.frame.style.name()));
     c(&mut out, "Extend the rule to the full width and close with the right cap.");
     let _ = writeln!(out, "fill = {}", cfg.frame.fill);
-    c(&mut out, "Default separator between modules on a line.");
-    let _ = writeln!(out, "separator = {}", toml_string(&cfg.frame.chars.separator));
+    c(&mut out, "Default separator between modules on a line (style-dependent when unset).");
+    if annotated && cfg.frame.style != FrameStyle::Custom {
+        let _ = writeln!(out, "# separator = {}", toml_string(&cfg.frame.chars.separator));
+    } else {
+        let _ = writeln!(out, "separator = {}", toml_string(&cfg.frame.chars.separator));
+    }
     if cfg.frame.style == FrameStyle::Custom || !annotated {
         let ch = &cfg.frame.chars;
         for (key, value) in [
@@ -136,7 +140,13 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
             "preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)",
         );
         let _ = writeln!(out, "enabled = {}", m.enabled);
-        let _ = writeln!(out, "preset = {}", toml_string(m.preset.name()));
+        // An annotated file leaves the module preset and option values as
+        // comments so the top-level `preset` keeps driving them after `init`.
+        if annotated {
+            let _ = writeln!(out, "# preset = {}", toml_string(m.preset.name()));
+        } else {
+            let _ = writeln!(out, "preset = {}", toml_string(m.preset.name()));
+        }
         let _ = writeln!(out, "refresh = {}", m.refresh);
         c(out, "label: text before the value; prefix/suffix: text around the module");
         let _ = writeln!(out, "label = {}", toml_string(&m.label));
@@ -163,7 +173,8 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
                 );
             }
             let value = m.value(opt.key).map_or_else(|| opt.default.to_toml(), Value::to_toml);
-            let _ = writeln!(out, "{} = {}", opt.key, value);
+            let prefix = if annotated { "# " } else { "" };
+            let _ = writeln!(out, "{prefix}{} = {}", opt.key, value);
         }
         if !schema.icons.is_empty() {
             let _ = writeln!(out, "[modules.{}.icons]", schema.id);
@@ -432,7 +443,7 @@ pub fn config_page() -> String {
     let _ = writeln!(o, "# Configuration reference\n");
     let _ = writeln!(
         o,
-        "garnish reads `$GARNISH_CONFIG`, else `--config`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.\n"
+        "garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.\n"
     );
     let _ = writeln!(
         o,
@@ -667,6 +678,14 @@ mod tests {
         let (again, errs) = config::parse(&text, &SCHEMAS);
         assert!(errs.is_empty(), "{errs:?}\n{text}");
         assert_eq!(again, cfg);
+        // the top-level preset still drives modules and the frame after `init`
+        let switched = text.replacen("preset = \"default\"", "preset = \"full\"", 1);
+        let (full, errs) = config::parse(&switched, &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(full.modules.get("context").unwrap().int("width"), 30);
+        let powerline = text.replacen("style = \"rounded\"", "style = \"powerline\"", 1);
+        let (pl, _) = config::parse(&powerline, &SCHEMAS);
+        assert_eq!(pl.frame.chars.separator, " \u{e0b1} ");
     }
 
     #[test]

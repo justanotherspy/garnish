@@ -187,7 +187,7 @@ renders dimmed with `✗` and the error is kept in the cache file for
 
 ## 4. Configuration
 
-Location: `$GARNISH_CONFIG` > `--config` > `$XDG_CONFIG_HOME/garnish/garnish.toml`
+Location: `--config` > `$GARNISH_CONFIG` > `$XDG_CONFIG_HOME/garnish/garnish.toml`
 (default `~/.config/garnish/garnish.toml`) > `~/.garnish.toml` > built-in
 defaults. Config is re-read every tick (it is tiny); no daemon.
 
@@ -304,10 +304,10 @@ cache dir, last worker errors, and a glyph test line.
 |---|---|
 | `garnish` | render from stdin (default) |
 | `garnish refresh --module M --session S --cwd D [--all]` | worker entry point |
-| `garnish install [--settings P] [--refresh-interval 1] [--absolute] [--dry-run]` | merge `statusLine` into settings.json (backup first); write default config if absent; warn if not on PATH |
+| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent; warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics |
 | `garnish config init [--preset P] \| check \| path \| show` | config management; `show` prints the fully resolved config |
-| `garnish preview <fixture\|--all> [--preset P] [--icons S] [--theme T]` | render fixtures for eyeballing |
+| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
 | `garnish gc` | sweep stale cache dirs |
@@ -322,7 +322,7 @@ Measured with hyperfine (`bench/run.sh`, release build, `-N`, warmup 20,
 | warm tick, default preset | < 3 ms | < 8 ms |
 | warm tick, full preset, all modules | < 3 ms | < 8 ms |
 | cold tick (empty cache, git repo) | < 30 ms | — |
-| `refresh branch` worker | < 50 ms | — |
+| `refresh --module sync` worker (rev-list, no fetch) | < 50 ms | — |
 
 Criterion micro-benches in `benches/` track parse, config resolution, and
 per-module render cost.

@@ -98,9 +98,10 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 
 - [x] Garbage/missing payloads, extreme COLUMNS, unreadable config, unwritable cache (`tests/hardening.rs`)
 - [x] Adversarial review of phases 4–6: 1 critical (symref cycle stack overflow), 6 high, 7 medium fixed with regression tests (see session log)
-- [ ] macOS path fallbacks (cache root, managed settings) — code paths exist, untested on a Mac
-- [ ] Final `scripts/ci.sh` green; `cargo doc --no-deps` clean
-- [ ] Tag `v0.1.0` locally; sprite checkpoint
+- [x] Adversarial review of phases 6–8 (install/doctor/docs/bench): 3 high (settings permissions widened, backup collisions, symlinked settings replaced), 6 medium, 11 low; all but the untestable ones fixed with regression tests. `command-run` removed: every subprocess needs kill-on-timeout.
+- [ ] macOS path fallbacks (cache root, managed settings, age-only locks) — code paths exist, untested on a Mac
+- [x] Final `scripts/ci.sh` green; `cargo doc --no-deps` clean
+- [x] Tag `v0.1.0` locally; sprite checkpoint
 
 ## Session log
 
@@ -135,3 +136,13 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
   validated against the current head/upstream, GC uses the wall clock, and
   docs/goldens render with a pinned `Clock` (no git, no settings env).
   Remaining low items noted in PLAN Phase 9. Next: Phase 9 wrap-up.
+- **2026-09-04 (night)** — Third adversarial review (install/doctor/docs/
+  bench) fixed: `install` keeps permissions, follows symlinks, never
+  clobbers a backup, strips a BOM, reports read errors in dry runs, warns on
+  stderr; `config init` leaves module presets/options/separator as comments
+  so the top-level preset keeps driving; doctor takes explicit cache/settings
+  (isolated unit test), probes writability, shows the debug.log tail; bench
+  `cold` really spawns workers, p99 index fixed, tool check added;
+  `command-run` dropped (no timeout). Headroom analysed: host process start
+  is 1.3 ms of the 2.4 ms tick. `v0.1.0` tagged. Open: macOS untested;
+  optional config/settings caching if more headroom is ever needed.

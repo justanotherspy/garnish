@@ -309,13 +309,10 @@ fn install(
         padding,
     };
     if !absolute && !inst::on_path("garnish", std::env::var_os("PATH").as_deref()) {
-        writeln!(
-            stdout,
-            "warning: `garnish` is not on PATH; run `make install` first or use --absolute"
-        )?;
+        eprintln!("warning: `garnish` is not on PATH; run `make install` first or use --absolute");
     }
-    let existing = std::fs::read_to_string(&plan.settings).unwrap_or_default();
-    let merged = inst::merge(&existing, &plan).map_err(|e| eyre!(e))?;
+    let existing = inst::read_existing(&plan.settings).map_err(|e| eyre!(e))?;
+    let merged = inst::merge(existing.as_deref().unwrap_or(""), &plan).map_err(|e| eyre!(e))?;
     if dry_run {
         writeln!(stdout, "would write {}:", plan.settings.display())?;
         stdout.write_all(merged.as_bytes())?;
