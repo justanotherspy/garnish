@@ -12,42 +12,43 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 - [x] `.config/nextest.toml`, `Makefile`, `.gitignore`
 - [x] Dependencies: clap, color-eyre, itertools, rayon, serde, serde_json, toml, jiff, command-run, unicode-width; dev: criterion, tempfile
 - [x] `hyperfine` installed
-- [ ] `cargo-nextest` installed (nightly)
+- [x] `cargo-nextest` installed (nightly)
 - [x] CLAUDE.md, SPEC.md, PLAN.md, README.md
-- [ ] `scripts/ci.sh`
-- [ ] Scaffold compiles under strict lints; `make check` green
-- [ ] First commit; sprite checkpoint
+- [x] `scripts/ci.sh`
+- [x] Scaffold compiles under strict lints; `make check` green
+- [x] First commit; sprite checkpoint
 
 ## Phase 1 — Payload, time, ANSI, preview
 
-- [ ] `payload.rs`: serde model of the stdin JSON, all optional fields `Option`
-- [ ] `tests/fixtures/payloads/`: subscription-full, api-key, pre-first-response, no-git, worktree-session, git-worktree, pr-approved/pending/changes/draft/mr/absent, spend-limit, fast-mode, ctx-1m-3/50/80/96, ctx-200k, vim, agent, session-name, no-effort, exceeds-200k
-- [ ] `time.rs`: `now()` honoring `GARNISH_NOW`; duration/countdown formatting (`1h12m`, `3d4h`, `47m`)
-- [ ] `ansi.rs`: styles, 256/truecolor, OSC 8, display width, ANSI-aware truncation with `…`
-- [ ] `num.rs`: saturating float→int helpers (no `as`)
-- [ ] `garnish preview <fixture|--all>` and golden-test harness (`UPDATE_GOLDEN=1`)
-- [ ] Unit tests for time/ansi/num
+- [x] `payload.rs`: serde model of the stdin JSON, all optional fields `Option`
+- [x] `tests/fixtures/payloads/`: subscription-full, api-key, pre-first-response, no-git, worktree-session, git-worktree, pr-approved/pending/changes/draft/mr/absent, spend-limit, fast-mode, ctx-1m-3/50/80/96, ctx-200k, vim, agent, session-name, no-effort, exceeds-200k
+- [x] `time.rs`: `now()` honoring `GARNISH_NOW`; duration/countdown formatting (`1h12m`, `3d4h`, `47m`)
+- [x] `ansi.rs`: styles, 256/truecolor, OSC 8, display width, ANSI-aware truncation with `…`
+- [x] `num.rs`: saturating float→int helpers (no `as`)
+- [x] `garnish preview <fixture|--all>` and golden-test harness (`UPDATE_GOLDEN=1`)
+- [x] Unit tests for time/ansi/num
 
 ## Phase 2 — Schema, config, layout, frame
 
-- [ ] `config/schema.rs`: `Opt`, `IconOpt`, `ColorOpt`, `ModuleSchema`, preset tables
-- [ ] `config/mod.rs`: top-level model, `[frame]`, `[[line]]` (left `modules` + `right`), `[modules.<id>]`, resolution order, validation with TOML paths
-- [ ] Icon sets: nerd, unicode, emoji, ascii
-- [ ] Themes: garnish, catppuccin-mocha, nord, dracula, tokyonight, mono; role overrides
-- [ ] `frame.rs`: none/rounded/square/double/heavy/powerline/custom; fill to `$COLUMNS`; overflow rules
-- [ ] `garnish config init|check|path|show`
-- [ ] Top-level presets: default, minimal, full, compact
-- [ ] Config fixtures + matrix test (no panic, line count, width)
+- [x] `config/schema.rs`: `Opt`, `IconOpt`, `ColorOpt`, `ModuleSchema`, preset tables
+- [x] `config/mod.rs`: top-level model, `[frame]`, `[[line]]` (left `modules` + `right`), `[modules.<id>]`, resolution order, validation with TOML paths
+- [x] Icon sets: nerd, unicode, emoji, ascii
+- [x] Themes: garnish, catppuccin-mocha, nord, dracula, tokyonight, mono; role overrides
+- [x] `frame.rs`: none/rounded/square/double/heavy/powerline/custom; fill to `$COLUMNS`; overflow rules
+- [x] `garnish config init|check|path|show`
+- [x] Top-level presets: default, minimal, full, compact
+- [~] Config fixtures + matrix test — in-process matrix test exists (`render::tests`); TOML config fixtures still to add
 
 ## Phase 3 — Payload-only modules
 
-- [ ] `model`, `effort`, `style`
-- [ ] `context` (+ `claude_settings.rs` autocompact resolution, `exceeds_200k`, `warn_at`)
-- [ ] `limit5h`, `limit7d`, `spend`, `cost`
-- [ ] `session`, `api`, `cache`, `clock` (jiff, spinner)
-- [ ] `session_name`, `vim`, `agent`, `lines`
-- [ ] Unit + golden tests per module × preset × icon set × theme
-- [ ] Failure rendering (`⚠` lines), `GARNISH_DEBUG` log
+- [x] `model`, `effort`, `style`
+- [x] `context` (+ `claude_settings.rs` autocompact resolution, `exceeds_200k`, `warn_at`)
+- [x] `limit5h`, `limit7d`, `spend`, `cost`
+- [x] `session`, `api`, `cache`, `clock` (jiff, spinner)
+- [x] `session_name`, `vim`, `agent`, `lines`
+- [x] Unit + golden tests per module × preset × icon set × theme
+- [x] Failure rendering (`⚠` lines)
+- [ ] `GARNISH_DEBUG` log
 
 ## Phase 4 — Cache & workers
 
@@ -94,5 +95,11 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 ## Session log
 
 - **2026-09-04** — Research (statusline contract, autocompact internals,
-  namtao toolkit), spec and plan approved. Phase 0 started: nightly
+  namtao toolkit), spec and plan approved. Phase 0 done: nightly
   1.100.0 (2026-09-03) installed, project scaffolded, deps added, docs written.
+  Phases 1–3 done in one pass: payload/time/ansi/num, schema-driven config with
+  presets/themes/icon sets/frames, all 21 modules registered (branch/sync are
+  payload-only stubs until Phase 5), render pipeline, docs generator, golden
+  suite (416 renders). Deviation from SPEC: role overrides live under
+  `[colors]`, not `[theme.colors]` (TOML cannot have `theme` be both a string
+  and a table). Next: adversarial review of phases 1–3, then Phase 4 cache/workers.

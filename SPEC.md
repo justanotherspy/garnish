@@ -196,7 +196,7 @@ color  = "auto"           # auto | always | never | 256 | truecolor
 truncate = true
 stale_style = "dim"
 
-[theme.colors]            # role overrides: accent muted ok warn danger band1..band4 frame text
+[colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
 
 [frame]
