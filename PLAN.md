@@ -99,7 +99,7 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 - [x] Garbage/missing payloads, extreme COLUMNS, unreadable config, unwritable cache (`tests/hardening.rs`)
 - [x] Adversarial review of phases 4–6: 1 critical (symref cycle stack overflow), 6 high, 7 medium fixed with regression tests (see session log)
 - [x] Adversarial review of phases 6–8 (install/doctor/docs/bench): 3 high (settings permissions widened, backup collisions, symlinked settings replaced), 6 medium, 11 low; all but the untestable ones fixed with regression tests. `command-run` removed: every subprocess needs kill-on-timeout.
-- [ ] macOS path fallbacks (cache root, managed settings, age-only locks) — code paths exist, untested on a Mac
+- [~] macOS path fallbacks (cache root, managed settings, age-only locks) — covered by the `macos` job in `.github/workflows/ci.yml`; first run failed because two worker tests hard-coded the Linux lock hand-over (fixed 2026-09-04), waiting for a green run
 - [x] Final `scripts/ci.sh` green; `cargo doc --no-deps` clean
 - [x] Tag `v0.1.0` locally; sprite checkpoint
 
@@ -146,3 +146,12 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
   `command-run` dropped (no timeout). Headroom analysed: host process start
   is 1.3 ms of the 2.4 ms tick. `v0.1.0` tagged. Open: macOS untested;
   optional config/settings caching if more headroom is ever needed.
+- **2026-09-04 (late)** — Pushed to `github.com/justanotherspy/garnish`
+  (SSH key registered through the Sprites gateway). GitHub Actions CI added:
+  Linux runs `scripts/ci.sh`, macOS runs `make check`, bench is manual and
+  informational; every action pinned to a commit SHA; Renovate on
+  `config:best-practices`. Job logs are unreachable through the gateway, so
+  `scripts/ci-annotate.sh` turns failures into check-run annotations. The
+  first macOS run failed: `worker_first_tick…` and `cache_live_lock…`
+  asserted the Linux-only `--lock-held` hand-over; both rewritten to be
+  platform-neutral (live locks are written by the test itself).

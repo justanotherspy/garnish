@@ -87,7 +87,13 @@ make install      # cargo install --path . --locked  → ~/.cargo/bin/garnish
 GitHub Actions (`.github/workflows/ci.yml`) runs `scripts/ci.sh` on Linux and
 `make check` on macOS for every push to `main`, tag and PR; the bench job is
 `workflow_dispatch` only and never gates (shared-runner timings are noise).
-The macOS job is the only coverage of the Mac-only code paths.
+The macOS job is the only coverage of the Mac-only code paths. **Every
+action is pinned to a full commit SHA** with a `# vX.Y.Z` comment (Renovate,
+`config:best-practices`, bumps them); never use a floating tag or branch.
+Job logs are not reachable through the Sprites gateway, so on failure the
+workflow runs `scripts/ci-annotate.sh`, which turns failing tests, clippy
+errors and rustfmt diffs into check-run annotations readable via
+`GET /repos/<o>/<r>/check-runs/<job id>/annotations`.
 
 ## Style: strict lints, never panic (namtao.com/rust)
 

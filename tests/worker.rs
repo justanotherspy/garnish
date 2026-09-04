@@ -142,27 +142,24 @@ fn worker_first_tick_spawns_then_refresh_fills_cache() {
         s.iter().any(|l| l.contains("--module branch"))
             && s.iter().any(|l| l.contains("--module sync"))
     );
-    assert!(s.iter().all(|l| l.ends_with("--lock-held")));
-    // The lock files were handed over to the (logged) workers.
+    // Only Linux hands the lock to the worker; elsewhere the worker takes it.
+    let handover = cfg!(target_os = "linux");
+    assert!(s.iter().all(|l| l.ends_with("--lock-held") == handover), "{s:?}");
     let files = repo_cache_files(&env);
-    assert_eq!(files, vec!["branch.lock", "sync.lock"], "{files:?}");
+    let expected: Vec<&str> = if handover { vec!["branch.lock", "sync.lock"] } else { vec![] };
+    assert_eq!(files, expected, "{files:?}");
 
-    // Run the worker synchronously with the inherited lock; it writes the entry and releases the lock.
+    // Run the worker synchronously exactly as the logged spawn would; it writes
+    // the entry and releases the lock.
     let w = env.work.to_str().unwrap().to_owned();
-    let (_, err, ok) = garnish(
-        &env,
-        &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w, "--lock-held"],
-        None,
-        &[],
-    );
-    assert!(ok, "{err}");
-    let (_, err, ok) = garnish(
-        &env,
-        &["refresh", "--module", "branch", "--session", "sess-worker", "--cwd", &w, "--lock-held"],
-        None,
-        &[],
-    );
-    assert!(ok, "{err}");
+    for module in ["sync", "branch"] {
+        let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
+        if handover {
+            args.push("--lock-held");
+        }
+        let (_, err, ok) = garnish(&env, &args, None, &[]);
+        assert!(ok, "{err}");
+    }
     let files = repo_cache_files(&env);
     assert_eq!(files, vec!["branch.cache", "sync.cache"], "{files:?}");
 
@@ -206,23 +203,32 @@ fn worker_dirty_flag_and_stale_marker() {
 fn cache_live_lock_suppresses_spawn_and_dead_lock_is_reclaimed() {
     let env = setup();
     config(&env, ONE_LINE);
-    // First tick takes the locks (handed to logged workers).
-    garnish(&env, &[], Some(&payload(&env.work)), &[]);
-    assert_eq!(spawns(&env).len(), 2);
-    // Locks exist and are live (our pid, recent): the next tick must not spawn again.
-    garnish(&env, &[], Some(&payload(&env.work)), &[]);
-    assert_eq!(spawns(&env).len(), 2);
-    // Make the locks stale by age: ticks reclaim them and spawn again.
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, err, ok) =
+        garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
+    assert!(ok, "{err}");
+    // Entries are past their TTL, but a live lock (this test's pid, stamped
+    // now) says a worker is already on it: the tick must not spawn.
+    let later = (NOW.parse::<u64>().unwrap() + 60).to_string();
+    let now_ms =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+    write_locks(&env, &format!("{} {now_ms}", std::process::id()));
+    garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
+    assert_eq!(spawns(&env).len(), 0, "{:?}", spawns(&env));
+    // Locks stale by age are reclaimed: the tick spawns again.
+    write_locks(&env, "4000000000 1");
+    garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
+    assert_eq!(spawns(&env).len(), 2, "{:?}", spawns(&env));
+}
+
+/// Overwrite every module lock in the repo cache with `text`.
+fn write_locks(env: &Env, text: &str) {
     let repos = env.cache.join("repos");
     for d in std::fs::read_dir(&repos).unwrap().flatten() {
-        for f in std::fs::read_dir(d.path()).unwrap().flatten() {
-            if f.path().extension().is_some_and(|e| e == "lock") {
-                std::fs::write(f.path(), "4000000000 1").unwrap();
-            }
+        for module in ["branch", "sync"] {
+            std::fs::write(d.path().join(format!("{module}.lock")), text).unwrap();
         }
     }
-    garnish(&env, &[], Some(&payload(&env.work)), &[]);
-    assert_eq!(spawns(&env).len(), 4, "{:?}", spawns(&env));
 }
 
 #[test]

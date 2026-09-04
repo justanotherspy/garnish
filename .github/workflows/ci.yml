@@ -15,6 +15,8 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Every action is pinned to a full commit SHA (Renovate keeps the pins and the
+# version comments current).
 jobs:
   # The same gate as `scripts/ci.sh` locally: fmt, strict clippy, nextest,
   # doctests, rustdoc with -D warnings, docs/ and examples/ sync.
@@ -22,12 +24,17 @@ jobs:
     name: linux (nightly)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Installs the channel and components pinned in rust-toolchain.toml.
       - run: rustup toolchain install --profile minimal
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - run: ./scripts/ci.sh
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with:
+          tool: nextest
+      - run: ./scripts/ci.sh 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
+      # Failures become check-run annotations readable through the API.
+      - if: failure()
+        run: ./scripts/ci-annotate.sh ci.log
 
   # macOS code paths (cache root, managed settings, age-only locks) have no
   # other coverage; see PLAN.md Phase 9.
@@ -35,11 +42,15 @@ jobs:
     name: macos (nightly)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup toolchain install --profile minimal
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - run: make check
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with:
+          tool: nextest
+      - run: make check 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
+      - if: failure()
+        run: ./scripts/ci-annotate.sh ci.log
 
   # Latency numbers on shared runners are not comparable to the budget in
   # SPEC § 8, so this never gates; run it by hand and read the artifact.
@@ -48,15 +59,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup toolchain install --profile minimal
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
           tool: hyperfine
       - run: ./bench/run.sh
         continue-on-error: true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-results
           path: bench/results/*.json
