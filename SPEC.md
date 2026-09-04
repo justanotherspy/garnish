@@ -271,17 +271,32 @@ cache dir, last worker errors, and a glyph test line.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
   or the error text. Malformed = miss. Written as `<file>.tmp.<pid>` + rename.
 - Tick: fresh → render; stale → dim `⟳` + spawn worker unless `<module>.lock`
-  exists; `err` → dim `✗`. Lock = `create_new` file `pid epoch_ms`; stale after
-  60 s or when `/proc/<pid>` is gone (Linux). Worker removes it on drop.
+  is live; `err` → dim `✗`. A failed entry is fresh for its TTL like any
+  other (a broken git is retried once per TTL, never once per tick). Entries
+  record what they were computed for (`head`, `upstream`); a render whose
+  situation differs treats the entry as stale.
+- Lock = file `pid epoch_ms`, created by `hard_link` from a pre-written temp
+  file and re-stamped by `rename` (never truncated in place). Live when
+  younger than 2 s (hand-over window), else while the pid exists (Linux,
+  `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
+  Stale locks are reclaimed by an atomic rename so racing ticks cannot both
+  win. A guard only unlinks a lock that still carries its own pid.
 - Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
-  `process_group(0)`, spawned without wait. `GARNISH_NO_SPAWN=1` logs intended
-  spawns to `<root>/spawns.log` instead.
-- GC: bounded sweep when a session dir is first created (dirs idle > 24 h,
-  ≤ 50 per sweep); `garnish gc` for manual runs.
+  `process_group(0)`, spawned without wait. On Linux the tick takes the lock
+  and passes `--lock-held`; elsewhere the worker takes it itself.
+  `GARNISH_NO_SPAWN=1` logs intended spawns to `<root>/spawns.log` instead.
+- `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
+- GC: bounded sweep when a session dir is first created (session and repo
+  dirs idle > 24 h by wall-clock mtime, ≤ 50 per sweep; temp/stale/adopt
+  files older than 1 h); `garnish gc` for manual runs.
 - **No child process on a warm tick.** Branch/upstream/HEAD are read from
-  `.git` files (loose refs, `packed-refs`, worktree `gitdir`); reftable repos
-  fall back to the worker. Ahead/behind, dirty, and fetch run in the worker
-  only (`git` via `command-run`, 2 s timeout, `GIT_TERMINAL_PROMPT=0`).
+  `.git` files (loose refs, `packed-refs` scanned as bytes with early exit,
+  worktree `gitdir`, symref chains capped at 5); reftable repos report no
+  head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
+  worker only through `git::run_program` (pipes drained on threads, kill on
+  timeout: 2 s for local commands, 20 s for `fetch`, `GIT_TERMINAL_PROMPT=0`).
+  A failed fetch is recorded in the entry (`fetch_error`, `fetch_attempt`)
+  without hiding the local counts and is not retried within `fetch_interval`.
 
 ## 7. CLI
 

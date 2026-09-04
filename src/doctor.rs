@@ -156,8 +156,7 @@ fn environment_section(o: &mut String) {
 }
 
 fn git_version() -> String {
-    crate::git::run_git(Path::new("."), &["--version"], std::time::Duration::from_secs(2))
-        .map_or_else(|e| format!("not available ({e})"), |v| v.trim().to_owned())
+    crate::git::version().unwrap_or_else(|e| format!("not available ({e})"))
 }
 
 fn count_dirs(dir: &Path) -> usize {

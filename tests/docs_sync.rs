@@ -30,11 +30,17 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 fn generated_docs_match_committed_docs() {
     let docs = root().join("docs");
     let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
     let status = Command::new(env!("CARGO_BIN_EXE_garnish"))
         .args(["docs", "--out", tmp.path().to_str().unwrap()])
+        .env("GARNISH_CACHE_DIR", &cache)
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "100000")
+        .env("DISABLE_AUTO_COMPACT", "1")
         .status()
         .unwrap();
     assert!(status.success());
+    assert!(!cache.exists(), "docs generation must not touch the cache or spawn workers");
     if std::env::var_os("UPDATE_DOCS").is_some() {
         for f in files(tmp.path()) {
             let rel = f.strip_prefix(tmp.path()).unwrap();

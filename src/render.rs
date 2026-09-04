@@ -91,27 +91,36 @@ pub struct Clock {
     pub tz: jiff::tz::TimeZone,
     /// The home directory (for `~` collapsing).
     pub home: Option<String>,
+    /// Claude Code's auto-compaction environment.
+    pub settings_env: crate::claude_settings::Env,
+    /// Whether repository discovery is allowed.
+    pub git: bool,
 }
 
 impl Clock {
-    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime` and `HOME`.
+    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME` and the process environment.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
             now: crate::time::now(),
             tz: crate::time::local_zone(),
             home: std::env::var("HOME").ok().filter(|h| !h.is_empty()),
+            settings_env: crate::claude_settings::Env::from_process(),
+            git: true,
         }
     }
 
-    /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev` — what the
-    /// golden renders and the generated docs use.
+    /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev`, no
+    /// auto-compaction overrides and no repository discovery — what the
+    /// generated docs use, so they come out identical on every machine.
     #[must_use]
     pub fn fixed() -> Self {
         Self {
             now: jiff::Timestamp::from_second(1_738_425_600).unwrap_or_default(),
             tz: jiff::tz::TimeZone::UTC,
             home: Some("/home/dev".to_owned()),
+            settings_env: crate::claude_settings::Env::default(),
+            git: false,
         }
     }
 }
@@ -145,6 +154,9 @@ pub fn render_lines_at(
         cache: &cache,
         tz: clock.tz.clone(),
         home: clock.home.clone(),
+        settings_env: clock.settings_env.clone(),
+        git: clock.git,
+        dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
     let layout = Layout {

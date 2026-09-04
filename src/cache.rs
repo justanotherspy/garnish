@@ -21,8 +21,10 @@ use crate::time::now_millis;
 /// Environment variable overriding the cache root.
 pub const CACHE_DIR_ENV: &str = "GARNISH_CACHE_DIR";
 
-/// Locks older than this are considered abandoned.
-pub const LOCK_STALE_MS: i64 = 60_000;
+/// Locks older than this are considered abandoned. Shorter where pid
+/// liveness cannot be checked (`/proc` is Linux-only), so a lock left by a
+/// killed tick blocks refreshes for seconds, not a minute.
+pub const LOCK_STALE_MS: i64 = if cfg!(target_os = "linux") { 60_000 } else { 15_000 };
 
 /// Locks younger than this are trusted without checking the pid (hand-over window).
 pub const LOCK_GRACE_MS: i64 = 2_000;
@@ -246,10 +248,25 @@ pub struct LockGuard {
 impl LockGuard {
     /// Adopt an existing lock file created by the process that spawned us,
     /// re-stamping it with our own pid and time so liveness checks track us.
+    /// The stamp is written to a temporary file and renamed over the lock so
+    /// no reader ever sees an empty (apparently abandoned) lock.
     #[must_use]
     pub fn adopt(path: PathBuf) -> Self {
-        let _ = fs::write(&path, format!("{} {}\n", std::process::id(), now_millis()));
+        let tmp = path.with_extension(format!("lock.adopt.{}", std::process::id()));
+        if fs::write(&tmp, format!("{} {}\n", std::process::id(), now_millis())).is_ok()
+            && fs::rename(&tmp, &path).is_err()
+        {
+            let _ = fs::remove_file(&tmp);
+        }
         Self { path, armed: true }
+    }
+
+    /// Whether the lock file still carries this process's pid.
+    fn owned_by_us(&self) -> bool {
+        fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|t| t.split_whitespace().next()?.parse::<u32>().ok())
+            .is_some_and(|pid| pid == std::process::id())
     }
 
     /// Path of the lock file.
@@ -266,7 +283,9 @@ impl LockGuard {
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        if self.armed {
+        // A lock reclaimed by someone else while we were running (we went
+        // past LOCK_STALE_MS) is theirs now; never unlink it from under them.
+        if self.armed && self.owned_by_us() {
             let _ = fs::remove_file(&self.path);
         }
     }
@@ -337,10 +356,12 @@ impl Cache {
     }
 
     /// Look a module up: entry, freshness against `ttl_ms`, and lock state.
+    /// A failed entry is fresh for its TTL like any other, so a persistent
+    /// failure is retried once per TTL rather than once per tick.
     #[must_use]
     pub fn lookup(&self, scope: &Scope, module: &str, ttl_ms: u64) -> Lookup {
         let entry = self.read(scope, module);
-        let fresh = entry.as_ref().is_some_and(|e| e.status == Status::Ok && e.is_fresh(ttl_ms));
+        let fresh = entry.as_ref().is_some_and(|e| e.is_fresh(ttl_ms));
         let in_progress = self.lock_is_live(&self.lock_path(scope, module));
         Lookup { entry, fresh, in_progress }
     }
@@ -432,13 +453,24 @@ impl Cache {
         }
     }
 
-    /// Remove session directories whose newest file is older than `max_age_ms`.
-    /// Returns how many were removed (at most `max`).
+    /// Remove session and repo directories whose newest file is older than
+    /// `max_age_ms`, plus temporary lock/entry files left behind by killed
+    /// processes. Returns how many directories were removed (at most `max`).
+    /// File mtimes are wall clock, so this compares against the real clock
+    /// even under `GARNISH_NOW`.
     pub fn gc_sessions(&self, max_age_ms: i64, max: usize) -> usize {
-        let Ok(dir) = fs::read_dir(self.root.join("sessions")) else { return 0 };
-        let now = now_millis();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| i64::try_from(d.as_millis()).ok())
+            .unwrap_or(i64::MAX);
         let mut removed = 0;
-        for entry in dir.filter_map(Result::ok) {
+        let dirs = ["sessions", "repos"]
+            .into_iter()
+            .filter_map(|kind| fs::read_dir(self.root.join(kind)).ok())
+            .flatten()
+            .filter_map(Result::ok);
+        for entry in dirs {
             if removed >= max {
                 break;
             }
@@ -446,6 +478,7 @@ impl Cache {
             if !path.is_dir() {
                 continue;
             }
+            sweep_temp_files(&path, now);
             let newest = fs::read_dir(&path)
                 .ok()
                 .into_iter()
@@ -471,6 +504,28 @@ impl Cache {
             }
         }
         removed
+    }
+}
+
+/// Temporary files older than this are leftovers of a killed process.
+const TEMP_FILE_MAX_AGE_MS: i64 = 60 * 60 * 1000;
+
+/// Delete `*.tmp.*`, `*.stale.*` and `*.adopt.*` files older than an hour.
+fn sweep_temp_files(dir: &Path, now_ms: i64) {
+    let Ok(files) = fs::read_dir(dir) else { return };
+    for f in files.filter_map(Result::ok) {
+        let name = f.file_name().to_string_lossy().into_owned();
+        let is_temp = [".tmp.", ".stale.", ".adopt."].iter().any(|m| name.contains(m));
+        let age = f
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|d| i64::try_from(d.as_millis()).ok())
+            .map_or(0, |t| now_ms.saturating_sub(t));
+        if is_temp && age > TEMP_FILE_MAX_AGE_MS {
+            let _ = fs::remove_file(f.path());
+        }
     }
 }
 
@@ -542,10 +597,10 @@ mod tests {
         };
         cache.write(&scope, "m", &old).unwrap();
         assert!(!cache.lookup(&scope, "m", 5_000).fresh);
-        // an err entry is never fresh
+        // an err entry is fresh for its TTL like any other (no retry storm)
         cache.write(&scope, "m", &Entry::err(5_000, "nope")).unwrap();
         let l = cache.lookup(&scope, "m", 5_000);
-        assert!(!l.fresh);
+        assert!(l.fresh);
         assert_eq!(l.entry.unwrap().status, Status::Err);
         // no stray temp files
         let names: Vec<String> = fs::read_dir(cache.entry_path(&scope, "m").parent().unwrap())
@@ -600,12 +655,29 @@ mod tests {
             assert!(matches!(cache.lock(&scope, "m"), LockOutcome::Held));
             fs::remove_file(cache.lock_path(&scope, "m")).unwrap();
         }
-        // adopting re-stamps the file with our pid
+        // adopting re-stamps the file with our pid (via rename, never truncating in place)
         fs::write(cache.lock_path(&scope, "m"), "1 1").unwrap();
         let g = LockGuard::adopt(cache.lock_path(&scope, "m"));
+        let stamped = fs::read_to_string(cache.lock_path(&scope, "m")).unwrap();
+        assert!(stamped.starts_with(&format!("{} ", std::process::id())), "{stamped}");
         assert!(cache.lock_is_live(&cache.lock_path(&scope, "m")));
+        assert!(
+            fs::read_dir(cache.lock_path(&scope, "m").parent().unwrap())
+                .unwrap()
+                .flatten()
+                .all(|e| !e.file_name().to_string_lossy().contains("adopt"))
+        );
         drop(g);
         assert!(!cache.lock_path(&scope, "m").exists());
+        // a guard never unlinks a lock that another process has since taken over
+        let g = match cache.lock(&scope, "m") {
+            LockOutcome::Acquired(g) => g,
+            other => panic!("{other:?}"),
+        };
+        fs::write(cache.lock_path(&scope, "m"), format!("4000000001 {}", now_millis())).unwrap();
+        drop(g);
+        assert!(cache.lock_path(&scope, "m").exists());
+        fs::remove_file(cache.lock_path(&scope, "m")).unwrap();
         // disarmed guard keeps the file
         let mut g = match cache.lock(&scope, "m") {
             LockOutcome::Acquired(g) => g,
@@ -660,6 +732,20 @@ mod tests {
         }
         cache.write(&Scope::Session("newer".into()), "m", &Entry::ok(1, BTreeMap::new())).unwrap();
         assert!(!cache.entry_path(&scope, "m").exists());
+        // repo dirs are swept too, and stale temp files inside live dirs go away
+        let repo = Scope::Repo("abc".into());
+        cache.write(&repo, "m", &Entry::ok(1, BTreeMap::new())).unwrap();
+        let dir = cache.entry_path(&repo, "m").parent().unwrap().to_path_buf();
+        let leftover = dir.join(".m.tmp.999");
+        fs::write(&leftover, "x").unwrap();
+        fs::File::options().write(true).open(&leftover).unwrap().set_modified(old).unwrap();
+        assert_eq!(cache.gc_sessions(GC_MAX_AGE_MS, 50), 0);
+        assert!(!leftover.exists() && cache.entry_path(&repo, "m").exists());
+        for f in fs::read_dir(&dir).unwrap().flatten() {
+            fs::File::options().write(true).open(f.path()).unwrap().set_modified(old).unwrap();
+        }
+        assert_eq!(cache.gc_sessions(GC_MAX_AGE_MS, 50), 1);
+        assert!(!dir.exists());
     }
 
     #[test]

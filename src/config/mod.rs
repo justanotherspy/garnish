@@ -497,6 +497,10 @@ fn parse_overrides(
                 None => err(key, "expected \"minimal\", \"default\" or \"full\"".into()),
             },
             "refresh" => match value.as_integer().and_then(|i| u64::try_from(i).ok()) {
+                Some(0) if schema.refresh > 0 => err(
+                    key,
+                    "this module is refreshed by a background worker; use at least 1 second".into(),
+                ),
                 Some(n) => ov.refresh = Some(n),
                 None => err(key, "expected a non-negative integer (seconds)".into()),
             },
@@ -787,6 +791,13 @@ x = 1
         assert!(paths.contains(&"modules.path.icons.nope"));
         assert!(paths.contains(&"modules.clock.format"));
         assert!(paths.contains(&"modules.ghost"));
+        let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &schemas());
+        assert!(errs.is_empty(), "payload-only modules may run every tick: {errs:?}");
+        let mut cached = schemas();
+        cached[0].refresh = 5;
+        let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &cached);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "modules.path.refresh");
         // defaults in effect
         assert_eq!(c, Config::defaults(&schemas()));
     }

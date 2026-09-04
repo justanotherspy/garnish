@@ -58,7 +58,7 @@ pub enum Spawned {
 /// already holds the module lock and hands it over.
 #[must_use]
 pub fn spawn(job: &Job, cache_root: &Path, lock_held: bool) -> Spawned {
-    if std::env::var_os(NO_SPAWN_ENV).is_some_and(|v| !v.is_empty() && v != "0") {
+    if crate::claude_settings::env_truthy(std::env::var(NO_SPAWN_ENV).ok().as_ref()) {
         return log_spawn(job, cache_root, lock_held);
     }
     let exe = match std::env::current_exe() {

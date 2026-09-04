@@ -44,6 +44,9 @@ fn render_modules(c: &mut Criterion) {
         cache: &cache,
         tz: clock.tz.clone(),
         home: clock.home,
+        settings_env: clock.settings_env,
+        git: clock.git,
+        dirs: std::cell::OnceCell::new(),
     };
     let mut group = c.benchmark_group("render_module");
     for entry in garnish::modules::REGISTRY.iter() {

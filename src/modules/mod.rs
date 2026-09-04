@@ -82,6 +82,13 @@ pub struct Ctx<'a> {
     pub tz: jiff::tz::TimeZone,
     /// The home directory, for `~` collapsing.
     pub home: Option<String>,
+    /// Claude Code's auto-compaction environment (empty for pinned renders).
+    pub settings_env: crate::claude_settings::Env,
+    /// Whether repository discovery is allowed (off for docs and goldens, so
+    /// fixture paths never touch a real repository or the cache).
+    pub git: bool,
+    /// The repository for the payload's directory, discovered at most once.
+    pub dirs: std::cell::OnceCell<Option<crate::git::Dirs>>,
 }
 
 impl Ctx<'_> {
@@ -91,35 +98,76 @@ impl Ctx<'_> {
         self.payload.session_id.as_deref().filter(|s| !s.is_empty()).unwrap_or("no-session")
     }
 
+    /// The repository containing the payload's current directory, if any.
+    #[must_use]
+    pub fn git_dirs(&self) -> Option<&crate::git::Dirs> {
+        self.dirs
+            .get_or_init(|| {
+                self.git.then(|| {
+                    crate::git::discover(std::path::Path::new(self.payload.current_dir()?))
+                })?
+            })
+            .as_ref()
+    }
+
     /// Look a cached module up and, when it is stale and nobody is refreshing
     /// it, take the lock and spawn a detached worker.
     ///
-    /// Returns the lookup plus the [`Freshness`] the render should carry.
+    /// `valid` rejects an entry that was computed for a different situation
+    /// (another branch, another upstream); a rejected entry counts as stale.
+    /// A failed entry is honoured for its TTL too, so a broken git does not
+    /// spawn a worker on every tick. Returns the lookup plus the
+    /// [`Freshness`] the render should carry.
     #[must_use]
-    pub fn cached(&self, cfg: &ModuleCfg, scope: &Scope) -> (Lookup, Freshness) {
+    pub fn cached(
+        &self,
+        cfg: &ModuleCfg,
+        scope: &Scope,
+        valid: impl Fn(&crate::cache::Entry) -> bool,
+    ) -> (Lookup, Freshness) {
         let ttl_ms = cfg.refresh.saturating_mul(1000);
-        let lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
+        let mut lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
+        if lookup.entry.as_ref().is_some_and(|e| !valid(e)) {
+            lookup.fresh = false;
+        }
+        let failed = lookup.entry.as_ref().filter(|e| e.status == crate::cache::Status::Err);
         if lookup.fresh {
-            return (lookup, Freshness::Fresh);
+            let freshness = failed.map_or(Freshness::Fresh, |e| Freshness::Failed(e.error.clone()));
+            return (lookup, freshness);
         }
-        if !lookup.in_progress
-            && let LockOutcome::Acquired(mut guard) = self.cache.lock(scope, cfg.id)
-        {
-            let job = crate::spawn::Job {
-                module: cfg.id.to_owned(),
-                session: self.session_id().to_owned(),
-                cwd: std::path::PathBuf::from(self.payload.current_dir().unwrap_or(".")),
-            };
-            match crate::spawn::spawn(&job, self.cache.root(), true) {
-                crate::spawn::Spawned::Process | crate::spawn::Spawned::Logged => guard.disarm(),
-                crate::spawn::Spawned::Failed(_) => {}
-            }
+        if !lookup.in_progress {
+            self.spawn_refresh(cfg, scope);
         }
-        let freshness = match &lookup.entry {
-            Some(e) if e.status == crate::cache::Status::Err => Freshness::Failed(e.error.clone()),
-            _ => Freshness::Stale,
-        };
+        let freshness = failed.map_or(Freshness::Stale, |e| Freshness::Failed(e.error.clone()));
         (lookup, freshness)
+    }
+
+    /// Start a detached worker for a module. On Linux the tick takes the lock
+    /// and hands it over (`--lock-held`); elsewhere pid liveness cannot be
+    /// checked, so the worker takes the lock itself and a lock left behind by
+    /// a killed tick cannot block refreshes.
+    fn spawn_refresh(&self, cfg: &ModuleCfg, scope: &Scope) {
+        let job = crate::spawn::Job {
+            module: cfg.id.to_owned(),
+            session: self.session_id().to_owned(),
+            cwd: std::path::PathBuf::from(self.payload.current_dir().unwrap_or(".")),
+        };
+        if cfg!(target_os = "linux") {
+            if let LockOutcome::Acquired(mut guard) = self.cache.lock(scope, cfg.id) {
+                match crate::spawn::spawn(&job, self.cache.root(), true) {
+                    crate::spawn::Spawned::Process | crate::spawn::Spawned::Logged => {
+                        guard.disarm();
+                    }
+                    crate::spawn::Spawned::Failed(e) => {
+                        crate::debug::log(&format!("spawn {} failed: {e}", cfg.id));
+                    }
+                }
+            }
+        } else if let crate::spawn::Spawned::Failed(e) =
+            crate::spawn::spawn(&job, self.cache.root(), false)
+        {
+            crate::debug::log(&format!("spawn {} failed: {e}", cfg.id));
+        }
     }
 }
 

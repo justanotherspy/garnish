@@ -8,6 +8,7 @@ pub mod cache;
 pub mod claude_settings;
 pub mod cli;
 pub mod config;
+pub mod debug;
 pub mod docs;
 pub mod doctor;
 pub mod frame;

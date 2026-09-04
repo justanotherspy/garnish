@@ -114,9 +114,13 @@ pub enum Head {
     Detached(String),
 }
 
-/// Read HEAD.
+/// Read HEAD. `None` for reftable repositories, whose `HEAD` file is a
+/// placeholder (`ref: refs/heads/.invalid`) rather than the real head.
 #[must_use]
 pub fn head(dirs: &Dirs) -> Option<Head> {
+    if dirs.uses_reftable() {
+        return None;
+    }
     let text = std::fs::read_to_string(dirs.git_dir.join("HEAD")).ok()?;
     let line = text.lines().next()?.trim();
     if let Some(r) = line.strip_prefix("ref:") {
@@ -126,28 +130,56 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
     (!line.is_empty()).then(|| Head::Detached(line.to_owned()))
 }
 
-/// Resolve a full ref name (`refs/heads/main`) to a commit id via loose refs
-/// or `packed-refs`. `None` for reftable repositories or unknown refs.
+/// Symbolic refs deeper than this are treated as broken (git's own limit).
+const SYMREF_MAX_DEPTH: usize = 5;
+
+/// Resolve a full ref name (`refs/heads/main`) to a commit id.
+///
+/// Loose refs are tried first, then `packed-refs`. `None` for reftable
+/// repositories, unknown refs, and symbolic-ref chains longer than five
+/// (cycles included), matching git's own limit.
 #[must_use]
 pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
     if dirs.uses_reftable() {
         return None;
     }
-    for base in [&dirs.git_dir, &dirs.common_dir] {
-        if let Ok(text) = std::fs::read_to_string(base.join(refname)) {
-            let line = text.lines().next()?.trim();
+    let mut name = refname.to_owned();
+    for _ in 0..SYMREF_MAX_DEPTH {
+        let mut next: Option<String> = None;
+        for base in [&dirs.git_dir, &dirs.common_dir] {
+            let Ok(text) = std::fs::read_to_string(base.join(&name)) else { continue };
+            let line = text.lines().next().unwrap_or("").trim();
             if let Some(r) = line.strip_prefix("ref:") {
-                return resolve_ref(dirs, r.trim());
+                next = Some(r.trim().to_owned());
+                break;
             }
             if !line.is_empty() {
                 return Some(line.to_owned());
             }
         }
+        match next {
+            Some(n) => name = n,
+            None => return packed_ref(dirs, &name),
+        }
     }
-    let packed = std::fs::read_to_string(dirs.common_dir.join("packed-refs")).ok()?;
-    packed.lines().filter(|l| !l.starts_with('#') && !l.starts_with('^')).find_map(|l| {
-        l.split_once(' ').filter(|(_, name)| name.trim() == refname).map(|(sha, _)| sha.to_owned())
-    })
+    None
+}
+
+/// Look a ref up in `packed-refs`, stopping at the first match. The file is
+/// scanned as bytes so a multi-megabyte packed-refs costs one read plus a
+/// linear scan with no per-line allocation.
+fn packed_ref(dirs: &Dirs, refname: &str) -> Option<String> {
+    let packed = std::fs::read(dirs.common_dir.join("packed-refs")).ok()?;
+    let want = refname.as_bytes();
+    packed
+        .split(|b| *b == b'\n')
+        .filter(|l| !l.is_empty() && l.first() != Some(&b'#') && l.first() != Some(&b'^'))
+        .find_map(|l| {
+            let space = l.iter().position(|b| *b == b' ')?;
+            let (sha, rest) = l.split_at(space);
+            let name = rest.get(1..)?.trim_ascii_end();
+            (name == want).then(|| String::from_utf8_lossy(sha).into_owned())
+        })
 }
 
 /// The HEAD commit id, if it can be read without git.
@@ -193,11 +225,13 @@ pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
     Some((remote.clone(), format!("refs/remotes/{remote}/{short}")))
 }
 
-/// Seconds since the last fetch (`FETCH_HEAD` mtime), if any.
+/// Seconds since the last fetch (`FETCH_HEAD` mtime), if any. `FETCH_HEAD`
+/// is per worktree, so the linked worktree's own git dir is checked first.
 #[must_use]
 pub fn fetch_age(dirs: &Dirs) -> Option<u64> {
-    let meta = std::fs::metadata(dirs.common_dir.join("FETCH_HEAD")).ok()?;
-    let modified = meta.modified().ok()?;
+    let modified = [&dirs.git_dir, &dirs.common_dir]
+        .into_iter()
+        .find_map(|d| std::fs::metadata(d.join("FETCH_HEAD")).ok()?.modified().ok())?;
     let secs = modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
     let now = u64::try_from(crate::time::now_secs()).ok()?;
     Some(now.saturating_sub(secs))
@@ -221,6 +255,7 @@ pub fn run_program(
     args: &[&str],
     timeout: Duration,
 ) -> Result<String, String> {
+    use std::io::Read as _;
     use std::process::{Command, Stdio};
     let mut child = Command::new(program)
         .args(args)
@@ -233,23 +268,26 @@ pub fn run_program(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("git: {e}"))?;
+    // Drain both pipes on their own threads: a child that writes more than
+    // the pipe buffer (64 KiB) before exiting would otherwise block forever.
+    let stdout = child.stdout.take().map(|mut p| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = p.read_to_end(&mut buf);
+            buf
+        })
+    });
+    let stderr = child.stderr.take().map(|mut p| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = p.read_to_end(&mut buf);
+            buf
+        })
+    });
     let start = std::time::Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = child.wait_with_output().map_err(|e| e.to_string())?;
-                let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
-                return if status.success() {
-                    Ok(stdout)
-                } else {
-                    Err(if stderr.is_empty() {
-                        format!("git {} failed", args.join(" "))
-                    } else {
-                        stderr
-                    })
-                };
-            }
+            Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -262,6 +300,16 @@ pub fn run_program(
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => return Err(e.to_string()),
         }
+    };
+    let out = stdout.and_then(|t| t.join().ok()).unwrap_or_default();
+    let err = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&err).trim().to_owned();
+    if status.success() {
+        Ok(String::from_utf8_lossy(&out).into_owned())
+    } else if stderr.is_empty() {
+        Err(format!("git {} failed", args.join(" ")))
+    } else {
+        Err(stderr)
     }
 }
 
@@ -304,19 +352,24 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
     Ok(!out.trim().is_empty())
 }
 
-/// `git fetch --quiet <remote>`.
+/// `git fetch --quiet <remote>`, killed after `timeout` (a hung network
+/// fetch must not pin the worker and its lock).
 ///
 /// # Errors
 /// Propagates git failures.
 pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> {
-    use command_run::Command;
-    let mut cmd = Command::with_args("git", ["fetch", "--quiet", remote]);
-    cmd.set_dir(cwd);
-    cmd.env.insert("GIT_TERMINAL_PROMPT".into(), "0".into());
+    run_git(cwd, &["fetch", "--quiet", remote], timeout).map(|_| ())
+}
+
+/// `git --version`, for `doctor`; no timeout is needed here.
+///
+/// # Errors
+/// When git is missing or fails.
+pub fn version() -> Result<String, String> {
+    let mut cmd = command_run::Command::with_args("git", ["--version"]);
     cmd.enable_capture();
     cmd.log_command = false;
-    let _ = timeout; // command-run has no timeout; fetch is only run opt-in in the worker.
-    cmd.run().map(|_| ()).map_err(|e| e.to_string())
+    cmd.run().map(|o| o.stdout_string_lossy().trim().to_owned()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -406,6 +459,75 @@ mod tests {
         git(&work, &["checkout", "-q", "--detach"]);
         let main = discover(&work).unwrap();
         assert!(matches!(head(&main), Some(Head::Detached(s)) if s.len() == 40));
+    }
+
+    #[test]
+    fn symref_cycles_and_reftable_repos_do_not_break_the_reader() {
+        let (tmp, work) = repo();
+        let dirs = discover(&work).unwrap();
+        std::fs::write(work.join(".git/refs/heads/loop"), "ref: refs/heads/loop\n").unwrap();
+        assert_eq!(resolve_ref(&dirs, "refs/heads/loop"), None);
+        std::fs::write(work.join(".git/refs/heads/a"), "ref: refs/heads/b\n").unwrap();
+        std::fs::write(work.join(".git/refs/heads/b"), "ref: refs/heads/main\n").unwrap();
+        assert_eq!(resolve_ref(&dirs, "refs/heads/a"), head_commit(&dirs));
+        std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/loop\n").unwrap();
+        assert_eq!(head(&dirs), Some(Head::Branch("loop".into())));
+        assert_eq!(head_commit(&dirs), None);
+
+        let rt = tmp.path().join("rt");
+        let out = Command::new("git")
+            .args(["init", "-q", "--ref-format=reftable", rt.to_str().unwrap()])
+            .output()
+            .unwrap();
+        if out.status.success() {
+            let dirs = discover(&rt).unwrap();
+            assert!(dirs.uses_reftable());
+            assert_eq!(head(&dirs), None, "reftable HEAD is a placeholder, never `.invalid`");
+            assert_eq!(resolve_ref(&dirs, "refs/heads/main"), None);
+        }
+    }
+
+    #[test]
+    fn packed_refs_scan_handles_peeled_tags_and_stops_at_first_match() {
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        let sha = head_commit(&dirs).unwrap();
+        git(&work, &["tag", "-a", "-m", "t", "v1"]);
+        git(&work, &["pack-refs", "--all"]);
+        let packed = std::fs::read_to_string(work.join(".git/packed-refs")).unwrap();
+        assert!(packed.lines().any(|l| l.starts_with('^')), "{packed}");
+        assert_eq!(resolve_ref(&dirs, "refs/heads/main"), Some(sha));
+        assert!(resolve_ref(&dirs, "refs/tags/v1").is_some());
+        assert_eq!(resolve_ref(&dirs, "refs/heads/mai"), None);
+    }
+
+    #[test]
+    fn fetch_age_is_per_worktree() {
+        let (d, work) = repo();
+        let wt = d.path().join("wt");
+        git(&work, &["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()]);
+        git(&wt, &["fetch", "-q", "origin"]);
+        let linked = discover(&wt).unwrap();
+        assert!(linked.git_dir.join("FETCH_HEAD").exists());
+        assert!(fetch_age(&linked).is_some());
+        assert!(fetch_age(&linked).unwrap() < 60);
+    }
+
+    #[test]
+    fn large_output_does_not_deadlock_the_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("git");
+        std::fs::write(&fake, "#!/bin/sh\nhead -c 300000 /dev/zero | tr '\\0' 'x'\nexit 0\n")
+            .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let out = run_program(&fake, dir.path(), &["status"], Duration::from_secs(5)).unwrap();
+        assert_eq!(out.len(), 300_000);
+        assert!(started.elapsed() < Duration::from_secs(4));
+        let noisy = dir.path().join("noisy");
+        std::fs::write(&noisy, "#!/bin/sh\nhead -c 200000 /dev/zero >&2\nexit 3\n").unwrap();
+        std::fs::set_permissions(&noisy, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(run_program(&noisy, dir.path(), &["x"], Duration::from_secs(5)).is_err());
     }
 
     #[test]

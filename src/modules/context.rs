@@ -198,9 +198,8 @@ fn compaction_percent(ctx: &Ctx<'_>, cfg: &ModuleCfg, window: u64) -> Option<f64
     // Project settings live under the directory Claude Code was launched in,
     // not under whatever subdirectory the session has moved to.
     let project = ctx.payload.project_dir().map(std::path::Path::new);
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let ac =
-        claude_settings::resolve(&claude_settings::Env::from_process(), project, home.as_deref());
+    let home = ctx.home.as_deref().map(std::path::Path::new);
+    let ac = claude_settings::resolve(&ctx.settings_env, project, home);
     let threshold = ac.threshold(window, cfg.int("compact_buffer_tokens"))?;
     Some(percent_of(threshold, window))
 }

@@ -135,8 +135,8 @@ user's OK first.
 | toml | the TOML config file (parse); config *generation* is hand-written in `docs.rs` | `config/` |
 | jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
 | itertools | iterator helpers (interspersing, joining, grouping) | rendering |
-| command-run | running external commands where a timeout is not needed (`git fetch`) | `git.rs` worker side |
-| std::process + `git::run_program` | git commands that need a kill-on-timeout (status, rev-list) | `git.rs` |
+| command-run | running external commands where a timeout is not needed (`git --version` in `doctor`) | `git.rs` |
+| std::process + `git::run_program` | every git command the worker runs (status, rev-list, fetch): kill-on-timeout, pipes drained on threads | `git.rs` |
 | rayon | data parallelism: `refresh --all`, `preview --all`, docs generation; **never on the tick path** | `cli.rs`, `docs.rs` |
 | unicode-width | terminal cell width of text | `ansi.rs` |
 | criterion (dev) | micro-benchmarks | `benches/` |
@@ -185,6 +185,26 @@ a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers it). Constant observed in the
   2.1.260 binary; configurable as `modules.context.compact_buffer_tokens`.
 - `COLUMNS`/`LINES` are set for the script; OSC 8 links and ANSI colors work.
+
+## Cache and worker invariants (learned the hard way)
+
+- A lock file always carries `pid epoch_ms`; it is created by `hard_link`
+  from a pre-written temp file and re-stamped by `rename`, never truncated
+  in place, so no reader ever sees an empty lock.
+- A lock younger than `LOCK_GRACE_MS` is live regardless of pid: the tick
+  writes it, exits, and the worker adopts it a few ms later.
+- Only Linux hands the lock to the worker (`--lock-held`); `/proc/<pid>` is
+  the liveness check. Elsewhere the worker takes the lock itself.
+- A failed entry is fresh for its TTL like any other. Never make failure
+  "not fresh": that spawns a worker on every tick while git is broken.
+- Entries carry the situation they were computed for (`head`, `upstream`);
+  renders pass a validator to `Ctx::cached` so a branch switch is a miss.
+- `refresh = 0` is only legal for payload-only modules; config validation
+  rejects it for cached ones.
+- GC compares file mtimes with the wall clock, not `GARNISH_NOW`.
+- Docs and goldens render with `Clock::fixed()`: no git discovery, no
+  settings env, no cache. Tests that run the binary must set
+  `GARNISH_CACHE_DIR` and `GARNISH_NO_SPAWN` and clear `CLAUDE_*`/`DISABLE_*`.
 
 ## Gotchas
 

@@ -48,7 +48,7 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 - [x] `session_name`, `vim`, `agent`, `lines`
 - [x] Unit + golden tests per module × preset × icon set × theme
 - [x] Failure rendering (`⚠` lines)
-- [ ] `GARNISH_DEBUG` log
+- [x] `GARNISH_DEBUG` log (`debug.rs`; spawn failures land in `<cache>/debug.log`)
 
 ## Phase 4 — Cache & workers
 
@@ -91,11 +91,14 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 - [x] `bench/run.sh` + `bench/check.sh` hyperfine gate (warm default, warm full, cold, refresh) — jq, not python
 - [x] ~~`--time` per-phase timing flag~~ dropped: criterion's per-module benches give the same breakdown without a runtime flag
 - [x] Budget green on this host (2026-09-04): warm-default 2.50 ms mean / 3.74 ms p99, warm-full 2.56 / 3.99, cold 3.69 mean, refresh-sync 3.37 mean
-- [ ] Headroom: the warm mean is within 0.5 ms of the budget; profile the remaining fixed cost (process start, config parse) before adding anything to the tick path
+- [x] Sprite checkpoint
+- [ ] Headroom: the warm mean is within 0.5 ms of the budget. Criterion says the in-process work is small (payload parse 3.5 µs, default config 25 µs, in-process tick 128 µs, `context` 43 µs for the settings reads) — but parsing a full annotated config file costs ~390 µs per tick. Candidates: skip the doc comments when parsing (they are already skipped by toml), cache the resolved config keyed by file mtime, or trim `SCHEMAS` cloning in `parse_overrides`.
 
 ## Phase 9 — Hardening & release
 
-- [ ] Garbage/missing payloads, extreme COLUMNS, non-UTF8 paths, macOS path fallbacks
+- [x] Garbage/missing payloads, extreme COLUMNS, unreadable config, unwritable cache (`tests/hardening.rs`)
+- [x] Adversarial review of phases 4–6: 1 critical (symref cycle stack overflow), 6 high, 7 medium fixed with regression tests (see session log)
+- [ ] macOS path fallbacks (cache root, managed settings) — code paths exist, untested on a Mac
 - [ ] Final `scripts/ci.sh` green; `cargo doc --no-deps` clean
 - [ ] Tag `v0.1.0` locally; sprite checkpoint
 
@@ -121,3 +124,14 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
   MRs render as `!N`. Open from the review: `config show` must emit fully
   resolved values (Phase 6), bench gate (Phase 8). Tooling: `make watch`
   (watchexec) added. Next: Phase 6 docs.
+- **2026-09-04 (evening)** — Phases 6–8 done: generated docs + guide +
+  docs-sync test, `install`/`doctor`/example config, hyperfine gate green
+  (warm 2.50 ms mean). Second adversarial review (phases 4–6) found a
+  symref-cycle stack overflow, a reftable `.invalid` branch, per-worktree
+  `FETCH_HEAD`, a pipe-buffer deadlock in the worker, an untimed fetch, fetch
+  failures poisoning `sync`, and failed entries respawning every tick; all
+  fixed with regression tests (git.rs, worker.rs, cache.rs). Locks are now
+  hard-linked and re-stamped by rename, hand-over is Linux-only, entries are
+  validated against the current head/upstream, GC uses the wall clock, and
+  docs/goldens render with a pinned `Clock` (no git, no settings env).
+  Remaining low items noted in PLAN Phase 9. Next: Phase 9 wrap-up.

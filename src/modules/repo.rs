@@ -17,8 +17,11 @@ use crate::icons::glyph;
 
 use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, icon, seg};
 
-/// How long the worker lets a git command run.
+/// How long the worker lets a local git command run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long the worker lets `git fetch` run (network; opt-in only).
+const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Cache scope for a checkout: shared by every session in the same worktree.
 fn repo_scope(session: &str, cwd: &Path) -> Scope {
@@ -136,8 +139,7 @@ impl Module for PathModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let ws = ctx.payload.workspace.as_ref();
         let cwd = ctx.payload.current_dir().unwrap_or("");
-        let toplevel =
-            git::discover(Path::new(cwd)).map(|d| d.toplevel.to_string_lossy().into_owned());
+        let toplevel = ctx.git_dirs().map(|d| d.toplevel.to_string_lossy().into_owned());
         let base = toplevel
             .as_deref()
             .or_else(|| ws.and_then(|w| w.project_dir.as_deref()))
@@ -411,9 +413,8 @@ impl Module for BranchModule {
     }
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
-        let cwd = Path::new(ctx.payload.current_dir().unwrap_or(""));
-        let dirs = git::discover(cwd);
-        let head = dirs.as_ref().and_then(git::head);
+        let dirs = ctx.git_dirs();
+        let head = dirs.and_then(git::head);
         let (name, detached) =
             match (&head, ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref())) {
                 (Some(Head::Branch(b)), _) => (b.clone(), false),
@@ -421,6 +422,7 @@ impl Module for BranchModule {
                 (None, Some(b)) => (b.to_owned(), false),
                 (None, None) => return Rendered::empty(),
             };
+        let head_key = name.clone();
         let max = cfg.size("max_length");
         let shown: String = if max > 0 && name.chars().count() > max {
             name.chars().take(max.saturating_sub(1)).chain(std::iter::once('…')).collect()
@@ -434,13 +436,17 @@ impl Module for BranchModule {
         segs.push(Segment::styled(shown, Style::fg(cfg.color("name")).bolded()));
         if cfg.bool("show_sha")
             && !detached
-            && let Some(sha) = dirs.as_ref().and_then(git::head_commit)
+            && let Some(sha) = dirs.and_then(git::head_commit)
         {
             segs.push(seg(cfg, format!(" {}", sha.chars().take(7).collect::<String>()), "sha"));
         }
         let mut freshness = Freshness::Fresh;
-        if cfg.bool("dirty") && dirs.is_some() {
-            let (lookup, fresh) = ctx.cached(cfg, &repo_scope(ctx.session_id(), cwd));
+        if cfg.bool("dirty")
+            && let Some(d) = dirs
+        {
+            let scope = Scope::Repo(d.cache_key());
+            let (lookup, fresh) =
+                ctx.cached(cfg, &scope, |e| e.get("head").is_none_or(|h| h == head_key));
             if lookup.entry.as_ref().and_then(|e| e.get("dirty")) == Some("1") {
                 segs.push(seg(cfg, format!(" {}", cfg.icon("dirty")), "dirty"));
             }
@@ -457,9 +463,15 @@ impl Module for BranchModule {
 
     fn refresh(&self, ctx: &RefreshCtx<'_>) -> Result<BTreeMap<String, String>, String> {
         let dirs = git::discover(ctx.cwd).ok_or_else(|| "not a git repository".to_owned())?;
+        let head = match git::head(&dirs) {
+            Some(Head::Branch(b)) => b,
+            Some(Head::Detached(sha)) => sha.chars().take(7).collect(),
+            None => String::new(),
+        };
         let dirty = git::is_dirty(&dirs.toplevel, GIT_TIMEOUT)?;
         let mut values = BTreeMap::new();
         values.insert("dirty".to_owned(), if dirty { "1" } else { "0" }.to_owned());
+        values.insert("head".to_owned(), head);
         Ok(values)
     }
 }
@@ -541,17 +553,18 @@ impl Module for SyncModule {
     }
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
-        let cwd = Path::new(ctx.payload.current_dir().unwrap_or(""));
-        let Some(dirs) = git::discover(cwd) else { return Rendered::empty() };
-        let Some(Head::Branch(branch)) = git::head(&dirs) else { return Rendered::empty() };
+        let Some(dirs) = ctx.git_dirs() else { return Rendered::empty() };
+        let Some(Head::Branch(branch)) = git::head(dirs) else { return Rendered::empty() };
         let mut segs: Vec<Segment> = Vec::new();
-        let Some((remote, tracking)) = git::upstream(&dirs, &branch) else {
+        let Some((remote, tracking)) = git::upstream(dirs, &branch) else {
             if !cfg.icon("no_upstream").is_empty() {
                 segs.push(seg(cfg, cfg.icon("no_upstream"), "upstream"));
             }
             return Rendered::fresh(segs);
         };
-        let (lookup, freshness) = ctx.cached(cfg, &repo_scope(ctx.session_id(), cwd));
+        let scope = Scope::Repo(dirs.cache_key());
+        let (lookup, freshness) =
+            ctx.cached(cfg, &scope, |e| e.get("upstream").is_none_or(|u| u == tracking));
         let counts = lookup.entry.as_ref().and_then(|e| {
             Some((e.get("ahead")?.parse::<u64>().ok()?, e.get("behind")?.parse::<u64>().ok()?))
         });
@@ -579,7 +592,7 @@ impl Module for SyncModule {
             segs.push(seg(cfg, format!("{sp}{short}"), "upstream"));
         }
         if cfg.bool("fetch_age")
-            && let Some(age) = git::fetch_age(&dirs)
+            && let Some(age) = git::fetch_age(dirs)
             && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
             && !cfg.icon("stale").is_empty()
         {
@@ -606,13 +619,32 @@ impl Module for SyncModule {
         };
         let (remote, tracking) =
             git::upstream(&dirs, &branch).ok_or_else(|| "no upstream".to_owned())?;
+        let mut values = BTreeMap::new();
         let interval = ctx.cfg.int("fetch_interval");
-        if interval > 0 && remote != "." && git::fetch_age(&dirs).is_none_or(|age| age >= interval)
-        {
-            git::fetch(&dirs.toplevel, &remote, GIT_TIMEOUT)?;
+        if interval > 0 && remote != "." {
+            // A failed fetch (offline, bad remote) must neither hide the local
+            // ahead/behind counts nor be retried on every refresh: the attempt
+            // time is remembered in the entry and the interval applies to it.
+            let scope = Scope::Repo(dirs.cache_key());
+            let last_attempt = ctx
+                .cache
+                .read(&scope, ctx.cfg.id)
+                .and_then(|e| e.get("fetch_attempt")?.parse::<i64>().ok());
+            let now = crate::time::now_secs();
+            let attempt_age = last_attempt.map(|t| now.saturating_sub(t));
+            let due = attempt_age
+                .is_none_or(|age| age >= i64::try_from(interval).unwrap_or(i64::MAX))
+                && git::fetch_age(&dirs).is_none_or(|age| age >= interval);
+            if due {
+                values.insert("fetch_attempt".to_owned(), now.to_string());
+                if let Err(e) = git::fetch(&dirs.toplevel, &remote, FETCH_TIMEOUT) {
+                    values.insert("fetch_error".to_owned(), e);
+                }
+            } else if let Some(t) = last_attempt {
+                values.insert("fetch_attempt".to_owned(), t.to_string());
+            }
         }
         let (ahead, behind) = git::ahead_behind(&dirs.toplevel, &tracking, GIT_TIMEOUT)?;
-        let mut values = BTreeMap::new();
         values.insert("ahead".to_owned(), ahead.to_string());
         values.insert("behind".to_owned(), behind.to_string());
         values.insert("upstream".to_owned(), tracking);

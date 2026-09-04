@@ -325,8 +325,92 @@ fn gc_subcommand_sweeps_idle_sessions() {
         .unwrap()
         .set_modified(t)
         .unwrap();
-    // Real clock here: file ages are compared against `now`.
-    let (out, _, ok) = garnish(&env, &["gc"], None, &[("GARNISH_NOW", "")]);
+    // File ages are wall clock: a frozen or future GARNISH_NOW must not matter.
+    let future = (NOW.parse::<u64>().unwrap() + 100_000_000).to_string();
+    let live = env.cache.join("sessions").join("live");
+    std::fs::create_dir_all(&live).unwrap();
+    std::fs::write(live.join("m.cache"), "v1 1 1 ok\n").unwrap();
+    let (out, _, ok) = garnish(&env, &["gc"], None, &[("GARNISH_NOW", future.as_str())]);
     assert!(ok && out.contains("removed 1"), "{out}");
     assert!(!old.exists());
+    assert!(live.exists(), "a live session dir survives gc under a future clock");
+}
+
+#[test]
+fn worker_failed_entry_is_not_retried_every_tick_and_branch_change_invalidates() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let shim = env.work.parent().unwrap().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    let fake = shim.join("git");
+    std::fs::write(&fake, "#!/bin/sh\necho 'fatal: nope' >&2\nexit 128\n").unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, _, ok) = garnish(
+        &env,
+        &["refresh", "--all", "--session", "sess-worker", "--cwd", &w],
+        None,
+        &[("PATH", path.as_str())],
+    );
+    assert!(ok);
+    let before = spawns(&env).len();
+    for _ in 0..3 {
+        let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert!(out.contains('✗'), "{out}");
+    }
+    assert_eq!(spawns(&env).len(), before, "a failed entry within its TTL spawns nothing");
+
+    // A real refresh, then a branch switch: the entry is for another upstream, so it is stale.
+    let (_, _, ok) = garnish(
+        &env,
+        &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w],
+        None,
+        &[],
+    );
+    assert!(ok);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1") && !out.contains('⟳'), "{out}");
+    git(&env.work, &["checkout", "-q", "-b", "feature"]);
+    git(&env.work, &["push", "-q", "-u", "origin", "feature"]);
+    let before = spawns(&env).len();
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("feature") && out.contains('⟳'), "{out}");
+    assert_eq!(spawns(&env).len(), before + 1, "{:?}", spawns(&env));
+}
+
+#[test]
+fn worker_fetch_failure_keeps_counts_and_is_not_retried_within_the_interval() {
+    let env = setup();
+    config(
+        &env,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\npreset = \"full\"\nfetch_interval = 300\n",
+    );
+    git(&env.work, &["remote", "set-url", "origin", "/nonexistent/origin.git"]);
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let entry = std::fs::read_dir(env.cache.join("repos"))
+        .unwrap()
+        .flatten()
+        .find_map(|d| std::fs::read_to_string(d.path().join("sync.cache")).ok())
+        .unwrap();
+    assert!(entry.lines().next().unwrap().ends_with(" ok"), "{entry}");
+    assert!(entry.contains("ahead=1"), "{entry}");
+    assert!(entry.contains("fetch_error="), "{entry}");
+    assert!(entry.contains("fetch_attempt=1738425600"), "{entry}");
+    let (_, _, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok);
+    let again = std::fs::read_dir(env.cache.join("repos"))
+        .unwrap()
+        .flatten()
+        .find_map(|d| std::fs::read_to_string(d.path().join("sync.cache")).ok())
+        .unwrap();
+    assert!(
+        again.contains("fetch_attempt=1738425600") && !again.contains("fetch_error="),
+        "{again}"
+    );
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1"), "{out}");
 }

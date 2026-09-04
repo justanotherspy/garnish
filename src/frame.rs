@@ -275,6 +275,11 @@ pub fn compose_line(
         }
         out.extend(right.iter().cloned());
     }
+    // The right group is never truncated by design, but a terminal narrower
+    // than the right group alone must still get a line that fits.
+    if layout.truncate && segments_width(&out) > layout.width {
+        return truncate(&out, layout.width, &layout.ellipsis);
+    }
     out
 }
 
