@@ -206,7 +206,7 @@ impl Module for CacheModule {
         }
         if cfg.bool("show_countdown") {
             let warm = pc.warm.unwrap_or(false);
-            let cd = pc.expires_at.and_then(crate::time::countdown);
+            let cd = pc.expires_at.and_then(|t| crate::time::countdown_at(t, ctx.now.as_second()));
             match (warm, cd) {
                 (true, Some(cd)) => {
                     segs.push(seg(cfg, format!(" {} {cd}", cfg.icon("warm")), "warm"));

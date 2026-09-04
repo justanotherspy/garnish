@@ -101,7 +101,14 @@ pub fn compact_duration(total_secs: u64) -> String {
 /// Countdown from [`now`] to an epoch-seconds instant, or `None` once passed.
 #[must_use]
 pub fn countdown(until_epoch_secs: i64) -> Option<String> {
-    let remaining = until_epoch_secs.checked_sub(now_secs())?;
+    countdown_at(until_epoch_secs, now_secs())
+}
+
+/// Countdown from an explicit instant (renders pass the tick's clock so a
+/// pinned clock pins the countdown too).
+#[must_use]
+pub fn countdown_at(until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
+    let remaining = until_epoch_secs.checked_sub(now_epoch_secs)?;
     u64::try_from(remaining).ok().filter(|&r| r > 0).map(compact_duration)
 }
 
@@ -137,9 +144,11 @@ mod tests {
     #[test]
     fn countdown_and_elapsed_are_relative_to_frozen_now() {
         // Compute against a fixed reference without touching the process env.
-        let base = parse_now("1738425600").unwrap();
-        let later = base.as_second() + 8_020;
-        let diff = u64::try_from(later - base.as_second()).unwrap();
-        assert_eq!(compact_duration(diff), "2h13m");
+        let base = parse_now("1738425600").unwrap().as_second();
+        assert_eq!(countdown_at(base + 8_020, base), Some("2h13m".into()));
+        assert_eq!(countdown_at(base + 1, base), Some("1s".into()));
+        assert_eq!(countdown_at(base, base), None);
+        assert_eq!(countdown_at(base - 1, base), None);
+        assert_eq!(countdown_at(i64::MAX, i64::MIN), None, "overflow is not a countdown");
     }
 }

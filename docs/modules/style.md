@@ -12,18 +12,18 @@ Shows `output_style.name`. By default the `default` style is hidden; the `full` 
 
 | preset | render |
 |---|---|
-| `minimal` | `(nothing to show for this payload)` |
-| `default` | `(nothing to show for this payload)` |
-| `full` | `✎ default` |
+| `minimal` | `concise` |
+| `default` | `✎ concise` |
+| `full` | `✎ concise` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | `(nothing to show for this payload)` |
-| `unicode` | `(nothing to show for this payload)` |
-| `emoji` | `(nothing to show for this payload)` |
-| `ascii` | `(nothing to show for this payload)` |
+| `nerd` | ` concise` |
+| `unicode` | `✎ concise` |
+| `emoji` | `🎨 concise` |
+| `ascii` | `style: concise` |
 
 ## Options
 

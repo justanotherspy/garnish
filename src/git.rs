@@ -225,15 +225,16 @@ pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
     Some((remote.clone(), format!("refs/remotes/{remote}/{short}")))
 }
 
-/// Seconds since the last fetch (`FETCH_HEAD` mtime), if any. `FETCH_HEAD`
-/// is per worktree, so the linked worktree's own git dir is checked first.
+/// Seconds between the last fetch (`FETCH_HEAD` mtime) and `now_epoch_secs`,
+/// if a fetch ever happened. `FETCH_HEAD` is per worktree, so the linked
+/// worktree's own git dir is checked first.
 #[must_use]
-pub fn fetch_age(dirs: &Dirs) -> Option<u64> {
+pub fn fetch_age(dirs: &Dirs, now_epoch_secs: i64) -> Option<u64> {
     let modified = [&dirs.git_dir, &dirs.common_dir]
         .into_iter()
         .find_map(|d| std::fs::metadata(d.join("FETCH_HEAD")).ok()?.modified().ok())?;
     let secs = modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-    let now = u64::try_from(crate::time::now_secs()).ok()?;
+    let now = u64::try_from(now_epoch_secs).ok()?;
     Some(now.saturating_sub(secs))
 }
 
@@ -441,7 +442,7 @@ mod tests {
         assert!(ahead_behind(&work, "refs/remotes/origin/ghost", t).is_err());
         assert!(run_git(&work, &["sleep-forever-not-a-command"], t).is_err());
         assert!(fetch(&work, "origin", t).is_ok());
-        assert!(fetch_age(&discover(&work).unwrap()).is_some());
+        assert!(fetch_age(&discover(&work).unwrap(), crate::time::now_secs()).is_some());
     }
 
     #[test]
@@ -509,8 +510,9 @@ mod tests {
         git(&wt, &["fetch", "-q", "origin"]);
         let linked = discover(&wt).unwrap();
         assert!(linked.git_dir.join("FETCH_HEAD").exists());
-        assert!(fetch_age(&linked).is_some());
-        assert!(fetch_age(&linked).unwrap() < 60);
+        let now = crate::time::now_secs();
+        assert!(fetch_age(&linked, now).is_some());
+        assert!(fetch_age(&linked, now).unwrap() < 60);
     }
 
     #[test]

@@ -152,7 +152,8 @@ impl Module for LimitModule {
         let text = if self.0 == Window::Spend { percent_unclamped(used) } else { percent(used) };
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
         if cfg.bool("show_reset")
-            && let Some(cd) = w.resets_at.and_then(crate::time::countdown)
+            && let Some(cd) =
+                w.resets_at.and_then(|t| crate::time::countdown_at(t, ctx.now.as_second()))
         {
             let g = cfg.icon("reset");
             let glyph_txt = if g.is_empty() { String::new() } else { format!("{g} ") };

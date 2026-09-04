@@ -13,17 +13,17 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 | preset | render |
 |---|---|
 | `minimal` | `91%` |
-| `default` | `⛁ 91% 1h ●` |
-| `full` | `⛁ 91% 1h ● 2 misses 352kw` |
+| `default` | `⛁ 91% 1h ● 47m` |
+| `full` | `⛁ 91% 1h ● 47m 2 misses 352kw` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | ` 91% 1h ` |
-| `unicode` | `⛁ 91% 1h ●` |
-| `emoji` | `🗄️ 91% 1h 🔥` |
-| `ascii` | `cache: 91% 1h warm` |
+| `nerd` | ` 91% 1h  47m` |
+| `unicode` | `⛁ 91% 1h ● 47m` |
+| `emoji` | `🗄️ 91% 1h 🔥 47m` |
+| `ascii` | `cache: 91% 1h warm 47m` |
 
 ## Options
 

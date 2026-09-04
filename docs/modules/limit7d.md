@@ -13,17 +13,17 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | preset | render |
 |---|---|
 | `minimal` | `41%` |
-| `default` | `▦ 41%` |
-| `full` | `▦ ███▎░░░░ 41%` |
+| `default` | `▦ 41% ⏱ 3d4h` |
+| `full` | `▦ ███▎░░░░ 41% ⏱ 3d4h` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | ` 41%` |
-| `unicode` | `▦ 41%` |
-| `emoji` | `📅 41%` |
-| `ascii` | `7d 41%` |
+| `nerd` | ` 41%  3d4h` |
+| `unicode` | `▦ 41% ⏱ 3d4h` |
+| `emoji` | `📅 41% ⏱️ 3d4h` |
+| `ascii` | `7d 41% reset 3d4h` |
 
 ## Options
 

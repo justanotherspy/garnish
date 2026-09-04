@@ -13,17 +13,17 @@ Percentage of the rolling five-hour window consumed and a countdown to `resets_a
 | preset | render |
 |---|---|
 | `minimal` | `24%` |
-| `default` | `⧗ 24%` |
-| `full` | `⧗ █▉░░░░░░ 24%` |
+| `default` | `⧗ 24% ⏱ 2h13m` |
+| `full` | `⧗ █▉░░░░░░ 24% ⏱ 2h13m` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | ` 24%` |
-| `unicode` | `⧗ 24%` |
-| `emoji` | `⏳ 24%` |
-| `ascii` | `5h 24%` |
+| `nerd` | ` 24%  2h13m` |
+| `unicode` | `⧗ 24% ⏱ 2h13m` |
+| `emoji` | `⏳ 24% ⏱️ 2h13m` |
+| `ascii` | `5h 24% reset 2h13m` |
 
 ## Options
 

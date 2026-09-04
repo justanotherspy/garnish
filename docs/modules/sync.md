@@ -12,18 +12,18 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 
 | preset | render |
 |---|---|
-| `minimal` | `(nothing to show for this payload)` |
-| `default` | `(nothing to show for this payload)` |
-| `full` | `(nothing to show for this payload)` |
+| `minimal` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `default` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `full` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | `(nothing to show for this payload)` |
-| `unicode` | `(nothing to show for this payload)` |
-| `emoji` | `(nothing to show for this payload)` |
-| `ascii` | `(nothing to show for this payload)` |
+| `nerd` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `unicode` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `emoji` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `ascii` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
 
 ## Options
 

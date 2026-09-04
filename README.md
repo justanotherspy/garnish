@@ -6,11 +6,13 @@
 </p>
 
 ```text
-╭─  ~/repo/garnish   main ⇡2   #42 ○ ──────────────────────  garnish-dev ─╮
-├─  Opus ▅▇█ high  ████████████░░░░░░░░▏░ 58%  concise ───────────── NORMAL ─┤
-├─  5h 23% ⏱2h13m   7d 41% ⏱3d4h ────────────────────────────── +156 −23 ─┤
-╰─  1h12m   8m20s   91% 1h warm 47m ─────────────────────── ⠹ 14:02:33 ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────────────────────────────── ♯ garnish-dev ─╮
+├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────────────────────────────┤
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────────────────────────────── ⠋ 16:00:00 ─╯
 ```
+
+<sub>The default preset with unicode icons at 100 columns, rendered from a saved payload (inside a repository the first line also carries the branch, ahead/behind and worktree). Every preset and frame style is rendered in [docs/config.md](docs/config.md).</sub>
 
 ## Why
 

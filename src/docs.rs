@@ -217,8 +217,9 @@ const fn stale_name(s: crate::config::StaleStyle) -> &'static str {
 }
 
 /// Payload fixtures embedded for the documentation renders.
-const FIXTURES: [(&str, &str); 7] = [
+const FIXTURES: [(&str, &str); 8] = [
     ("subscription-full", include_str!("../tests/fixtures/payloads/subscription-full.json")),
+    ("output-style", include_str!("../tests/fixtures/payloads/output-style.json")),
     ("api-key", include_str!("../tests/fixtures/payloads/api-key.json")),
     ("worktree-session", include_str!("../tests/fixtures/payloads/worktree-session.json")),
     ("pr-approved", include_str!("../tests/fixtures/payloads/pr-approved.json")),
@@ -236,6 +237,7 @@ fn sample_fixture(id: &str) -> &'static str {
         "cost" => "api-key",
         "vim" => "vim",
         "agent" => "agent",
+        "style" => "output-style",
         _ => "subscription-full",
     }
 }
@@ -259,7 +261,13 @@ fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
     let (cfg, _) = config::parse(&text, &SCHEMAS);
     let out = render_plain_at(&fixture(sample_fixture(id)), &cfg, Some(80), &Clock::fixed());
     let line = out.lines().next().unwrap_or("").trim_end().to_owned();
-    if line.is_empty() { "(nothing to show for this payload)".to_owned() } else { line }
+    if !line.is_empty() {
+        return line;
+    }
+    match id {
+        "sync" => "(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)".to_owned(),
+        _ => "(nothing to show for this payload)".to_owned(),
+    }
 }
 
 /// One unframed line exercising the icon set, for `garnish doctor`.

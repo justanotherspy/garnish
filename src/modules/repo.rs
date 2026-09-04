@@ -592,7 +592,7 @@ impl Module for SyncModule {
             segs.push(seg(cfg, format!("{sp}{short}"), "upstream"));
         }
         if cfg.bool("fetch_age")
-            && let Some(age) = git::fetch_age(dirs)
+            && let Some(age) = git::fetch_age(dirs, ctx.now.as_second())
             && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
             && !cfg.icon("stale").is_empty()
         {
@@ -634,7 +634,7 @@ impl Module for SyncModule {
             let attempt_age = last_attempt.map(|t| now.saturating_sub(t));
             let due = attempt_age
                 .is_none_or(|age| age >= i64::try_from(interval).unwrap_or(i64::MAX))
-                && git::fetch_age(&dirs).is_none_or(|age| age >= interval);
+                && git::fetch_age(&dirs, now).is_none_or(|age| age >= interval);
             if due {
                 values.insert("fetch_attempt".to_owned(), now.to_string());
                 if let Err(e) = git::fetch(&dirs.toplevel, &remote, FETCH_TIMEOUT) {
