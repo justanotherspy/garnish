@@ -22,7 +22,7 @@ jobs:
     name: linux (nightly)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Installs the channel and components pinned in rust-toolchain.toml.
       - run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@v2
@@ -35,7 +35,7 @@ jobs:
     name: macos (nightly)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
@@ -48,7 +48,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
