@@ -1,0 +1,43 @@
+{
+  "cwd": "/home/dev/projects/garnish",
+  "session_id": "sess-0002",
+  "transcript_path": "/home/dev/.claude/projects/-home-dev-projects-garnish/sess.jsonl",
+  "version": "2.1.260",
+  "model": {
+    "id": "claude-opus-5",
+    "display_name": "Opus"
+  },
+  "workspace": {
+    "current_dir": "/home/dev/projects/garnish",
+    "project_dir": "/home/dev/projects/garnish",
+    "added_dirs": [],
+    "repo": {
+      "host": "github.com",
+      "owner": "dschwartz",
+      "name": "garnish"
+    }
+  },
+  "output_style": {
+    "name": "default"
+  },
+  "cost": {
+    "total_cost_usd": 0.0,
+    "total_duration_ms": 1500,
+    "total_api_duration_ms": 0,
+    "total_lines_added": 0,
+    "total_lines_removed": 0
+  },
+  "context_window": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "context_window_size": 1000000,
+    "used_percentage": null,
+    "remaining_percentage": null,
+    "current_usage": null
+  },
+  "exceeds_200k_tokens": false,
+  "fast_mode": false,
+  "thinking": {
+    "enabled": true
+  }
+}
