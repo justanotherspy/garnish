@@ -144,6 +144,12 @@ impl Style {
         Self { bold: true, ..self }
     }
 
+    /// Copy with `underline` set when `on`.
+    #[must_use]
+    pub const fn underline_if(self, on: bool) -> Self {
+        Self { underline: on, ..self }
+    }
+
     fn sgr(self, mode: ColorMode) -> String {
         if mode == ColorMode::Never {
             return String::new();

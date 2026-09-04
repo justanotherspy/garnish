@@ -1,0 +1,1 @@
+garnish  worktree-feature-x  42%  24%  16:00
