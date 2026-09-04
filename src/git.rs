@@ -203,8 +203,6 @@ pub fn fetch_age(dirs: &Dirs) -> Option<u64> {
     Some(now.saturating_sub(secs))
 }
 
-// ---------------------------------------------------------------- worker side
-
 /// Run `git` with arguments in `cwd`, killing it after `timeout`.
 ///
 /// # Errors

@@ -82,6 +82,40 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
     crate::ansi::truncate(&line, width, ellipsis)
 }
 
+/// The environment-dependent inputs of a render, so docs and tests can pin them.
+#[derive(Debug, Clone)]
+pub struct Clock {
+    /// The current instant.
+    pub now: jiff::Timestamp,
+    /// The local time zone.
+    pub tz: jiff::tz::TimeZone,
+    /// The home directory (for `~` collapsing).
+    pub home: Option<String>,
+}
+
+impl Clock {
+    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime` and `HOME`.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
+            now: crate::time::now(),
+            tz: crate::time::local_zone(),
+            home: std::env::var("HOME").ok().filter(|h| !h.is_empty()),
+        }
+    }
+
+    /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev` — what the
+    /// golden renders and the generated docs use.
+    #[must_use]
+    pub fn fixed() -> Self {
+        Self {
+            now: jiff::Timestamp::from_second(1_738_425_600).unwrap_or_default(),
+            tz: jiff::tz::TimeZone::UTC,
+            home: Some("/home/dev".to_owned()),
+        }
+    }
+}
+
 /// Render every configured line to segments (no escape sequences yet).
 #[must_use]
 pub fn render_lines(
@@ -89,16 +123,28 @@ pub fn render_lines(
     config: &Config,
     columns: Option<usize>,
 ) -> Vec<Vec<Segment>> {
+    render_lines_at(payload, config, columns, &Clock::from_env())
+}
+
+/// [`render_lines`] with an explicit clock, zone and home.
+#[must_use]
+pub fn render_lines_at(
+    payload: &Payload,
+    config: &Config,
+    columns: Option<usize>,
+    clock: &Clock,
+) -> Vec<Vec<Segment>> {
     let width = config.width(columns);
     let cache = crate::cache::Cache::from_env();
     let ctx = Ctx {
         payload,
         theme: &config.theme,
         icons: config.icons,
-        now: crate::time::now(),
+        now: clock.now,
         width,
         cache: &cache,
-        tz: crate::time::local_zone(),
+        tz: clock.tz.clone(),
+        home: clock.home.clone(),
     };
     let stale = stale_glyphs(config.icons);
     let layout = Layout {
@@ -159,6 +205,21 @@ const fn stale_glyphs(icons: IconSet) -> (&'static str, &'static str) {
 #[must_use]
 pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
     strip_ansi(&render_loaded(payload, loaded, columns, true))
+}
+
+/// Plain-text render of the configured lines with a pinned clock (docs).
+#[must_use]
+pub fn render_plain_at(
+    payload: &Payload,
+    config: &Config,
+    columns: Option<usize>,
+    clock: &Clock,
+) -> String {
+    render_lines_at(payload, config, columns, clock)
+        .iter()
+        .map(|line| Painter::PLAIN.paint(line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

@@ -69,12 +69,20 @@ colors and refresh interval. Put any module on any line, left or right.
 Full reference: [`docs/`](docs/README.md) (generated from the module schemas)
 and the [guide](docs/guide.md).
 
+## Try it without a session
+
+```sh
+garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
+garnish config init && garnish config check && garnish config show
+```
+
 ## Develop
 
 ```sh
 make check    # fmt + clippy (pedantic, nursery, no panics) + nextest + doctests
+make watch    # watchexec: lint + test on every save
+make docs     # regenerate docs/ from the module schemas
 make bench    # hyperfine gate: warm tick mean < 3 ms, p99 < 8 ms
-make docs     # regenerate docs/ from code
 ```
 
 See [`CLAUDE.md`](CLAUDE.md) for the working rules, [`SPEC.md`](SPEC.md) for

@@ -108,6 +108,12 @@ pub enum Command {
     },
     /// Remove cache directories of sessions idle for more than a day.
     Gc,
+    /// Regenerate the reference documentation from the module schemas.
+    Docs {
+        /// Output directory (default `docs`).
+        #[arg(long, default_value = "docs")]
+        out: PathBuf,
+    },
     /// Inspect or create the configuration.
     Config {
         /// What to do.
@@ -180,6 +186,12 @@ pub fn run() -> Result<()> {
         Command::Config { action } => config_cmd(&action, config_path),
         Command::Refresh { module, all, session, cwd, lock_held } => {
             refresh(module.as_deref(), all, &session, &cwd, lock_held, config_path)
+        }
+        Command::Docs { out } => {
+            let written = crate::docs::generate(&out)
+                .with_context(|| format!("writing {}", out.display()))?;
+            writeln!(std::io::stdout().lock(), "wrote {written} file(s) under {}", out.display())?;
+            Ok(())
         }
         Command::Gc => {
             let cache = crate::cache::Cache::from_env();

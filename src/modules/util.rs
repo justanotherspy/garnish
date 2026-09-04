@@ -50,7 +50,6 @@ pub fn bar(
         (!glyph.is_empty()).then_some((cell.min(width.saturating_sub(1)), glyph, color))
     });
 
-    // Build the bar cell by cell into runs of (text, style).
     let mut segs: Vec<Segment> = Vec::new();
     let mut push = |text: &str, style: Style| match segs.last_mut() {
         Some(last) if last.style == style => last.text.push_str(text),

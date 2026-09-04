@@ -165,8 +165,6 @@ pub struct Loaded {
     pub errors: Vec<ConfigError>,
 }
 
-// ---------------------------------------------------------------- raw TOML
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 struct RawConfig {
@@ -209,8 +207,6 @@ struct RawLine {
     right: Vec<String>,
     separator: Option<String>,
 }
-
-// ---------------------------------------------------------------- loading
 
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
 #[must_use]
@@ -318,8 +314,6 @@ pub fn parse_with(
 fn line_of(text: &str, byte: usize) -> usize {
     text.bytes().take(byte).filter(|&b| b == b'\n').count().saturating_add(1)
 }
-
-// ---------------------------------------------------------------- resolution
 
 impl Config {
     /// Built-in defaults.

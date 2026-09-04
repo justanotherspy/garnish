@@ -466,6 +466,12 @@ impl ModuleCfg {
     pub const fn icons(&self) -> &BTreeMap<&'static str, String> {
         &self.icons
     }
+
+    /// Every resolved color.
+    #[must_use]
+    pub const fn colors(&self) -> &BTreeMap<&'static str, Color> {
+        &self.colors
+    }
 }
 
 /// Explicit per-module overrides from the config file.

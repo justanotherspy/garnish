@@ -120,7 +120,10 @@ icon-set default → module preset → top-level preset → explicit key.
 | `branch` | branch or detached HEAD | name | icon + name | + short SHA, dirty `●` | 5 |
 | `sync` | ahead/behind vs `@{upstream}` | `⇡2⇣1` when non-zero | colored counts, dim `no upstream` | + upstream name + fetch-age hint `⇣?12m` | 5 (+ opt-in `fetch_interval`) |
 | `worktree` | `workspace.git_worktree` / `worktree.name` | name | icon + name | + `original_branch → branch` | 0 |
-| `pr` | open PR/MR | `#123` linked | icon + `#123` linked + state glyph | + state word, `MR` label | 0 |
+| `pr` | open PR/MR | `#123` linked | icon + `#123` linked + state glyph | + state word | 0 |
+
+GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
+icon; GitHub pull requests as `#42`.
 
 PR state glyphs/colors: approved `✓` ok, pending `○` warn, changes_requested
 `✗` danger, draft `◌` muted. Link uses OSC 8 to `pr.url`.
@@ -148,7 +151,7 @@ color = "danger" }`; `warn_at` adds an extra badge threshold. No token counter.
 | `limit5h` | 5-hour % + reset countdown | `23%` | icon + `23%` + `⏱2h13m` | + mini bar | 0 |
 | `limit7d` | 7-day % + reset countdown | `41%` | icon + `41%` + `⏱3d4h` | + mini bar | 0 |
 | `spend` | spend-limit % | `62%` | icon + % + reset | + bar, danger > 100 | 0 |
-| `cost` | `total_cost_usd` | `$1.23` | icon + `$1.23` | + `+156/−23` | 0 |
+| `cost` | `total_cost_usd` | `$1.23` | icon + `$1.23` | + `+156 −23` | 0 |
 
 Limit modules render nothing when their window is absent. `cost` has
 `only_without_rate_limits = true` so one usage line serves both auth modes.
@@ -159,7 +162,7 @@ Limit modules render nothing when their window is absent. `cost` has
 |---|---|---|---|---|---|
 | `session` | `total_duration_ms` | `1h12m` | icon + `1h12m` | + start time | 0 |
 | `api` | `total_api_duration_ms` | `8m20s` | icon + `8m20s` | + `(11%)` of session | 0 |
-| `cache` | prompt cache | `91%` | icon + `91%` + TTL badge | + `warm 47m`/`cold`, misses, writes | 0 |
+| `cache` | prompt cache | `91%` | icon + `91%` + TTL badge + `● 47m`/`○` warm countdown | + misses, writes | 0 |
 | `clock` | local time + spinner | `HH:MM` | spinner + `HH:MM:SS` | + date, UTC offset | 0 |
 
 `cache` hit % = `prompt_cache.hit_ratio`; fallback to the last request's
@@ -173,7 +176,7 @@ Spinner frame = `now_secs mod frames.len()` (stateless).
 | `session_name` | `session_name` (absent → hidden) | name | icon + name | + short `session_id` | 0 |
 | `vim` | `vim.mode` (absent → hidden) | `N`/`I`/`V`/`VL` | colored badge | + icon | 0 |
 | `agent` | `agent.name` (absent → hidden) | name | icon + name | + thinking glyph | 0 |
-| `lines` | lines added/removed | `+156/−23` | colored with icons | + net delta | 0 |
+| `lines` | lines added/removed | `+156 −23` | icon + colored `+156 −23` | + net delta | 0 |
 
 ### 3.6 Staleness
 

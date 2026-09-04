@@ -80,6 +80,8 @@ pub struct Ctx<'a> {
     pub cache: &'a Cache,
     /// The local time zone, resolved once per tick.
     pub tz: jiff::tz::TimeZone,
+    /// The home directory, for `~` collapsing.
+    pub home: Option<String>,
 }
 
 impl Ctx<'_> {

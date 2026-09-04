@@ -62,6 +62,37 @@ impl Color {
         Some(Self::Ansi(named))
     }
 
+    /// The config spelling of this color: `default`, a name, an index, or `#rrggbb`.
+    #[must_use]
+    pub fn to_spec(self) -> String {
+        const NAMES: [&str; 16] = [
+            "black",
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "magenta",
+            "cyan",
+            "white",
+            "bright-black",
+            "bright-red",
+            "bright-green",
+            "bright-yellow",
+            "bright-blue",
+            "bright-magenta",
+            "bright-cyan",
+            "bright-white",
+        ];
+        match self {
+            Self::Default => "default".to_owned(),
+            Self::Ansi(n) => {
+                NAMES.get(usize::from(n)).map_or_else(|| n.to_string(), |s| (*s).to_owned())
+            }
+            Self::Indexed(n) => n.to_string(),
+            Self::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+        }
+    }
+
     /// SGR parameters for this color as a foreground.
     fn fg_params(self, mode: ColorMode) -> Option<String> {
         match (self, mode) {
@@ -371,6 +402,11 @@ mod tests {
         assert_eq!(Color::parse("#ff880"), None);
         assert_eq!(Color::parse("chartreuse"), None);
         assert_eq!(Color::parse("none"), Some(Color::Default));
+        for spec in ["default", "red", "bright-blue", "208", "#ff8800"] {
+            let c = Color::parse(spec).unwrap();
+            assert_eq!(c.to_spec(), spec);
+            assert_eq!(Color::parse(&c.to_spec()), Some(c));
+        }
     }
 
     #[test]

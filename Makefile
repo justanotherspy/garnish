@@ -31,8 +31,8 @@ test:
 doc:
 	cargo doc --no-deps
 
-docs: release
-	./target/release/garnish docs --out docs
+docs:
+	UPDATE_DOCS=1 cargo nextest run --test docs_sync
 
 bench: release
 	./bench/run.sh

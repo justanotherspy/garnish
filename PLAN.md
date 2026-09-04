@@ -52,26 +52,29 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 
 ## Phase 4 — Cache & workers
 
-- [ ] `cache.rs`: root resolution, entry format, atomic write, TTL, GC
-- [ ] `spawn.rs`: detached worker (`process_group(0)`), lock files, `GARNISH_NO_SPAWN`
-- [ ] `garnish refresh --module|--all` (rayon for `--all`)
-- [ ] Tests (serial group): TTL expiry, live lock, stale lock/dead pid, tmp/truncated ignored, tick killed mid-run, 32 concurrent ticks → one worker, GC bounds
-- [ ] Sprite checkpoint
+- [x] `cache.rs`: root resolution, entry format, atomic write, TTL, GC
+- [x] `spawn.rs`: detached worker (`process_group(0)`), lock files, `GARNISH_NO_SPAWN`
+- [x] `garnish refresh --module|--all` (rayon for `--all`)
+- [x] Tests (serial group): TTL expiry, live lock, stale lock/dead pid, tmp/truncated ignored, 32 concurrent ticks → one worker, GC bounds
+- [ ] Test: tick killed mid-run while the worker completes (needs a real spawn; blocked on a harness that can kill a process group deterministically)
+- [x] Sprite checkpoint
 
 ## Phase 5 — Repo modules
 
-- [ ] `git.rs`: direct `.git` reads (HEAD, loose refs, packed-refs, worktree gitdir, upstream from config), reftable detection
-- [ ] Worker: ahead/behind (`rev-list --left-right --count`), dirty (`status --porcelain=v2`, 2 s timeout), opt-in `git fetch` with `fetch_interval`
-- [ ] `path`, `branch`, `sync`, `worktree`, `pr`
-- [ ] Temp-repo tests (ahead/behind/diverged/no-upstream/detached/dirty/worktree) + PATH shim tests (slow/failing git never blocks a tick)
+- [x] `git.rs`: direct `.git` reads (HEAD, loose refs, packed-refs, worktree gitdir, upstream from config), reftable detection
+- [x] Worker: ahead/behind (`rev-list --left-right --count`), dirty (`status --porcelain=v2`, 2 s timeout), opt-in `git fetch` with `fetch_interval`
+- [x] `path`, `branch`, `sync`, `worktree`, `pr`
+- [x] Temp-repo tests (ahead/behind/no-upstream/detached/worktree in `git.rs`; ahead+dirty end to end in `tests/worker.rs`) + PATH shim test (hanging git never blocks a tick)
+- [ ] Temp-repo tests still missing: behind, diverged, `fetch_interval` end to end
 
 ## Phase 6 — Docs
 
-- [ ] `docs.rs` + `garnish docs`: `docs/README.md`, `docs/config.md`, `docs/modules/<id>.md` with preset renders
-- [ ] `docs/guide.md` (hand-written)
-- [ ] `garnish modules`
-- [ ] Docs-sync test; `scripts/ci.sh` fails on drift
-- [ ] Sprite checkpoint
+- [x] `docs.rs` + `garnish docs`: `docs/README.md`, `docs/config.md`, `docs/modules/<id>.md` with preset renders
+- [x] `docs/guide.md` (hand-written)
+- [x] `garnish modules`
+- [x] Docs-sync test (`tests/docs_sync.rs`, `UPDATE_DOCS=1` regenerates); `scripts/ci.sh` fails on drift
+- [x] `config show` emits fully resolved values (review M2); round-trip tests for both modes
+- [x] Sprite checkpoint
 
 ## Phase 7 — Install, doctor, polish
 
@@ -103,3 +106,14 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
   suite (416 renders). Deviation from SPEC: role overrides live under
   `[colors]`, not `[theme.colors]` (TOML cannot have `theme` be both a string
   and a table). Next: adversarial review of phases 1–3, then Phase 4 cache/workers.
+- **2026-09-04 (later)** — Phases 4–5 done: cache with hard-link locks and a
+  2 s hand-over grace window, detached workers, git reader, repo modules,
+  worker integration tests. Adversarial review of phases 1–3 found 2 critical
+  / 4 high / 6 medium issues; all fixed with regression tests (commit
+  `287e719`). Notable: a lock handed to a worker carried the tick's pid and
+  looked dead the moment the tick exited — fixed by the grace window plus the
+  worker re-stamping the lock. Spec drifts recorded in SPEC § 3: `lines`
+  renders `+156 −23`, `cache` shows the warm countdown in `default`, GitLab
+  MRs render as `!N`. Open from the review: `config show` must emit fully
+  resolved values (Phase 6), bench gate (Phase 8). Tooling: `make watch`
+  (watchexec) added. Next: Phase 6 docs.

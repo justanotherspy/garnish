@@ -146,8 +146,7 @@ impl Module for PathModule {
         if base.is_empty() {
             return Rendered::empty();
         }
-        let home = std::env::var("HOME").ok();
-        let shown = shorten(&tildify(base, home.as_deref()), cfg.size("depth"));
+        let shown = shorten(&tildify(base, ctx.home.as_deref()), cfg.size("depth"));
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "folder", "icon"));

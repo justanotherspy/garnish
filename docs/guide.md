@@ -1,0 +1,140 @@
+# garnish guide
+
+garnish is the `statusLine` command for Claude Code: every second Claude Code
+pipes a JSON snapshot of the session to it, and garnish prints a few framed
+lines built from small, independent modules. This guide gets you from install
+to a status line you like. The [configuration reference](config.md) lists
+every key, and each module has a page under [modules/](modules/).
+
+## 1. Install
+
+```sh
+git clone <this repo> && cd garnish
+make install            # cargo install --path . --locked  →  ~/.cargo/bin/garnish
+garnish --version
+```
+
+Requirements: a terminal with ANSI colors; a [Nerd Font](https://www.nerdfonts.com)
+for the default `nerd` icon set (or set `icons = "unicode"` / `"emoji"` /
+`"ascii"`); OSC 8 hyperlink support (iTerm2, Kitty, WezTerm, Ghostty…) for
+clickable pull-request numbers.
+
+## 2. Hook it into Claude Code
+
+```sh
+garnish install         # merges the statusLine block into ~/.claude/settings.json (backup kept)
+```
+
+or by hand:
+
+```json
+{ "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }
+```
+
+`refreshInterval: 1` makes the clock tick and the countdowns move; garnish
+keeps that cheap by rendering payload data directly and everything slow
+(git, worktrees) from a cache that a detached worker refreshes in the
+background. A tick never waits on git and never runs a process.
+
+## 3. Try it before you commit
+
+```sh
+garnish preview tests/fixtures/payloads/subscription-full.json
+garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
+COLUMNS=80 garnish preview tests/fixtures/payloads/api-key.json --width 80
+```
+
+`preview` renders a saved payload with any preset, icon set, theme and width,
+so you can see a change without waiting for a real session.
+
+## 4. Write a config
+
+```sh
+garnish config init     # ~/.config/garnish/garnish.toml, fully annotated
+garnish config check    # every problem, with its TOML path
+garnish config show     # the fully resolved result (what a tick actually uses)
+```
+
+Start from a preset and override what you care about:
+
+```toml
+preset = "compact"          # default | minimal | full | compact
+icons  = "nerd"
+theme  = "catppuccin-mocha"
+
+[frame]
+style = "rounded"           # none | rounded | square | double | heavy | powerline | custom
+
+[modules.context]
+preset = "full"
+width  = 30
+```
+
+A broken config never blanks the status line: garnish falls back to the
+defaults and appends a dim `⚠ config: <file>:<line> <message>` line.
+
+## 5. Compose your own lines
+
+Every module is independent, so lines are just lists of module ids. `modules`
+are left-aligned, `right` are right-aligned, and the frame rule fills the gap.
+
+```toml
+[[line]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name", "clock"]
+
+[[line]]
+modules = ["model", "effort", "context"]
+right   = ["limit5h", "limit7d", "cost"]
+```
+
+| group | modules |
+|---|---|
+| repo | `path` `branch` `sync` `worktree` `pr` |
+| model | `model` `effort` `context` `style` |
+| usage | `limit5h` `limit7d` `spend` `cost` |
+| session | `session` `api` `cache` `clock` |
+| identity | `session_name` `vim` `agent` `lines` |
+
+Modules that have nothing to show are skipped: `limit5h` only appears on a
+subscription, `cost` only with an API key, `pr` only while a pull request is
+open, `vim` only with vim mode on.
+
+## 6. Presets, icons, colors
+
+Each module has three presets: `minimal` (bare value), `default`, and `full`
+(everything it knows). Set them per module (`[modules.context] preset =
+"full"`) or all at once with the top-level `preset`.
+
+Every glyph a module uses is an `icons` key with a value per icon set, and
+every colored part is a `colors` key that defaults to a theme role:
+
+```toml
+[modules.branch.icons]
+branch = ""            # any string
+[modules.branch.colors]
+name = "danger"          # a role…
+icon = "#ff8800"         # …or a literal color
+[colors]
+accent = "bright-blue"   # restyle every module that uses the role
+```
+
+## 7. Troubleshooting
+
+- **Boxes or missing glyphs** → your font lacks Nerd Font icons; set
+  `icons = "unicode"`.
+- **Misaligned right edge** → the terminal renders some emoji one cell wide;
+  use `icons = "unicode"` or override the offending glyph.
+- **`⟳` next to a value** → the cached value is past its TTL and a worker is
+  refreshing it; `✗` means the last refresh failed. `garnish doctor` shows the
+  error.
+- **Nothing changes** → check `garnish config path` and `garnish config check`.
+- **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`.
+
+## 8. Under the hood
+
+stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[line]]` renders
+its modules → frame joins left/right groups and fills to `$COLUMNS` → stdout.
+Cached modules read one small file each; when it is stale the tick renders it
+dimmed and spawns `garnish refresh` in its own process group to recompute it.
+Warm tick budget: under 3 ms.
