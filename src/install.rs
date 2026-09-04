@@ -193,6 +193,16 @@ mod tests {
         assert_eq!(v["statusLine"]["refreshInterval"], 1);
         assert_eq!(v["statusLine"]["hideVimModeIndicator"], true);
         assert!(v["statusLine"].get("padding").is_none());
+        assert!(
+            out.find("\"theme\"").unwrap() < out.find("\"statusLine\"").unwrap(),
+            "key order kept: {out}"
+        );
+        let ordered = merge(r#"{"z":1,"a":2,"m":{"y":1,"b":2}}"#, &p).unwrap();
+        let zi = ordered.find("\"z\"").unwrap();
+        let ai = ordered.find("\"a\"").unwrap();
+        let yi = ordered.find("\"y\"").unwrap();
+        let bi = ordered.find("\"b\"").unwrap();
+        assert!(zi < ai && yi < bi, "nested key order kept: {ordered}");
         let with_pad = Plan { padding: Some(2), ..p };
         let v: Value = serde_json::from_str(&merge("", &with_pad).unwrap()).unwrap();
         assert_eq!(v["statusLine"]["padding"], 2);

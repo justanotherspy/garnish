@@ -15,7 +15,8 @@ itertools = "0.15.0"
 jiff = "0.2.35"
 rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+# preserve_order: `garnish install` must not reorder the user's settings.json keys.
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 toml = "1.1.5"
 unicode-width = "0.2.2"
 
