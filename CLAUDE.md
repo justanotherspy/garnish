@@ -14,6 +14,38 @@ how to work here. Read it, then read `PLAN.md` for where things stand.
    `sprite-env checkpoints create --comment "garnish: phase N done"`.
 5. No PRs, no pushes. Everything is local to `/home/sprite/repo/garnish`.
 
+## Phase protocol (documents first, code second, review last)
+
+`PLAN.md` tracks progress of tasks. `SPEC.md` is the final goal state of the
+whole system. Keeping them honest is what stops sessions drifting from the
+goal without a documented reason.
+
+**Starting a phase**
+
+1. Re-read `SPEC.md` and `PLAN.md` for that phase and compare them with the
+   codebase as it actually is. If they disagree (a decision changed, a design
+   was simplified, a name moved), update the documents *first*, with the
+   reason, then start coding.
+
+**Finishing a phase**
+
+1. Validate the phase goals in `PLAN.md` are met (tests, `make check`, manual
+   `preview` when rendering changed).
+2. Update `PLAN.md` (checkboxes, session log) and `SPEC.md` (anything that
+   changed in the target design, with why).
+3. Update `CLAUDE.md` with anything learned about *how to do things* here
+   (toolchain quirks, lint workarounds, testing tricks), and `README.md` when
+   anything a human user needs to know changed (commands, config keys,
+   requirements).
+4. If code was written, spawn an **adversarial code-review subagent** whose
+   brief is to attack the phase's changes: find broken behaviour, subtle bugs,
+   lint escapes, deviations from `SPEC.md`, and missing tests. Fix what it
+   finds.
+5. For every real bug found (by the review, by you, or by the user), add a
+   unit test and, where the behaviour is user-visible, an integration/golden
+   test so it cannot regress.
+6. Commit, then checkpoint.
+
 ## Toolchain
 
 - **Nightly Rust** via rustup (`rust-toolchain.toml`, rolling `nightly`).
