@@ -114,6 +114,29 @@ pub enum Command {
         #[arg(long, default_value = "docs")]
         out: PathBuf,
     },
+    /// Wire garnish into Claude Code's settings.json (a backup is kept).
+    Install {
+        /// Settings file (default `~/.claude/settings.json`).
+        #[arg(long, value_name = "FILE")]
+        settings: Option<PathBuf>,
+        /// `statusLine.refreshInterval` in seconds.
+        #[arg(long, default_value_t = 1)]
+        refresh_interval: u64,
+        /// `statusLine.padding`.
+        #[arg(long)]
+        padding: Option<u64>,
+        /// Write the absolute path of this binary instead of `garnish`.
+        #[arg(long)]
+        absolute: bool,
+        /// Do not write a default config file when none exists.
+        #[arg(long)]
+        no_config: bool,
+        /// Print what would change without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Print a diagnostic report: versions, settings, config, cache, environment, glyphs.
+    Doctor,
     /// Inspect or create the configuration.
     Config {
         /// What to do.
@@ -193,6 +216,13 @@ pub fn run() -> Result<()> {
             writeln!(std::io::stdout().lock(), "wrote {written} file(s) under {}", out.display())?;
             Ok(())
         }
+        Command::Install { settings, refresh_interval, padding, absolute, no_config, dry_run } => {
+            install(settings, refresh_interval, padding, absolute, no_config, dry_run, config_path)
+        }
+        Command::Doctor => {
+            std::io::stdout().lock().write_all(crate::doctor::report(config_path).as_bytes())?;
+            Ok(())
+        }
         Command::Gc => {
             let cache = crate::cache::Cache::from_env();
             let n = cache.gc_sessions(crate::cache::GC_MAX_AGE_MS, usize::MAX);
@@ -248,6 +278,67 @@ fn refresh(
         })
         .collect();
     results.into_iter().collect::<Result<Vec<()>>>().map(|_| ())
+}
+
+fn install(
+    settings: Option<PathBuf>,
+    refresh_interval: u64,
+    padding: Option<u64>,
+    absolute: bool,
+    no_config: bool,
+    dry_run: bool,
+    config_path: Option<&Path>,
+) -> Result<()> {
+    use crate::install::{self as inst, Plan};
+    let mut stdout = std::io::stdout().lock();
+    let command = if absolute {
+        std::env::current_exe().context("locating this binary")?.display().to_string()
+    } else {
+        "garnish".to_owned()
+    };
+    let plan = Plan {
+        settings: settings.unwrap_or_else(inst::default_settings_path),
+        command,
+        refresh_interval: refresh_interval.max(1),
+        padding,
+    };
+    if !absolute && !inst::on_path("garnish", std::env::var_os("PATH").as_deref()) {
+        writeln!(
+            stdout,
+            "warning: `garnish` is not on PATH; run `make install` first or use --absolute"
+        )?;
+    }
+    let existing = std::fs::read_to_string(&plan.settings).unwrap_or_default();
+    let merged = inst::merge(&existing, &plan).map_err(|e| eyre!(e))?;
+    if dry_run {
+        writeln!(stdout, "would write {}:", plan.settings.display())?;
+        stdout.write_all(merged.as_bytes())?;
+    } else {
+        let outcome = inst::apply(&plan).map_err(|e| eyre!(e))?;
+        match (outcome.changed, outcome.backup) {
+            (false, _) => writeln!(stdout, "{} already up to date", plan.settings.display())?,
+            (true, Some(b)) => {
+                writeln!(stdout, "updated {} (backup: {})", plan.settings.display(), b.display())?;
+            }
+            (true, None) => writeln!(stdout, "wrote {}", plan.settings.display())?,
+        }
+    }
+    let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
+    if !no_config && !target.exists() {
+        if dry_run {
+            writeln!(stdout, "would write a default config to {}", target.display())?;
+        } else {
+            if let Some(dir) = target.parent() {
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating {}", dir.display()))?;
+            }
+            let (cfg, _) = config::parse("", &SCHEMAS);
+            std::fs::write(&target, crate::docs::config_toml(&cfg, true))
+                .with_context(|| format!("writing {}", target.display()))?;
+            writeln!(stdout, "wrote default config to {}", target.display())?;
+        }
+    }
+    Ok(())
 }
 
 /// `COLUMNS`, then `GARNISH_COLUMNS`.

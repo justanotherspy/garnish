@@ -58,3 +58,26 @@ fn generated_docs_match_committed_docs() {
         "docs out of date: {mismatches:?} (run UPDATE_DOCS=1 cargo nextest run --test docs_sync)"
     );
 }
+
+#[test]
+fn example_config_matches_config_init() {
+    let example = root().join("examples").join("garnish.toml");
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("garnish.toml");
+    let status = Command::new(env!("CARGO_BIN_EXE_garnish"))
+        .args(["--config", target.to_str().unwrap(), "config", "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let generated = std::fs::read_to_string(&target).unwrap();
+    if std::env::var_os("UPDATE_DOCS").is_some() {
+        std::fs::create_dir_all(example.parent().unwrap()).unwrap();
+        std::fs::write(&example, &generated).unwrap();
+        return;
+    }
+    let committed = std::fs::read_to_string(&example).unwrap_or_default();
+    assert_eq!(
+        committed, generated,
+        "examples/garnish.toml is out of date (UPDATE_DOCS=1 regenerates)"
+    );
+}

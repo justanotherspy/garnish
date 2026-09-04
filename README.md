@@ -74,6 +74,7 @@ and the [guide](docs/guide.md).
 ```sh
 garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
 garnish config init && garnish config check && garnish config show
+garnish doctor          # versions, settings, config, cache, failed refreshes, glyph test
 ```
 
 ## Develop

@@ -1,0 +1,812 @@
+# garnish configuration — see docs/config.md for every key.
+# Top-level preset: default | minimal | full | compact
+preset = "default"
+# Icon set: nerd | unicode | emoji | ascii
+icons = "nerd"
+# Theme: garnish | catppuccin-mocha | nord | dracula | tokyonight | mono
+theme = "garnish"
+# Color output: auto | always | never | 256 | truecolor
+color = "auto"
+# Truncate the left group when a line overflows $COLUMNS.
+truncate = true
+# Stale cached values: dim | hide | plain
+stale_style = "dim"
+# Cells subtracted from the width (mirror statusLine.padding).
+padding = 0
+
+# Role color overrides; every module color defaults to one of these roles.
+[colors]
+# accent = "#7dd3a0"
+# accent2 = "#89b4fa"
+# muted = "#6c7086"
+# text = "#cdd6f4"
+# ok = "#a6e3a1"
+# warn = "#f9e2af"
+# hot = "#fab387"
+# danger = "#f38ba8"
+# frame = "#585b70"
+# band1 = "#a6e3a1"
+# band2 = "#f9e2af"
+# band3 = "#fab387"
+# band4 = "#f38ba8"
+
+# Frame style: none | rounded | square | double | heavy | powerline | custom
+[frame]
+style = "rounded"
+# Extend the rule to the full width and close with the right cap.
+fill = true
+# Default separator between modules on a line.
+separator = " │ "
+# For style = "custom": first middle last single fill_char right_first right_middle right_last right_single pad
+
+# Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.
+[[line]]
+modules = ["path", "branch", "sync", "worktree", "pr"]
+right = ["session_name", "agent"]
+[[line]]
+modules = ["model", "effort", "context", "style"]
+right = ["vim"]
+[[line]]
+modules = ["limit5h", "limit7d", "spend", "cost"]
+right = ["lines"]
+[[line]]
+modules = ["session", "api", "cache"]
+right = ["clock"]
+
+# path — Working directory, based on the repository root.
+[modules.path]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the folder icon. [minimal=false default=true full=true]
+show_icon = true
+# depth (integer) — Path components of the base to keep (0 = all). [minimal=1 default=2 full=0]
+depth = 2
+# show_subpath (bool) — Show the path below the base. [minimal=false default=true full=true]
+show_subpath = true
+# show_added (bool) — Show the count of added directories. [minimal=false default=false full=true]
+show_added = false
+[modules.path.icons]
+# folder — Folder icon.
+folder = ""
+# added — Added-directories glyph.
+added = ""
+[modules.path.colors]
+# icon — Icon.
+icon = "accent"
+# base — Base directory.
+base = "text"
+# subpath — Path below the base.
+subpath = "muted"
+# added — Added directories.
+added = "muted"
+
+# branch — Checked-out branch (or detached HEAD).
+[modules.branch]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 5
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the branch icon. [minimal=false default=true full=true]
+show_icon = true
+# show_sha (bool) — Append the short commit SHA. [minimal=false default=false full=true]
+show_sha = false
+# dirty (bool) — Show a marker when the tree has changes. [minimal=false default=false full=true]
+dirty = false
+# max_length (integer) — Truncate longer names (0 = no limit). [minimal=40 default=40 full=40]
+max_length = 40
+[modules.branch.icons]
+# branch — Branch icon.
+branch = ""
+# detached — Detached HEAD icon.
+detached = ""
+# dirty — Dirty marker.
+dirty = "●"
+[modules.branch.colors]
+# icon — Icon.
+icon = "accent"
+# name — Branch name.
+name = "text"
+# sha — Short SHA.
+sha = "muted"
+# dirty — Dirty marker.
+dirty = "warn"
+
+# sync — Commits ahead/behind the upstream branch.
+[modules.sync]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 5
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_zero (bool) — Show `0` counts instead of hiding them. [minimal=false default=false full=false]
+show_zero = false
+# show_upstream (bool) — Show the upstream name. [minimal=false default=false full=true]
+show_upstream = false
+# fetch_age (bool) — Hint when the last fetch is older than `fetch_stale_minutes`. [minimal=false default=true full=true]
+fetch_age = true
+# fetch_stale_minutes (integer) — Age after which the fetch hint appears. [minimal=30 default=30 full=30]
+fetch_stale_minutes = 30
+# fetch_interval (integer) — Run `git fetch` in the background every N seconds (0 = never). [minimal=0 default=0 full=0]
+fetch_interval = 0
+[modules.sync.icons]
+# ahead — Ahead glyph.
+ahead = "⇡"
+# behind — Behind glyph.
+behind = "⇣"
+# stale — Stale-fetch glyph.
+stale = ""
+# no_upstream — No-upstream glyph.
+no_upstream = ""
+[modules.sync.colors]
+# ahead — Ahead count.
+ahead = "ok"
+# behind — Behind count.
+behind = "warn"
+# upstream — Upstream name.
+upstream = "muted"
+# stale — Fetch-age hint.
+stale = "muted"
+
+# worktree — Git worktree name.
+[modules.worktree]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_original (bool) — Show `original → branch`. [minimal=false default=false full=true]
+show_original = false
+[modules.worktree.icons]
+# worktree — Worktree icon.
+worktree = ""
+# arrow — Original → branch arrow.
+arrow = "→"
+[modules.worktree.colors]
+# icon — Icon.
+icon = "accent2"
+# name — Worktree name.
+name = "text"
+# original — Original branch.
+original = "muted"
+
+# pr — Open pull/merge request with review state, linked.
+[modules.pr]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the PR icon. [minimal=false default=true full=true]
+show_icon = true
+# show_state (bool) — Show the review-state glyph. [minimal=false default=true full=true]
+show_state = true
+# show_state_word (bool) — Show the review state as a word. [minimal=false default=false full=true]
+show_state_word = false
+# link (bool) — Make the number a clickable link. [minimal=true default=true full=true]
+link = true
+[modules.pr.icons]
+# pr — Pull request icon.
+pr = ""
+# mr — Merge request icon.
+mr = ""
+# approved — Approved.
+approved = "✓"
+# pending — Pending review.
+pending = "○"
+# changes_requested — Changes requested.
+changes_requested = "✗"
+# draft — Draft.
+draft = "◌"
+[modules.pr.colors]
+# icon — Icon.
+icon = "accent"
+# number — PR number.
+number = "text"
+# approved — Approved.
+approved = "ok"
+# pending — Pending.
+pending = "warn"
+# changes_requested — Changes requested.
+changes_requested = "danger"
+# draft — Draft.
+draft = "muted"
+
+# model — Model name, with fast-mode and thinking indicators.
+[modules.model]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the model icon. [minimal=false default=true full=true]
+show_icon = true
+# show_id (bool) — Append the raw model id. [minimal=false default=false full=true]
+show_id = false
+# show_fast (bool) — Show a bolt when fast mode is on. [minimal=true default=true full=true]
+show_fast = true
+# show_thinking (bool) — Show a glyph when extended thinking is enabled. [minimal=false default=false full=true]
+show_thinking = false
+[modules.model.icons]
+# model — Model icon.
+model = "󰚩"
+# fast — Fast mode.
+fast = ""
+# thinking — Extended thinking.
+thinking = ""
+[modules.model.colors]
+# icon — Icon.
+icon = "accent"
+# name — Model name.
+name = "text"
+# id — Model id.
+id = "muted"
+# fast — Fast-mode bolt.
+fast = "warn"
+# thinking — Thinking glyph.
+thinking = "accent2"
+
+# effort — Reasoning effort level as a five-step scale and/or word.
+[modules.effort]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# style (`scale` | `word` | `both`) — How to show the level. [minimal="word" default="scale" full="both"]
+style = "scale"
+# show_icon (bool) — Show the effort icon. [minimal=false default=true full=true]
+show_icon = true
+[modules.effort.icons]
+# effort — Effort icon.
+effort = ""
+# scale — Five glyphs, one per level, lowest first.
+scale = "▁▃▅▇█"
+[modules.effort.colors]
+# icon — Icon.
+icon = "accent2"
+# active — Lit scale steps.
+active = "accent2"
+# inactive — Unlit scale steps.
+inactive = "muted"
+# word — Level word.
+word = "text"
+
+# context — Context window usage bar with color bands and the auto-compaction marker.
+[modules.context]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# width (integer) — Bar width in cells; 0 hides the bar. [minimal=0 default=20 full=30]
+width = 20
+# show_icon (bool) — Show the context icon. [minimal=false default=true full=true]
+show_icon = true
+# show_percent (bool) — Show the percentage after the bar. [minimal=true default=true full=true]
+show_percent = true
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+thresholds = [50, 75, 90]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+band_colors = ["band1", "band2", "band3", "band4"]
+# compaction_marker (bool) — Mark the auto-compaction threshold on the bar. [minimal=true default=true full=true]
+compaction_marker = true
+# compact_buffer_tokens (integer) — Tokens Claude Code reserves below the window for the compaction summary. [minimal=13000 default=13000 full=13000]
+compact_buffer_tokens = 13000
+# show_compaction_percent (bool) — Also print the compaction threshold as a percentage. [minimal=false default=false full=true]
+show_compaction_percent = false
+# show_window (bool) — Show the window size tag (`1M`, `200k`). [minimal=false default=false full=true]
+show_window = false
+# exceeds_200k (bool) — Show an indicator when the last response exceeded 200k tokens. [minimal=false default=false full=true]
+exceeds_200k = false
+# warn_at (number) — Extra warning badge at or above this percentage; 0 disables. [minimal=0 default=0 full=0]
+warn_at = 0
+[modules.context.icons]
+# context — Context icon.
+context = ""
+# fill — Filled cell.
+fill = "█"
+# empty — Empty cell.
+empty = "░"
+# marker — Compaction marker.
+marker = "▏"
+# compact — Compaction label glyph.
+compact = "⤓"
+# exceeds — Exceeds-200k indicator.
+exceeds = "‼"
+# warn — Warning badge.
+warn = ""
+[modules.context.colors]
+# icon — Icon.
+icon = "accent"
+# percent — Percentage text.
+percent = "text"
+# empty — Empty part of the bar.
+empty = "muted"
+# marker — Compaction marker.
+marker = "warn"
+# exceeds — Exceeds-200k indicator.
+exceeds = "danger"
+# window — Window size tag.
+window = "muted"
+# warn — Warning badge.
+warn = "danger"
+
+# style — Output style name.
+[modules.style]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# hide_default (bool) — Hide when the style is `default`. [minimal=true default=true full=false]
+hide_default = true
+# show_icon (bool) — Show the style icon. [minimal=false default=true full=true]
+show_icon = true
+[modules.style.icons]
+# style — Style icon.
+style = ""
+[modules.style.colors]
+# icon — Icon.
+icon = "accent2"
+# name — Style name.
+name = "text"
+
+# limit5h — Five-hour rate limit usage and time until reset.
+[modules.limit5h]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
+show_icon = true
+# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+show_reset = true
+# bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
+bar_width = 0
+# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+thresholds = [50, 75, 90]
+# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+band_colors = ["band1", "band2", "band3", "band4"]
+[modules.limit5h.icons]
+# window — Window icon.
+window = ""
+# reset — Countdown glyph.
+reset = ""
+# fill — Bar filled cell.
+fill = "█"
+# empty — Bar empty cell.
+empty = "░"
+[modules.limit5h.colors]
+# icon — Icon.
+icon = "accent2"
+# reset — Countdown.
+reset = "muted"
+# empty — Bar empty part.
+empty = "muted"
+
+# limit7d — Seven-day rate limit usage and time until reset.
+[modules.limit7d]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
+show_icon = true
+# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+show_reset = true
+# bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
+bar_width = 0
+# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+thresholds = [50, 75, 90]
+# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+band_colors = ["band1", "band2", "band3", "band4"]
+[modules.limit7d.icons]
+# window — Window icon.
+window = ""
+# reset — Countdown glyph.
+reset = ""
+# fill — Bar filled cell.
+fill = "█"
+# empty — Bar empty cell.
+empty = "░"
+[modules.limit7d.colors]
+# icon — Icon.
+icon = "accent2"
+# reset — Countdown.
+reset = "muted"
+# empty — Bar empty part.
+empty = "muted"
+
+# spend — Spend-limit usage behind a Claude apps gateway.
+[modules.spend]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
+show_icon = true
+# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+show_reset = true
+# bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
+bar_width = 0
+# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+thresholds = [50, 75, 90]
+# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+band_colors = ["band1", "band2", "band3", "band4"]
+[modules.spend.icons]
+# window — Window icon.
+window = ""
+# reset — Countdown glyph.
+reset = ""
+# fill — Bar filled cell.
+fill = "█"
+# empty — Bar empty cell.
+empty = "░"
+[modules.spend.colors]
+# icon — Icon.
+icon = "accent2"
+# reset — Countdown.
+reset = "muted"
+# empty — Bar empty part.
+empty = "muted"
+
+# cost — Estimated session cost in USD.
+[modules.cost]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the cost icon. [minimal=false default=true full=true]
+show_icon = true
+# decimals (integer) — Decimal places. [minimal=2 default=2 full=2]
+decimals = 2
+# only_without_rate_limits (bool) — Hide when the harness reports subscription rate limits. [minimal=true default=true full=true]
+only_without_rate_limits = true
+# show_lines (bool) — Append lines added/removed. [minimal=false default=false full=true]
+show_lines = false
+[modules.cost.icons]
+# cost — Cost icon.
+cost = ""
+# added — Lines-added glyph.
+added = "+"
+# removed — Lines-removed glyph.
+removed = "−"
+[modules.cost.colors]
+# icon — Icon.
+icon = "ok"
+# amount — Amount.
+amount = "text"
+# added — Lines added.
+added = "ok"
+# removed — Lines removed.
+removed = "danger"
+
+# session — Session duration.
+[modules.session]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_start (bool) — Append the start time (HH:MM). [minimal=false default=false full=true]
+show_start = false
+[modules.session.icons]
+# session — Session icon.
+session = ""
+[modules.session.colors]
+# icon — Icon.
+icon = "accent2"
+# value — Duration.
+value = "text"
+# start — Start time.
+start = "muted"
+
+# api — Time spent waiting for API responses.
+[modules.api]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_share (bool) — Append the share of the session. [minimal=false default=false full=true]
+show_share = false
+[modules.api.icons]
+# api — API icon.
+api = ""
+[modules.api.colors]
+# icon — Icon.
+icon = "accent2"
+# value — Duration.
+value = "text"
+# share — Share of session.
+share = "muted"
+
+# cache — Prompt cache hit ratio, TTL and warmth.
+[modules.cache]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_ttl (bool) — Show the TTL badge. [minimal=false default=true full=true]
+show_ttl = true
+# show_countdown (bool) — Show the warm countdown / cold state. [minimal=false default=true full=true]
+show_countdown = true
+# show_misses (bool) — Show the miss count. [minimal=false default=false full=true]
+show_misses = false
+# show_writes (bool) — Show tokens written to the cache. [minimal=false default=false full=true]
+show_writes = false
+[modules.cache.icons]
+# cache — Cache icon.
+cache = ""
+# warm — Warm glyph.
+warm = ""
+# cold — Cold glyph.
+cold = ""
+[modules.cache.colors]
+# icon — Icon.
+icon = "accent"
+# percent — Hit ratio.
+percent = "text"
+# ttl — TTL badge.
+ttl = "muted"
+# warm — Warm countdown.
+warm = "ok"
+# cold — Cold state.
+cold = "danger"
+# detail — Misses and writes.
+detail = "muted"
+
+# clock — Local wall-clock time with a spinner.
+[modules.clock]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# format (`24h` | `12h`) — Hour format. [minimal="24h" default="24h" full="24h"]
+format = "24h"
+# seconds (bool) — Show seconds. [minimal=false default=true full=true]
+seconds = true
+# spinner (bool) — Show the spinner. [minimal=false default=true full=true]
+spinner = true
+# date (bool) — Show the date. [minimal=false default=false full=true]
+date = false
+# utc_offset (bool) — Show the UTC offset. [minimal=false default=false full=true]
+utc_offset = false
+# tz (string) — IANA time zone; empty means the system zone. [minimal="" default="" full=""]
+tz = ""
+[modules.clock.icons]
+# spinner — Spinner frames, one character each.
+spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+[modules.clock.colors]
+# spinner — Spinner.
+spinner = "accent"
+# time — Time.
+time = "text"
+# date — Date and offset.
+date = "muted"
+
+# session_name — Session name.
+[modules.session_name]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_id (bool) — Append the first 8 characters of the session id. [minimal=false default=false full=true]
+show_id = false
+# max_length (integer) — Truncate longer names (0 = no limit). [minimal=32 default=32 full=32]
+max_length = 32
+[modules.session_name.icons]
+# name — Name icon.
+name = ""
+[modules.session_name.colors]
+# icon — Icon.
+icon = "accent2"
+# name — Name.
+name = "text"
+# id — Session id.
+id = "muted"
+
+# vim — Vim mode badge.
+[modules.vim]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# style (`badge` | `short`) — Full word or one letter. [minimal="short" default="badge" full="badge"]
+style = "badge"
+# show_icon (bool) — Show the vim icon. [minimal=false default=false full=true]
+show_icon = false
+[modules.vim.icons]
+# vim — Vim icon.
+vim = ""
+[modules.vim.colors]
+# icon — Icon.
+icon = "accent2"
+# normal — NORMAL mode.
+normal = "accent"
+# insert — INSERT mode.
+insert = "ok"
+# visual — VISUAL modes.
+visual = "warn"
+
+# agent — Agent name.
+[modules.agent]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_thinking (bool) — Show the thinking glyph. [minimal=false default=false full=true]
+show_thinking = false
+[modules.agent.icons]
+# agent — Agent icon.
+agent = ""
+# thinking — Thinking glyph.
+thinking = ""
+[modules.agent.colors]
+# icon — Icon.
+icon = "accent2"
+# name — Agent name.
+name = "text"
+# thinking — Thinking glyph.
+thinking = "accent2"
+
+# lines — Lines added and removed this session.
+[modules.lines]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+preset = "default"
+refresh = 0
+# label: text before the value; prefix/suffix: text around the module
+label = ""
+prefix = ""
+suffix = ""
+# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+hide_when_empty = true
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
+show_icon = true
+# show_net (bool) — Append the net change. [minimal=false default=false full=true]
+show_net = false
+# hide_zero (bool) — Hide when nothing changed. [minimal=true default=true full=true]
+hide_zero = true
+[modules.lines.icons]
+# lines — Diff icon.
+lines = ""
+# added — Added glyph.
+added = "+"
+# removed — Removed glyph.
+removed = "−"
+[modules.lines.colors]
+# icon — Icon.
+icon = "accent2"
+# added — Added count.
+added = "ok"
+# removed — Removed count.
+removed = "danger"
+# net — Net delta.
+net = "muted"
+
