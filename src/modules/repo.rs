@@ -1,16 +1,30 @@
 //! `path`, `branch`, `sync`, `worktree`, `pr`: where you are in the repository.
 //!
-//! `path`, `worktree` and `pr` come straight from the payload. `branch` and
-//! `sync` read the repository; until the cache layer lands (Phase 4/5) they
-//! only use what the payload already carries.
+//! `worktree` and `pr` come straight from the payload. `path` and `branch`
+//! read the `.git` directory directly on every tick (a few small file reads,
+//! never a process). Ahead/behind counts, the dirty flag and optional fetching
+//! come from the background worker through the cache.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path};
+use std::time::Duration;
 
 use crate::ansi::{Segment, Style};
+use crate::cache::Scope;
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::git::{self, Head};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, icon, seg};
+
+/// How long the worker lets a git command run.
+const GIT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Cache scope for a checkout: shared by every session in the same worktree.
+fn repo_scope(session: &str, cwd: &Path) -> Scope {
+    git::discover(cwd)
+        .map_or_else(|| Scope::Session(session.to_owned()), |d| Scope::Repo(d.cache_key()))
+}
 
 /// Collapse `$HOME` to `~`.
 #[must_use]
@@ -388,16 +402,56 @@ impl Module for BranchModule {
     }
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
-        // Until the git reader lands, use the branch the harness reports for worktree sessions.
-        let Some(name) = ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref()) else {
-            return Rendered::empty();
+        let cwd = Path::new(ctx.payload.current_dir().unwrap_or(""));
+        let dirs = git::discover(cwd);
+        let head = dirs.as_ref().and_then(git::head);
+        let (name, detached) =
+            match (&head, ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref())) {
+                (Some(Head::Branch(b)), _) => (b.clone(), false),
+                (Some(Head::Detached(sha)), _) => (sha.chars().take(7).collect(), true),
+                (None, Some(b)) => (b.to_owned(), false),
+                (None, None) => return Rendered::empty(),
+            };
+        let max = cfg.size("max_length");
+        let shown: String = if max > 0 && name.chars().count() > max {
+            name.chars().take(max.saturating_sub(1)).chain(std::iter::once('…')).collect()
+        } else {
+            name
         };
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "branch", "icon"));
+            segs.extend(icon(cfg, if detached { "detached" } else { "branch" }, "icon"));
         }
-        segs.push(Segment::styled(name, Style::fg(cfg.color("name")).bolded()));
-        Rendered::fresh(segs)
+        segs.push(Segment::styled(shown, Style::fg(cfg.color("name")).bolded()));
+        if cfg.bool("show_sha")
+            && !detached
+            && let Some(sha) = dirs.as_ref().and_then(git::head_commit)
+        {
+            segs.push(seg(cfg, format!(" {}", sha.chars().take(7).collect::<String>()), "sha"));
+        }
+        let mut freshness = Freshness::Fresh;
+        if cfg.bool("dirty") && dirs.is_some() {
+            let (lookup, fresh) = ctx.cached(cfg, &repo_scope(ctx.session_id(), cwd));
+            if lookup.entry.as_ref().and_then(|e| e.get("dirty")) == Some("1") {
+                segs.push(seg(cfg, format!(" {}", cfg.icon("dirty")), "dirty"));
+            }
+            if lookup.entry.is_some() {
+                freshness = fresh;
+            }
+        }
+        Rendered { segments: segs, freshness }
+    }
+
+    fn scope(&self, session: &str, cwd: &Path) -> Scope {
+        repo_scope(session, cwd)
+    }
+
+    fn refresh(&self, ctx: &RefreshCtx<'_>) -> Result<BTreeMap<String, String>, String> {
+        let dirs = git::discover(ctx.cwd).ok_or_else(|| "not a git repository".to_owned())?;
+        let dirty = git::is_dirty(&dirs.toplevel, GIT_TIMEOUT)?;
+        let mut values = BTreeMap::new();
+        values.insert("dirty".to_owned(), if dirty { "1" } else { "0" }.to_owned());
+        Ok(values)
     }
 }
 
@@ -473,9 +527,83 @@ impl Module for SyncModule {
         }
     }
 
-    fn render(&self, _ctx: &Ctx<'_>, _cfg: &ModuleCfg) -> Rendered {
-        // Needs the repository reader and cache (Phase 4/5).
-        Rendered::empty()
+    fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
+        let cwd = Path::new(ctx.payload.current_dir().unwrap_or(""));
+        let Some(dirs) = git::discover(cwd) else { return Rendered::empty() };
+        let Some(Head::Branch(branch)) = git::head(&dirs) else { return Rendered::empty() };
+        let mut segs: Vec<Segment> = Vec::new();
+        let Some((remote, tracking)) = git::upstream(&dirs, &branch) else {
+            if !cfg.icon("no_upstream").is_empty() {
+                segs.push(seg(cfg, cfg.icon("no_upstream"), "upstream"));
+            }
+            return Rendered::fresh(segs);
+        };
+        let (lookup, freshness) = ctx.cached(cfg, &repo_scope(ctx.session_id(), cwd));
+        let counts = lookup.entry.as_ref().and_then(|e| {
+            Some((e.get("ahead")?.parse::<u64>().ok()?, e.get("behind")?.parse::<u64>().ok()?))
+        });
+        let show_zero = cfg.bool("show_zero");
+        if let Some((ahead, behind)) = counts {
+            if ahead > 0 || show_zero {
+                segs.push(Segment::styled(
+                    format!("{}{ahead}", cfg.icon("ahead")),
+                    Style::fg(cfg.color("ahead")).bolded(),
+                ));
+            }
+            if behind > 0 || show_zero {
+                if !segs.is_empty() {
+                    segs.push(Segment::plain(" "));
+                }
+                segs.push(Segment::styled(
+                    format!("{}{behind}", cfg.icon("behind")),
+                    Style::fg(cfg.color("behind")).bolded(),
+                ));
+            }
+        }
+        if cfg.bool("show_upstream") {
+            let sp = if segs.is_empty() { "" } else { " " };
+            let short = tracking.strip_prefix("refs/remotes/").unwrap_or(&tracking);
+            segs.push(seg(cfg, format!("{sp}{short}"), "upstream"));
+        }
+        if cfg.bool("fetch_age")
+            && let Some(age) = git::fetch_age(&dirs)
+            && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
+            && !cfg.icon("stale").is_empty()
+        {
+            let sp = if segs.is_empty() { "" } else { " " };
+            segs.push(seg(
+                cfg,
+                format!("{sp}{}{}", cfg.icon("stale"), crate::time::compact_duration(age)),
+                "stale",
+            ));
+        }
+        let _ = remote;
+        let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
+        Rendered { segments: segs, freshness }
+    }
+
+    fn scope(&self, session: &str, cwd: &Path) -> Scope {
+        repo_scope(session, cwd)
+    }
+
+    fn refresh(&self, ctx: &RefreshCtx<'_>) -> Result<BTreeMap<String, String>, String> {
+        let dirs = git::discover(ctx.cwd).ok_or_else(|| "not a git repository".to_owned())?;
+        let Some(Head::Branch(branch)) = git::head(&dirs) else {
+            return Err("detached HEAD".to_owned());
+        };
+        let (remote, tracking) =
+            git::upstream(&dirs, &branch).ok_or_else(|| "no upstream".to_owned())?;
+        let interval = ctx.cfg.int("fetch_interval");
+        if interval > 0 && remote != "." && git::fetch_age(&dirs).is_none_or(|age| age >= interval)
+        {
+            git::fetch(&dirs.toplevel, &remote, GIT_TIMEOUT)?;
+        }
+        let (ahead, behind) = git::ahead_behind(&dirs.toplevel, &tracking, GIT_TIMEOUT)?;
+        let mut values = BTreeMap::new();
+        values.insert("ahead".to_owned(), ahead.to_string());
+        values.insert("behind".to_owned(), behind.to_string());
+        values.insert("upstream".to_owned(), tracking);
+        Ok(values)
     }
 }
 

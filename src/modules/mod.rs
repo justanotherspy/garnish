@@ -5,7 +5,10 @@ use std::sync::LazyLock;
 
 use jiff::Timestamp;
 
+use std::collections::BTreeMap;
+
 use crate::ansi::{Color, Segment, Style};
+use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
 use crate::config::schema::{ModuleCfg, ModuleSchema};
 use crate::icons::IconSet;
 use crate::payload::Payload;
@@ -73,6 +76,60 @@ pub struct Ctx<'a> {
     pub now: Timestamp,
     /// Terminal width available to the status line.
     pub width: usize,
+    /// The on-disk cache.
+    pub cache: &'a Cache,
+}
+
+impl Ctx<'_> {
+    /// The session id the payload reports (or a placeholder).
+    #[must_use]
+    pub fn session_id(&self) -> &str {
+        self.payload.session_id.as_deref().filter(|s| !s.is_empty()).unwrap_or("no-session")
+    }
+
+    /// Look a cached module up and, when it is stale and nobody is refreshing
+    /// it, take the lock and spawn a detached worker.
+    ///
+    /// Returns the lookup plus the [`Freshness`] the render should carry.
+    #[must_use]
+    pub fn cached(&self, cfg: &ModuleCfg, scope: &Scope) -> (Lookup, Freshness) {
+        let ttl_ms = cfg.refresh.saturating_mul(1000);
+        let lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
+        if lookup.fresh {
+            return (lookup, Freshness::Fresh);
+        }
+        if !lookup.in_progress
+            && let LockOutcome::Acquired(mut guard) = self.cache.lock(scope, cfg.id)
+        {
+            let job = crate::spawn::Job {
+                module: cfg.id.to_owned(),
+                session: self.session_id().to_owned(),
+                cwd: std::path::PathBuf::from(self.payload.current_dir().unwrap_or(".")),
+            };
+            match crate::spawn::spawn(&job, self.cache.root(), true) {
+                crate::spawn::Spawned::Process | crate::spawn::Spawned::Logged => guard.disarm(),
+                crate::spawn::Spawned::Failed(_) => {}
+            }
+        }
+        let freshness = match &lookup.entry {
+            Some(e) if e.status == crate::cache::Status::Err => Freshness::Failed(e.error.clone()),
+            _ => Freshness::Stale,
+        };
+        (lookup, freshness)
+    }
+}
+
+/// What a worker needs to refresh a module.
+#[derive(Debug, Clone)]
+pub struct RefreshCtx<'a> {
+    /// Session id.
+    pub session: &'a str,
+    /// Working directory the tick reported.
+    pub cwd: &'a std::path::Path,
+    /// The module's resolved config.
+    pub cfg: &'a ModuleCfg,
+    /// The cache.
+    pub cache: &'a Cache,
 }
 
 /// A built-in module.
@@ -81,6 +138,34 @@ pub trait Module: Send + Sync {
     fn schema(&self) -> ModuleSchema;
     /// Render for one tick. Must be cheap: no I/O beyond reading cache files.
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered;
+    /// Cache scope for this module given a session and working directory.
+    /// Payload-only modules never call this.
+    fn scope(&self, session: &str, _cwd: &std::path::Path) -> Scope {
+        Scope::Session(session.to_owned())
+    }
+    /// Compute fresh values in the background worker. Payload-only modules
+    /// return an error, which is recorded as a failed entry.
+    ///
+    /// # Errors
+    /// Any failure is returned as text and cached as an `err` entry.
+    fn refresh(&self, _ctx: &RefreshCtx<'_>) -> Result<BTreeMap<String, String>, String> {
+        Err("module is not cached".to_owned())
+    }
+}
+
+/// Run a module's refresh and store the result. Returns the written entry.
+///
+/// # Errors
+/// Propagates cache write errors.
+pub fn run_refresh(module: &dyn Module, ctx: &RefreshCtx<'_>) -> std::io::Result<CacheEntry> {
+    let scope = module.scope(ctx.session, ctx.cwd);
+    let ttl_ms = ctx.cfg.refresh.saturating_mul(1000);
+    let entry = match module.refresh(ctx) {
+        Ok(values) => CacheEntry::ok(ttl_ms, values),
+        Err(e) => CacheEntry::err(ttl_ms, e),
+    };
+    ctx.cache.write(&scope, ctx.cfg.id, &entry)?;
+    Ok(entry)
 }
 
 /// A registry entry.

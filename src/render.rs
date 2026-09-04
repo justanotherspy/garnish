@@ -77,8 +77,15 @@ pub fn render_lines(
     columns: Option<usize>,
 ) -> Vec<Vec<Segment>> {
     let width = config.width(columns);
-    let ctx =
-        Ctx { payload, theme: &config.theme, icons: config.icons, now: crate::time::now(), width };
+    let cache = crate::cache::Cache::from_env();
+    let ctx = Ctx {
+        payload,
+        theme: &config.theme,
+        icons: config.icons,
+        now: crate::time::now(),
+        width,
+        cache: &cache,
+    };
     let stale = stale_glyphs(config.icons);
     let layout = Layout {
         chars: config.frame.chars.clone(),

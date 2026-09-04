@@ -10,9 +10,19 @@ how to work here. Read it, then read `PLAN.md` for where things stand.
 2. Work in small commits; run `make check` before every commit.
 3. Before ending a session: tick checkboxes in `PLAN.md`, append a dated entry
    to its **Session log**, commit. Never leave the tree red.
-4. Create a sprite checkpoint after finishing a phase:
+4. Create a sprite checkpoint after finishing **every** phase (not optional):
    `sprite-env checkpoints create --comment "garnish: phase N done"`.
 5. No PRs, no pushes. Everything is local to `/home/sprite/repo/garnish`.
+6. **Edit files with the Read/Edit/Write tools**, never with Bash heredocs,
+   `sed`, or Python one-liners. Bash is for running commands (cargo, git,
+   make), not for changing source. (Bash edits bypass the harness's file
+   tracking and have already caused a lost write in this project.)
+7. **Use the rust-analyzer LSP tools** (installed as a Claude Code plugin):
+   check diagnostics after edits, go-to-definition and find-references before
+   renaming or changing a signature.
+8. **Stop and ask** the user when a decision is theirs to make (a design
+   change against `SPEC.md`, a new dependency, a behaviour the spec leaves
+   open). Do not guess silently; do not widen scope.
 
 ## Phase protocol (documents first, code second, review last)
 
@@ -54,9 +64,9 @@ goal without a documented reason.
   last good date and note it in `PLAN.md`; unpin later.
 - Edition 2024. `cargo nextest run` for tests, `cargo test --doc` for doctests,
   `cargo bench` for criterion, `./bench/run.sh` for hyperfine end-to-end.
-- rust-analyzer is installed as a nightly component; the user enables the LSP
-  plugin in Claude Code themselves. Use the LSP tool (diagnostics after edits,
-  go-to-definition, references) when it is available.
+- rust-analyzer is installed as a nightly component and the rust-analyzer LSP
+  plugin is installed in Claude Code. Use the LSP tool: diagnostics after
+  edits, go-to-definition, references, hover for types.
 - `hyperfine` and `cargo-nextest` live in the cargo bin dir
   (`/.sprite/languages/rust/cargo/bin` on this host).
 
@@ -96,23 +106,34 @@ What that means when writing code:
 - Prefer combinator pipelines over `if let` towers. Data in → data out.
 - Prototype freely inside unit tests; clippy ignores unwraps there.
 
-## Crate map (only these; ask before adding more)
+## Crate map (the chosen crate for each job; never add an alternative)
 
-| crate | used for |
-|---|---|
-| clap (derive) | CLI; no subcommand = `render` from stdin |
-| color-eyre | error reports; installed once in `main` |
-| serde / serde_json | stdin payload (`payload.rs`) |
-| toml | config (`config/`) |
-| jiff | local time, countdowns, durations; `GARNISH_NOW` freezes time |
-| itertools | joining/interspersing segments |
-| command-run | `git` invocations in the background worker only |
-| rayon | parallel `refresh --all`, `preview --all`, `docs`; **never on the tick path** |
-| unicode-width | display width for ANSI-aware truncation |
-| criterion (dev) | micro-benchmarks in `benches/` |
-| tempfile (dev) | temp repos/cache dirs in tests |
+Every crate below was chosen deliberately (see the namtao 2026 toolkit). When
+a task fits one of these jobs, use the listed crate; do not reach for a
+different crate that does the same thing (no `chrono` for time, no `anyhow`
+for errors, no `structopt`/`argh` for CLI, no `regex` for parsing, no
+`crossbeam`/`tokio` for parallelism). Adding any new dependency needs the
+user's OK first.
 
-`reqwest` is not a dependency; PR data comes from the harness payload.
+| crate | job it owns | where |
+|---|---|---|
+| clap (derive) | argument parsing; no subcommand = `render` from stdin | `cli.rs` |
+| color-eyre | error type (`Result`, `eyre!`, `.context()`) and panic/error reports; installed once in `main` | everywhere fallible |
+| serde + serde_json | JSON: the stdin payload, Claude settings files | `payload.rs`, `claude_settings.rs` |
+| toml | the TOML config file (parse); config *generation* is hand-written in `docs.rs` | `config/` |
+| jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
+| itertools | iterator helpers (interspersing, joining, grouping) | rendering |
+| command-run | running external commands where a timeout is not needed (`git fetch`) | `git.rs` worker side |
+| std::process + `git::run_program` | git commands that need a kill-on-timeout (status, rev-list) | `git.rs` |
+| rayon | data parallelism: `refresh --all`, `preview --all`, docs generation; **never on the tick path** | `cli.rs`, `docs.rs` |
+| unicode-width | terminal cell width of text | `ansi.rs` |
+| criterion (dev) | micro-benchmarks | `benches/` |
+| tempfile (dev) | temp dirs for repos/caches in tests | tests |
+| hyperfine (binary, not a crate) | end-to-end latency gate | `bench/` |
+
+`reqwest` is not a dependency: PR data comes from the harness payload and
+garnish makes no network calls. If HTTP is ever needed, `reqwest` is the
+chosen crate.
 
 ## Architecture in one breath
 

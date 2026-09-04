@@ -87,6 +87,27 @@ pub enum Command {
     },
     /// List the built-in modules.
     Modules,
+    /// Background worker: recompute one module's cache entry (or all cached modules).
+    #[command(hide = true)]
+    Refresh {
+        /// Module id; omit with `--all`.
+        #[arg(long, required_unless_present = "all")]
+        module: Option<String>,
+        /// Refresh every cached module.
+        #[arg(long)]
+        all: bool,
+        /// Session id.
+        #[arg(long)]
+        session: String,
+        /// Working directory the tick reported.
+        #[arg(long)]
+        cwd: PathBuf,
+        /// The caller already holds the module lock; release it when done.
+        #[arg(long)]
+        lock_held: bool,
+    },
+    /// Remove cache directories of sessions idle for more than a day.
+    Gc,
     /// Inspect or create the configuration.
     Config {
         /// What to do.
@@ -147,7 +168,64 @@ pub fn run() -> Result<()> {
             Ok(())
         }
         Command::Config { action } => config_cmd(&action, config_path),
+        Command::Refresh { module, all, session, cwd, lock_held } => {
+            refresh(module.as_deref(), all, &session, &cwd, lock_held, config_path)
+        }
+        Command::Gc => {
+            let cache = crate::cache::Cache::from_env();
+            let n = cache.gc_sessions(crate::cache::GC_MAX_AGE_MS, usize::MAX);
+            writeln!(
+                std::io::stdout().lock(),
+                "removed {n} idle session dir(s) under {}",
+                cache.root().display()
+            )?;
+            Ok(())
+        }
     }
+}
+
+fn refresh(
+    module: Option<&str>,
+    all: bool,
+    session: &str,
+    cwd: &Path,
+    lock_held: bool,
+    config_path: Option<&Path>,
+) -> Result<()> {
+    use crate::modules::{REGISTRY, RefreshCtx, run_refresh};
+    use rayon::prelude::*;
+    let loaded = config::load(config_path, &SCHEMAS);
+    let cache = crate::cache::Cache::from_env();
+    let targets: Vec<&crate::modules::Entry> = REGISTRY
+        .iter()
+        .filter(|e| if all { e.schema.refresh > 0 } else { Some(e.schema.id) == module })
+        .collect();
+    if targets.is_empty() {
+        return Err(eyre!("unknown module {}", module.unwrap_or("?")));
+    }
+    let results: Vec<Result<()>> = targets
+        .par_iter()
+        .map(|entry| {
+            let Some(cfg) = loaded.config.modules.get(entry.schema.id) else { return Ok(()) };
+            let scope = entry.module.scope(session, cwd);
+            // Hold (or inherit) the lock while working so ticks do not spawn twice.
+            let guard = if lock_held {
+                crate::cache::LockGuard::adopt(cache.lock_path(&scope, entry.schema.id))
+            } else {
+                match cache.lock(&scope, entry.schema.id) {
+                    crate::cache::LockOutcome::Acquired(g) => g,
+                    crate::cache::LockOutcome::Held => return Ok(()),
+                    crate::cache::LockOutcome::Unavailable(e) => return Err(e.into()),
+                }
+            };
+            let ctx = RefreshCtx { session, cwd, cfg, cache: &cache };
+            run_refresh(entry.module.as_ref(), &ctx)
+                .with_context(|| format!("refreshing {}", entry.schema.id))?;
+            drop(guard);
+            Ok(())
+        })
+        .collect();
+    results.into_iter().collect::<Result<Vec<()>>>().map(|_| ())
 }
 
 /// `COLUMNS`, then `GARNISH_COLUMNS`.
