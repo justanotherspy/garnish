@@ -1,0 +1,64 @@
+[package]
+name = "garnish"
+version = "0.1.0"
+edition = "2024"
+description = "A fast, cached, beautifully themed status line for Claude Code"
+license = "MIT"
+repository = "local"
+publish = false
+default-run = "garnish"
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+color-eyre = "0.6.5"
+command-run = "1.2.0"
+itertools = "0.15.0"
+jiff = "0.2.35"
+rayon = "1.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "1.1.5"
+unicode-width = "0.2.2"
+
+[dev-dependencies]
+criterion = "0.8.2"
+tempfile = "3.27.0"
+
+[[bench]]
+name = "tick"
+harness = false
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+# Strict lint set from namtao.com/rust ("Rust: Don't Panic").
+# pedantic + nursery teach good Rust; the rest deny every panic path.
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+inherits = "release"
+strip = false
+debug = 1

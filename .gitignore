@@ -1,0 +1,5 @@
+/target
+/bench/results/
+/docs/_tmp/
+*.log
+.DS_Store

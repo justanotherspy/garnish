@@ -1,0 +1,17 @@
+[profile.default]
+retries = 0
+slow-timeout = { period = "30s", terminate-after = 2 }
+fail-fast = false
+
+# Tests that share GARNISH_CACHE_DIR or PATH shims must not run concurrently.
+[test-groups]
+serial = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/^(cache|spawn|worker|gc)_/) | test(/serial/)'
+test-group = 'serial'
+
+[profile.ci]
+retries = 0
+fail-fast = false
+failure-output = "immediate-final"
