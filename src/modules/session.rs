@@ -37,7 +37,7 @@ impl Module for SessionModule {
             icons: vec![IconSpec {
                 key: "session",
                 doc: "Session icon.",
-                glyph: glyph("\u{f017}", "⏱", "⏱", "t:"),
+                glyph: glyph("\u{f017}", "⏱", "⏱\u{fe0f}", "t:"),
             }],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent2" },
@@ -62,7 +62,7 @@ impl Module for SessionModule {
                 .now
                 .checked_sub(jiff::SignedDuration::from_secs(i64::try_from(elapsed).unwrap_or(0)))
         {
-            let zoned = started.to_zoned(TimeZone::try_system().unwrap_or(TimeZone::UTC));
+            let zoned = started.to_zoned(ctx.tz.clone());
             segs.push(seg(cfg, format!(" since {}", zoned.strftime("%H:%M")), "start"));
         }
         Rendered::fresh(segs)
@@ -158,7 +158,7 @@ impl Module for CacheModule {
                 IconSpec {
                     key: "cache",
                     doc: "Cache icon.",
-                    glyph: glyph("\u{f1c0}", "⛁", "🗄", "cache:"),
+                    glyph: glyph("\u{f1c0}", "⛁", "🗄\u{fe0f}", "cache:"),
                 },
                 IconSpec {
                     key: "warm",
@@ -168,7 +168,7 @@ impl Module for CacheModule {
                 IconSpec {
                     key: "cold",
                     doc: "Cold glyph.",
-                    glyph: glyph("\u{f2dc}", "○", "❄", "cold"),
+                    glyph: glyph("\u{f2dc}", "○", "❄\u{fe0f}", "cold"),
                 },
             ],
             colors: vec![
@@ -283,16 +283,15 @@ impl Module for ClockModule {
         let zone = (!tz.is_empty())
             .then(|| TimeZone::get(tz).ok())
             .flatten()
-            .unwrap_or_else(|| TimeZone::try_system().unwrap_or(TimeZone::UTC));
+            .unwrap_or_else(|| ctx.tz.clone());
         let zoned = ctx.now.to_zoned(zone);
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("spinner") {
             let frames: Vec<char> = cfg.icon("spinner").chars().collect();
             if !frames.is_empty() {
-                let tick = u64_to_usize(
-                    u64::try_from(ctx.now.as_second().rem_euclid(1_000_000)).unwrap_or(0),
-                );
-                let idx = tick.checked_rem(frames.len()).unwrap_or(0);
+                let len = i64::try_from(frames.len()).unwrap_or(1).max(1);
+                let idx =
+                    u64_to_usize(u64::try_from(ctx.now.as_second().rem_euclid(len)).unwrap_or(0));
                 if let Some(f) = frames.get(idx) {
                     segs.push(seg(cfg, format!("{f} "), "spinner"));
                 }

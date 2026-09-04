@@ -2,15 +2,51 @@
 //! [`now`], which honours `GARNISH_NOW` so tests and golden renders are
 //! deterministic.
 
-use jiff::{Timestamp, Zoned, tz::TimeZone};
+use jiff::{Timestamp, tz::TimeZone};
 
 /// Environment variable that freezes the clock (epoch seconds or RFC 3339).
 pub const NOW_ENV: &str = "GARNISH_NOW";
 
 /// Current instant, or the frozen instant from `GARNISH_NOW`.
+///
+/// An unparseable `GARNISH_NOW` is reported on stderr once and ignored, so a
+/// typo in a test harness cannot silently drift golden renders.
 #[must_use]
 pub fn now() -> Timestamp {
-    std::env::var(NOW_ENV).ok().and_then(|v| parse_now(&v)).unwrap_or_else(Timestamp::now)
+    match std::env::var(NOW_ENV) {
+        Ok(v) if v.trim().is_empty() => Timestamp::now(),
+        Ok(v) => parse_now(&v).unwrap_or_else(|| {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| eprintln!("garnish: ignoring unparseable {NOW_ENV}={v:?}"));
+            Timestamp::now()
+        }),
+        Err(_) => Timestamp::now(),
+    }
+}
+
+/// The local time zone, resolved without scanning the system zoneinfo
+/// database: `TZ` when set, else `/etc/localtime` read as `TZif`, else UTC.
+///
+/// Reading one file is an order of magnitude cheaper than jiff's system
+/// zone discovery and is called once per tick.
+#[must_use]
+pub fn local_zone() -> TimeZone {
+    if let Ok(name) = std::env::var("TZ")
+        && !name.is_empty()
+    {
+        if let Ok(tz) = TimeZone::get(&name) {
+            return tz;
+        }
+        if let Ok(bytes) = std::fs::read(&name)
+            && let Ok(tz) = TimeZone::tzif("TZ", &bytes)
+        {
+            return tz;
+        }
+    }
+    std::fs::read("/etc/localtime")
+        .ok()
+        .and_then(|bytes| TimeZone::tzif("Local", &bytes).ok())
+        .unwrap_or(TimeZone::UTC)
 }
 
 /// Parse a `GARNISH_NOW` value: integer epoch seconds or an RFC 3339 string.
@@ -33,17 +69,6 @@ pub fn now_secs() -> i64 {
 #[must_use]
 pub fn now_millis() -> i64 {
     now().as_millisecond()
-}
-
-/// Local wall-clock time for [`now`], using the system zone or `tz` when given.
-///
-/// Falls back to UTC when the zone cannot be resolved.
-#[must_use]
-pub fn local(tz: Option<&str>) -> Zoned {
-    let zone = tz
-        .and_then(|name| TimeZone::get(name).ok())
-        .unwrap_or_else(|| TimeZone::try_system().unwrap_or(TimeZone::UTC));
-    now().to_zoned(zone)
 }
 
 /// Compact duration such as `1h12m`, `8m20s`, `3d4h`, `47s`.

@@ -145,8 +145,17 @@ pub fn run() -> Result<()> {
     let config_path = cli.config.as_deref();
     match cli.command.unwrap_or(Command::Render) {
         Command::Render => {
-            let mut input = String::new();
-            std::io::stdin().read_to_string(&mut input).context("reading stdin")?;
+            // The render path never fails and never prints nothing (SPEC § 5):
+            // unreadable or non-UTF-8 stdin becomes a warning line, and a
+            // closed stdout (EPIPE) is not worth an error report.
+            let mut bytes = Vec::with_capacity(8 * 1024);
+            let input = match std::io::stdin().read_to_end(&mut bytes) {
+                Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
+                Err(e) => {
+                    eprintln!("garnish: reading stdin: {e}");
+                    String::new()
+                }
+            };
             let req = Request {
                 payload_json: &input,
                 config_path,
@@ -156,7 +165,8 @@ pub fn run() -> Result<()> {
             };
             let out = render::render(&req);
             let mut stdout = std::io::stdout().lock();
-            stdout.write_all(out.as_bytes())?;
+            let _ = stdout.write_all(out.as_bytes());
+            let _ = stdout.flush();
             Ok(())
         }
         Command::Preview { path, args } => preview(&path, config_path, &args),

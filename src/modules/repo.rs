@@ -39,18 +39,21 @@ pub fn tildify(path: &str, home: Option<&str>) -> String {
     }
 }
 
-/// Keep the last `depth` components of a path (0 = all).
+/// Keep the last `depth` components of a path (0 = all). A leading `~` is
+/// kept so a home-relative path still reads as one: `~/projects/garnish`.
 #[must_use]
 pub fn shorten(path: &str, depth: usize) -> String {
     if depth == 0 {
         return path.to_owned();
     }
-    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let (home, rest) = path.strip_prefix('~').map_or(("", path), |r| ("~", r));
+    let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
     if parts.len() <= depth {
         return path.to_owned();
     }
     let skip = parts.len().saturating_sub(depth);
-    parts.iter().skip(skip).copied().collect::<Vec<_>>().join("/")
+    let tail = parts.iter().skip(skip).copied().collect::<Vec<_>>().join("/");
+    if home.is_empty() { tail } else { format!("{home}/{tail}") }
 }
 
 /// The path of `cwd` relative to `base`, if `cwd` is inside `base`.
@@ -133,8 +136,13 @@ impl Module for PathModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let ws = ctx.payload.workspace.as_ref();
         let cwd = ctx.payload.current_dir().unwrap_or("");
-        let base =
-            ws.and_then(|w| w.project_dir.as_deref()).filter(|p| !p.is_empty()).unwrap_or(cwd);
+        let toplevel =
+            git::discover(Path::new(cwd)).map(|d| d.toplevel.to_string_lossy().into_owned());
+        let base = toplevel
+            .as_deref()
+            .or_else(|| ws.and_then(|w| w.project_dir.as_deref()))
+            .filter(|p| !p.is_empty())
+            .unwrap_or(cwd);
         if base.is_empty() {
             return Rendered::empty();
         }
@@ -389,7 +397,9 @@ impl Module for BranchModule {
                     glyph: glyph("\u{f0c1}", "➦", "📌", "@"),
                 },
                 IconSpec {
-                    key: "dirty", doc: "Dirty marker.", glyph: glyph("●", "●", "✏", "*")
+                    key: "dirty",
+                    doc: "Dirty marker.",
+                    glyph: glyph("●", "●", "✏\u{fe0f}", "*"),
                 },
             ],
             colors: vec![
@@ -502,15 +512,19 @@ impl Module for SyncModule {
             ],
             icons: vec![
                 IconSpec {
-                    key: "ahead", doc: "Ahead glyph.", glyph: glyph("⇡", "⇡", "⬆", "^")
+                    key: "ahead",
+                    doc: "Ahead glyph.",
+                    glyph: glyph("⇡", "⇡", "⬆\u{fe0f}", "^"),
                 },
                 IconSpec {
-                    key: "behind", doc: "Behind glyph.", glyph: glyph("⇣", "⇣", "⬇", "v")
+                    key: "behind",
+                    doc: "Behind glyph.",
+                    glyph: glyph("⇣", "⇣", "⬇\u{fe0f}", "v"),
                 },
                 IconSpec {
                     key: "stale",
                     doc: "Stale-fetch glyph.",
-                    glyph: glyph("\u{f017}", "⧖", "🕰", "?"),
+                    glyph: glyph("\u{f017}", "⧖", "🕰\u{fe0f}", "?"),
                 },
                 IconSpec {
                     key: "no_upstream",
@@ -617,9 +631,11 @@ mod tests {
         assert_eq!(tildify("/home/dev", Some("/home/dev")), "~");
         assert_eq!(tildify("/home/developer/x", Some("/home/dev")), "/home/developer/x");
         assert_eq!(tildify("/x", None), "/x");
-        assert_eq!(shorten("~/projects/garnish", 2), "projects/garnish");
-        assert_eq!(shorten("~/projects/garnish", 1), "garnish");
+        assert_eq!(shorten("~/projects/garnish", 2), "~/projects/garnish");
+        assert_eq!(shorten("~/a/projects/garnish", 2), "~/projects/garnish");
+        assert_eq!(shorten("~/projects/garnish", 1), "~/garnish");
         assert_eq!(shorten("~/projects/garnish", 0), "~/projects/garnish");
+        assert_eq!(shorten("/srv/a/b/c", 2), "b/c");
         assert_eq!(shorten("garnish", 3), "garnish");
         assert_eq!(subpath("/a/b", "/a/b/c/d"), Some("c/d".into()));
         assert_eq!(subpath("/a/b", "/a/b"), None);

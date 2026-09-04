@@ -306,7 +306,13 @@ pub fn parse_with(
     raw.color = overlay.color.or(raw.color);
     let mut errors = Vec::new();
     let config = resolve(&raw, schemas, &mut errors);
-    if errors.is_empty() { (config, errors) } else { (Config::defaults(schemas), errors) }
+    if errors.is_empty() {
+        return (config, errors);
+    }
+    // Fall back to the defaults, keeping the icon set (a validated enum) so
+    // the warning line and glyphs still match what the user asked for.
+    let fallback = RawConfig { icons: raw.icons, ..RawConfig::default() };
+    (resolve(&fallback, schemas, &mut Vec::new()), errors)
 }
 
 fn line_of(text: &str, byte: usize) -> usize {
@@ -463,7 +469,12 @@ fn resolve_frame(raw: Option<&RawFrame>, preset: TopPreset) -> FrameCfg {
         set(&mut chars.pad, &f.pad);
         set(&mut chars.separator, &f.separator);
     }
-    let fill = raw.and_then(|f| f.fill).unwrap_or(style != FrameStyle::None);
+    // Filling is on for every style: with `none` the rule is spaces, which is
+    // what right-aligns the `right` group on an unframed line.
+    let fill = raw.and_then(|f| f.fill).unwrap_or(true);
+    if crate::ansi::display_width(&chars.fill) != 1 {
+        chars.fill = " ".into();
+    }
     FrameCfg { style, chars, fill }
 }
 
@@ -800,8 +811,12 @@ x = 1
     fn minimal_preset_is_unframed_and_compact_has_two_lines() {
         let (c, _) = parse("preset = \"minimal\"", &schemas());
         assert_eq!(c.frame.style, FrameStyle::None);
-        assert!(!c.frame.fill);
+        assert!(c.frame.fill);
         assert_eq!(c.lines.len(), 1);
+        let (wide, _) = parse("[frame]\nfill_char = \"ab\"", &schemas());
+        assert_eq!(wide.frame.chars.fill, " ");
+        let (empty, _) = parse("[frame]\nfill_char = \"\"", &schemas());
+        assert_eq!(empty.frame.chars.fill, " ");
         let (c, _) = parse("preset = \"compact\"", &schemas());
         assert_eq!(c.lines.len(), 2);
         assert_eq!(c.modules.get("path").unwrap().preset, Preset::Default);

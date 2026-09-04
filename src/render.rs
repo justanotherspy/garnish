@@ -48,15 +48,7 @@ pub fn render_loaded(
     let painter = Painter { mode, links: mode != ColorMode::Never };
     let mut lines = render_lines(payload, config, columns);
     if !loaded.errors.is_empty() {
-        let path =
-            loaded.path.as_ref().map_or_else(|| "config".to_owned(), |p| p.display().to_string());
-        let first = loaded.errors.first().map_or_else(String::new, ToString::to_string);
-        let extra = loaded.errors.len().saturating_sub(1);
-        let suffix = if extra > 0 { format!(" (+{extra} more)") } else { String::new() };
-        lines.push(vec![Segment::styled(
-            format!("⚠ config: {path}: {first}{suffix}"),
-            Style::fg(config.theme.role(Role::Warn)).dimmed(),
-        )]);
+        lines.push(config_warning(loaded, config.width(columns)));
     }
     let mut out = String::new();
     for line in &lines {
@@ -67,6 +59,27 @@ pub fn render_loaded(
         out.push('\n');
     }
     out
+}
+
+/// The trailing `⚠ config: <path>:<line> <message>` line, truncated to the width.
+fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
+    let config = &loaded.config;
+    let path =
+        loaded.path.as_ref().map_or_else(|| "config".to_owned(), |p| p.display().to_string());
+    let first = loaded.errors.first();
+    let location = first.and_then(|e| e.line).map_or(String::new(), |l| format!(":{l}"));
+    let message = first.map_or_else(String::new, |e| {
+        if e.path.is_empty() { e.message.clone() } else { format!("{}: {}", e.path, e.message) }
+    });
+    let extra = loaded.errors.len().saturating_sub(1);
+    let suffix = if extra > 0 { format!(" (+{extra} more)") } else { String::new() };
+    let glyph = if config.icons == IconSet::Ascii { "!" } else { "⚠" };
+    let line = vec![Segment::styled(
+        format!("{glyph} config: {path}{location} {message}{suffix}"),
+        Style::fg(config.theme.role(Role::Warn)).dimmed(),
+    )];
+    let ellipsis = if config.icons == IconSet::Ascii { ".." } else { "…" };
+    crate::ansi::truncate(&line, width, ellipsis)
 }
 
 /// Render every configured line to segments (no escape sequences yet).
@@ -85,6 +98,7 @@ pub fn render_lines(
         now: crate::time::now(),
         width,
         cache: &cache,
+        tz: crate::time::local_zone(),
     };
     let stale = stale_glyphs(config.icons);
     let layout = Layout {
@@ -183,8 +197,24 @@ mod tests {
             "⚠ garnish: bad payload\n"
         );
         let out = render_plain(&fixture("api-key"), &loaded("theme = \"nope\""), Some(80));
-        assert!(out.lines().last().unwrap().starts_with("⚠ config: config: theme:"), "{out}");
+        assert!(
+            out.lines().last().unwrap().starts_with("⚠ config: config theme: unknown theme"),
+            "{out}"
+        );
         assert!(out.lines().count() >= 2);
+        // syntax errors carry the line number and the warning never overflows the width
+        let out =
+            render_plain(&fixture("api-key"), &loaded("preset = \"default\"\n[frame\nx"), Some(40));
+        let last = out.lines().last().unwrap();
+        assert!(last.starts_with("⚠ config: config:2 "), "{last}");
+        assert!(display_width(last) <= 40, "{last}");
+        assert!(last.ends_with('…'), "{last}");
+        let out = render_plain(
+            &fixture("api-key"),
+            &loaded("icons = \"ascii\"\ntheme = \"nope\""),
+            Some(80),
+        );
+        assert!(out.lines().last().unwrap().starts_with("! config:"), "{out}");
     }
 
     #[test]

@@ -9,10 +9,11 @@ const PARTIALS: [char; 7] = ['▏', '▎', '▍', '▌', '▋', '▊', '▉'];
 /// Render a smooth horizontal bar.
 ///
 /// `percent` is 0..=100; `width` is the number of cells; `fill`/`empty` are
-/// the glyphs for filled and empty cells (`fill` may be multi-char in ASCII
-/// sets, in which case no partial blocks are used). `marker` places a glyph at
-/// a percentage position (drawn over the empty part only). The filled part
-/// takes `fill_color`; the rest `empty_color`.
+/// the glyphs for filled and empty cells (with `█`/single-cell `empty` the
+/// last filled cell uses eighth-blocks for sub-cell precision). `marker`
+/// places a glyph at a percentage position; it always wins over the cell it
+/// lands on, filled or not, so the compaction point stays visible as usage
+/// approaches it. The filled part takes `fill_color`; the rest `empty_color`.
 #[must_use]
 pub fn bar(
     width: usize,
@@ -26,48 +27,50 @@ pub fn bar(
     if width == 0 {
         return Vec::new();
     }
+    // Glyphs that are not exactly one cell wide would break the width
+    // accounting of the whole line; fall back to safe defaults.
+    let fill = if crate::ansi::display_width(fill) == 1 { fill } else { "█" };
+    let empty = if crate::ansi::display_width(empty) == 1 { empty } else { "░" };
+    let marker = marker.map(|(p, g, c)| {
+        (p, if g.is_empty() || crate::ansi::display_width(g) == 1 { g } else { "|" }, c)
+    });
     let pct = crate::num::clamp_percent(percent);
     let cells_f = usize_to_f64(width) * pct / 100.0;
     let whole = u64_to_usize(floor_to_u64(cells_f)).min(width);
     let frac = cells_f - usize_to_f64(whole);
     let smooth = fill == "█" && empty.chars().count() == 1;
     let partial_idx = u64_to_usize(floor_to_u64(frac * 8.0));
-
-    let mut segs: Vec<Segment> = Vec::new();
-    let mut filled_text = fill.repeat(whole);
-    let mut used = whole;
     let partial = (smooth && whole < width && partial_idx > 0)
         .then(|| PARTIALS.get(partial_idx.saturating_sub(1)))
         .flatten();
-    if let Some(c) = partial {
-        filled_text.push(*c);
-        used = used.saturating_add(1);
-    }
-    if !filled_text.is_empty() {
-        segs.push(Segment::styled(filled_text, Style::fg(fill_color)));
-    }
-    let remaining = width.saturating_sub(used);
-    if remaining > 0 {
-        let marker_cell = marker.and_then(|(mpct, glyph, color)| {
-            let cell = u64_to_usize(floor_to_u64(
-                usize_to_f64(width) * crate::num::clamp_percent(mpct) / 100.0,
-            ));
-            let cell = cell.min(width.saturating_sub(1));
-            (cell >= used && !glyph.is_empty()).then_some((cell, glyph, color))
-        });
-        match marker_cell {
-            Some((cell, glyph, color)) => {
-                let before = cell.saturating_sub(used);
-                if before > 0 {
-                    segs.push(Segment::styled(empty.repeat(before), Style::fg(empty_color)));
-                }
-                segs.push(Segment::styled(glyph, Style::fg(color).bolded()));
-                let after = remaining.saturating_sub(before).saturating_sub(1);
-                if after > 0 {
-                    segs.push(Segment::styled(empty.repeat(after), Style::fg(empty_color)));
-                }
-            }
-            None => segs.push(Segment::styled(empty.repeat(remaining), Style::fg(empty_color))),
+    let marker_cell = marker.and_then(|(mpct, glyph, color)| {
+        let cell = u64_to_usize(floor_to_u64(
+            usize_to_f64(width) * crate::num::clamp_percent(mpct) / 100.0,
+        ));
+        (!glyph.is_empty()).then_some((cell.min(width.saturating_sub(1)), glyph, color))
+    });
+
+    // Build the bar cell by cell into runs of (text, style).
+    let mut segs: Vec<Segment> = Vec::new();
+    let mut push = |text: &str, style: Style| match segs.last_mut() {
+        Some(last) if last.style == style => last.text.push_str(text),
+        _ => segs.push(Segment::styled(text, style)),
+    };
+    let filled_style = Style::fg(fill_color);
+    let empty_style = Style::fg(empty_color);
+    for cell in 0..width {
+        if let Some((mcell, glyph, color)) = marker_cell
+            && cell == mcell
+        {
+            push(glyph, Style::fg(color).bolded());
+        } else if cell < whole {
+            push(fill, filled_style);
+        } else if cell == whole
+            && let Some(c) = partial
+        {
+            push(&c.to_string(), filled_style);
+        } else {
+            push(empty, empty_style);
         }
     }
     segs
@@ -77,6 +80,14 @@ pub fn bar(
 #[must_use]
 pub fn percent(p: f64) -> String {
     format!("{}%", crate::num::round_to_u64(crate::num::clamp_percent(p)))
+}
+
+/// The percentage as the user sees it (rounded, 0..=100), so band colors
+/// agree with the printed number at the boundaries (89.6 prints `90%` and is
+/// colored as 90).
+#[must_use]
+pub fn rounded(p: f64) -> f64 {
+    crate::num::u64_to_f64(crate::num::round_to_u64(crate::num::clamp_percent(p)))
 }
 
 /// Format a percentage allowing values above 100 (spend limits).
@@ -137,19 +148,40 @@ mod tests {
     }
 
     #[test]
-    fn marker_lands_in_the_empty_part_only() {
+    fn marker_always_wins_its_cell() {
         let c = Color::Default;
         assert_eq!(text(&bar(10, 30.0, "█", "░", c, c, Some((90.0, "▏", c)))), "███░░░░░░▏");
-        // marker inside the filled part is hidden
-        assert_eq!(text(&bar(10, 95.0, "█", "░", c, c, Some((90.0, "▏", c)))), "█████████▌");
+        // marker over the partial cell and over a full cell stays visible
+        assert_eq!(text(&bar(10, 95.0, "█", "░", c, c, Some((90.0, "▏", c)))), "█████████▏");
+        assert_eq!(text(&bar(10, 100.0, "█", "░", c, c, Some((90.0, "▏", c)))), "█████████▏");
+        assert_eq!(
+            text(&bar(20, 96.0, "█", "░", c, c, Some((98.7, "▏", c)))),
+            "███████████████████▏"
+        );
         // marker at 100% sits in the last cell
         assert_eq!(text(&bar(5, 0.0, "█", "░", c, c, Some((100.0, "|", c)))), "░░░░|");
+        // tiny bars
+        assert_eq!(text(&bar(1, 50.0, "█", "░", c, c, Some((90.0, "▏", c)))), "▏");
+        assert_eq!(text(&bar(2, 50.0, "█", "░", c, c, Some((90.0, "▏", c)))), "█▏");
+        assert_eq!(text(&bar(3, 50.0, "█", "░", c, c, None)), "█▌░");
+        // an empty marker glyph draws nothing
+        assert_eq!(text(&bar(4, 0.0, "█", "░", c, c, Some((50.0, "", c)))), "░░░░");
+    }
+
+    #[test]
+    fn multi_cell_glyphs_fall_back_so_the_bar_stays_the_right_width() {
+        let c = Color::Default;
+        let out = text(&bar(6, 50.0, "🟩", "..", c, c, Some((90.0, "|>", c))));
+        assert_eq!(crate::ansi::display_width(&out), 6, "{out}");
+        assert_eq!(out, "███░░|");
     }
 
     #[test]
     fn formatting_helpers() {
         assert_eq!(percent(41.6), "42%");
         assert_eq!(percent(140.0), "100%");
+        assert_eq!(rounded(89.6), 90.0);
+        assert_eq!(rounded(f64::NAN), 0.0);
         assert_eq!(percent_unclamped(112.4), "112%");
         assert_eq!(dollars(1.2345, 2), "$1.23");
         assert_eq!(dollars(0.0, 2), "$0.00");

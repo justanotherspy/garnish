@@ -1,6 +1,13 @@
-.PHONY: all build release check lint fmt test doc docs bench install ci clean
+.PHONY: all build release check lint fmt test doc docs bench install ci clean watch
 
 all: check
+
+# Re-run lint + tests whenever a source or test file changes. Output goes to
+# the terminal and to target/watch.log so the Monitor tool can follow it.
+watch:
+	watchexec -c clear --debounce 2s -w src -w tests -w Cargo.toml -w benches \
+		--shell=bash -- 'cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tail -30 && cargo nextest run 2>&1 | grep -E "FAIL|Summary|panicked"; echo "== watch run done $$(date +%T)"' \
+		2>&1 | tee target/watch.log
 
 build:
 	cargo build

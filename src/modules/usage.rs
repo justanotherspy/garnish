@@ -5,7 +5,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::icons::{Glyph, glyph};
 use crate::payload::RateWindow;
 
-use super::util::{bar, dollars, percent, percent_unclamped};
+use super::util::{bar, dollars, percent, percent_unclamped, rounded};
 use super::{Ctx, Module, Rendered, icon, seg};
 
 /// Which rate-limit window a limit module shows.
@@ -109,7 +109,7 @@ impl Module for LimitModule {
                 IconSpec {
                     key: "reset",
                     doc: "Countdown glyph.",
-                    glyph: glyph("\u{f017}", "⏱", "⏱", "reset"),
+                    glyph: glyph("\u{f017}", "⏱", "⏱\u{fe0f}", "reset"),
                 },
                 IconSpec {
                     key: "fill", doc: "Bar filled cell.", glyph: glyph("█", "█", "█", "#")
@@ -131,7 +131,7 @@ impl Module for LimitModule {
         let Some(used) = w.used_percentage else { return Rendered::empty() };
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
-        let color = ctx.theme.band(used, &thresholds, &bands);
+        let color = ctx.theme.band(rounded(used), &thresholds, &bands);
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "window", "icon"));

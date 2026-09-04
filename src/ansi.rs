@@ -5,7 +5,7 @@
 //! on plain text and the color mode can be switched without touching modules.
 
 use std::fmt::Write as _;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// A color, in any of the forms the config accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -214,25 +214,35 @@ impl Segment {
 
 /// Display width of a string in terminal cells (no escape sequences expected).
 ///
-/// Private-use glyphs (Nerd Font icons) count as one cell.
+/// Uses `unicode-width`'s string algorithm, which understands emoji
+/// presentation sequences (VS16), ZWJ sequences and combining marks; private
+/// use glyphs (Nerd Font icons) count as one cell.
 #[must_use]
 pub fn display_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+    UnicodeWidthStr::width(s)
 }
 
-/// Width of one character in cells.
+/// Width of one character in cells (use [`display_width`] for text).
 #[must_use]
 pub fn char_width(c: char) -> usize {
-    let cp = u32::from(c);
-    // Private Use Areas: Nerd Font glyphs render single-width in practice.
-    if (0xE000..=0xF8FF).contains(&cp) || (0xF_0000..=0x10_FFFD).contains(&cp) {
-        return 1;
-    }
-    // Variation selector 16 requests emoji presentation → the base glyph is wide.
-    if cp == 0xFE0F {
-        return 0;
-    }
     UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Split text into terminal clusters that must not be separated: a base
+/// character plus any following zero-width characters (combining marks,
+/// variation selectors), and anything joined by U+200D ZERO WIDTH JOINER.
+fn clusters(s: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut joined = false;
+    for c in s.chars() {
+        let attach = joined || (char_width(c) == 0 && !out.is_empty());
+        match out.last_mut() {
+            Some(last) if attach => last.push(c),
+            _ => out.push(c.to_string()),
+        }
+        joined = c == '\u{200d}';
+    }
+    out
 }
 
 /// Sum of segment widths.
@@ -254,8 +264,8 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
     let mut used = 0_usize;
     'outer: for seg in segments {
         let mut kept = String::new();
-        for ch in seg.text.chars() {
-            let w = char_width(ch);
+        for cluster in clusters(&seg.text) {
+            let w = display_width(&cluster);
             if used.saturating_add(w) > budget {
                 if !kept.is_empty() {
                     out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
@@ -263,7 +273,7 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
                 break 'outer;
             }
             used = used.saturating_add(w);
-            kept.push(ch);
+            kept.push_str(&cluster);
         }
         out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
     }
@@ -367,9 +377,27 @@ mod tests {
     fn widths_count_nerd_glyphs_as_one_and_emoji_as_two() {
         assert_eq!(display_width("abc"), 3);
         assert_eq!(display_width("\u{e725}"), 1);
+        assert_eq!(display_width("\u{f06a9}"), 1);
         assert_eq!(display_width("⏱"), 1);
+        assert_eq!(display_width("⏱\u{fe0f}"), 2);
         assert_eq!(display_width("🌿"), 2);
+        assert_eq!(display_width("👨\u{200d}💻"), 2);
+        assert_eq!(display_width("e\u{301}"), 1);
+        assert_eq!(display_width("日本"), 4);
         assert_eq!(display_width("█░▏"), 3);
+    }
+
+    #[test]
+    fn truncation_never_splits_a_cluster() {
+        let segs = vec![Segment::plain("a👨\u{200d}💻b⏱\u{fe0f}c")];
+        // widths: a=1, family=2, b=1, timer=2, c=1 → total 7
+        assert_eq!(segments_width(&segs), 7);
+        assert_eq!(Painter::PLAIN.paint(&truncate(&segs, 3, "…")), "a…");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&segs, 4, "…")), "a👨\u{200d}💻…");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&segs, 6, "…")), "a👨\u{200d}💻b…");
+        assert_eq!(segments_width(&truncate(&segs, 6, "…")), 5);
+        let cjk = vec![Segment::plain("日本語")];
+        assert_eq!(Painter::PLAIN.paint(&truncate(&cjk, 4, "…")), "日…");
     }
 
     #[test]

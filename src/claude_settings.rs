@@ -64,15 +64,29 @@ impl Env {
     }
 }
 
-fn truthy(v: Option<&String>) -> bool {
-    v.is_some_and(|s| !s.is_empty() && s != "0" && s != "false")
+/// Claude Code's own rule for boolean environment variables (`isEnvTruthy`):
+/// only `1`, `true`, `yes`, `on` (case-insensitive) count as set.
+#[must_use]
+pub fn env_truthy(v: Option<&String>) -> bool {
+    v.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
-/// Settings files in precedence order (highest first) for a working directory.
+/// The managed (organisation-deployed) settings file for this platform.
 #[must_use]
-pub fn settings_files(cwd: Option<&Path>, home: Option<&Path>) -> Vec<std::path::PathBuf> {
-    let mut files = Vec::new();
-    if let Some(dir) = cwd {
+pub fn managed_settings_path() -> std::path::PathBuf {
+    if cfg!(target_os = "macos") {
+        std::path::PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json")
+    } else {
+        std::path::PathBuf::from("/etc/claude-code/managed-settings.json")
+    }
+}
+
+/// Settings files in precedence order (highest first) for a project directory:
+/// managed > `.claude/settings.local.json` > `.claude/settings.json` > user.
+#[must_use]
+pub fn settings_files(project_dir: Option<&Path>, home: Option<&Path>) -> Vec<std::path::PathBuf> {
+    let mut files = vec![managed_settings_path()];
+    if let Some(dir) = project_dir {
         files.push(dir.join(".claude").join("settings.local.json"));
         files.push(dir.join(".claude").join("settings.json"));
     }
@@ -108,8 +122,8 @@ pub fn resolve(env: &Env, cwd: Option<&Path>, home: Option<&Path>) -> AutoCompac
     let env_window = env.window.as_deref().and_then(|s| s.trim().parse::<u64>().ok());
     AutoCompact {
         enabled: enabled.unwrap_or(true)
-            && !truthy(env.disable.as_ref())
-            && !truthy(env.disable_all.as_ref()),
+            && !env_truthy(env.disable.as_ref())
+            && !env_truthy(env.disable_all.as_ref()),
         window: env_window.or(window),
         pct_override: env.pct.as_deref().and_then(|s| s.trim().parse::<f64>().ok()),
     }
@@ -178,9 +192,14 @@ mod tests {
             ac,
             AutoCompact { enabled: true, window: Some(250_000), pct_override: Some(80.0) }
         );
-        let env = Env { disable: Some("1".into()), ..Default::default() };
-        assert!(!resolve(&env, None, None).enabled);
-        let env = Env { disable: Some("0".into()), ..Default::default() };
-        assert!(resolve(&env, None, None).enabled);
+        for on in ["1", "true", "YES", " On "] {
+            let env = Env { disable: Some(on.into()), ..Default::default() };
+            assert!(!resolve(&env, None, None).enabled, "{on}");
+        }
+        for off in ["0", "false", "no", "off", "", "maybe"] {
+            let env = Env { disable: Some(off.into()), ..Default::default() };
+            assert!(resolve(&env, None, None).enabled, "{off}");
+        }
+        assert_eq!(settings_files(None, None), vec![managed_settings_path()]);
     }
 }

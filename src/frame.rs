@@ -209,7 +209,9 @@ pub fn compose_line(
         0
     };
     let right_w = segments_width(right);
-    let right_block_w = if right.is_empty() { 0 } else { right_w.saturating_add(pad_w) };
+    // With a rule the right group is preceded by a pad; without one, by the separator (join_w).
+    let right_block_w =
+        if right.is_empty() || !layout.fill { right_w } else { right_w.saturating_add(pad_w) };
     let fill_w = display_width(&layout.chars.fill).max(1);
 
     // Cells the left group may occupy before it gets truncated.

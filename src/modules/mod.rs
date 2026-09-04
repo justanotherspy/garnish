@@ -78,6 +78,8 @@ pub struct Ctx<'a> {
     pub width: usize,
     /// The on-disk cache.
     pub cache: &'a Cache,
+    /// The local time zone, resolved once per tick.
+    pub tz: jiff::tz::TimeZone,
 }
 
 impl Ctx<'_> {
@@ -256,7 +258,21 @@ pub fn decorate(
     stale_glyphs: (&str, &str),
 ) -> Vec<Segment> {
     if rendered.is_empty() {
-        return Vec::new();
+        if cfg.hide_when_empty {
+            return Vec::new();
+        }
+        let mut out: Vec<Segment> = Vec::new();
+        if !cfg.prefix.is_empty() {
+            out.push(Segment::plain(&cfg.prefix));
+        }
+        if !cfg.label.is_empty() {
+            out.push(muted(theme, format!("{} ", cfg.label)));
+        }
+        out.push(muted(theme, "–"));
+        if !cfg.suffix.is_empty() {
+            out.push(Segment::plain(&cfg.suffix));
+        }
+        return out;
     }
     let mut out: Vec<Segment> = Vec::new();
     if !cfg.prefix.is_empty() {

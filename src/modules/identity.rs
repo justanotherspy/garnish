@@ -37,7 +37,7 @@ impl Module for SessionNameModule {
             icons: vec![IconSpec {
                 key: "name",
                 doc: "Name icon.",
-                glyph: glyph("\u{f02b}", "♯", "🏷", ""),
+                glyph: glyph("\u{f02b}", "♯", "🏷\u{fe0f}", ""),
             }],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent2" },
@@ -160,7 +160,7 @@ impl Module for AgentModule {
                 IconSpec {
                     key: "agent",
                     doc: "Agent icon.",
-                    glyph: glyph("\u{f21b}", "☉", "🕵", "agent:"),
+                    glyph: glyph("\u{f21b}", "☉", "🕵\u{fe0f}", "agent:"),
                 },
                 IconSpec {
                     key: "thinking",

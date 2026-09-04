@@ -80,7 +80,15 @@ pub fn toml_string(s: &str) -> String {
 }
 
 fn format_float(f: f64) -> String {
-    if f.fract() == 0.0 && f.abs() < 1e15 { format!("{f:.0}") } else { f.to_string() }
+    if f.is_nan() {
+        "nan".into()
+    } else if f.is_infinite() {
+        if f > 0.0 { "inf".into() } else { "-inf".into() }
+    } else if f.fract() == 0.0 && f.abs() < 1e15 {
+        format!("{f:.0}")
+    } else {
+        f.to_string()
+    }
 }
 
 /// The kind of an option, used for validation and docs.
@@ -548,6 +556,9 @@ mod tests {
         assert_eq!(Value::Int(3).to_toml(), "3");
         assert_eq!(Value::Float(2.5).to_toml(), "2.5");
         assert_eq!(Value::Float(50.0).to_toml(), "50");
+        assert_eq!(Value::Float(f64::NAN).to_toml(), "nan");
+        assert_eq!(Value::Float(f64::NEG_INFINITY).to_toml(), "-inf");
+        assert_eq!(Value::NumList(vec![f64::INFINITY]).to_toml(), "[inf]");
         assert_eq!(Value::Str("a\"b".into()).to_toml(), "\"a\\\"b\"");
         assert_eq!(Value::Str("\u{f06a9}\\".into()).to_toml(), "\"\u{f06a9}\\\\\"");
         assert_eq!(Value::StrList(vec!["x".into()]).to_toml(), "[\"x\"]");

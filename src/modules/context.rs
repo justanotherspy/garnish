@@ -6,7 +6,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{bar, percent, tokens};
+use super::util::{bar, percent, rounded, tokens};
 use super::{Ctx, Module, Rendered, icon, seg};
 
 /// `context`: smooth usage bar + percentage + compaction marker.
@@ -83,7 +83,7 @@ impl Module for ContextModule {
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
         let pct = used.map(crate::num::clamp_percent);
-        let fill_color = ctx.theme.band(pct.unwrap_or(0.0), &thresholds, &bands);
+        let fill_color = ctx.theme.band(rounded(pct.unwrap_or(0.0)), &thresholds, &bands);
 
         let marker = compaction_percent(ctx, cfg, window);
         let width = cfg.size("width");
@@ -195,9 +195,12 @@ fn compaction_percent(ctx: &Ctx<'_>, cfg: &ModuleCfg, window: u64) -> Option<f64
     if !cfg.bool("compaction_marker") {
         return None;
     }
-    let cwd = ctx.payload.current_dir().map(std::path::Path::new);
+    // Project settings live under the directory Claude Code was launched in,
+    // not under whatever subdirectory the session has moved to.
+    let project = ctx.payload.project_dir().map(std::path::Path::new);
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let ac = claude_settings::resolve(&claude_settings::Env::from_process(), cwd, home.as_deref());
+    let ac =
+        claude_settings::resolve(&claude_settings::Env::from_process(), project, home.as_deref());
     let threshold = ac.threshold(window, cfg.int("compact_buffer_tokens"))?;
     Some(percent_of(threshold, window))
 }

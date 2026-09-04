@@ -106,6 +106,18 @@ What that means when writing code:
 - Prefer combinator pipelines over `if let` towers. Data in → data out.
 - Prototype freely inside unit tests; clippy ignores unwraps there.
 
+## Comments and documentation
+
+- Every file has a `//!` module doc saying what it owns; every `pub` item
+  has a `///` doc (the `missing_docs` lint enforces the latter). Docs
+  describe *what* and *why*, follow rustdoc conventions (`# Errors`,
+  `# Panics`, intra-doc links), and read as reference material.
+- Inline `//` comments are for the non-obvious only: an invariant, a
+  workaround for a quirk, a subtle ordering, a reference to the spec. Do not
+  narrate what the code plainly does, do not leave "changed X" notes, and do
+  not comment out code. When in doubt, leave the comment out.
+- Reviewing a file's comments is part of finishing a phase: delete fluff.
+
 ## Crate map (the chosen crate for each job; never add an alternative)
 
 Every crate below was chosen deliberately (see the namtao 2026 toolkit). When
