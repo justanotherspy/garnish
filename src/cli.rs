@@ -172,7 +172,13 @@ pub enum ConfigAction {
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     let config_path = cli.config.as_deref();
-    match cli.command.unwrap_or(Command::Render) {
+    let command = cli.command.unwrap_or(Command::Render);
+    // The render path cannot return an error, so it skips color-eyre's
+    // report handler installation; every other subcommand gets pretty errors.
+    if !matches!(command, Command::Render) {
+        color_eyre::install()?;
+    }
+    match command {
         Command::Render => {
             // The render path never fails and never prints nothing (SPEC § 5):
             // unreadable or non-UTF-8 stdin becomes a warning line, and a

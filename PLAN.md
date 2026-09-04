@@ -92,7 +92,7 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
 - [x] ~~`--time` per-phase timing flag~~ dropped: criterion's per-module benches give the same breakdown without a runtime flag
 - [x] Budget green on this host (2026-09-04): warm-default 2.50 ms mean / 3.74 ms p99, warm-full 2.56 / 3.99, cold 3.69 mean, refresh-sync 3.37 mean
 - [x] Sprite checkpoint
-- [ ] Headroom: the warm mean is within 0.5 ms of the budget. Criterion says the in-process work is small (payload parse 3.5 µs, default config 25 µs, in-process tick 128 µs, `context` 43 µs for the settings reads) — but parsing a full annotated config file costs ~390 µs per tick. Candidates: skip the doc comments when parsing (they are already skipped by toml), cache the resolved config keyed by file mtime, or trim `SCHEMAS` cloning in `parse_overrides`.
+- [x] Headroom analysed (2026-09-04): on this host a `println!` hello-world binary costs 1.3 ms, `garnish --version` 1.7 ms and a warm tick 2.4 ms. So ~55 % of the tick is process start-up the code cannot influence, ~0.4 ms is clap + static init, and ~0.7 ms is the render (0.3 ms user, 0.4 ms sys: config locate, three settings.json reads, cache lookups, `/etc/localtime`, stdin). Criterion: payload parse 3.5 µs, default config 25 µs, in-process tick 128 µs, full annotated config file ~390 µs. Skipping `color_eyre::install` on the render path made no measurable difference but is kept (the path cannot error). If more headroom is ever needed: cache the resolved config keyed by mtime (saves ~0.4 ms for users with a full config file) and cache the settings.json reads for 30 s.
 
 ## Phase 9 — Hardening & release
 
