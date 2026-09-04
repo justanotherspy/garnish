@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # The same gate as `scripts/ci.sh` locally: fmt, strict clippy, nextest,
+  # doctests, rustdoc with -D warnings, docs/ and examples/ sync.
+  linux:
+    name: linux (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the channel and components pinned in rust-toolchain.toml.
+      - run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: ./scripts/ci.sh
+
+  # macOS code paths (cache root, managed settings, age-only locks) have no
+  # other coverage; see PLAN.md Phase 9.
+  macos:
+    name: macos (nightly)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: make check
+
+  # Latency numbers on shared runners are not comparable to the budget in
+  # SPEC § 8, so this never gates; run it by hand and read the artifact.
+  bench:
+    name: bench (informational)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: hyperfine
+      - run: ./bench/run.sh
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results/*.json

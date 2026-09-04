@@ -2,7 +2,8 @@
 
 <p align="center">
   <em>A fast, cached, beautifully themed status line for Claude Code.</em><br>
-  <sub>Rust · nightly · no network calls of its own · &lt; 3 ms per tick</sub>
+  <sub>Rust · nightly · no network calls of its own · &lt; 3 ms per tick</sub><br>
+  <a href="https://github.com/justanotherspy/garnish/actions/workflows/ci.yml"><img src="https://github.com/justanotherspy/garnish/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 ```text

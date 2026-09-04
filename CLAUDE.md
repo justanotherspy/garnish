@@ -84,6 +84,11 @@ make install      # cargo install --path . --locked  → ~/.cargo/bin/garnish
 ./scripts/ci.sh   # everything above plus docs-sync check
 ```
 
+GitHub Actions (`.github/workflows/ci.yml`) runs `scripts/ci.sh` on Linux and
+`make check` on macOS for every push to `main`, tag and PR; the bench job is
+`workflow_dispatch` only and never gates (shared-runner timings are noise).
+The macOS job is the only coverage of the Mac-only code paths.
+
 ## Style: strict lints, never panic (namtao.com/rust)
 
 `Cargo.toml` denies `clippy::pedantic`, `clippy::nursery`, and every panic
