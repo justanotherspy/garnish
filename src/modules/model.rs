@@ -41,7 +41,9 @@ impl Module for ModelModule {
                 IconSpec {
                     key: "model",
                     doc: "Model icon.",
-                    glyph: glyph("\u{f06a9}", "◆", "🤖", ""),
+                    // nf-cod-hubot: in the BMP private-use area, so v2 Nerd
+                    // Fonts render it; nf-md-robot (U+F06A9) is v3-only.
+                    glyph: glyph("\u{eb08}", "◆", "🤖", ""),
                 },
                 IconSpec {
                     key: "fast",

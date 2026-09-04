@@ -130,9 +130,9 @@ accent = "bright-blue"   # restyle every module that uses the role
   `icons = "unicode"`.
 - **Misaligned right edge** → the terminal renders some emoji one cell wide;
   use `icons = "unicode"` or override the offending glyph.
-- **`⟳` next to a value** → the cached value is past its TTL and a worker is
-  refreshing it; `✗` means the last refresh failed. `garnish doctor` shows the
-  error.
+- **`⟳` next to a value** → the cached value has not been refreshed for
+  `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
+  refresh failed. `garnish doctor` shows the error.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
 - **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`.
 
@@ -140,6 +140,7 @@ accent = "bright-blue"   # restyle every module that uses the role
 
 stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[line]]` renders
 its modules → frame joins left/right groups and fills to `$COLUMNS` → stdout.
-Cached modules read one small file each; when it is stale the tick renders it
-dimmed and spawns `garnish refresh` in its own process group to recompute it.
+Cached modules read one small file each; when it is past its TTL the tick
+spawns `garnish refresh` in its own process group to recompute it and keeps
+showing the last value, dimmed only once it is `stale_after` TTLs overdue.
 Warm tick budget: under 3 ms.

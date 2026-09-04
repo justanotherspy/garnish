@@ -20,7 +20,7 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 
 | icons | render |
 |---|---|
-| `nerd` | `󰚩 Opus` |
+| `nerd` | ` Opus` |
 | `unicode` | `◆ Opus` |
 | `emoji` | `🤖 Opus` |
 | `ascii` | `Opus` |
@@ -48,7 +48,7 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `model` | `U+F06A9` | `◆` | `🤖` | `` | Model icon. |
+| `model` | `U+EB08` | `◆` | `🤖` | `` | Model icon. |
 | `fast` | `U+F0E7` | `⚡` | `⚡` | `!` | Fast mode. |
 | `thinking` | `U+F0EB` | `⋯` | `💭` | `~` | Extended thinking. |
 

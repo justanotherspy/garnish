@@ -11,6 +11,8 @@ color = "auto"
 truncate = true
 # Stale cached values: dim | hide | plain
 stale_style = "dim"
+# TTL periods a cached value may be overdue before it is styled stale (>= 1).
+stale_after = 5
 # Cells subtracted from the width (mirror statusLine.padding).
 padding = 0
 
@@ -264,7 +266,7 @@ hide_when_empty = true
 # show_thinking = false
 [modules.model.icons]
 # model — Model icon.
-model = "󰚩"
+model = ""
 # fast — Fast mode.
 fast = ""
 # thinking — Extended thinking.

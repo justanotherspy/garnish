@@ -155,3 +155,37 @@ it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
   first macOS run failed: `worker_first_tick…` and `cache_live_lock…`
   asserted the Linux-only `--lock-held` hand-over; both rewritten to be
   platform-neutral (live locks are written by the test itself).
+- **2026-09-04 (night, 2)** — The VM was restored from a corrupt snapshot;
+  the uncommitted `ci-annotate.sh` work survived and was committed. Checked
+  CI on `main`: Linux green, macOS still failing at `make check` (exit 2)
+  with **no** annotations, because `ci-annotate.sh` used GNU-only `sed`/`\s`
+  on the BSD userland. The script is now portable and ships the log tail
+  when nothing matches, so the next macOS failure is readable. Pins refreshed
+  (`taiki-e/install-action` v2.87.5; checkout, rust-cache, upload-artifact
+  already latest); Renovate already on `config:best-practices`. New working
+  rules in `CLAUDE.md`: branch + PR workflow, commit and push before every
+  checkpoint, checkpoint often. The PR's macOS run then showed two real
+  failures: the install test compared `/var` against `/private/var`
+  (canonicalised now) and the 32-tick test asserted the Linux-only lock
+  hand-over (platform-aware now); the annotate script also missed nextest's
+  coloured `FAIL` lines and its new `stdout ───` block format, so it now
+  strips ANSI first and anchors each panic to `file:line`.
+  Status line feedback from Daniel: (1) the model icon `󰚩` (U+F06A9, Nerd
+  Fonts v3 only) showed as a box → `` (nf-cod-hubot, U+EB08); (2) the
+  `sync` fetch age dimmed every fifth tick because its 5 s TTL expired →
+  new top-level `stale_after` (default 5 TTLs, SPEC § 3.6): a value past its
+  TTL spawns the worker but renders unchanged until it is that overdue;
+  (3) right side cut with `…` → not reproducible in garnish (the right
+  group is never truncated); Claude Code renders each row with Ink
+  `wrap="truncate"`, so the row must be wider than the harness's box;
+  workaround `padding = N`, root cause still open. GitHub attribution: the
+  hey.com commit email maps to another account, so `user.email` is now the
+  justanotherspy noreply address; the signing key is registered only as an
+  auth key, so signatures show `unknown_key` until it is added as a signing
+  key. The second macOS run found one more `/private/var` comparison
+  (`git::tests::linked_worktrees_and_detached_heads`) and terminated both
+  400-render matrices at 60 s; they now fan out with rayon (golden 3.4 s →
+  1.2 s locally) and get a 180 s budget in `.config/nextest.toml`. The
+  branch was squashed into one signed commit under the justanotherspy
+  identity at Daniel's request. Next: register the signing key (needs the
+  `admin:ssh_signing_key` gateway scope or a manual upload), merge PR #5.

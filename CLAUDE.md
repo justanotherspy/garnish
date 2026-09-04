@@ -9,12 +9,25 @@ how to work here. Read it, then read `PLAN.md` for where things stand.
 1. Read `PLAN.md` → find the first unchecked item in the current phase.
 2. Work in small commits; run `make check` before every commit.
 3. Before ending a session: tick checkboxes in `PLAN.md`, append a dated entry
-   to its **Session log**, commit. Never leave the tree red.
-4. Create a sprite checkpoint after finishing **every** phase (not optional):
-   `sprite-env checkpoints create --comment "garnish: phase N done"`.
-5. No PRs. Work is local to `/home/sprite/repo/garnish`; `origin` is
-   `github.com/justanotherspy/garnish` (SSH key registered 2026-09-04).
-   Push `main` only when the user asks.
+   to its **Session log**, commit, push. Never leave the tree red.
+4. **Checkpoint often**, and **always commit and push before checkpointing**:
+   after every phase, after every review-fix batch, and after any hour of
+   work. A checkpoint of unpushed work is not a backup (the VM has already
+   been restored from a corrupt snapshot once, 2026-09-04). The sequence is
+   `make check` → `git commit -S` → `git push` →
+   `sprite-env checkpoints create --comment "garnish: <what landed>"`.
+5. **Branches and PRs.** `main` is protected (verified signatures, CI).
+   Work on a branch (`review/<date>`, `phase-N/<topic>`), push it, and open a
+   PR against `main` through the Sprites GitHub gateway
+   (`sprite-api-gateway` skill; `gh` is not authenticated here). Merge only
+   when the user asks. `origin` is `github.com/justanotherspy/garnish`
+   (SSH key registered 2026-09-04). Commits and tags are SSH-signed with
+   `~/.ssh/id_ed25519` (repo-local `gpg.format=ssh`, `commit.gpgsign=true`);
+   never commit with `--no-gpg-sign`. The commit email must be
+   `4822513+justanotherspy@users.noreply.github.com` (repo-local
+   `user.email`): the hey.com address belongs to a different GitHub account
+   and GitHub attributes commits by email. GitHub marks a signature verified
+   only when the key is registered as a *signing* key on that account.
 6. **Edit files with the Read/Edit/Write tools**, never with Bash heredocs,
    `sed`, or Python one-liners. Bash is for running commands (cargo, git,
    make), not for changing source. (Bash edits bypass the harness's file
@@ -200,7 +213,15 @@ a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - Autocompact fires at `effective_window − 13_000` tokens
   (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers it). Constant observed in the
   2.1.260 binary; configurable as `modules.context.compact_buffer_tokens`.
-- `COLUMNS`/`LINES` are set for the script; OSC 8 links and ANSI colors work.
+- `COLUMNS`/`LINES` are `process.stdout.columns`/`rows` (the full terminal);
+  OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
+  ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is
+  an Ink `<Text wrap="truncate">`, so a row wider than the harness's box is
+  cut with `…` on the right; garnish's top-level `padding` subtracts cells
+  to compensate when that happens.
+- Nerd icons must come from the BMP private-use area (U+E000–U+F8FF);
+  the Material Design range at U+F0000+ only exists in Nerd Fonts v3 and
+  renders as a box elsewhere.
 
 ## Cache and worker invariants (learned the hard way)
 

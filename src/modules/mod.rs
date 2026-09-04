@@ -87,6 +87,9 @@ pub struct Ctx<'a> {
     /// Whether repository discovery is allowed (off for docs and goldens, so
     /// fixture paths never touch a real repository or the cache).
     pub git: bool,
+    /// TTL periods a cached value may be overdue before it renders stale
+    /// (`stale_after`, ≥ 1).
+    pub stale_after: u32,
     /// The repository for the payload's directory, discovered at most once.
     pub dirs: std::cell::OnceCell<Option<crate::git::Dirs>>,
 }
@@ -114,10 +117,12 @@ impl Ctx<'_> {
     /// it, take the lock and spawn a detached worker.
     ///
     /// `valid` rejects an entry that was computed for a different situation
-    /// (another branch, another upstream); a rejected entry counts as stale.
-    /// A failed entry is honoured for its TTL too, so a broken git does not
-    /// spawn a worker on every tick. Returns the lookup plus the
-    /// [`Freshness`] the render should carry.
+    /// (another branch, another upstream); a rejected entry is overdue at
+    /// once. A failed entry is honoured for its TTL too, so a broken git does
+    /// not spawn a worker on every tick. Returns the lookup plus the
+    /// [`Freshness`] the render should carry: a value past its TTL still
+    /// renders [`Freshness::Fresh`] while the worker runs and only becomes
+    /// [`Freshness::Stale`] after `stale_after` TTLs (SPEC § 3.6).
     #[must_use]
     pub fn cached(
         &self,
@@ -127,7 +132,8 @@ impl Ctx<'_> {
     ) -> (Lookup, Freshness) {
         let ttl_ms = cfg.refresh.saturating_mul(1000);
         let mut lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
-        if lookup.entry.as_ref().is_some_and(|e| !valid(e)) {
+        let mismatched = lookup.entry.as_ref().is_some_and(|e| !valid(e));
+        if mismatched {
             lookup.fresh = false;
         }
         let failed = lookup.entry.as_ref().filter(|e| e.status == crate::cache::Status::Err);
@@ -138,7 +144,13 @@ impl Ctx<'_> {
         if !lookup.in_progress {
             self.spawn_refresh(cfg, scope);
         }
-        let freshness = failed.map_or(Freshness::Stale, |e| Freshness::Failed(e.error.clone()));
+        let grace_ms = ttl_ms.saturating_mul(u64::from(self.stale_after.max(1)));
+        let overdue = mismatched || lookup.entry.as_ref().is_none_or(|e| !e.is_fresh(grace_ms));
+        let freshness = match failed {
+            Some(e) => Freshness::Failed(e.error.clone()),
+            None if overdue => Freshness::Stale,
+            None => Freshness::Fresh,
+        };
         (lookup, freshness)
     }
 

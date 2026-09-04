@@ -131,6 +131,9 @@ pub struct Config {
     pub truncate: bool,
     /// Stale styling.
     pub stale_style: StaleStyle,
+    /// TTL periods a cached value may be overdue before it is styled stale
+    /// (≥ 1; SPEC § 3.6).
+    pub stale_after: u32,
     /// Extra horizontal padding subtracted from the width.
     pub padding: usize,
     /// Frame.
@@ -174,6 +177,7 @@ struct RawConfig {
     color: Option<ColorChoice>,
     truncate: Option<bool>,
     stale_style: Option<StaleStyle>,
+    stale_after: Option<u32>,
     padding: Option<u16>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
@@ -426,6 +430,8 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         }
     }
 
+    let stale_after = resolve_stale_after(raw.stale_after, errors);
+
     Config {
         preset,
         icons,
@@ -434,11 +440,26 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         color: raw.color.unwrap_or_default(),
         truncate: raw.truncate.unwrap_or(true),
         stale_style: raw.stale_style.unwrap_or_default(),
+        stale_after,
         padding: usize::from(raw.padding.unwrap_or(0)),
         frame,
         lines,
         modules,
     }
+}
+
+/// `stale_after`: TTL periods before an overdue value is styled stale.
+/// Zero is reported and clamped to one so rendering never divides the TTL away.
+fn resolve_stale_after(raw: Option<u32>, errors: &mut Vec<ConfigError>) -> u32 {
+    let stale_after = raw.unwrap_or(5);
+    if stale_after == 0 {
+        errors.push(ConfigError {
+            path: "stale_after".into(),
+            message: "must be at least 1 (TTL periods before a value is styled stale)".into(),
+            line: None,
+        });
+    }
+    stale_after.max(1)
 }
 
 fn resolve_frame(raw: Option<&RawFrame>, preset: TopPreset) -> FrameCfg {
@@ -708,6 +729,20 @@ mod tests {
         assert!(c.frame.fill);
         assert_eq!(c.modules.get("path").map(|m| m.int("depth")), Some(2));
         assert_eq!(c.width(Some(100)), 100);
+    }
+
+    #[test]
+    fn stale_after_defaults_to_five_and_rejects_zero() {
+        let (cfg, errors) = parse("", &schemas());
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(cfg.stale_after, 5);
+        let (cfg, errors) = parse("stale_after = 2\n", &schemas());
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(cfg.stale_after, 2);
+        let (cfg, errors) = parse("stale_after = 0\n", &schemas());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors.first().map(|e| e.path.as_str()), Some("stale_after"));
+        assert!(cfg.stale_after >= 1, "never zero, whatever the fallback");
     }
 
     #[test]

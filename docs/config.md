@@ -13,7 +13,8 @@ An invalid file never blanks the status line: garnish renders the defaults and a
 | `theme` | `garnish` \| `catppuccin-mocha` \| `nord` \| `dracula` \| `tokyonight` \| `mono` | `garnish` | Color palette (see below). |
 | `color` | `auto` \| `always` \| `never` \| `256` \| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set. |
 | `truncate` | bool | `true` | Truncate the left group when a line overflows `$COLUMNS`; the right group is never cut. |
-| `stale_style` | `dim` \| `hide` \| `plain` | `dim` | How cached values past their TTL are shown while a worker refreshes them. |
+| `stale_style` | `dim` \| `hide` \| `plain` | `dim` | How overdue cached values are shown. |
+| `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |
 | `padding` | integer | `0` | Cells subtracted from the width; mirror `statusLine.padding`. |
 
 ## `[colors]` — theme roles
