@@ -12,7 +12,9 @@ how to work here. Read it, then read `PLAN.md` for where things stand.
    to its **Session log**, commit. Never leave the tree red.
 4. Create a sprite checkpoint after finishing **every** phase (not optional):
    `sprite-env checkpoints create --comment "garnish: phase N done"`.
-5. No PRs, no pushes. Everything is local to `/home/sprite/repo/garnish`.
+5. No PRs. Work is local to `/home/sprite/repo/garnish`; `origin` is
+   `github.com/justanotherspy/garnish` (SSH key registered 2026-09-04).
+   Push `main` only when the user asks.
 6. **Edit files with the Read/Edit/Write tools**, never with Bash heredocs,
    `sed`, or Python one-liners. Bash is for running commands (cargo, git,
    make), not for changing source. (Bash edits bypass the harness's file
