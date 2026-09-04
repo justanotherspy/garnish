@@ -1,6 +1,7 @@
 //! Frames: the characters that join lines together, and the assembly of one
 //! output line from a left group, a right group and the frame rule.
 
+use itertools::Itertools;
 use serde::Deserialize;
 
 use crate::ansi::{Segment, Style, display_width, segments_width, truncate};
@@ -280,15 +281,13 @@ pub fn compose_line(
 /// Join module renders with a separator, skipping empty ones.
 #[must_use]
 pub fn join_modules(parts: &[Vec<Segment>], separator: &str, theme: &Theme) -> Vec<Segment> {
-    let sep = Segment::styled(separator, Style::fg(theme.role(Role::Muted)));
-    let mut out: Vec<Segment> = Vec::new();
-    for part in parts.iter().filter(|p| !p.is_empty()) {
-        if !out.is_empty() && !separator.is_empty() {
-            out.push(sep.clone());
-        }
-        out.extend(part.iter().cloned());
+    let sep = vec![Segment::styled(separator, Style::fg(theme.role(Role::Muted)))];
+    let non_empty = parts.iter().filter(|p| !p.is_empty());
+    if separator.is_empty() {
+        non_empty.flatten().cloned().collect()
+    } else {
+        Itertools::intersperse(non_empty, &sep).flatten().cloned().collect()
     }
-    out
 }
 
 #[cfg(test)]

@@ -300,7 +300,7 @@ cache dir, last worker errors, and a glyph test line.
 ## 8. Performance budget
 
 Measured with hyperfine (`bench/run.sh`, release build, `-N`, warmup 20,
-300 runs) and gated by `bench/check.py`:
+300 runs) and gated by `bench/check.sh` (jq over hyperfine's JSON):
 
 | scenario | mean | p99 |
 |---|---|---|
