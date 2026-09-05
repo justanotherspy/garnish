@@ -79,7 +79,8 @@ fn hostile_environment_is_tolerated() {
     for cols in ["0", "1", "5", "12", "abc", "-4", "100000", ""] {
         let (out, _, ok) = tick(PAYLOAD.as_bytes(), &[("COLUMNS", cols)], dir.path());
         assert!(ok, "COLUMNS={cols}");
-        let limit: usize = cols.parse::<usize>().map_or(120, |c| c.max(10));
+        // Claude Code's box is 4 cells narrower than COLUMNS (SPEC § 2.1); floor 10.
+        let limit: usize = cols.parse::<usize>().map_or(116, |c| c.saturating_sub(4).max(10));
         for line in out.lines() {
             assert!(width(line) <= limit, "COLUMNS={cols}: {line:?} is {} wide", width(line));
         }

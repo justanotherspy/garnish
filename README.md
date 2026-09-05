@@ -112,7 +112,10 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
   TOML path. A broken config never blanks the line; it falls back to the
   defaults and appends a dim `⚠ config: …` note.
 - **The right edge is cut with `…`**: Claude Code truncates rows wider than
-  its own box; set `padding = 1` (or more) in the config.
+  its own box, which is 4 cells narrower than the terminal plus 2 cells per
+  unit of `statusLine.padding`. garnish subtracts the 4 by itself; if you set
+  `statusLine.padding` in `settings.json`, set `padding` in the config to
+  twice that value.
 
 More in the guide's [troubleshooting section](docs/guide.md#7-troubleshooting).
 

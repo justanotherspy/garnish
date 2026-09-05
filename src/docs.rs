@@ -49,7 +49,8 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     let _ = writeln!(out, "stale_style = {}", toml_string(stale_name(cfg.stale_style)));
     c(&mut out, "TTL periods a cached value may be overdue before it is styled stale (>= 1).");
     let _ = writeln!(out, "stale_after = {}", cfg.stale_after);
-    c(&mut out, "Cells subtracted from the width (mirror statusLine.padding).");
+    c(&mut out, "Extra cells subtracted from the width, on top of the 4 Claude Code's box");
+    c(&mut out, "always takes; set 2 x statusLine.padding when that setting is non-zero.");
     let _ = writeln!(out, "padding = {}", cfg.padding);
     let _ = writeln!(out);
 
@@ -485,7 +486,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `padding` | integer | `0` | Cells subtracted from the width; mirror `statusLine.padding`. |"
+        "| `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |"
     );
 
     let _ = writeln!(

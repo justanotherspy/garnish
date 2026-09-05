@@ -138,7 +138,13 @@ accent = "bright-blue"   # restyle every module that uses the role
   `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
   refresh failed. `garnish doctor` shows the error.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
-- **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`.
+- **Right edge cut with `…`** → Claude Code's status line box is 4 cells
+  narrower than the terminal, plus 2 cells per unit of `statusLine.padding`.
+  garnish subtracts the 4 on its own; if `statusLine.padding` is set in
+  `settings.json`, set `padding` in the config to twice that value.
+- **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`
+  (the lines come out 96 cells wide: what fits in Claude Code's box at that
+  terminal width).
 
 ## 8. Under the hood
 
