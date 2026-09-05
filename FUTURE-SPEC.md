@@ -673,6 +673,343 @@ then code, then the adversarial review. When a phase is started, move its
 text out of this file into `SPEC.md` and delete it here, so this document
 shrinks to what is still undecided.
 
+---
+
+# Part II — Rust designs, translated from the Node implementation
+
+Part I says *what* to port and why. Part II records *how ccstatusline built
+each thing*, close enough to the code that a garnish phase can be planned
+from it without re-reading their repository, and what the Rust version
+should do differently. Every subsection ends with the garnish shape.
+
+## 11. Line composition: flex points, separators, merge, padding
+
+### 11.1 How ccstatusline composes a line (`renderStatusLine`, `src/utils/renderer.ts`)
+
+1. **Pre-render once.** Every widget of every line is rendered to plain text
+   first (`preRenderAllWidgets`); layout decisions use these strings, so a
+   widget is never rendered twice and empty widgets are known before
+   separators are placed.
+2. **Manual separators collapse.** A `separator` item is kept only if some
+   widget *before it in the same flex part* rendered content; walking back,
+   a run of default "spacing" separators is replaced by the manual one, and
+   an empty widget in between is skipped unless it is merged into the one
+   before it. Trailing separators are popped. When the width is unknown, a
+   spacing separator next to a flex point is dropped too.
+3. **Default separator insertion.** Between consecutive elements unless one
+   of them is a flex point or the previous widget has `merge` set. With
+   `inheritSeparatorColors` the separator takes the previous widget's fg/bg,
+   bold and dim.
+4. **Padding.** `defaultPadding` (a string, usually one space) is split by
+   `defaultPaddingSide` into leading/trailing pieces; a widget with a
+   background paints its padding in that background; `merge = "no-padding"`
+   drops the padding between the merged pair.
+5. **Flex distribution.** The element list is split at flex points into
+   parts; `total = width − Σ visible(part)`, `per = ⌊total / n⌋`,
+   `extra = total mod n`; the first `extra` gaps get one more cell. Without a
+   known width a flex renders as a gray ` | `.
+6. **Truncate** the finished string to the width with an ANSI/OSC-aware
+   `…`, then apply a whole-line gradient if a gradient foreground override is
+   set (after truncation so the trailing reset survives).
+
+### 11.2 garnish shape
+
+garnish already has steps 1, 2 (via `hide_when_empty` collapse), 4 and 6 in
+`frame.rs`/`render.rs` for two groups. The generalisation:
+
+```rust
+/// One run of modules between flex points. `Left`/`Center`/`Right` today;
+/// a `Vec<Group>` of any length is the same algorithm.
+struct Group { segments: Vec<Rendered>, align_columns: Vec<usize> }
+
+fn distribute(width: usize, groups: &[Group]) -> Vec<usize> {
+    let used: usize = groups.iter().map(Group::width).sum();
+    let Some(gaps) = NonZeroUsize::new(groups.len().saturating_sub(1)) else {
+        return Vec::new();
+    };
+    let total = width.saturating_sub(used);
+    let (per, extra) = (total / gaps, total % gaps);   // NonZero: no panic path
+    (0..gaps.get()).map(|i| per.saturating_add(usize::from(i < extra))).collect()
+}
+```
+
+Overflow keeps the `SPEC.md` § 4 rule (drop the fill, cut the left group,
+never the right); with a center group the cut order is left, then center.
+Their `merge` becomes a per-module `glue = true` in garnish ("no separator
+after me; with `glue = "tight"` no padding either"), which is also how a
+`text.<name>` label can sit flush against the module it labels. Their
+`merge-target-hidden` hide state ("a decorative item hides when the widget
+it is glued to hides") is the missing half of garnish § 3.7 text modules:
+`hide_with = "pr"` on a text module makes a label vanish with its module.
+
+## 12. Powerline segments: the painter algorithm
+
+### 12.1 Their algorithm (`renderPowerlineStatusLine`)
+
+Inputs per line: the rendered widgets (separators filtered out; flex points
+kept as positions), the theme's `fg[]`/`bg[]` arrays for the current color
+level, `separators[]` with a parallel `separatorInvertBackground[]`,
+`startCaps[]`, `endCaps[]`, `autoAlign`, `continueThemeAcrossLines`, and
+three counters carried across lines: separator index, theme color index,
+start-cap slot index.
+
+1. **Elements.** For each rendered widget: pad the text (respecting
+   `no-padding` merges), pick `fg = widget.color ?? default`, `bg =
+   widget.backgroundColor`; if a theme is active, `fg/bg = theme[idx mod
+   len]`, and `idx` advances only when the widget does **not** merge with
+   the next one, so a merged pair shares a color. A widget that preserves
+   its own colors keeps its fg but still takes the theme bg.
+2. **Flex bookkeeping.** Flex points are counted against *rendered*
+   elements (an empty widget must not move a flex slot). Each flex starts a
+   new "segment offset", which selects the next start/end cap in the cap
+   arrays.
+3. **Auto-align.** Element *k* (merged runs count as one) is padded on the
+   right to the pre-computed column width; an element flagged
+   `excludeFromAutoAlign` stops alignment for the rest of the line.
+4. **Emission.** For each element: optional start cap painted `fg =
+   bgToFg(element.bg)` with no background; then `SGR 1`/`SGR 2` if bold/dim,
+   fg code, bg code, text (parens-dim applied if `dim = "parens"`), then
+   `\x1b[49m\x1b[39m` and an intensity reset chosen so bold survives up to
+   the separator (`\x1b[22;1m` when dim+bold and a separator or end cap
+   follows). Then either an end cap + flex sentinel(s) or a **separator**:
+   - normal: `fg = bg(this)`, `bg = bg(next)`; if both backgrounds are
+     equal, `fg = fg(this)` instead so the glyph stays visible;
+   - inverted (`separatorInvertBackground[i]`): `fg = bg(next)`,
+     `bg = bg(this)`; same-bg case uses `fg(next)`;
+   - only one side has a background: paint the glyph in that background's
+     color as foreground, no background;
+   - after the glyph, `\x1b[22m` if the element was bold or dim.
+   The separator glyph index is `(globalOffset + local) mod len`.
+5. **End cap** after the last element unless a flex follows it (the flex
+   already emitted one). Flex sentinels are then split and spaced exactly
+   as in § 11.1 step 5, the line is truncated to width, and a
+   `chalk.reset('')` is appended.
+6. **Cross-line state** after a line is printed: separator index advances
+   by the separators actually emitted, the theme index by the number of
+   color-consuming elements (only if `continueThemeAcrossLines`), the cap
+   slot index by the number of segments on the line.
+
+Enabling Powerline in their TUI rewrites the config (`buildEnabledPowerlineSettings`,
+`src/utils/powerline-settings.ts`): default padding becomes `" "`, every
+manual separator is removed, theme defaults to `nord-aurora`; fonts are
+detected by scanning font directories for names matching
+`/powerline|nerd font|meslo.*lg|cascadia.*code.*pl|fira.*code.*nerd/i` and
+by `fc-list | grep -i powerline`, with an offer to clone
+`powerline/fonts` and run its `install.sh` (`src/utils/powerline.ts`).
+
+### 12.2 Their theme table (truecolor level; MIT, ccstatusline `src/utils/colors.ts`)
+
+Each theme is five `(fg, bg)` pairs cycled per segment; 16- and 256-color
+variants are hand-picked in the source. garnish can derive the 256 level
+with the mapper in § 13.3 and keep only a hand-picked 16-color row.
+
+| theme | bg₁ | bg₂ | bg₃ | bg₄ | bg₅ | fg rule |
+|---|---|---|---|---|---|---|
+| nord | `88C0D0` | `4C566A` | `5E81AC` | `B48EAD` | `A3BE8C` | dark on light, `D8DEE9`/`FDF6E3` on dark |
+| nord-aurora (default) | `BF616A` | `EBCB8B` | `5E81AC` | `A3BE8C` | `B48EAD` | `ECEFF4` on red, `2E3440` on the rest, `FDF6E3` on blue |
+| monokai | `A6E22E` | `49483E` | `E6DB74` | `AE81FF` | `66D9EF` | `272822`, `F8F8F2` on the gray |
+| solarized | `268BD2` | `B58900` | `586E75` | `2AA198` | `EEE8D5` | `073642`, `FDF6E3` on the gray |
+| minimal | `585858` | `D0D0D0` | `1A1A1A` | `A8A8A8` | `303030` | white/black alternating |
+| dracula | `BD93F9` | `F8F8F2` | `FF5555` | `8BE9FD` | `44475A` | `282A36`, `F8F8F2` on the last |
+| catppuccin | `CBA6F7` | `45475A` | `A6E3A1` | `F38BA8` | `585B70` | `1E1E2E`, `CDD6F4` on the grays |
+| gruvbox | `CC241D` | `FABD2F` | `A89984` | `458588` | `98971A` | `EBDBB2`/`FDF6E3` on red/blue, `282828` elsewhere |
+| onedark | `61AFEF` | `3E4452` | `98C379` | `E06C75` | `E5C07B` | `282C34`, `ABB2BF` on the gray |
+| tokyonight | `7AA2F7` | `D5D6DB` | `BB9AF7` | `E0AF68` | `7DCFFF` | `1A1B26` throughout |
+
+garnish already ships catppuccin-mocha, nord, dracula and tokyonight as
+foreground themes; a `[segments]` palette per theme is five extra pairs in
+`theme.rs`, not a new theme system.
+
+### 12.3 garnish shape
+
+```rust
+/// Painted per line after modules rendered; pure function of its inputs.
+struct SegmentPlan<'a> {
+    parts: Vec<Vec<Seg<'a>>>,      // split at flex points
+    palette: &'a [(Rgb, Rgb)],     // (fg, bg) cycled per color-consuming segment
+    seps: &'a [SepGlyph],          // { glyph: &str, invert: bool }
+    caps: Caps<'a>,                // start/end arrays cycled per part
+    carry: &'a mut Carry,          // sep_idx, theme_idx, cap_idx across lines
+}
+fn separator(prev: &Seg, next: &Seg, g: &SepGlyph) -> Ansi { /* § 12.1 step 4 */ }
+```
+
+Differences worth making: (a) alignment reuses garnish's `align` columns
+rather than a second `autoAlign`; (b) the "same background" rule should
+pick a contrasting fg from the theme (their `fg(this)`) — keep it; (c)
+garnish knows the exact width, so the flex split happens before painting
+and the sentinel trick is unnecessary; (d) `hide_when_empty` removes the
+segment *and* its palette slot, so colors do not shift when a module hides
+(theirs advances the theme index only for rendered elements, which is the
+same behaviour; keep it); (e) `color = never`/`mono` renders segments as
+plain text with the frame separator, never as unreadable same-color blocks.
+Output cost: two SGR sequences and two resets per segment, about 40 bytes;
+a 4-line, 16-module layout adds ~1 KB per tick. Within budget, but pin it
+in `bench/`.
+
+## 13. Gradients
+
+### 13.1 Grammar and presets (`src/utils/gradient.ts`)
+
+`gradient:<name>` | `gradient:<stop>-<stop>[-…]` | `gradient:<stop>,<stop>[,…]`
+where a stop is `RRGGBB`, `#RRGGBB` or `hex:RRGGBB`; the delimiter is `,`
+if the body contains one, else `-`; fewer than two valid stops → not a
+gradient. Presets (from gradient-string, MIT, re-expressed as explicit
+stops because interpolation is OKLab rather than an HSV hue spin):
+
+| name | stops |
+|---|---|
+| atlas | `feac5e c779d0 4bc0c8` |
+| cristal | `bdfff3 4ac29a` |
+| teen | `77a1d3 79cbca e684ae` |
+| mind | `473b7b 3584a7 30d2be` |
+| morning | `ff5f6d ffc371` |
+| vice | `5ee7df b490ca` |
+| passion | `f43b47 453a94` |
+| fruit | `ff4e50 f9d423` |
+| instagram | `833ab4 fd1d1d fcb045` |
+| retro | `3f51b1 5a55ae 7b5fac 8f6aae a86aa4 cc6b8e f18271 f3a469 f7c978` |
+| summer | `fdbb2d 22c1c3` |
+| rainbow | `ff0000 ffff00 00ff00 00ffff 0000ff ff00ff ff0000` |
+| pastel | `aee9d8 cdeeb0 f6f0a8 f7c8a8 f3aecb c3b6f0 aee9d8` |
+
+### 13.2 Sampling and application
+
+- sRGB → linear (`c ≤ 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4`) → OKLab
+  (Björn Ottosson's matrices; the inverse is the `4.0767416621 …` matrix in
+  their source) → interpolate `L, a, b` linearly between the two bracketing
+  stops: `scaled = t·(n−1)`, `lower = min(n−2, ⌊scaled⌋)`, `frac = scaled −
+  lower` → back to sRGB, clamped.
+- Per widget: one SGR per **non-whitespace** code point; whitespace passes
+  through and does not consume a step; CSI/OSC sequences pass through
+  untouched; the sweep restarts at `t = 0` per widget. Per line: the sweep
+  spans the visible cells of the whole line (walking display clusters), and
+  is applied after truncation.
+- ansi16 → no gradient (first stop or plain). Powerline mode → background
+  collapses to the first stop; a foreground gradient may still sweep across
+  all non-color-preserving segments (`powerlineGradientWidth`).
+- Their known limitation: the per-widget path walks code points, so a ZWJ
+  emoji gets several steps and inert codes on zero-width joiners.
+
+### 13.3 xterm-256 mapping
+
+```text
+gray (r == g == b):  r < 8 → 16;  r > 248 → 231;  else 232 + round((r − 8) / 247 · 24)
+else:                16 + 36·round(r/255·5) + 6·round(g/255·5) + round(b/255·5)
+```
+
+### 13.4 garnish shape
+
+`theme.rs` gains `enum Paint { Solid(Rgb), Gradient(Vec<Rgb>) }` wherever a
+role or module color is resolved; `ansi.rs` gains
+`paint_gradient(text, stops, level)`. Do better than their limitation
+without a new crate: step the gradient per **cell**, using `unicode-width`
+— a zero-width code point (ZWJ, variation selector, combining mark) gets no
+SGR and no step, a wide glyph consumes two steps, so the sweep is uniform in
+terminal cells. `color = 256` maps each sample with § 13.3; `mono` and
+ansi16 fall back to the role's solid color. Keys: any color value may be a
+gradient string; `[line].gradient = "<spec>"` sweeps the line. Docs list
+the presets from a `GRADIENT_PRESETS` table so `garnish docs` stays the
+source of truth.
+
+## 14. Number formats and dim-parens
+
+- Kinds: `tokens | speed | percent | memory | cost`; style `precise |
+  compact | whole`; optional `decimals`. Resolution order: global per-kind
+  → per-widget → the widget's own baseline (percent 1 decimal, context bar
+  0, cost 2). `compact` trims trailing zeros (`512.0 → 512`, `5.2 → 5.2`);
+  `whole` forces 0 decimals. The TUI cycles precise → compact → whole with
+  `.`.
+- `dim = "parens"` dims every `(...)` span: `\x1b[2m(...)\x1b[22m`, re-asserting
+  bold with `\x1b[22;1m` when the surrounding text is bold, because SGR 22
+  clears both.
+
+garnish shape: `num.rs` gets `struct NumFormat { style, decimals }` and a
+`[format]` table with those five kinds; module schemas declare which kind
+each number is so docs can say what `format.tokens` affects. `dim =
+"parens"` is a segment-level flag: garnish already knows which segments are
+"detail" (the full-preset extras), so dim those segments rather than regex
+over the rendered text.
+
+## 15. Hide states
+
+Observed vocabulary and where it applies (`getHideableStates` across
+`src/widgets/`, shared constants in `src/widgets/shared/hideable.ts`):
+
+| key | meaning | widgets |
+|---|---|---|
+| `no-git` / `no-jj` | not in a repo | every git/jj widget |
+| `no-remote`, `no-upstream` | remote or upstream missing | origin/upstream widgets, ahead/behind |
+| `not-fork` | repo is not a fork | is-fork, upstream owner |
+| `no-data` | source unavailable | usage, speed, PR/MR, CI checks, block timer |
+| `zero` | count is zero | tokens, file counts, conflicts, changes, ahead/behind, cost `$0.00`, timer under 1 min |
+| `empty` | nothing observed yet | cache activity, skills |
+| `disabled` | feature off | extra usage |
+| `default-value` | value equals the default | output style |
+| `merge-target-hidden` | glued decoration hides with its target | custom text / symbol |
+
+Storage: `metadata.hide = "a,b,c"`; absent means "widget defaults"; the
+editor writes the key only when the enabled set differs from the defaults,
+so untouched configs stay minimal. The v3→v4 migration folded older
+per-widget booleans (`hideNoGit`, …) into this list.
+
+garnish shape: `ModuleSchema.hide_states: &[HideState { key, doc, default }]`
+per module; config `hide = ["no_upstream", "zero"]` (snake_case, validated
+by `config check`, listed by `garnish docs`); `hide_when_empty` stays as the
+alias for a module's `empty` state; `text.<name>.hide_with = "<module>"` is
+the `merge-target-hidden` equivalent.
+
+## 16. Per-module option vocabulary (from the editor keybinds)
+
+Every option ccstatusline exposes per widget, mapped to a garnish key. Most
+exist already; the rest are the A-tier keys in Part I.
+
+| their key | option | garnish |
+|---|---|---|
+| `p` progress toggle | bar `none → slider (+%) → slider-only`, or long/short bar (32/16 cells) | `bar = "blocks" \| "line"`, `width` (have) |
+| `v` invert fill | show remaining instead of used | `show = "remaining"` (have on bars) |
+| `u` used/remaining | same for usage widgets | same |
+| `s` short time | compact durations | `durations` (have) |
+| `t` timestamp | absolute reset time instead of countdown | `reset = "countdown" \| "absolute"` (A10) |
+| `z`/`l`/`h`/`w` | timezone, locale, 12/24 h, weekday for absolute times | `[time] tz, hour12, weekday` shared by `clock` and the usage modules (jiff) |
+| `t` time cursor | `│` at elapsed position on the slider | `cursor = true` (A10) |
+| `f` format / `.` precision | number style | `[format]` (A6) |
+| `n` nerd font | per-widget glyph set | `icons` (have, per set) |
+| `g` glyph, symbol override | replace the widget's symbol | `icons.<slot>` (have) |
+| `l` limit | show the limit value next to used | `show_limit = true` on `spend`/extra usage |
+| `h` hours only | block timer shows hours | `durations` handles |
+| `h` history toggle | 48 h incident strip | C3 |
+| `t` turn/session | cache scope | garnish `cache` is payload-scoped; n/a |
+| `t` ttl | show the cache TTL badge | have |
+| `w` window | speed rolling window seconds | C1 |
+| `w` width | bar width | `width` (have) |
+| `s` segments, `f` fish style, `h` home `~` | path display | A7 |
+| `l` link to repo / IDE, `u` url | OSC 8 links | A8 |
+| `o` owner only when fork | upstream owner display | B2 (`show = ["owner"]`) |
+| `v` view last/count/list, `t` tokens reclaimed, `s` split by trigger | compaction counter views | C1 |
+| `z` zero conflicts display | show `0` or hide | `hide = ["zero"]` (A4) |
+| `e` edit text / edit cmd, `t` timeout, `p` preserve colors | custom text / command | `text.<name>` (have); command: out |
+| `r` raw value, `m` merge, `x` exclude align, `h` hide… | item-level | `label = ""`, `glue`, `align_stop`, `hide` |
+
+## 17. Output and lifecycle tricks
+
+- **Row prefix `\x1b[0m`** (A1) — the harness wraps rows in `dimColor`.
+- **NBSP** — every space becomes U+00A0 before printing so VS Code's
+  terminal keeps trailing padding; verify before adopting (§ 5.4).
+- **One-shot notices.** `settings.updatemessage = { message, remaining }`
+  prints a line under the status line for `remaining` renders (decrementing
+  each time), used after installs. garnish equivalent: a `<cache>/notice`
+  file `{text, ticks_left}` written by `install`, `config migrate` or a
+  version change, printed as a dim extra row and decremented per tick.
+- **Config-error badge.** On an unparseable settings file the line renders
+  from in-memory defaults with a red `⚠ invalid config` prefix, and the file
+  is never overwritten. garnish already has the `⚠ garnish:` row; add the
+  "never overwrite" sentence to `SPEC.md` § 5.
+- **Needs-based work.** `renderMultipleLines` computes transcript analysis,
+  usage prefetch and status prefetch only when a configured widget needs
+  them. garnish's worker model already has this shape; C1–C3 workers must
+  spawn only when their module is configured on some line.
+
 ## Appendix — where to look in ccstatusline (commit 016be1f)
 
 | topic | files |
