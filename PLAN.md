@@ -195,9 +195,9 @@ README/guide, adversarial review, tests for every bug found.
 
 ## Phase 18 — Bundled skills (SPEC § 13)
 
-- [ ] `skills/garnish-statusline/SKILL.md`: interactive config builder (terminal/font → icons, width → preset, priorities → lines, theme, frame, align/durations, free-text wish), previews with `garnish preview`, writes with `config init --force`, validates
-- [ ] `skills/garnish-feedback/SKILL.md`: `gh issue create` with terminal app + version, font, OS, `garnish --version`, `config show`, `doctor`, the plain render, and a screenshot request; labels `feedback` (+ `alignment`)
-- [ ] `skills/garnish-submit-preset/SKILL.md`: asks name/summary/columns/needs/author, renders and validates, opens a `preset` issue with the § 12 header
+- [x] `skills/garnish-statusline/SKILL.md`: interactive config builder (terminal/font → icons, width → preset, priorities → lines, theme, frame, align/durations, animation, free-text wish), starts from a gallery preset when one fits, previews with `garnish preview` (a sample payload is embedded for installs without the repository), writes, validates; never touches `settings.json` itself
+- [x] `skills/garnish-feedback/SKILL.md`: `gh issue create` with terminal app + version, font, OS, `garnish --version`, `config show`, `doctor` (glyph grid kept whole), the plain render, and a screenshot request; labels `feedback` (+ `alignment`)
+- [x] `skills/garnish-submit-preset/SKILL.md`: asks name/summary/columns/needs/author, builds the § 12 header, validates and renders at the declared width (no `…`, rows inside the box), opens a `preset` issue asking for a screenshot; README "Skills" section and guide § 9
 - [ ] `garnish skills install [--dir D] | list`; skills embedded with `include_str!`; `garnish install` runs it unless `--no-skills`; README/guide section; an integration test that `install` writes the three directories
 - [ ] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`) and the `feedback`, `alignment`, `preset` labels
 

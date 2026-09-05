@@ -227,3 +227,23 @@ Cached modules read one small file each; when it is past its TTL the tick
 spawns `garnish refresh` in its own process group to recompute it and keeps
 showing the last value, dimmed only once it is `stale_after` TTLs overdue.
 Warm tick budget: under 3 ms.
+
+## 9. Skills
+
+garnish ships three Claude Code skills (`skills/<name>/SKILL.md`, embedded in
+the binary and written to `~/.claude/skills/<name>/` by `garnish install` or
+`garnish skills install [--dir D]`; `garnish skills list` shows them):
+
+- `garnish-statusline` — an interactive config builder: it asks about your
+  terminal and font, width, what matters most, colours, frame and alignment,
+  writes the config, previews it and validates it. It never edits
+  `settings.json` beyond what `garnish install` does.
+- `garnish-feedback` — files a GitHub issue on `justanotherspy/garnish` with
+  the environment, `garnish config show`, `garnish doctor` (glyph grid
+  included) and the plain rendered line, labelled `feedback` (and
+  `alignment` for width problems), and asks for a screenshot.
+- `garnish-submit-preset` — proposes your config as a gallery preset: name,
+  summary, designed width, requirement and author, the file with its gallery
+  header, a rendered sample checked to fit, an issue labelled `preset`.
+
+Invoke them from Claude Code by name once installed.
