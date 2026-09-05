@@ -137,17 +137,47 @@ test.
 - [ ] Item 4 (guide): explain that aligned columns pair positionally, so a `–` placeholder under a wide bar gets a wide blank column
 - [ ] Tour follow-up: the `garnish doctor` glyph test should render every set through the real width code and print the expected cell count per glyph so a mismatch report can be pasted into a feedback issue
 
-## Phase 13 — Layout features from the walkthrough (SPEC § 4.1)
+Phases 13–18 implement the spec changes of 2026-09-05, one phase per spec
+section, in dependency order: the clock-driven `frame`/offset rule (Phase
+15) is shared by the ticker, text modules and animations, so it lands
+first among the moving parts. Each phase follows the phase protocol in
+`CLAUDE.md`: spec re-read, schema → render → `make docs` → goldens →
+README/guide, adversarial review, tests for every bug found.
+
+## Phase 13 — Alignment and line keys (SPEC § 4.1)
 
 - [ ] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output; test both on the two-line alignment config
-- [ ] Intentional empty lines: `modules = []` with no `right` is a spacer row that `hide_empty_lines` never drops; docs sample
-- [ ] `overflow = "ticker"` with `ticker_step` and `ticker_gap`: stateless scroll window derived from the tick clock, wraps around, right group untouched; golden at two `GARNISH_NOW` values shows the shift; document the 1 s minimum cadence
-- [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`)
-- [ ] Text modules (SPEC § 3.7, Daniel's idea 2026-09-05): `[modules.text.<name>]` with `text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, `color`; ids `text.<name>` on any line; the scroller in `ansi.rs` shared with the line ticker; ANSI/control stripped from `text`; `config check` validates the table exists for every placed id; `garnish modules` and the docs list the family; goldens at two `GARNISH_NOW` values for `scroll` and `scroll-wrap`; CLAUDE.md's "module set is fixed" convention amended to "fixed, plus the text family"
-- [ ] Animation framework (SPEC § 4.2, Daniel's idea 2026-09-05): one `time::frame(now, step, period)` rule; `[frame] fill_pattern`/`fill_step`/`fill_direction` (dots travelling along the rule, width unchanged), `separator_frames`/`separator_step`, `<key>_frames` on any icon key with equal-width validation, the clock spinner re-expressed through it, `animate = false` and `GARNISH_ANIMATE=0` freeze at frame 0; goldens at two `GARNISH_NOW` values; bench unchanged
-- [ ] Each feature: schema/config → render → `make docs` → goldens → README/guide paragraph
+- [ ] `hide_empty_lines = true` (bug 11 lands here if Phase 12 did not): a line whose modules all rendered nothing is dropped; first/last caps follow the surviving lines; test with `pr-absent`
+- [ ] Intentional empty lines: `modules = []` with no `right` is a spacer row that `hide_empty_lines` never drops (empty framed row, or a blank row with `style = "none"`); docs sample
+- [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`); guide sentence on positional columns (item 4)
+- [ ] Goldens for each key; README and guide paragraphs
 
-## Phase 14 — Presets gallery (SPEC § 12)
+## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
+
+- [ ] Per-key fallback (bug 8): `parse_with` returns the resolved config with defaults substituted only for the bad values; wholesale fallback only on TOML syntax errors; the `⚠ config:` line unchanged; test: bad colour + custom frame keeps the frame, syntax error still falls back
+- [ ] `config check` exits 1 quietly on problems (bug 7): a `ConfigInvalid` error mapped to an `ExitCode` in `main`, no color-eyre report; same for `config init` refusing to overwrite; `tests/cli.rs` asserts stderr has no "Location:"
+- [ ] `garnish doctor` glyph test prints every set through the real width code with a marker column and the expected cell count per glyph (tour follow-up), so a mismatch can be pasted into a feedback issue
+- [ ] `config init --preset` accepts gallery names once Phase 17 exists (cross-reference)
+
+## Phase 15 — Clock-driven scrolling: line ticker and text modules (SPEC § 3.7, § 4.1 ticker)
+
+- [ ] `time::frame(now, step, period) -> usize`: the one stateless rule (`floor(now_secs × step) mod period`), with unit tests at the boundaries and for `step = 0.5`
+- [ ] `ansi::scroll(segments, width, offset, gap, wrap)`: window onto a segment list, ANSI-aware like `truncate`, `wrap = false` restarts at 0 after the end passes; property test that the window is always exactly `width` cells
+- [ ] `overflow = "truncate" | "ticker"` with `ticker_step`, `ticker_gap`: applied to the left group after alignment, right group untouched; golden at two `GARNISH_NOW` values shows the shift; `truncate = false` keeps meaning "hand the harness the whole row"
+- [ ] Text modules: `[modules.text.<name>]` (`text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, `color`, plus the common `label`/`prefix`/`suffix`), ids `text.<name>` on any line, resolved from the config rather than the fixed schema table; ANSI/control stripped from `text`; `config check` validates `justify`/`overflow`/`step` and that every placed id has a table; `garnish modules` and the generated reference list the family with one page; goldens at two `GARNISH_NOW` values for `scroll` and `scroll-wrap`
+- [ ] CLAUDE.md convention amended (done in the roadmap PR: "fixed, plus the text family"); presets: add `single-line-ticker` and a text-module example to `presets/`
+- [ ] Bench: the scroller runs only when a group overflows or a text module scrolls; warm tick unchanged
+
+## Phase 16 — Animation framework (SPEC § 4.2)
+
+- [ ] `animate` top-level key and `GARNISH_ANIMATE=0`; both freeze every animation at frame 0 (`time::frame` returns 0)
+- [ ] `[frame] fill_pattern`, `fill_step`, `fill_direction`: the rule is painted from the pattern at the clock offset; its width is still computed from the groups; with `animate = false` the pattern's frame 0 is used; `fill_char` stays the static case
+- [ ] `[frame] separator_frames`, `separator_step`: cycle per tick; validation rejects frames of unequal cell width; per-line `separator` overrides win
+- [ ] `<key>_frames` on any `[modules.<id>.icons]` key with equal-width validation; the `clock` spinner re-expressed as `spinner_frames` (default list unchanged, goldens byte-identical at frame 0)
+- [ ] Goldens at two `GARNISH_NOW` values for a pattern rule, an animated separator and an animated icon; docs render at frame 0 (`Clock::fixed()`), with a sentence saying so
+- [ ] Bench unchanged (frame lookup only); guide section "Animation" with the accessibility note; a `presets/animated-dots` entry
+
+## Phase 17 — Presets gallery (SPEC § 12)
 
 - [ ] `presets/` seeded with the walkthrough configs (in this PR: files with the `# name/summary/columns/needs` header)
 - [ ] `tests/presets.rs`: every file validates, renders without `…` at its declared width, name matches filename and is unique (in this PR: validation only)
@@ -156,7 +186,7 @@ test.
 - [ ] `presets/screenshots/<name>.png` convention and a README note on contributing one
 - [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary)
 
-## Phase 15 — Bundled skills (SPEC § 13)
+## Phase 18 — Bundled skills (SPEC § 13)
 
 - [ ] `skills/garnish-statusline/SKILL.md`: interactive config builder (terminal/font → icons, width → preset, priorities → lines, theme, frame, align/durations, free-text wish), previews with `garnish preview`, writes with `config init --force`, validates
 - [ ] `skills/garnish-feedback/SKILL.md`: `gh issue create` with terminal app + version, font, OS, `garnish --version`, `config show`, `doctor`, the plain render, and a screenshot request; labels `feedback` (+ `alignment`)
@@ -324,7 +354,9 @@ and user feedback. Pick from here when no phase is in progress.
   overflow), § 12 (a `presets/` gallery with a generated page, screenshots
   and eventually a website) and § 13 (three bundled skills:
   `garnish-statusline` config builder, `garnish-feedback` issue filer,
-  `garnish-submit-preset`), planned as Phases 13–15. This PR is
+  `garnish-submit-preset`), then text modules (§ 3.7) and the animation
+  framework (§ 4.2), planned as Phases 13–18, one per spec section in
+  dependency order. This PR is
   documentation plus the seed `presets/` files and a validation test;
   no behaviour changed. His live config at the end of the session is the
   eight-line step 7b layout; the pre-walkthrough full config is backed up

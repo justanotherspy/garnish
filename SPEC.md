@@ -206,7 +206,7 @@ renders dimmed with `✗` and the error is kept in the cache file for
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
 
-### 3.7 Text modules (target state; PLAN Phase 13)
+### 3.7 Text modules (target state; PLAN Phase 15)
 
 The 21 built-in modules stay the only ones that read the payload or run
 anything. **Text modules** are the one user-defined kind: a fixed string in
@@ -346,7 +346,7 @@ digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
 elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
 the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
 
-### 4.1 Layout keys decided on 2026-09-05 (target state; see PLAN Phase 13)
+### 4.1 Layout keys decided on 2026-09-05 (target state; PLAN Phase 13, ticker in Phase 15)
 
 These came out of the live config walkthrough with Daniel. They are part of
 the target design; the implementation status is in `PLAN.md`.
@@ -406,7 +406,7 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   non-zero counts carry the ahead/behind colours. The fetch-age hint has a
   space between its glyph and the age like every other module.
 
-### 4.2 Animation (target state; PLAN Phase 13)
+### 4.2 Animation (target state; PLAN Phase 16)
 
 Every animation in garnish is a pure function of the tick's clock: frame
 index or scroll offset = `floor(now_secs × step) mod period`. No state is
@@ -472,7 +472,7 @@ without an error report.
   `⚠ config: <path>:<line> <msg>`; only a TOML syntax error falls back to
   the built-in defaults wholesale. (Decided 2026-09-05: one bad colour used
   to discard the whole file, frame and lines included, which made a typo
-  look like a different program. Until PLAN Phase 12 lands, any error still
+  look like a different program. Until PLAN Phase 14 lands, any error still
   falls back wholesale.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
@@ -614,7 +614,7 @@ per-module render cost.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
   small terminals.
 
-## 12. Presets gallery (target state; PLAN Phase 14)
+## 12. Presets gallery (target state; PLAN Phase 17)
 
 The four built-in top-level presets stay the only ones compiled into the
 binary. Everything else is a **gallery preset**: a complete config file under
@@ -642,7 +642,7 @@ binary. Everything else is a **gallery preset**: a complete config file under
 - **Seed set.** The configs exercised in the 2026-09-05 walkthrough
   (`presets/` in this repository) are the first entries.
 
-## 13. Skills (target state; PLAN Phase 15)
+## 13. Skills (target state; PLAN Phase 18)
 
 Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
 in the repository, are embedded in the binary (`include_str!`) so a
