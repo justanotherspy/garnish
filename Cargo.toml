@@ -21,8 +21,8 @@ toml = "1.1.5"
 unicode-width = "0.2.2"
 
 [dev-dependencies]
-criterion = "0.8.2"
-tempfile = "3.27.0"
+criterion = "=0.8.2"
+tempfile = "=3.27.0"
 
 [[bench]]
 name = "tick"
