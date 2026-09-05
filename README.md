@@ -80,6 +80,18 @@ width  = 30
 Every module has `minimal` / `default` / `full` presets plus its own icons,
 colors and refresh interval. Put any module on any line, left or right.
 
+Two top-level keys keep a multi-line layout tidy: `align = true` pads every
+module column to the widest module in it, so the `│` separators stack
+vertically instead of drifting with each line's content, and
+`durations = "fixed"` prints timers as `9m00s` / `1h05m` instead of `9m` /
+`1h5m`, so they keep their width as they tick.
+
+```text
+╭─ ◆ Opus        │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────── ⠋ 16:00:00 ─╮
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d04h ───────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m       │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m00s ────────────────────────────╯
+```
+
 | group | modules |
 |---|---|
 | repo | `path` `branch` `sync` `worktree` `pr` |

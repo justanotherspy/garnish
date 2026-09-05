@@ -90,6 +90,8 @@ pub struct Ctx<'a> {
     /// TTL periods a cached value may be overdue before it renders stale
     /// (`stale_after`, ≥ 1).
     pub stale_after: u32,
+    /// How elapsed times and countdowns print (`durations`).
+    pub durations: crate::time::DurationStyle,
     /// The repository for the payload's directory, discovered at most once.
     pub dirs: std::cell::OnceCell<Option<crate::git::Dirs>>,
 }
@@ -99,6 +101,19 @@ impl Ctx<'_> {
     #[must_use]
     pub fn session_id(&self) -> &str {
         self.payload.session_id.as_deref().filter(|s| !s.is_empty()).unwrap_or("no-session")
+    }
+
+    /// A duration in the configured style (`8m20s` or `8m20s`/`9m00s`).
+    #[must_use]
+    pub fn duration(&self, total_secs: u64) -> String {
+        self.durations.format(total_secs)
+    }
+
+    /// Countdown from this tick's clock to an epoch-seconds instant in the
+    /// configured style, or `None` once passed.
+    #[must_use]
+    pub fn countdown(&self, until_epoch_secs: i64) -> Option<String> {
+        self.durations.countdown_at(until_epoch_secs, self.now.as_second())
     }
 
     /// The repository containing the payload's current directory, if any.

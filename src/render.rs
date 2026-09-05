@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::ansi::{ColorMode, Painter, Segment, Style, strip_ansi};
+use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width, strip_ansi};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
 use crate::frame::{Layout, compose_line, join_modules};
 use crate::icons::IconSet;
@@ -157,6 +157,7 @@ pub fn render_lines_at(
         settings_env: clock.settings_env.clone(),
         git: clock.git,
         stale_after: config.stale_after,
+        durations: config.durations,
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
@@ -168,19 +169,67 @@ pub fn render_lines_at(
         ellipsis: if config.icons == IconSet::Ascii { "..".into() } else { "…".into() },
     };
     let count = config.lines.len();
+    // Every line renders before any is composed: aligned columns need the
+    // widths of all lines.
+    let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
+        .lines
+        .iter()
+        .map(|line| {
+            (
+                render_group(&ctx, config, &line.left, stale),
+                render_group(&ctx, config, &line.right, stale),
+            )
+        })
+        .unzip();
+    if config.align {
+        align_columns(&mut lefts, false);
+        align_columns(&mut rights, true);
+    }
     config
         .lines
         .iter()
+        .zip(lefts.iter().zip(rights.iter()))
         .enumerate()
-        .map(|(i, line)| {
+        .map(|(i, (line, (left, right)))| {
             let sep = config.separator(line);
-            let left =
-                join_modules(&render_group(&ctx, config, &line.left, stale), sep, &config.theme);
-            let right =
-                join_modules(&render_group(&ctx, config, &line.right, stale), sep, &config.theme);
+            let left = join_modules(left, sep, &config.theme);
+            let right = join_modules(right, sep, &config.theme);
             compose_line(&layout, &config.theme, i, count, &left, &right)
         })
         .collect()
+}
+
+/// Pad module `k` of every group to the widest module `k` among the groups
+/// that have a module after it, so the separators after it fall on the
+/// same cell in every line (SPEC § 4). Left groups count from the left and
+/// pad on the right; right groups (`from_right`) count from the right end
+/// and pad on the left. A group's last module is never padded.
+fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool) {
+    let columns = groups.iter().map(Vec::len).max().unwrap_or(0);
+    for k in 0..columns {
+        let padded = |g: &Vec<Vec<Segment>>| g.len() > k.saturating_add(1);
+        let target = groups
+            .iter()
+            .filter(|g| padded(g))
+            .filter_map(|g| if from_right { g.iter().rev().nth(k) } else { g.get(k) })
+            .map(|m| segments_width(m))
+            .max();
+        let Some(target) = target else { continue };
+        for g in groups.iter_mut().filter(|g| padded(g)) {
+            let module = if from_right { g.iter_mut().rev().nth(k) } else { g.get_mut(k) };
+            let Some(module) = module else { continue };
+            let gap = target.saturating_sub(segments_width(module));
+            if gap == 0 {
+                continue;
+            }
+            let pad = Segment::plain(" ".repeat(gap));
+            if from_right {
+                module.insert(0, pad);
+            } else {
+                module.push(pad);
+            }
+        }
+    }
 }
 
 fn render_group(
@@ -290,6 +339,72 @@ mod tests {
             Some(80),
         );
         assert!(out.lines().last().unwrap().starts_with("! config:"), "{out}");
+    }
+
+    /// Cell at which `needle` starts in `line`.
+    fn column_of(line: &str, needle: &str) -> usize {
+        let at = line.find(needle).unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));
+        display_width(line.get(..at).unwrap())
+    }
+
+    #[test]
+    fn align_stacks_separators_and_never_pads_the_last_module() {
+        // Two lines whose first modules differ in width; the clock starts
+        // the second column on both, the lines module ends the right group.
+        let base = "icons = \"unicode\"\n[[line]]\nmodules = [\"model\", \"clock\"]\nright = [\"session\", \"lines\"]\n[[line]]\nmodules = [\"session\", \"clock\"]\nright = [\"model\", \"lines\"]\n";
+        let payload = fixture("subscription-full");
+        let plain = |text: &str| {
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+        };
+        let loose: Vec<String> = plain(base).lines().map(str::to_owned).collect();
+        // Top-level keys go before the [[line]] tables.
+        let aligned: Vec<String> =
+            plain(&format!("align = true\n{base}")).lines().map(str::to_owned).collect();
+        assert_eq!(loose.len(), 2, "{loose:?}");
+        assert_eq!(aligned.len(), 2, "{aligned:?}");
+        assert_ne!(
+            column_of(&loose[0], "16:00:00"),
+            column_of(&loose[1], "16:00:00"),
+            "without align the second column drifts: {loose:?}"
+        );
+        assert_eq!(
+            column_of(&aligned[0], "16:00:00"),
+            column_of(&aligned[1], "16:00:00"),
+            "{aligned:?}"
+        );
+        // Right group: the first module is padded on its left so the bar
+        // before `lines` sits on the same cell; `lines` itself is never padded.
+        let bar_before_lines = |l: &str| l.rfind(" │ ").map(|b| display_width(l.get(..b).unwrap()));
+        assert_eq!(bar_before_lines(&aligned[0]), bar_before_lines(&aligned[1]), "{aligned:?}");
+        assert!(aligned.iter().all(|l| l.ends_with("+156 −23 ─╯") || l.ends_with("+156 −23 ─╮")));
+        for l in &aligned {
+            assert_eq!(display_width(l), 76, "{l}");
+        }
+        // The default (align = false) render is untouched.
+        assert_eq!(plain(base), plain(&format!("align = false\n{base}")));
+    }
+
+    #[test]
+    fn fixed_durations_render_two_units() {
+        let (config, _) = config::parse("durations = \"fixed\"", &SCHEMAS);
+        let out = strip_ansi(&render_plain_at(
+            &fixture("subscription-full"),
+            &config,
+            Some(100),
+            &Clock::fixed(),
+        ));
+        assert!(out.contains("1h12m") && out.contains("8m20s"), "{out}");
+        assert!(out.contains("2h13m") && out.contains("3d04h"), "{out}");
+        let (config, _) = config::parse("", &SCHEMAS);
+        let out = strip_ansi(&render_plain_at(
+            &fixture("subscription-full"),
+            &config,
+            Some(100),
+            &Clock::fixed(),
+        ));
+        assert!(out.contains("3d4h"), "compact stays the default: {out}");
     }
 
     #[test]

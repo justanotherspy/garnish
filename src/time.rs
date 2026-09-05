@@ -3,6 +3,7 @@
 //! deterministic.
 
 use jiff::{Timestamp, tz::TimeZone};
+use serde::Deserialize;
 
 /// Environment variable that freezes the clock (epoch seconds or RFC 3339).
 pub const NOW_ENV: &str = "GARNISH_NOW";
@@ -98,18 +99,77 @@ pub fn compact_duration(total_secs: u64) -> String {
     }
 }
 
+/// Fixed-width duration such as `0m47s`, `9m00s`, `1h05m`, `3d04h`.
+///
+/// Always two units, the small one zero-padded to two digits, so a ticking
+/// value only changes width when the large unit gains a digit or the unit
+/// pair changes (`59m59s` → `1h00m`).
+#[must_use]
+pub fn fixed_duration(total_secs: u64) -> String {
+    let days = total_secs / 86_400;
+    let hours = (total_secs % 86_400) / 3_600;
+    let mins = (total_secs % 3_600) / 60;
+    let secs = total_secs % 60;
+    if days > 0 {
+        format!("{days}d{hours:02}h")
+    } else if hours > 0 {
+        format!("{hours}h{mins:02}m")
+    } else {
+        format!("{mins}m{secs:02}s")
+    }
+}
+
+/// How elapsed times and countdowns print (top-level `durations` key).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DurationStyle {
+    /// [`compact_duration`]: at most two units, a zero second unit dropped.
+    #[default]
+    Compact,
+    /// [`fixed_duration`]: two units always, the small one two digits wide.
+    Fixed,
+}
+
+impl DurationStyle {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Fixed => "fixed",
+        }
+    }
+
+    /// Format a duration in this style.
+    #[must_use]
+    pub fn format(self, total_secs: u64) -> String {
+        match self {
+            Self::Compact => compact_duration(total_secs),
+            Self::Fixed => fixed_duration(total_secs),
+        }
+    }
+
+    /// Countdown from an explicit instant to an epoch-seconds instant in
+    /// this style, or `None` once passed (renders pass the tick's clock so
+    /// a pinned clock pins the countdown too).
+    #[must_use]
+    pub fn countdown_at(self, until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
+        let remaining = until_epoch_secs.checked_sub(now_epoch_secs)?;
+        u64::try_from(remaining).ok().filter(|&r| r > 0).map(|r| self.format(r))
+    }
+}
+
 /// Countdown from [`now`] to an epoch-seconds instant, or `None` once passed.
 #[must_use]
 pub fn countdown(until_epoch_secs: i64) -> Option<String> {
     countdown_at(until_epoch_secs, now_secs())
 }
 
-/// Countdown from an explicit instant (renders pass the tick's clock so a
-/// pinned clock pins the countdown too).
+/// Compact countdown from an explicit instant; see
+/// [`DurationStyle::countdown_at`].
 #[must_use]
 pub fn countdown_at(until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
-    let remaining = until_epoch_secs.checked_sub(now_epoch_secs)?;
-    u64::try_from(remaining).ok().filter(|&r| r > 0).map(compact_duration)
+    DurationStyle::Compact.countdown_at(until_epoch_secs, now_epoch_secs)
 }
 
 /// Seconds elapsed since an epoch-seconds instant (zero when in the future).
@@ -132,6 +192,27 @@ mod tests {
         assert_eq!(compact_duration(7_200), "2h");
         assert_eq!(compact_duration(273_600), "3d4h");
         assert_eq!(compact_duration(86_400), "1d");
+    }
+
+    #[test]
+    fn fixed_durations_keep_two_units_and_two_digits() {
+        assert_eq!(fixed_duration(0), "0m00s");
+        assert_eq!(fixed_duration(47), "0m47s");
+        assert_eq!(fixed_duration(59), "0m59s");
+        assert_eq!(fixed_duration(60), "1m00s");
+        assert_eq!(fixed_duration(500), "8m20s");
+        assert_eq!(fixed_duration(3_599), "59m59s");
+        assert_eq!(fixed_duration(3_600), "1h00m");
+        assert_eq!(fixed_duration(4_320), "1h12m");
+        assert_eq!(fixed_duration(7_200), "2h00m");
+        assert_eq!(fixed_duration(86_399), "23h59m");
+        assert_eq!(fixed_duration(86_400), "1d00h");
+        assert_eq!(fixed_duration(273_600), "3d04h");
+        assert_eq!(DurationStyle::Fixed.format(60), "1m00s");
+        assert_eq!(DurationStyle::Compact.format(60), "1m");
+        assert_eq!(DurationStyle::Fixed.countdown_at(1_060, 1_000), Some("1m00s".into()));
+        assert_eq!(DurationStyle::Fixed.countdown_at(1_000, 1_000), None);
+        assert_eq!(DurationStyle::Fixed.name(), "fixed");
     }
 
     #[test]

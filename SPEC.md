@@ -221,6 +221,8 @@ truncate = true           # cut the left group when a line overflows; the right 
 stale_style = "dim"       # dim | hide | plain: how overdue cached values are shown
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
 padding = 0               # extra cells subtracted from the width, on top of the harness's 4; set 2 × statusLine.padding
+align = false             # pad each module column to the widest module in it across lines, so separators line up
+durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
@@ -270,6 +272,26 @@ rule fills the gap to the width `$COLUMNS − 4 − padding` (§ 2.1; never belo
 (ANSI-aware, `…`); never the right group. `--width` and `GARNISH_COLUMNS`
 stand in for `$COLUMNS` and get the same subtraction, so `preview` shows what
 Claude Code would show at that terminal width.
+
+Aligned columns (`align = true`): module *k* of a group, counted among the
+modules that rendered something (from the left in the left group, from the
+right end in the right group), is padded with spaces to the widest module *k*
+among the lines that have a module after it: the left group pads on the
+right, the right group on the left. A line's last module is never padded.
+The separators after column *k* then fall on the same cell in every line,
+so `│` bars stack vertically; bars only line up between lines that use the
+same `separator`. Padding happens before truncation and fill, so an
+over-wide line still loses its left group first. A column's width is the
+widest module in it, so a value growing by a cell only moves the bars when
+that module was already the widest.
+
+Durations (`durations`): `compact` prints at most two units and drops a zero
+second unit (`8m20s`, `9m`, `2h`, `3d4h`). `fixed` always prints two units
+with the small one zero-padded to two digits (`0m47s`, `9m00s`, `2h00m`,
+`3d04h`), so the width of a timer only changes when the large unit gains a
+digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
+elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
+the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, all reported with TOML paths.

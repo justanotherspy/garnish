@@ -16,6 +16,8 @@ An invalid file never blanks the status line: garnish renders the defaults and a
 | `stale_style` | `dim` \| `hide` \| `plain` | `dim` | How overdue cached values are shown. |
 | `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |
 | `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |
+| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |
+| `durations` | `compact` \| `fixed` | `compact` | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. |
 
 ## `[colors]` — theme roles
 
@@ -102,6 +104,22 @@ Every module color defaults to a role; override a role here to restyle every mod
 ```text
 ◆ Opus  ◫ ████████▍░░░░░░░░░░▏ 42%                     ⠋ 16:00:00
 ⧗ 24% ⏱ 2h13m  ▦ 41% ⏱ 3d4h                        ⛁ 91% 1h ● 47m
+```
+
+### Aligned columns
+
+With `align = true` every module column is padded to the widest module in it, so the separators fall on the same cell in every line (only between lines that share a `separator`). `durations = "fixed"` keeps timers from changing width as they tick. The same three lines, `align = false` then `align = true`:
+
+```text
+╭─ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ─────────────────────── ⠋ 16:00:00 ─╮
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d04h ───────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m00s ──────────────────────────────────╯
+```
+
+```text
+╭─ ◆ Opus        │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────── ⠋ 16:00:00 ─╮
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d04h ───────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m       │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m00s ────────────────────────────╯
 ```
 
 ## `[[line]]`
