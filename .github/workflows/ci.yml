@@ -25,12 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Installs the channel and components pinned in rust-toolchain.toml.
-      - run: rustup toolchain install --profile minimal
+      # The same prerequisites as every other host: the toolchain pinned in
+      # rust-toolchain.toml and cargo-nextest (SESSION_HOST=ci picks the
+      # prebuilt binary).
+      - run: ./scripts/setup.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
-        with:
-          tool: nextest
       - run: ./scripts/ci.sh 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       # Failures become check-run annotations readable through the API.
       - if: failure()
@@ -43,11 +42,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup toolchain install --profile minimal
+      - run: ./scripts/setup.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
-        with:
-          tool: nextest
       - run: make check 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       - if: failure()
         run: ./scripts/ci-annotate.sh ci.log
@@ -60,11 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup toolchain install --profile minimal
+      - run: ./scripts/setup.sh --bench
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
-        with:
-          tool: hyperfine
       - run: ./bench/run.sh
         continue-on-error: true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

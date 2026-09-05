@@ -119,15 +119,14 @@ More in the guide's [troubleshooting section](docs/guide.md#7-troubleshooting).
 ## Contributing
 
 garnish is written by Claude Code, session by session, under the rules in
-[`CLAUDE.md`](CLAUDE.md). [`SPEC.md`](SPEC.md) is the target design,
-[`PLAN.md`](PLAN.md) the progress and backlog, and [`SPRITE.md`](SPRITE.md)
-the notes for building it on a Sprite VM.
+[`CLAUDE.md`](CLAUDE.md). [`SPEC.md`](SPEC.md) is the target design and
+[`PLAN.md`](PLAN.md) the progress and backlog.
 
 ```sh
+make setup    # rustup nightly + components + cargo-nextest (ARGS=--bench adds hyperfine, jq)
 make check    # fmt + clippy (pedantic, nursery, no panics) + nextest + doctests
 make docs     # regenerate docs/ and examples/ from the module schemas
 make bench    # hyperfine gate: warm tick mean < 3 ms, p99 < 8 ms
 ```
 
-`make check` needs [`cargo-nextest`](https://nexte.st); `make bench` needs
-`hyperfine` and `jq`. Pull requests run the same checks on Linux and macOS.
+Pull requests run the same setup and checks on Linux and macOS.

@@ -1,6 +1,12 @@
-.PHONY: all build release check lint fmt test doc docs bench install ci clean watch
+.PHONY: all setup build release check lint fmt test doc docs bench install ci clean watch
 
 all: check
+
+# Install or update the prerequisites for this host (rustup nightly with the
+# pinned components, cargo-nextest). ARGS=--bench adds hyperfine and jq,
+# ARGS=--all adds watchexec too.
+setup:
+	./scripts/setup.sh $(ARGS)
 
 # Re-run lint + tests whenever a source or test file changes. Output goes to
 # the terminal and to target/watch.log so the Monitor tool can follow it.
