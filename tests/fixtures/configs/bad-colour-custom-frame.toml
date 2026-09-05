@@ -1,0 +1,27 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# Three bad values and an unknown key must not discard the rest (SPEC § 5,
+# walkthrough bug 8): the heavy frame with its own separator and both lines
+# stay, `theme`, `durations` and `colors.accent` fall back to their defaults,
+# and a dim `⚠ config:` line names the first problem and counts the others.
+
+theme     = "solarized"
+durations = "loose"
+mystery   = 1
+
+[colors]
+accent = "bogus"
+
+[frame]
+style     = "heavy"
+separator = " ┃ "
+
+[[line]]
+modules = ["model", "context"]
+right   = ["clock"]
+
+[[line]]
+modules = ["session", "api"]
+right   = ["lines"]

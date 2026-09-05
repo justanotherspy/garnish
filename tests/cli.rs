@@ -132,7 +132,9 @@ fn config_subcommands_and_doctor_work_end_to_end() {
 
     let (out, _, ok) = run(&["doctor"], home, &[]);
     assert!(ok, "{out}");
-    for needle in ["garnish 0.", "claude settings", "INVALID", "cache", "glyph test", "unicode"] {
+    for needle in
+        ["garnish 0.", "claude settings", "2 problem(s)", "cache", "glyph test", "unicode"]
+    {
         assert!(out.contains(needle), "{needle}\n{out}");
     }
 }

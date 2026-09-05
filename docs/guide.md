@@ -79,8 +79,10 @@ preset = "full"
 width  = 30
 ```
 
-A broken config never blanks the status line: garnish falls back to the
-defaults and appends a dim `⚠ config: <file>:<line> <message>` line.
+A bad key never blanks the status line: every valid key stays in effect, the
+built-in default stands in for the bad one, and a dim `⚠ config: <file>
+<path>: <message>` line is appended. Only a file that does not parse as TOML
+falls back to the defaults wholesale, with the line of the syntax error.
 
 ## 5. Compose your own lines
 

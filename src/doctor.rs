@@ -84,7 +84,12 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
             let _ = writeln!(o, "config   {} ok", p.display());
         }
         (Some(p), false) => {
-            let _ = writeln!(o, "config   {} INVALID (defaults in effect)", p.display());
+            let _ = writeln!(
+                o,
+                "config   {} has {} problem(s); the built-in default stands in for each bad key",
+                p.display(),
+                loaded.errors.len()
+            );
             for e in &loaded.errors {
                 let _ = writeln!(o, "         {e}");
             }

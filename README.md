@@ -172,8 +172,10 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
   failed; `garnish doctor` shows the last error.
 - **Nothing changes after editing the config**: `garnish config path` shows
   which file is read, `garnish config check` reports problems with their
-  TOML path. A broken config never blanks the line; it falls back to the
-  defaults and appends a dim `⚠ config: …` note.
+  TOML path. A bad key never blanks the line: every valid key stays in
+  effect, the built-in default stands in for the bad one, and a dim
+  `⚠ config: …` note is appended; only a file that does not parse falls back
+  to the defaults wholesale.
 - **The right edge is cut with `…`**: Claude Code truncates rows wider than
   its own box, which is 4 cells narrower than the terminal plus 2 cells per
   unit of `statusLine.padding`. garnish subtracts the 4 by itself; if you set
