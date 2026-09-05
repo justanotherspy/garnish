@@ -377,9 +377,9 @@ fn skills(action: SkillsAction) -> Result<()> {
             let dir = dir.unwrap_or_else(|| {
                 crate::skills::default_dir(&crate::install::default_settings_path())
             });
-            let written = crate::skills::install(&dir)
+            let report = crate::skills::install(&dir)
                 .with_context(|| format!("writing skills to {}", dir.display()))?;
-            writeln!(stdout, "wrote {} skill(s) to {}", written.len(), dir.display())?;
+            writeln!(stdout, "{}", report.summary())?;
         }
     }
     Ok(())
@@ -404,7 +404,6 @@ fn install(
     config_path: Option<&Path>,
 ) -> Result<()> {
     use crate::install::{self as inst, Plan};
-    let no_config = skip.config;
     let mut stdout = std::io::stdout().lock();
     let command = if absolute {
         std::env::current_exe().context("locating this binary")?.display().to_string()
@@ -435,7 +434,12 @@ fn install(
             (true, None) => writeln!(stdout, "wrote {}", plan.settings.display())?,
         }
     }
+    if !skip.config {
+        install_default_config(&mut stdout, config_path, padding, dry_run)?;
+    }
     // The skills (SPEC § 13) go next to the settings file, in ~/.claude/skills.
+    // They come last: they are the optional part, so a problem with them
+    // never leaves the settings updated and the config unwritten.
     if !skip.skills {
         let dir = crate::skills::default_dir(&plan.settings);
         if dry_run {
@@ -446,14 +450,22 @@ fn install(
                 dir.display()
             )?;
         } else {
-            let written = crate::skills::install(&dir)
+            let report = crate::skills::install(&dir)
                 .with_context(|| format!("writing skills to {}", dir.display()))?;
-            writeln!(stdout, "wrote {} skill(s) to {}", written.len(), dir.display())?;
+            writeln!(stdout, "{}", report.summary())?;
         }
     }
-    if no_config {
-        return Ok(());
-    }
+    Ok(())
+}
+
+/// The config half of `garnish install`: write the annotated default file
+/// when none exists, seeded with `padding` when `--padding` was given.
+fn install_default_config(
+    stdout: &mut impl Write,
+    config_path: Option<&Path>,
+    padding: Option<u64>,
+    dry_run: bool,
+) -> Result<()> {
     let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
     // The harness pads both sides, so the config mirrors statusLine.padding doubled (SPEC § 2.1).
     let config_padding = padding.map(|p| p.saturating_mul(2));
