@@ -845,6 +845,48 @@ const fn role_doc(role: Role) -> &'static str {
     }
 }
 
+/// The `docs/presets.md` gallery page (SPEC § 12): every embedded preset
+/// rendered at its declared width with the `subscription-full` payload at
+/// frame 0, followed by the file itself in a collapsed block.
+#[must_use]
+pub fn presets_page() -> String {
+    let mut o = String::new();
+    let _ = writeln!(
+        o,
+        "# Presets gallery\n\nComplete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0; presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.\n"
+    );
+    let _ = writeln!(o, "| name | summary | columns | needs |\n|---|---|---|---|");
+    for p in crate::gallery::PRESETS.iter() {
+        let _ = writeln!(
+            o,
+            "| [`{}`](#{}) | {} | {} | {} |",
+            p.name,
+            p.name,
+            p.summary,
+            p.columns,
+            p.needs.as_deref().unwrap_or("—")
+        );
+    }
+    let payload = fixture("subscription-full");
+    for p in crate::gallery::PRESETS.iter() {
+        let (cfg, _) = config::parse(&crate::gallery::body(p.source), &SCHEMAS);
+        let sample = render_plain_at(&payload, &cfg, Some(p.columns), &Clock::fixed());
+        let needs = p.needs.as_deref().map_or(String::new(), |n| format!(", needs {n}"));
+        let author = p.author.as_deref().map_or(String::new(), |a| format!(" · by @{a}"));
+        let _ = writeln!(
+            o,
+            "\n## `{}`\n\n{}\n\nAt {} columns{needs}{author}:\n\n```text\n{}\n```\n\n<details><summary><code>presets/{}.toml</code></summary>\n\n```toml\n{}```\n\n</details>",
+            p.name,
+            p.summary,
+            p.columns,
+            sample.trim_end(),
+            p.name,
+            p.source
+        );
+    }
+    o
+}
+
 /// The `docs/README.md` index.
 #[must_use]
 pub fn index_page() -> String {
@@ -865,7 +907,7 @@ pub fn index_page() -> String {
     );
     let _ = writeln!(
         o,
-        "\n## Default preset, unicode icons\n\n```text\n{}\n```",
+        "\nComplete example configs, rendered at their own widths, are in the [presets gallery](presets.md).\n\n## Default preset, unicode icons\n\n```text\n{}\n```",
         preset_sample(config::presets::TopPreset::Default, IconSet::Unicode)
     );
     o
@@ -889,6 +931,8 @@ pub fn generate(out: &Path) -> std::io::Result<usize> {
         }
     }
     std::fs::write(out.join("modules").join("text.md"), text_page())?;
+    n = n.saturating_add(1);
+    std::fs::write(out.join("presets.md"), presets_page())?;
     n = n.saturating_add(1);
     Ok(n)
 }
@@ -1016,7 +1060,16 @@ mod tests {
     fn generate_writes_all_pages() {
         let dir = tempfile::tempdir().unwrap();
         let n = generate(dir.path()).unwrap();
-        assert_eq!(n, 3 + SCHEMAS.len(), "index, config, one page per module, the text family");
+        assert_eq!(
+            n,
+            4 + SCHEMAS.len(),
+            "index, config, presets, one page per module, the text family"
+        );
+        let presets = std::fs::read_to_string(dir.path().join("presets.md")).unwrap();
+        for p in crate::gallery::PRESETS.iter() {
+            assert!(presets.contains(&format!("## `{}`", p.name)), "{}", p.name);
+        }
+        assert!(presets.contains("<details>") && presets.contains("```toml"), "{presets}");
         assert!(dir.path().join("modules").join("clock.md").exists());
         let text = std::fs::read_to_string(dir.path().join("modules").join("text.md")).unwrap();
         assert!(text.contains("| `overflow` |") && text.contains("v0.2"), "{text}");

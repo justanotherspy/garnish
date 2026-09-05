@@ -62,6 +62,12 @@ columns (this block is the one that may scroll on a narrow screen):
 ╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ✦ 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
+Beyond the four built-ins, the [presets gallery](docs/presets.md) has complete
+configs (aligned columns, Dracula in 256 colours, a scrolling ticker, animated
+dots, …) rendered at their own widths; `garnish presets` lists them and
+`garnish config init --preset <name>` writes one. A real-terminal capture may
+accompany a preset as `presets/screenshots/<name>.png`.
+
 A config written by `garnish config init` (or `garnish install`) spells out
 every `[[line]]` and the `[frame]`; those explicit blocks win over the
 preset, so changing `preset` in such a file only changes what each module
