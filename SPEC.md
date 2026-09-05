@@ -277,7 +277,11 @@ Aligned columns (`align = true`): module *k* of a group, counted among the
 modules that rendered something (from the left in the left group, from the
 right end in the right group), is padded with spaces to the widest module *k*
 among the lines that have a module after it: the left group pads on the
-right, the right group on the left. A line's last module is never padded.
+right, the right group (hanging off the right cap) on the left. A line's
+last module is never padded. With `fill = false` the right group follows the
+left one after a separator, so the whole line is one sequence of columns,
+aligned from the left; the last left module is then padded when a right
+group follows it.
 The separators after column *k* then fall on the same cell in every line,
 so `│` bars stack vertically; bars only line up between lines that use the
 same `separator`. Padding happens before truncation and fill, so an

@@ -103,7 +103,7 @@ impl Ctx<'_> {
         self.payload.session_id.as_deref().filter(|s| !s.is_empty()).unwrap_or("no-session")
     }
 
-    /// A duration in the configured style (`8m20s` or `8m20s`/`9m00s`).
+    /// A duration in the configured style: `9m` (compact) or `9m00s` (fixed).
     #[must_use]
     pub fn duration(&self, total_secs: u64) -> String {
         self.durations.format(total_secs)

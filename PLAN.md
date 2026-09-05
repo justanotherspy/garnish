@@ -227,4 +227,12 @@ and user feedback. Pick from here when no phase is in progress.
   `docs/config.md` § Aligned columns. Column widths are per tick (the
   widest module wins), so a growing value only moves the bars when it was
   already the widest; a persisted high-water mark per column is a possible
-  follow-up if that is not enough.
+  follow-up if that is not enough. Review round: modules that rendered
+  nothing were still counted as columns (a hidden `pr` produced a blank
+  padded column and a phantom bar, and made the visible last module
+  "not last"), fixed by dropping empty renders in `render_group`; with
+  `fill = false` the right group is left-anchored, so the line is now
+  aligned as one sequence (spec'd); the alignment test now uses groups
+  whose first, last and rightmost modules all differ in width, so padding
+  the last module, not mirroring the right group, or padding it on the
+  wrong side each fail it, plus a test with hidden modules.
