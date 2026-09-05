@@ -4,20 +4,24 @@ garnish is the `statusLine` command for Claude Code: every second Claude Code
 pipes a JSON snapshot of the session to it, and garnish prints a few framed
 lines built from small, independent modules. This guide gets you from install
 to a status line you like. The [configuration reference](config.md) lists
-every key, and each module has a page under [modules/](modules/).
+every key, and each module has a page under [modules/](modules/). (Those
+pages are generated from the code; this guide is the one hand-written page
+here.)
 
 ## 1. Install
 
 ```sh
-git clone <this repo> && cd garnish
+git clone https://github.com/justanotherspy/garnish.git && cd garnish
 make install            # cargo install --path . --locked  →  ~/.cargo/bin/garnish
 garnish --version
 ```
 
-Requirements: a terminal with ANSI colors; a [Nerd Font](https://www.nerdfonts.com)
-for the default `nerd` icon set (or set `icons = "unicode"` / `"emoji"` /
-`"ascii"`); OSC 8 hyperlink support (iTerm2, Kitty, WezTerm, Ghostty…) for
-clickable pull-request numbers.
+Requirements: Linux or macOS; [rustup](https://rustup.rs) (the repo pins a
+nightly toolchain, which rustup installs on first build); Claude Code
+2.1.251 or newer; a terminal with ANSI colors; a
+[Nerd Font](https://www.nerdfonts.com) for the default `nerd` icon set (or
+set `icons = "unicode"` / `"emoji"` / `"ascii"`); OSC 8 hyperlink support
+(iTerm2, Kitty, WezTerm, Ghostty…) for clickable pull-request numbers.
 
 ## 2. Hook it into Claude Code
 

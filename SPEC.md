@@ -1,6 +1,9 @@
 # garnish — Product Requirements & Technical Specification
 
-Status: v0.1 draft, approved 2026-09-04. Owner: Daniel Schwartz. Builder: Claude.
+Status: approved 2026-09-04; `v0.1.0` tagged the same day. Owner: Daniel
+Schwartz. Builder: Claude. This document is the target design of the whole
+system; when the design changes, it changes here first, with the reason
+(`CLAUDE.md` § Phase protocol). Progress lives in `PLAN.md`.
 
 ## 1. Purpose
 
@@ -202,9 +205,10 @@ preset = "default"        # default | minimal | full | compact
 icons  = "nerd"           # nerd | unicode | emoji | ascii
 theme  = "garnish"        # garnish | catppuccin-mocha | nord | dracula | tokyonight | mono
 color  = "auto"           # auto | always | never | 256 | truecolor
-truncate = true
-stale_style = "dim"
+truncate = true           # cut the left group when a line overflows; the right group is never cut
+stale_style = "dim"       # dim | hide | plain: how overdue cached values are shown
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
+padding = 0               # cells subtracted from the width; mirror statusLine.padding
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
@@ -308,13 +312,16 @@ cache dir, last worker errors, and a glyph test line.
 
 ## 7. CLI
 
+`--config FILE` is a global flag on every command and overrides
+`GARNISH_CONFIG` and the default location.
+
 | command | purpose |
 |---|---|
 | `garnish` | render from stdin (default) |
-| `garnish refresh --module M --session S --cwd D [--all]` | worker entry point |
+| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent; warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics |
-| `garnish config init [--preset P] \| check \| path \| show` | config management; `show` prints the fully resolved config |
+| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force`; `show` prints the fully resolved config |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
@@ -354,7 +361,8 @@ per-module render cost.
   frame style, custom frame, each module in each preset × fixtures → no panic,
   correct line count, width ≤ COLUMNS; golden files under `tests/golden/`
   (`UPDATE_GOLDEN=1` regenerates).
-- **Docs sync**: `garnish docs` output must equal committed `docs/`.
+- **Docs sync**: `garnish docs` output must equal committed `docs/`, and
+  `config init` output must equal `examples/garnish.toml`.
 
 ### Test hooks (environment)
 
@@ -367,7 +375,21 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 
-## 10. Assumptions
+## 10. Documentation
+
+- `docs/README.md`, `docs/config.md` and `docs/modules/<id>.md` are generated
+  by `garnish docs` from `ModuleSchema` and the preset/theme/icon tables, with
+  sample renders made under a pinned clock and no git or settings lookup.
+  They are committed so the reference is readable on GitHub, and
+  `tests/docs_sync.rs` fails when they drift from the code.
+- `docs/guide.md` is the one hand-written page under `docs/`: install,
+  hook-up, first config, troubleshooting. `garnish docs` never writes it.
+- `examples/garnish.toml` is what `garnish config init` writes, kept in sync
+  by the same test.
+- `README.md` is for users and links to the guide and the reference;
+  `CLAUDE.md`, `PLAN.md` and `SPRITE.md` are for building the project.
+
+## 11. Assumptions
 
 - Window size comes from `context_window_size`; 1M is assumed only when the
   field is absent or zero.
