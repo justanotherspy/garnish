@@ -17,6 +17,39 @@ use crate::payload::Payload;
 use crate::render::{Clock, render_plain_at};
 use crate::theme::{PALETTES, Role};
 
+/// The top-level keys of the config file, in schema order.
+fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
+    let c = |s: &mut String, text: &str| {
+        if annotated {
+            let _ = writeln!(s, "# {text}");
+        }
+    };
+    c(out, "garnish configuration — see docs/config.md for every key.");
+    c(out, "Top-level preset: default | minimal | full | compact");
+    let _ = writeln!(out, "preset = {}", toml_string(cfg.preset.name()));
+    c(out, "Icon set: nerd | unicode | emoji | ascii");
+    let _ = writeln!(out, "icons = {}", toml_string(cfg.icons.name()));
+    c(out, &format!("Theme: {}", PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(" | ")));
+    let _ = writeln!(out, "theme = {}", toml_string(&cfg.theme_name));
+    c(out, "Color output: auto | always | never | 256 | truecolor");
+    let _ = writeln!(out, "color = {}", toml_string(color_name(cfg.color)));
+    c(out, "Truncate the left group when a line overflows the width.");
+    let _ = writeln!(out, "truncate = {}", cfg.truncate);
+    c(out, "Stale cached values: dim | hide | plain");
+    let _ = writeln!(out, "stale_style = {}", toml_string(stale_name(cfg.stale_style)));
+    c(out, "TTL periods a cached value may be overdue before it is styled stale (>= 1).");
+    let _ = writeln!(out, "stale_after = {}", cfg.stale_after);
+    c(out, "Extra cells subtracted from the width, on top of the 4 Claude Code's box");
+    c(out, "always takes; set 2 x statusLine.padding when that setting is non-zero.");
+    let _ = writeln!(out, "padding = {}", cfg.padding);
+    c(out, "Pad each module column to the widest module in it across lines, so the");
+    c(out, "separators line up vertically.");
+    let _ = writeln!(out, "align = {}", cfg.align);
+    c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
+    let _ = writeln!(out, "durations = {}", toml_string(cfg.durations.name()));
+    let _ = writeln!(out);
+}
+
 /// Render a config as TOML.
 ///
 /// With `annotated`, every option carries its doc comment and colors are
@@ -31,28 +64,7 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
             let _ = writeln!(s, "# {text}");
         }
     };
-    c(&mut out, "garnish configuration — see docs/config.md for every key.");
-    c(&mut out, "Top-level preset: default | minimal | full | compact");
-    let _ = writeln!(out, "preset = {}", toml_string(cfg.preset.name()));
-    c(&mut out, "Icon set: nerd | unicode | emoji | ascii");
-    let _ = writeln!(out, "icons = {}", toml_string(cfg.icons.name()));
-    c(
-        &mut out,
-        &format!("Theme: {}", PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(" | ")),
-    );
-    let _ = writeln!(out, "theme = {}", toml_string(&cfg.theme_name));
-    c(&mut out, "Color output: auto | always | never | 256 | truecolor");
-    let _ = writeln!(out, "color = {}", toml_string(color_name(cfg.color)));
-    c(&mut out, "Truncate the left group when a line overflows $COLUMNS.");
-    let _ = writeln!(out, "truncate = {}", cfg.truncate);
-    c(&mut out, "Stale cached values: dim | hide | plain");
-    let _ = writeln!(out, "stale_style = {}", toml_string(stale_name(cfg.stale_style)));
-    c(&mut out, "TTL periods a cached value may be overdue before it is styled stale (>= 1).");
-    let _ = writeln!(out, "stale_after = {}", cfg.stale_after);
-    c(&mut out, "Extra cells subtracted from the width, on top of the 4 Claude Code's box");
-    c(&mut out, "always takes; set 2 x statusLine.padding when that setting is non-zero.");
-    let _ = writeln!(out, "padding = {}", cfg.padding);
-    let _ = writeln!(out);
+    write_top_level(&mut out, cfg, annotated);
 
     c(&mut out, "Role color overrides; every module color defaults to one of these roles.");
     let _ = writeln!(out, "[colors]");
@@ -488,6 +500,14 @@ pub fn config_page() -> String {
         o,
         "| `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |"
     );
+    let _ = writeln!(
+        o,
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |"
+    );
+    let _ = writeln!(
+        o,
+        "| `durations` | `compact` \\| `fixed` | `compact` | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. |"
+    );
 
     let _ = writeln!(
         o,
@@ -542,6 +562,21 @@ fn frame_section(o: &mut String) {
         }
         let _ = writeln!(o, "`{}`\n\n```text\n{}\n```\n", style.name(), frame_sample(style));
     }
+    let _ = writeln!(
+        o,
+        "### Aligned columns\n\nWith `align = true` every module column is padded to the widest module in it, so the separators fall on the same cell in every line (only between lines that share a `separator`). `durations = \"fixed\"` keeps timers from changing width as they tick. The same three lines, `align = false` then `align = true`:\n\n```text\n{}\n```\n\n```text\n{}\n```\n",
+        align_sample(false),
+        align_sample(true)
+    );
+}
+
+/// Three lines whose first modules differ in width, with and without `align`.
+fn align_sample(align: bool) -> String {
+    let text = format!(
+        "icons = \"unicode\"\nalign = {align}\ndurations = \"fixed\"\n[[line]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[line]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"lines\"]\n[[line]]\nmodules = [\"session\", \"api\", \"cache\"]\nright = [\"cost\"]\n"
+    );
+    let (cfg, _) = config::parse(&text, &SCHEMAS);
+    render_plain_at(&fixture("subscription-full"), &cfg, Some(80), &Clock::fixed())
 }
 
 fn presets_section(o: &mut String) {

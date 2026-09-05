@@ -7,7 +7,6 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 use crate::num::{percent_of, u64_to_usize};
-use crate::time::compact_duration;
 
 use super::util::{percent, tokens};
 use super::{Ctx, Module, Rendered, icon, seg};
@@ -56,7 +55,7 @@ impl Module for SessionModule {
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "session", "icon"));
         }
-        segs.push(seg(cfg, compact_duration(elapsed), "value"));
+        segs.push(seg(cfg, ctx.duration(elapsed), "value"));
         if cfg.bool("show_start")
             && let Ok(started) = ctx
                 .now
@@ -111,7 +110,7 @@ impl Module for ApiModule {
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "api", "icon"));
         }
-        segs.push(seg(cfg, compact_duration(api_ms / 1000), "value"));
+        segs.push(seg(cfg, ctx.duration(api_ms / 1000), "value"));
         if cfg.bool("show_share")
             && let Some(total) = cost.total_duration_ms.filter(|t| *t > 0)
         {
@@ -206,7 +205,7 @@ impl Module for CacheModule {
         }
         if cfg.bool("show_countdown") {
             let warm = pc.warm.unwrap_or(false);
-            let cd = pc.expires_at.and_then(|t| crate::time::countdown_at(t, ctx.now.as_second()));
+            let cd = pc.expires_at.and_then(|t| ctx.countdown(t));
             match (warm, cd) {
                 (true, Some(cd)) => {
                     segs.push(seg(cfg, format!(" {} {cd}", cfg.icon("warm")), "warm"));

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::ansi::{ColorMode, Painter, Segment, Style, strip_ansi};
+use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width, strip_ansi};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
 use crate::frame::{Layout, compose_line, join_modules};
 use crate::icons::IconSet;
@@ -157,6 +157,7 @@ pub fn render_lines_at(
         settings_env: clock.settings_env.clone(),
         git: clock.git,
         stale_after: config.stale_after,
+        durations: config.durations,
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
@@ -168,19 +169,89 @@ pub fn render_lines_at(
         ellipsis: if config.icons == IconSet::Ascii { "..".into() } else { "…".into() },
     };
     let count = config.lines.len();
+    // Every line renders before any is composed: aligned columns need the
+    // widths of all lines.
+    let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
+        .lines
+        .iter()
+        .map(|line| {
+            (
+                render_group(&ctx, config, &line.left, stale),
+                render_group(&ctx, config, &line.right, stale),
+            )
+        })
+        .unzip();
+    if config.align {
+        if config.frame.fill {
+            align_columns(&mut lefts, false);
+            align_columns(&mut rights, true);
+        } else {
+            // Left-packed, the right group follows the left one after a
+            // separator, so the line is one sequence of columns (SPEC § 4).
+            let split: Vec<usize> = lefts.iter().map(Vec::len).collect();
+            let mut rows: Vec<Vec<Vec<Segment>>> = lefts
+                .iter_mut()
+                .zip(rights.iter_mut())
+                .map(|(l, r)| {
+                    let mut row = std::mem::take(l);
+                    row.append(r);
+                    row
+                })
+                .collect();
+            align_columns(&mut rows, false);
+            for ((mut row, n), (l, r)) in
+                rows.into_iter().zip(split).zip(lefts.iter_mut().zip(rights.iter_mut()))
+            {
+                *r = row.split_off(n.min(row.len()));
+                *l = row;
+            }
+        }
+    }
     config
         .lines
         .iter()
+        .zip(lefts.iter().zip(rights.iter()))
         .enumerate()
-        .map(|(i, line)| {
+        .map(|(i, (line, (left, right)))| {
             let sep = config.separator(line);
-            let left =
-                join_modules(&render_group(&ctx, config, &line.left, stale), sep, &config.theme);
-            let right =
-                join_modules(&render_group(&ctx, config, &line.right, stale), sep, &config.theme);
+            let left = join_modules(left, sep, &config.theme);
+            let right = join_modules(right, sep, &config.theme);
             compose_line(&layout, &config.theme, i, count, &left, &right)
         })
         .collect()
+}
+
+/// Pad module `k` of every group to the widest module `k` among the groups
+/// that have a module after it, so the separators after it fall on the
+/// same cell in every line (SPEC § 4). Left groups count from the left and
+/// pad on the right; right groups (`from_right`) count from the right end
+/// and pad on the left. A group's last module is never padded.
+fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool) {
+    let columns = groups.iter().map(Vec::len).max().unwrap_or(0);
+    for k in 0..columns {
+        let padded = |g: &Vec<Vec<Segment>>| g.len() > k.saturating_add(1);
+        let target = groups
+            .iter()
+            .filter(|g| padded(g))
+            .filter_map(|g| if from_right { g.iter().rev().nth(k) } else { g.get(k) })
+            .map(|m| segments_width(m))
+            .max();
+        let Some(target) = target else { continue };
+        for g in groups.iter_mut().filter(|g| padded(g)) {
+            let module = if from_right { g.iter_mut().rev().nth(k) } else { g.get_mut(k) };
+            let Some(module) = module else { continue };
+            let gap = target.saturating_sub(segments_width(module));
+            if gap == 0 {
+                continue;
+            }
+            let pad = Segment::plain(" ".repeat(gap));
+            if from_right {
+                module.insert(0, pad);
+            } else {
+                module.push(pad);
+            }
+        }
+    }
 }
 
 fn render_group(
@@ -204,6 +275,8 @@ fn render_group(
             };
             Some(decorate(rendered, cfg, &config.theme, stale))
         })
+        // A module that rendered nothing is not a column (SPEC § 4).
+        .filter(|module| !module.is_empty())
         .collect()
 }
 
@@ -290,6 +363,118 @@ mod tests {
             Some(80),
         );
         assert!(out.lines().last().unwrap().starts_with("! config:"), "{out}");
+    }
+
+    /// Cell at which `needle` starts in `line`.
+    fn column_of(line: &str, needle: &str) -> usize {
+        let at = line.find(needle).unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));
+        display_width(line.get(..at).unwrap())
+    }
+
+    /// Cell of the last ` │ ` in `line`.
+    fn last_bar(line: &str) -> usize {
+        let at = line.rfind(" │ ").unwrap_or_else(|| panic!("no bar in {line:?}"));
+        display_width(line.get(..at).unwrap())
+    }
+
+    #[test]
+    fn align_stacks_separators_and_never_pads_the_last_module() {
+        // Left groups: the first modules differ in width (column 2 must
+        // start on the same cell) and so do the last ones (they must not be
+        // padded). Right groups: the rightmost modules differ in width, so
+        // the bar before them only lines up when the pad goes on the left.
+        let base = "[[line]]\nmodules = [\"model\", \"session\"]\nright = [\"session\", \"api\"]\n[[line]]\nmodules = [\"session\", \"clock\"]\nright = [\"model\", \"lines\"]\n";
+        let payload = fixture("subscription-full");
+        let plain = |text: &str| {
+            let (config, errs) = config::parse(&format!("icons = \"unicode\"\n{text}"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+        };
+        let loose: Vec<String> = plain(base).lines().map(str::to_owned).collect();
+        // Top-level keys go before the [[line]] tables.
+        let aligned: Vec<String> =
+            plain(&format!("align = true\n{base}")).lines().map(str::to_owned).collect();
+        assert_eq!(loose.len(), 2, "{loose:?}");
+        assert_eq!(aligned.len(), 2, "{aligned:?}");
+        // Left column 2: `⏱ 1h12m` on line 1 (its first `⏱` is the left one),
+        // `⠋ 16:00:00` on line 2.
+        assert_ne!(
+            column_of(&loose[0], "⏱ 1h12m"),
+            column_of(&loose[1], "⠋ 16:00:00"),
+            "without align the second column drifts: {loose:?}"
+        );
+        assert_eq!(
+            column_of(&aligned[0], "⏱ 1h12m"),
+            column_of(&aligned[1], "⠋ 16:00:00"),
+            "{aligned:?}"
+        );
+        // The last left module keeps a single pad cell before the rule.
+        assert!(aligned[0].contains("1h12m ──"), "{}", aligned[0]);
+        assert!(aligned[1].contains("16:00:00 ──"), "{}", aligned[1]);
+        // Right group: `⇄ 8m20s` and `Δ +156 −23` differ in width; the bar
+        // before them lands on the same cell only if the pad is on their left.
+        assert_ne!(last_bar(&loose[0]), last_bar(&loose[1]), "{loose:?}");
+        assert_eq!(last_bar(&aligned[0]), last_bar(&aligned[1]), "{aligned:?}");
+        assert!(aligned[0].ends_with("⇄ 8m20s ─╮"), "{}", aligned[0]);
+        assert!(aligned[1].ends_with("Δ +156 −23 ─╯"), "{}", aligned[1]);
+        for l in &aligned {
+            assert_eq!(display_width(l), 76, "{l}");
+        }
+        // Left-packed lines anchor the right group on its left, so it pads
+        // on the right and the bars still stack.
+        let packed: Vec<String> = plain(&format!("align = true\n[frame]\nfill = false\n{base}"))
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(last_bar(&packed[0]), last_bar(&packed[1]), "{packed:?}");
+        assert!(packed[0].ends_with("⇄ 8m20s"), "no trailing pad: {}", packed[0]);
+        // The default (align = false) render is untouched.
+        assert_eq!(plain(base), plain(&format!("align = false\n{base}")));
+    }
+
+    #[test]
+    fn align_ignores_modules_that_render_nothing() {
+        let payload = fixture("pr-absent");
+        let plain = |lines: &str| {
+            let (config, errs) =
+                config::parse(&format!("align = true\nicons = \"unicode\"\n{lines}"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+        };
+        // A hidden first module is not a column: no phantom bar before the clock.
+        let out = plain(
+            "[[line]]\nmodules = [\"pr\", \"clock\"]\n[[line]]\nmodules = [\"model\", \"clock\"]\n",
+        );
+        let first = out.lines().next().unwrap();
+        assert!(first.starts_with("╭─ ⠋ 16:00:00 ─"), "{out}");
+        // A hidden last module does not turn the visible last module into a
+        // padded one: a single pad cell before the rule.
+        let out = plain(
+            "[[line]]\nmodules = [\"model\", \"pr\"]\n[[line]]\nmodules = [\"session\", \"clock\"]\n",
+        );
+        let first = out.lines().next().unwrap();
+        assert!(!first.contains('│') && !first.contains("  ─"), "{out}");
+    }
+
+    #[test]
+    fn fixed_durations_render_two_units() {
+        let (config, _) = config::parse("durations = \"fixed\"", &SCHEMAS);
+        let out = strip_ansi(&render_plain_at(
+            &fixture("subscription-full"),
+            &config,
+            Some(100),
+            &Clock::fixed(),
+        ));
+        assert!(out.contains("1h12m") && out.contains("8m20s"), "{out}");
+        assert!(out.contains("2h13m") && out.contains("3d04h"), "{out}");
+        let (config, _) = config::parse("", &SCHEMAS);
+        let out = strip_ansi(&render_plain_at(
+            &fixture("subscription-full"),
+            &config,
+            Some(100),
+            &Clock::fixed(),
+        ));
+        assert!(out.contains("3d4h"), "compact stays the default: {out}");
     }
 
     #[test]

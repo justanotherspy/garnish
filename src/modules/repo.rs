@@ -597,11 +597,7 @@ impl Module for SyncModule {
             && !cfg.icon("stale").is_empty()
         {
             let sp = if segs.is_empty() { "" } else { " " };
-            segs.push(seg(
-                cfg,
-                format!("{sp}{}{}", cfg.icon("stale"), crate::time::compact_duration(age)),
-                "stale",
-            ));
+            segs.push(seg(cfg, format!("{sp}{}{}", cfg.icon("stale"), ctx.duration(age)), "stale"));
         }
         let _ = remote;
         let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };

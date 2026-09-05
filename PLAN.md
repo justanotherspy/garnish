@@ -106,6 +106,17 @@ phase closed goes in the **Backlog**; host trouble does not belong here.
 - [x] CI runs `scripts/setup.sh` instead of a third-party install action
 - [x] Documents split by role (`CLAUDE.md` host-neutral, `SPRITE.md` for Sprites, `PLAN.md` codebase-only, `README.md` for users)
 
+## Phase 11 — Aligned columns and fixed-width durations
+
+Requested by Daniel (2026-09-05): separators should stack vertically across
+lines, with column widths that do not jitter as timers tick.
+
+- [x] SPEC § 4: `align` (pad module *k* to the widest module *k* among lines with a module after it; left pads right, right pads left; last module never padded) and `durations = compact | fixed`
+- [x] `time::fixed_duration` + `DurationStyle`; every duration and countdown goes through `Ctx::duration` / `Ctx::countdown`
+- [x] `render::align_columns` runs after all lines render and before join/compose; default render byte-identical (goldens unchanged)
+- [x] Docs: config keys, `### Aligned columns` sample in `docs/config.md`, README and guide
+- [x] Tests: fixed-duration table, config parse/fallback, two-line alignment (separator columns equal, last module unpadded, right group mirrored), fixed durations in a full render
+
 ## Backlog (open after v0.1.0)
 
 Items left unchecked when their phase closed, plus follow-ups from reviews
@@ -201,3 +212,27 @@ and user feedback. Pick from here when no phase is in progress.
   regenerated (fill length only), SPEC § 2.1 and § 4 layout rule, README and
   guide troubleshooting, `CLAUDE.md` facts (with how to re-verify after an
   upgrade). Backlog item closed.
+- **2026-09-05 (Phase 11)** — Daniel asked for an option that lines the
+  `│` separators up across lines and stops module widths jittering as
+  timers tick. Two top-level keys, spec'd first (§ 4): `align = true` pads
+  module *k* of each group to the widest module *k* among the lines that
+  have a module after it (left group pads right, right group counts from
+  the right end and pads left; a line's last module is never padded), so
+  bars stack between lines sharing a separator; `durations = "fixed"`
+  prints two units always with the small one two digits wide (`0m47s`,
+  `9m00s`, `1h05m`, `3d04h`). Every elapsed time and countdown now goes
+  through `Ctx::duration`/`Ctx::countdown`. `render_lines_at` renders all
+  groups first, aligns, then joins and composes; with the defaults the
+  output is byte-identical (goldens untouched). Sample in
+  `docs/config.md` § Aligned columns. Column widths are per tick (the
+  widest module wins), so a growing value only moves the bars when it was
+  already the widest; a persisted high-water mark per column is a possible
+  follow-up if that is not enough. Review round: modules that rendered
+  nothing were still counted as columns (a hidden `pr` produced a blank
+  padded column and a phantom bar, and made the visible last module
+  "not last"), fixed by dropping empty renders in `render_group`; with
+  `fill = false` the right group is left-anchored, so the line is now
+  aligned as one sequence (spec'd); the alignment test now uses groups
+  whose first, last and rightmost modules all differ in width, so padding
+  the last module, not mirroring the right group, or padding it on the
+  wrong side each fail it, plus a test with hidden modules.

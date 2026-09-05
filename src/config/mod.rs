@@ -10,6 +10,7 @@ use crate::ansi::{Color, ColorMode};
 use crate::frame::{FrameChars, FrameStyle};
 use crate::icons::IconSet;
 use crate::theme::{PALETTES, Role, Theme, palette};
+use crate::time::DurationStyle;
 
 pub mod presets;
 pub mod schema;
@@ -145,6 +146,11 @@ pub struct Config {
     /// Extra cells subtracted from the width on top of [`HARNESS_PADDING`]
     /// (`2 × statusLine.padding` when that setting is non-zero).
     pub padding: usize,
+    /// Pad module columns to the widest module in each across lines so the
+    /// separators line up (SPEC § 4).
+    pub align: bool,
+    /// How elapsed times and countdowns print.
+    pub durations: DurationStyle,
     /// Frame.
     pub frame: FrameCfg,
     /// Lines.
@@ -188,6 +194,8 @@ struct RawConfig {
     stale_style: Option<StaleStyle>,
     stale_after: Option<u32>,
     padding: Option<u16>,
+    align: Option<bool>,
+    durations: Option<DurationStyle>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
     line: Vec<RawLine>,
@@ -355,24 +363,13 @@ impl Config {
     }
 }
 
-fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigError>) -> Config {
-    let preset = raw.preset.unwrap_or_default();
-    let icons = raw.icons.unwrap_or_default();
-
-    let theme_name = raw.theme.clone().unwrap_or_else(|| "garnish".to_owned());
-    let pal = palette(&theme_name).unwrap_or_else(|| {
-        errors.push(ConfigError {
-            path: "theme".into(),
-            message: format!(
-                "unknown theme {theme_name:?}; expected one of {}",
-                PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")
-            ),
-            line: None,
-        });
-        &PALETTES[0]
-    });
+/// `[colors]` role overrides; unknown roles and bad colors are reported and skipped.
+fn resolve_colors(
+    raw: &BTreeMap<String, String>,
+    errors: &mut Vec<ConfigError>,
+) -> BTreeMap<Role, Color> {
     let mut overrides: BTreeMap<Role, Color> = BTreeMap::new();
-    for (k, v) in &raw.colors {
+    for (k, v) in raw {
         match (Role::parse(k), Color::parse(v)) {
             (Some(role), Some(color)) => {
                 overrides.insert(role, color);
@@ -392,6 +389,26 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             }),
         }
     }
+    overrides
+}
+
+fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigError>) -> Config {
+    let preset = raw.preset.unwrap_or_default();
+    let icons = raw.icons.unwrap_or_default();
+
+    let theme_name = raw.theme.clone().unwrap_or_else(|| "garnish".to_owned());
+    let pal = palette(&theme_name).unwrap_or_else(|| {
+        errors.push(ConfigError {
+            path: "theme".into(),
+            message: format!(
+                "unknown theme {theme_name:?}; expected one of {}",
+                PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")
+            ),
+            line: None,
+        });
+        &PALETTES[0]
+    });
+    let overrides = resolve_colors(&raw.colors, errors);
     let theme = Theme::from_palette(pal, &overrides);
 
     let frame = resolve_frame(raw.frame.as_ref(), preset);
@@ -457,6 +474,8 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         stale_style: raw.stale_style.unwrap_or_default(),
         stale_after,
         padding: usize::from(raw.padding.unwrap_or(0)),
+        align: raw.align.unwrap_or(false),
+        durations: raw.durations.unwrap_or_default(),
         frame,
         lines,
         modules,
@@ -756,6 +775,22 @@ mod tests {
         assert_eq!(c.width(Some(0)), MIN_WIDTH);
         let (c, _) = parse("padding = 2", &schemas);
         assert_eq!(c.width(Some(80)), 74, "statusLine.padding = 1 costs two more cells");
+    }
+
+    #[test]
+    fn align_and_durations_default_off_and_parse() {
+        let schemas = schemas();
+        let (c, errs) = parse("", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert!(!c.align);
+        assert_eq!(c.durations, DurationStyle::Compact);
+        let (c, errs) = parse("align = true\ndurations = \"fixed\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert!(c.align);
+        assert_eq!(c.durations, DurationStyle::Fixed);
+        let (c, errs) = parse("durations = \"loose\"", &schemas);
+        assert!(!errs.is_empty(), "unknown duration style must be reported");
+        assert_eq!(c.durations, DurationStyle::Compact, "and fall back to the default");
     }
 
     #[test]

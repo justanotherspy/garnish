@@ -109,6 +109,12 @@ Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is
 open, `vim` only with vim mode on.
 
+With several lines, `align = true` (top level) pads every module column to
+the widest module in it so the `│` separators stack vertically, and
+`durations = "fixed"` prints timers as `9m00s` / `1h05m` so their width does
+not change as they tick. Both are shown in
+[config.md § Aligned columns](config.md#aligned-columns).
+
 ## 6. Presets, icons, colors
 
 Each module has three presets: `minimal` (bare value), `default`, and `full`
