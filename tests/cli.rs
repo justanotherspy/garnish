@@ -138,4 +138,20 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     {
         assert!(out.contains(needle), "{needle}\n{out}");
     }
+
+    // The gallery: listed, written without its tooling header, valid, and an
+    // unknown name is a real error that names the choices.
+    let (out, _, ok) = run(&["presets"], home, &[]);
+    assert!(ok, "{out}");
+    assert!(out.lines().count() >= 15, "{out}");
+    assert!(out.lines().any(|l| l.starts_with("minimal-clean ")), "{out}");
+    let (out, _, ok) = run(&["config", "init", "--force", "--preset", "minimal-clean"], home, &[]);
+    assert!(ok && out.starts_with("wrote "), "{out}");
+    let written = std::fs::read_to_string(&cfg).unwrap();
+    assert!(!written.contains("# name:") && !written.contains("# columns:"), "{written}");
+    assert!(written.contains("preset = \"minimal\""), "{written}");
+    let (out, _, ok) = run(&["config", "check"], home, &[]);
+    assert!(ok && out.contains(": ok"), "{out}");
+    let (_, err, ok) = run(&["config", "init", "--force", "--preset", "nope"], home, &[]);
+    assert!(!ok && err.contains("gallery name") && err.contains("minimal-clean"), "{err}");
 }

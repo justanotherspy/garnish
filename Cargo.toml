@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "A fast, cached, beautifully themed status line for Claude Code"
 license = "MIT"
-repository = "local"
+repository = "https://github.com/justanotherspy/garnish"
 publish = false
 default-run = "garnish"
 

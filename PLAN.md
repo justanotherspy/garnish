@@ -189,9 +189,9 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `tests/presets.rs`: every file validates, renders without `…` and inside the box at its declared width (animated presets must move between two ticks), name matches filename and is unique
 - [x] `src/gallery.rs`: the files embedded with `include_str!` (`gallery::PRESETS`, `find`, `header`, `body` strips the tooling lines), a unit test that the table lists exactly `presets/*.toml` and that every body validates
 - [x] `garnish docs` renders `docs/presets.md` (`docs::presets_page`: a table, then per preset the sample at the declared width from `subscription-full` at frame 0 and the file in a collapsed block); `docs_sync` covers it, the index and README link to it
-- [ ] `garnish presets` lists names + summaries; `garnish config init --preset <gallery name>` writes the file (tooling header lines stripped)
+- [x] `garnish presets` lists names, summaries, widths and needs; `garnish config init --preset <gallery name>` writes the file with the tooling header lines stripped (a built-in name still gets the annotated default file; an unknown name lists both kinds); end-to-end test in `tests/cli.rs`
 - [x] `presets/screenshots/<name>.png` convention, named in README, `presets/README.md` and the gallery page intro (the `garnish-submit-preset` skill of Phase 18 asks for one)
-- [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary)
+- [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary and for this roadmap; stays open here as the pointer)
 
 ## Phase 18 — Bundled skills (SPEC § 13)
 
@@ -213,7 +213,7 @@ and user feedback. Pick from here when no phase is in progress.
 - [ ] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end
 - [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)
 - [ ] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fix the wording in `docs.rs` and regenerate
-- [ ] `Cargo.toml` still says `repository = "local"`; point it at the GitHub URL before any release beyond the local tag
+- [x] `Cargo.toml` said `repository = "local"`; it points at the GitHub URL (Phase 17, 2026-09-06)
 - [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened
 
 ## Session log
@@ -463,3 +463,14 @@ and user feedback. Pick from here when no phase is in progress.
   with `fill = false` is now reported, SPEC § 4.2 says "frame 0 when off"
   everywhere, the presets test checks every animated preset moves, and
   `animated-dots` animates the model icon (the fixture has no branch).
+- **2026-09-06 (Phase 17, three layers)** — Presets gallery of SPEC § 12.
+  `phase-17/gallery-embed`: `src/gallery.rs` embeds every `presets/*.toml`
+  with `include_str!` (a unit test keeps the table equal to the directory),
+  parses the header, and `body` strips the tooling lines for a written file.
+  `phase-17/gallery-docs`: `docs/presets.md` generated with every preset
+  rendered at its declared width at frame 0 plus the file in a collapsed
+  block; index and README link to it; the screenshots convention is named.
+  `phase-17/gallery-cli`: `garnish presets`, `config init --preset <gallery
+  name>` (built-in names keep the annotated default file; an unknown name
+  lists both kinds), end-to-end test; `Cargo.toml repository` points at
+  GitHub. The website stays a backlog pointer.
