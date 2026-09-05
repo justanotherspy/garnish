@@ -6,22 +6,33 @@ phase in `PLAN.md`. It exists so that the next planning session starts from
 an inventory of what a mature competitor ships, what garnish already does
 better, and which ideas are worth the cost of porting.
 
-Source studied: [sirmalloc/ccstatusline](https://github.com/sirmalloc/ccstatusline),
-MIT, Node/TypeScript with a React/Ink TUI. Clone at commit
-`016be1fcf19453bd4362439b197e9cf841d7006a` (package version 2.2.29),
-read on 2026-09-05. File paths below are relative to that repository at that
-commit; the local clone lived in a job scratch directory and is not kept.
-Facts about Claude Code were re-verified against the 2.1.261 binary on the
-same day (see § 8.3).
+Sources studied (all MIT), read on 2026-09-05/06 from shallow clones in a
+job scratch directory that is not kept:
 
-How to read this: § 3 is the list of things garnish must not give up while
-porting anything. § 4 is the widget inventory. § 5 holds the proposals,
-tiered by what they cost: **A** fits every current invariant, **B** needs a
-worker or cache adaptation, **C** needs a `SPEC.md` non-goal lifted or a new
-crate and is therefore a decision for Daniel, **D** is deliberately not
-ported. § 7 is the interactive installer, which gets its own section because
-Daniel asked for it. § 9 is the decision checklist; § 10 a suggested phase
-order after Phase 18.
+| project | what it is | version read |
+|---|---|---|
+| [sirmalloc/ccstatusline](https://github.com/sirmalloc/ccstatusline) | the mature status line, Node/TypeScript with a React/Ink TUI | commit `016be1fcf19453bd4362439b197e9cf841d7006a`, v2.2.29 |
+| [krayong/ccsidekick](https://github.com/krayong/ccsidekick) | a status line with a reacting ASCII character, tips, cost engine | v1.8.0 |
+| [vincent-k2026/codachi](https://github.com/vincent-k2026/codachi) | a tamagotchi pet in the status line | v0.3.0 |
+| [refinist/ccstatusline-editor](https://github.com/refinist/ccstatusline-editor) | a browser editor for ccstatusline configs with share links | v2.2.26-ccse.1 |
+
+File paths in Parts I–II are relative to the ccstatusline clone; Parts III
+and IV name their repository. Facts about Claude Code were re-verified
+against the 2.1.261 binary (see § 8.3).
+
+How to read this. **Part I** (§ 1–10) is the decision document for
+ccstatusline: § 3 lists what garnish must not give up while porting
+anything, § 4 is the widget inventory, § 5 holds the proposals tiered by
+cost (**A** fits every current invariant, **B** needs a worker or cache
+adaptation, **C** needs a `SPEC.md` non-goal lifted or a new crate and is a
+decision for Daniel, **D** is deliberately not ported), § 7 the interactive
+installer, § 9 the decision checklist, § 10 a phase order after Phase 18.
+**Part II** (§ 11–22) records how ccstatusline built each thing, close to
+the code, and the Rust shape for garnish. **Part III** (§ 23–24) mines the
+two companion projects into a garnish companion design. **Part IV**
+(§ 25–26) covers the web editor and what garnish takes from it. Each part
+ends with its own decision list; § 10 collects the phase order for all of
+them.
 
 ---
 
@@ -53,9 +64,17 @@ Public numbers on 2026-09-05:
 | runtime | Node ≥ 18 or Bun; installed via `npx`/`bunx` or a pinned global install |
 | distribution | npm with trusted-publishing provenance; GitHub release per `v*` tag; Remotion-rendered demo GIF |
 
-An ecosystem has formed around it: a config gallery (statuslin.es), a
-browser-based visual editor (ccstatusline-editor), and interoperability with
-`ccusage`. Its README explicitly answers "why is it slow" with a startup
+The three smaller projects, on 2026-09-06:
+
+| project | stars / forks | created | last push | note |
+|---|---|---|---|---|
+| ccsidekick | 30 / 1 | 2026-07-06 | 2026-09-02 | active; 18 packs, plugin marketplace, landing site |
+| codachi | 12 / 5 | 2026-04-02 | 2026-04-18 | small and finished-looking; the pet mechanics are the value |
+| ccstatusline-editor | 12 / 0 | 2026-07-03 | 2026-07-25 | tracks ccstatusline releases by version suffix |
+
+An ecosystem has formed around ccstatusline: a config gallery
+(statuslin.es), the browser editor above, a companion apply CLI
+(`@refinist/ccsa`), and interoperability with `ccusage`. Its README explicitly answers "why is it slow" with a startup
 table: `bunx ccstatusline@latest` 633 ms, a pinned global install 202 ms,
 `npx` about 1.1 s per repaint. That number is the single biggest
 differentiator garnish has (§ 3).
@@ -647,7 +666,10 @@ should be re-tiered before anything network-related is built.
 - [ ] **Segments.** Is the Powerline-segment look (B1) wanted enough to
       justify a background role set in `theme.rs` and a second painter path?
 - [ ] **Verify items** (no decision, just work): A1 dim reset on screen;
-      NBSP behaviour in VS Code; where the autocompact notice renders.
+      NBSP behaviour in VS Code; where the autocompact notice renders; the
+      `spinnerVerbs` settings key (§ 24.9).
+- [ ] **Companion** (Part III): see § 24.11.
+- [ ] **Sharing, rotation, web preview** (Part IV): see § 26.1.
 
 ## 10. Suggested phase order after Phase 18
 
@@ -667,6 +689,10 @@ work lands first; network and TUI phases wait on § 9.
 | 27 | transcript worker | C1 `compactions`, `speed` (if approved) |
 | 28 | network workers | C2 usage API, C3 service status, B3b (if approved; adds `reqwest`) |
 | 29 | setup | 7.3b or 7.3c `garnish setup` (if approved), import/export, doctor screen |
+| 30 | sharing and rotation | `config share` / `config apply` / `preview --config` / `preview --html`; theme and preset rotation keys (§ 26) |
+| 31 | companion core | `garnish hook` classifier and event summary (shared with B4), `pet` one-row with the `sprig` voice, `say`, mood and pressure, `preview --live` (§ 24.1–24.6) |
+| 32 | companion memory and tips | memory file, tiers, `garnish stats`, `tip` catalog, pace delta and pace colors on the limit modules, `provider`, branch operation glyph (§ 24.7–24.10) |
+| 33 | companion gutter and packs | `[gutter]` three-row layout, `pack.toml` static art, spinner verbs after the binary check (§ 24.4–24.5, 24.9) |
 
 Each of these follows the phase protocol in `CLAUDE.md`: `SPEC.md` first,
 then code, then the adversarial review. When a phase is started, move its
@@ -1300,6 +1326,498 @@ with `[1m]` suffix inference for 1 M models and an 80 % "usable" ratio;
 garnish's `effective_window − 13 000` autocompact threshold was verified
 against the binary and is the better number for A11.
 
+---
+
+# Part III — A companion character (ccsidekick, codachi)
+
+Daniel likes the idea of a sidekick or tamagotchi-style pet in the status
+line. Two MIT projects do it well in different ways; this part records how
+each is built and then designs a garnish companion that keeps garnish's
+invariants (no child process on a warm tick, payload first, clock-driven
+animation, a fixed module set) and improves on both.
+
+## 23. The two projects
+
+### 23.1 ccsidekick (krayong, MIT, v1.8.0, Bun/TypeScript workspace)
+
+A status line *with a character*: a single sourced ASCII figure (≤ 9 rows ×
+25 columns) sits in a left gutter beside a five-row field block; a
+one-line in-character comment renders under the block and an optional
+"helpful" tip above it. 18 character packs ship as pure data
+(`pack.json`: figure rows, attribution, tone, an optional theme, ~620
+voice lines in tiered pools, ≥ 25 spinner verbs), 33 widgets, 58 built-in
+themes plus one per pack. Numbers that matter:
+
+- **Two binaries.** `ccsidekick-render render` (the tick) and
+  `ccsidekick-render classify` (the hook) load no UI; `ccsidekick` is the
+  Ink TUI plus `setup`/`list`/`uninstall`. Same split garnish has between
+  `render` and its subcommands.
+- **Hooks.** `PostToolUse` and `PostToolUseFailure` (matcher = the union of
+  tool names) run `classify`, which maps the tool name or Bash command to
+  one of 31 outcome categories (`test_pass/fail`, `build_pass/fail`,
+  `typecheck_pass/fail`, `lint`, `format`, `install`, eight `git_*`,
+  `force_push`, `dangerous`, `file_edit`, `file_read`, `search`,
+  `web_fetch`, `todo_update`, `agent_spawn`, `skill_run`, `docker`, `k8s`,
+  `deploy`, `db_migrate`, `server_start`) plus a stack tag from the program
+  (`cargo → rust`, `pytest → python`, `kubectl → kubernetes`, …). A
+  successful tool flips to a failure when `tool_response` has `isError` or
+  `interrupted`, or stdout+stderr matches a tight failure regex
+  (`\bFAILED\b|\bFAIL\b|✗|✕|\bnot ok\b|error:|error\[|error TS\d|error CS\d|
+  \bpanic:|Traceback \(most recent call last\)|[1-9]\d* (?:failed|failing|errors?)\b`);
+  a non-empty stderr alone is never a failure. Events append to
+  `sessions/<id>/events.jsonl`, bounded to 200 lines; the hook exits 0
+  and prints nothing. `PostToolBatch` is deliberately not wired (it co-fires
+  and would double count).
+- **Mood.** From events inside a 5-minute window: none → `idle`; no
+  pass/fail among them → `busy`; latest signal a pass with an earlier fail →
+  `recovery`; ≥ 3 fails and latest not a pass → `struggling`; latest a pass →
+  `happy`. Three *pressure* moods override the figure, first match wins:
+  `compact_hint` (context near autocompact), `block_limit`, `weekly_limit`
+  (quota > 80 %). Mood never changes a glyph, only color (a static tint
+  over a diagonal shimmer gradient that drifts top-left → bottom-right on a
+  24 s wall-clock period).
+- **Quota by pace, not by percentage.** `r = used_fraction /
+  max(elapsed_fraction, 0.01)`; `r ≤ 1` nominal, `≤ 1.5` caution, else
+  critical; below 20 % used the pace is ignored, above 80 % always
+  critical. Context bands are fixed at < 34 / 34–66 / ≥ 67 %.
+- **Voice selection** (`compose/character.ts`) walks a fixed chain and the
+  first slot with content wins: first contact → hot event reaction →
+  pressure or non-idle mood (tier-nested pools) → milestone (tier up,
+  comeback after ≥ 3 days, streak 3/7/30/100, anniversary) → date egg →
+  egg (every 12th tick) → greeting by time bucket (morning/day/evening/
+  night/weekend) → idle. The pick is `sha1(seed parts) mod pool`, so the
+  same situation shows the same line instead of flickering. Lines are
+  capped at 66 columns. Pressure and milestone lines fire once per session
+  (latches in `state.json`, merged under a lock so concurrent ticks never
+  drop one).
+- **Familiarity.** Cross-session analytics (`analytics/store.json`, one
+  record per session joined from the transcript cost cache) give a tier —
+  stranger / acquaintance / friend / partner / legend at 3 / 15 / 50 / 100
+  sessions — streaks with a one-day grace, days since last session, and
+  "seen this project". Random mode picks the least-recently-used character
+  by that store, tie-broken by a hash of the session id over the sorted
+  candidate set.
+- **Helpful tips** (`compose/helpful/catalog.ts`, ~45 triggers, core-owned,
+  never pack-authored): safety (untracked secret file, destructive command
+  just ran, kube context or terraform workspace looks like prod, commit on
+  detached HEAD, force push), billing (API key while subscribed, PAYG near
+  cap, low balance), quota (block/weekly almost spent, will exhaust at this
+  pace), context (compact urgent, commit before compact, compaction thrash
+  ≥ 3, cache inefficiency < 50 % after 20 turns, compact soon ≥ 60 %), git
+  (merge conflict, upstream gone, pushed to default, commit on default, big
+  diff > 1000 lines, diverged, behind upstream, dirty default branch,
+  unpushed, no upstream, > 20 untracked, ≥ 5 stashes, > 20 commits behind
+  default, rebase/merge/cherry-pick/revert in progress, uninitialised
+  submodule, detached HEAD), workflow (todo in progress > 30 min, effort
+  low). Each has a severity, a "momentary" flag, a 5-minute show window
+  and a 10-minute cooldown; the user sets a severity floor. Kube and
+  terraform context are read from files, never by spawning the tools.
+- **Spinner verbs.** Install writes `spinnerVerbs: {mode: "replace",
+  verbs: [...]}` into Claude Code's settings so the harness's loading text
+  speaks in character. A real hook into the harness that no other project
+  uses.
+- **Cost engine.** Prices every transcript in the tree in-house with a
+  bundled `pricing.json` (per-model input/output/cache-write 5 m and 1 h/
+  cache-read per million, `fast_mult`), deduplicated globally by
+  `(message.id, requestId)` keeping the write with the largest
+  `output_tokens`, cached per file by `{mtime, size, byteOffset,
+  headHash}` so a growing transcript re-prices only its appended tail and a
+  compaction rewrite (head hash mismatch) forces a full reparse. Burn rate
+  over the live 5-hour window. Also reconstructs the current **todo list**
+  from `TaskCreate`/`TaskUpdate`/`TodoWrite` rows in the transcript.
+- **Git.** One `rev-parse` answers three location probes; `status
+  --porcelain=v2 --branch`; `diff HEAD --numstat`; `describe --tags
+  --exact-match`; in-progress operation from the existence of
+  `.git/rebase-merge|rebase-apply|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD`;
+  submodule branches via `submodule status --recursive`; `GIT_DIR`-style
+  location env vars stripped so a hook environment cannot redirect the
+  reads. Git runs fresh every tick (their tick is ~100 ms+; garnish's
+  cannot).
+- **Layout.** Figure gutter (25 cols + 2 gap) only when `columns ≥ 80`;
+  below that a `[name] │` chip leads the line. Every externally sourced
+  string (cwd, branch, session name, pack text) is stripped of C0/C1 and
+  ESC sequences before painting; the model field keeps a protected tail
+  (`(1M)`, effort) and ellipsizes the name first.
+- **Setup.** `npx ccsidekick` opens a wizard (character → theme →
+  comments) on first run and a dashboard later (sections: Character, Theme,
+  Statusline widgets, Comments, Stats, Install; keys `w a s d`/arrows,
+  `tab`, `1–7`, `/` find, `?` help, `ctrl+p` preview, `ctrl+s` save &
+  install, `ctrl+w`/`ctrl+d` switch views). `ccsidekick setup --character
+  … --theme … --widgets …` is the non-interactive twin that validates every
+  value against the live registry and fails loudly on a typo; `ccsidekick
+  list characters|themes|widgets` prints the valid sets. The repo is its
+  own Claude plugin marketplace with a `/ccsidekick-setup` slash command
+  whose instructions tell Claude to run `list` first, map plain-English
+  intent onto flags, and never pass a value that did not match — a
+  template for garnish's Phase 18 skill. Config is TOML with
+  `schema_version = 1` and a per-project `.ccsidekick/config.toml`
+  override; settings writes are verify-then-rollback (write, re-read,
+  parse, restore the old text on failure) with the oldest and newest
+  backups retained.
+- **Stats.** A dashboard section with sessions, uptime, tier progress,
+  a 60-day activity heatmap, a sparkline, per-model bars, weekday/weekend
+  split, cost against budget.
+
+### 23.2 codachi (vincent-k2026, MIT, v0.3.0, zero-dependency TypeScript)
+
+"A productivity copilot disguised as a tamagotchi." Three rows: widgets
+(model, context bar with `555K/1.0M`, burn velocity `^3%/m` and an ETA
+`~15m` to a full context, 5 h and 7 d limits with a pace delta `⇡5%`/`⇣2%`
+and a reset countdown), git (`git:(main*) ~12 ?3 | +489 -84 lines | last:
+<commit subject>`), and the pet row (`Mochi *slow blink* ...I love you`).
+
+- **Frames are procedural.** Five species (cat, penguin, owl, octopus,
+  bunny) × five body sizes (tiny/small/medium/chubby/thicc, chosen by
+  context-usage bucket, so *the pet grows as the context fills*) × five
+  moods (idle, happy, busy, danger, sleep) × four frames. A species is ~40
+  lines: a template takes an eye glyph and a tail glyph (`o`/`^`/`-`/`O`
+  eyes; `~` wag, `!` alarm, `z`/`Z` sleep) and the width is derived, so
+  every frame of an animation is padded to the same width and the figure
+  never jitters. Frame index is `floor(now / 1.5 s) mod 4`.
+- **Events.** A `PostToolExecution` hook appends to `events.json` (50
+  entries, optimistic generation counter). ~40 categories including
+  file-type edits (`edit_test/docs/style/config/code` from the path),
+  `creating_file`, `rapid_editing` (5 edits in 60 s), `recovered`,
+  `struggling` (3 failures), `first_action`, `many_edits`, `web_research`,
+  `agent_spawned`. Freshness tiers: hot < 15 s, warm < 60 s, cold < 5 min.
+- **Mood engine** is a 15-tier priority list: tier-upgrade celebration →
+  danger (context > 85 %) → smart `/compact` suggestion (context > 70 % and
+  fast burn, once per trigger) → hot event → high usage → warm event → busy
+  → welcome back (first ticks) → session stats → cold event → rare egg →
+  velocity → time of day → file type → git mood → body-size line → species
+  idle. 900+ messages, file-aware (names the file being edited), with
+  Simplified Chinese bundled and user locale overrides.
+- **Memory.** `memory.json` with a schema version: first met, sessions,
+  uptime; tiers stranger / acquaintance / friend / bestie at 0 / 3 / 15 /
+  50; a one-time upgrade celebration. Identity (species, palette) is a hash
+  of `transcript_path`, so a session keeps its pet.
+- **Context ETA.** A 20-entry ring of `(pct, t)` samples (≥ 1 s apart)
+  gives velocity in %/min over the last ~30 s; ETA = remaining / velocity
+  when velocity > 0.3 %/min. This needs state written on the tick.
+- **Pace delta.** `used% − elapsed%` of the window, from `resets_at` and
+  the window length (300 or 10 080 min); positive is red (over pace),
+  negative green. Payload-only.
+- **Plugins.** `~/.config/codachi/plugins/*.mjs` export message packs and
+  RGB palettes (executed code, which garnish will not do). `codachi stats`
+  prints the relationship dashboard; `init` / `uninstall` / `config` (TUI)
+  / `demo` (live preview loop) round out the CLI.
+
+### 23.3 What each got right
+
+| aspect | ccsidekick | codachi | take for garnish |
+|---|---|---|---|
+| figure | sourced art, static, color-only mood | procedural, animated, grows with context | codachi's procedural frames through garnish's clock-driven animation; ccsidekick's static-art path as an optional pack |
+| events | 31 outcome categories, two hooks, soft-fail regex | 40 categories incl. file types and rapid editing | ccsidekick's vocabulary plus codachi's file-type and rapid-edit detectors |
+| mood | 5 moods + 3 pressure moods, 5-min window | 5 moods incl. sleep, 15-tier message priority | ccsidekick's mood rule; codachi's `sleep`; ccsidekick's slot chain for messages |
+| memory | 5 tiers, streaks, comeback, anniversary, LRU rotation | 4 tiers, one-time celebration | ccsidekick's |
+| quota | pace band `r` | pace delta `⇡5%` | both: delta on the module, band for the color |
+| extras | tips catalog, spinner verbs, cost engine, todo | context ETA, `stats`, i18n | tips, spinner verbs, ETA, `stats` |
+| setup | wizard + dashboard, flags twin, plugin slash command | one-line `init`, config TUI, `demo` | flags twin and the skill contract; `demo` as `preview --live` |
+| data | packs are pure data, lint-enforced | messages in code, plugins are code | pure data packs (TOML), lint in tests |
+
+## 24. garnish companion design
+
+Everything below is payload-plus-cache on the tick; the only new process is
+the hook, which runs in Claude Code's hook slot, not on the tick.
+
+### 24.1 Modules
+
+- **`pet`** — the figure. `species = "cat" | "penguin" | "owl" | "octopus"
+  | "bunny" | "sprig"` (a garnish-original default, so the bundled set has
+  no trademark exposure), `size = "auto" | "tiny" | … | "thicc"` (`auto`
+  follows the context bucket), `rows = 1 | 3` (a one-row pet `(o w o)~`
+  fits today's four-line layouts; three rows use the gutter in § 24.5),
+  `name = "Mochi"`, `animate = true`, `mood_colors = true`.
+- **`say`** — the one-line voice, usually alone on its own line or right
+  after `pet`; `max_width` (default 66), `tone` filter if a pack declares
+  tones, `hide = ["idle"]` to speak only when something happened.
+- **`tip`** — the helpful line, `min_severity = "medium"`, `show_for = 300`,
+  `cooldown = 600`, `hide_when_empty` default true.
+- **`provider`** — badge for bedrock / vertex / foundry / proxy / api from
+  the environment (`CLAUDE_CODE_USE_BEDROCK` etc., `ANTHROPIC_BASE_URL`),
+  hidden for a subscription; small, payload/env only, and ccsidekick users
+  asked for it.
+
+### 24.2 Events: the hook
+
+`garnish hook` (shared with B4) is registered by `install --hooks` for
+`PostToolUse`, `PostToolUseFailure`, `PreToolUse` (matcher `Skill`) and
+`UserPromptSubmit`, tagged `_tag: "garnish-managed"`. It reads the hook
+JSON from stdin, classifies in-process, appends one line to
+`<cache>/<session>/events.jsonl` (bounded 200), rewrites a small
+`<cache>/<session>/events.json` summary (`freshest`, `consecutive_failures`,
+`edits_60s`, counts by category, last skill), and exits 0 without output.
+The tick reads the summary only.
+
+```rust
+/// Written to events.jsonl by `garnish hook`; the tick never parses Bash text.
+struct Event { ts: i64, kind: EventKind, stack: Option<Stack>, detail: Option<String> }
+
+enum EventKind { TestPass, TestFail, BuildPass, BuildFail, TypecheckPass, TypecheckFail,
+    Lint, Format, Install, GitCommit, GitPush, GitPull, GitMerge, GitRebase, GitBranch,
+    GitTag, GitStash, ForcePush, Dangerous, FileEdit(FileClass), FileCreate, FileRead,
+    Search, WebFetch, TodoUpdate, AgentSpawn, SkillRun, Docker, K8s, Deploy, DbMigrate,
+    ServerStart }
+enum FileClass { Test, Docs, Style, Config, Code }
+```
+
+Classification is table-driven (tool-name map, then Bash rules
+most-specific first, wrappers `npx bunx sudo time env command` skipped) with
+the pass/fail suffix taken from the hook event plus the soft-fail check.
+The crate map bans `regex`, so the failure markers are a list of literal
+substrings and two tiny hand-written matchers (`[1-9]\d* failed`, `error
+TS\d`); `tests/hook.rs` pins them against real tool outputs (cargo, pytest,
+go test, jest, tsc). Rapid editing = ≥ 5 `FileEdit` in 60 s, computed by the
+hook into the summary.
+
+### 24.3 Mood and pressure
+
+```rust
+enum Mood { Idle, Sleep, Busy, Happy, Struggling, Recovery }
+enum Pressure { CompactHint, BlockLimit, WeeklyLimit }
+
+fn mood(summary: &Summary, now: i64) -> Mood            // ccsidekick's rule, § 23.1
+fn pressure(payload: &Payload, cfg: &Config) -> Option<Pressure>
+```
+
+Pressure uses garnish's exact autocompact threshold (`context ≥ window −
+compact_buffer_tokens − margin` → `CompactHint`), then `limit5h`/`limit7d`
+by the pace band (§ 23.1) with the 80 % floor. `Sleep` = idle and context <
+10 % (codachi). Freshness (`hot < 15 s`, `warm < 60 s`, `cold < 5 min`)
+weights the message choice, not the mood.
+
+### 24.4 Frames and animation
+
+codachi's model, expressed once:
+
+```rust
+struct Species { name: &'static str, build: fn(size: Size, eye: char, tail: char) -> Frame }
+const FRAMES: [(Mood, [(char, char); 4]); 6] = [ /* eye, tail per frame */ ];
+```
+
+Frame index comes from `SPEC.md` § 4.2 (`floor(now × step) mod 4`, `step`
+from `[modules.pet].fps`, default 2/3 for codachi's 1.5 s), so the pet
+needs no state and freezes under `GARNISH_ANIMATE=0` for goldens. All four
+frames of an animation are padded to one width (their `pickFrame`), and the
+one-row variant is the face row alone. Mood colors: `happy` accent, `busy`
+text, `struggling` warn, `recovery` ok, pressure danger; with A3 gradients
+a `sprig` in the `full` preset can carry ccsidekick's shimmer as a gradient
+whose phase is the clock. ASCII species render in every icon set; `emoji`
+icon set may swap the face for a single glyph in one-row mode.
+
+Optional static art: `~/.config/garnish/packs/<name>/pack.toml` with
+`[figure] rows = [...]` (≤ 9 × 25), `[attribution]`, `tone`, and the line
+pools of § 24.6. Pure data, validated by `config check`, never executed;
+mood is color-only for static art (ccsidekick's rule), which keeps a
+sourced figure from strobing.
+
+### 24.5 Gutter layout (three-row pet)
+
+A new top-level key, kept out of `[[line]]` so existing layouts are
+untouched:
+
+```toml
+[gutter]
+module = "pet"        # the only gutter-capable module for now
+side = "left"
+rows = 3              # lines 1..3 get the gutter; extra lines render flush
+gap = 2
+min_width = 80        # below this the gutter is dropped and `pet` renders one-row inline
+```
+
+`compose_line` reserves `figure_width + gap` on the gutter lines and the
+frame's fill still reaches the right edge, so `align` and the right group
+behave as before. Below `min_width` the figure is dropped and, if `pet` is
+also on a line, its one-row form shows there (ccsidekick's chip fallback,
+without a second element).
+
+### 24.6 Voice
+
+Pools per slot, tier-nested where ccsidekick nests them: `first_contact`,
+`greeting.{morning,day,evening,night,weekend}`, `mood.<mood>`,
+`event.<reaction>` (the 18-cell reaction set: three fail kinds, lint,
+format, install, git, file_edit, search, web_fetch, todo_update,
+agent_spawn, skill_run, docker, k8s, deploy, db_migrate, dangerous),
+`pressure.<kind>`, `milestone.{tier_up,comeback,streak,anniversary}`,
+`positive_git.{clean_tree,op_cleared,branch_created,tag_pushed}`, `egg`,
+`date_egg`, `stack.<stack>.{slow,fail}`, `file.<class>` (codachi's
+file-type lines). Selection is ccsidekick's chain (§ 23.1) with codachi's
+freshness gating on the event slot. Deterministic pick: `fnv1a(seed) mod
+len` where the seed is `(slot, tier, mood, bucket, session_id, 10-second
+tick)`; a ten-line FNV-1a in `num.rs` avoids a hash crate. Templates may
+name the file or branch (`{file}`, `{branch}`), sanitised first.
+
+The bundled voice lives in `packs/sprig.toml` and is loaded with
+`include_str!`; a unit test lints it the way `pack:lint` does (pool counts,
+≤ 66 columns, no near-duplicates by token-set Jaccard ≥ 0.8, no control
+characters). Further packs are user data under the config dir.
+
+### 24.7 Memory, tiers, stats
+
+`<cache>/companion/memory.json` (`schema_version`, `first_met`, `sessions`,
+`uptime_s`, `last_seen`, `projects_seen`, `streak_days`, `last_day`) is
+updated when a tick sees a new `session_id` (the tick writes one small file
+once per session; workers own every other write). Tiers at 3 / 15 / 50 /
+100 sessions; milestone and pressure lines latch once per session in
+`<cache>/<session>/state.json`, merged as sets so overlapping ticks never
+drop a latch. `garnish stats` prints the dashboard: first met, sessions,
+uptime, tier progress bar, streak, last-24 h events from `events.jsonl`
+(tests pass/fail, commits, edits), this session's duration. No network, no
+telemetry.
+
+### 24.8 Tips
+
+Port ccsidekick's catalog as a `&[Tip]` table: `id`, `severity`,
+`momentary`, `test: fn(&Derived) -> Option<String>`. Inputs garnish already
+has: payload (context, limits, effort, `pr`), the `branch` worker (dirty
+flags, upstream, ahead/behind, untracked paths, in-progress operation
+from `.git/*` file existence, stash count, tag), events (dangerous, force
+push, compaction count if C1 lands), settings (API key vs subscription from
+`rate_limits` presence). Secret detection matches untracked names against
+`.env*`, `*.pem`, `*.key`, `id_rsa*`, `*credentials*`, `*.p12`. Kube and
+terraform prod contexts come from `~/.kube/config` `current-context` and
+`.terraform/environment` files, read on the settings cache cadence. Show
+window and cooldown are latched in `state.json`.
+
+### 24.9 Spinner verbs
+
+`install --spinner-verbs` writes `spinnerVerbs: {mode: "replace", verbs:
+[...]}` from the active pack (≥ 25 verbs) into Claude settings, preserving
+key order; `install --no-spinner-verbs`/uninstall removes it. **Verify**
+the key name and shape against the 2.1.261 binary before building; if it
+is not there, drop the idea (ccsidekick may target a newer harness).
+
+### 24.10 Small ports from these two (Tier A unless noted)
+
+- `limit5h`/`limit7d`: `pace = true` shows `⇡5%`/`⇣2%` (used − elapsed);
+  `pace_colors = true` colors by the pace band instead of raw percentage.
+- `branch`: in-progress operation glyph (`rebase 2/7`, `merge`,
+  `cherry-pick`, `revert`) from `.git/*` existence, no process; `tag` via
+  `describe --tags --exact-match` in the worker; submodule branches
+  optional.
+- `context`: `eta = true` prints `~15m` from a velocity ring — needs a
+  tick-side sample file (`<cache>/<session>/ctx.json`, ≤ 20 rows); a
+  decision, because today only workers write on the tick path.
+- `todo` module (in-progress task name) — C1, transcript.
+- `cost`: `burn = true` (`$/h` over the 5-hour window) — C1, transcript.
+- `provider` module — Tier A.
+- Sanitisation invariant: every externally sourced string (cwd, branch,
+  session name, agent name, pack text) is stripped of C0/C1 and ESC before
+  painting; add a golden with a hostile branch name.
+- `preview --live` (codachi's `demo`): loop a fixture through the renderer
+  on a TTY with the clock running, for screenshots and for checking
+  animation without Claude Code.
+- Settings write contract from ccsidekick: write temp, rename, re-read,
+  parse, restore the previous text on failure; keep the oldest and newest
+  backups only.
+
+### 24.11 Decisions for Part III
+
+- [ ] Ship a companion at all, and which of `pet` / `say` / `tip` /
+      `provider` (each is a module; the hook is shared with B4).
+- [ ] Bundled species: garnish-original `sprig` plus codachi-style animals
+      (procedural ASCII, no trademark) — yes/no on each.
+- [ ] Allow user packs as pure data under the config dir (`pack.toml`)?
+- [ ] Tick-side writes for memory (once per session) and the context-ETA
+      ring (every tick, tiny) — accept, or restrict ETA to a worker?
+- [ ] Gutter layout (`[gutter]`) versus one-row pets only.
+- [ ] Spinner verbs, after the binary check.
+- [ ] `garnish stats` as a new subcommand.
+
+---
+
+# Part IV — A visual editor (ccstatusline-editor)
+
+## 25. What it is
+
+[refinist/ccstatusline-editor](https://github.com/refinist/ccstatusline-editor)
+(MIT, Vue 3 + Vite + Pinia + shadcn-vue, deployed as a Cloudflare Worker;
+clone at v2.2.26-ccse.1) is a browser editor for ccstatusline configs:
+
+- **Editor page**: a widget palette (drag and drop, `vue-draggable-plus`),
+  a line editor for up to five lines, an inspector for the selected widget
+  (colors, bold, dim, raw value, per-widget options) and global settings
+  (padding, separator, powerline, color level), a JSON panel, undo history
+  (editor-only preferences such as "auto separator" are kept out of the
+  history and the export), and a **true-to-terminal preview**: the app
+  re-implements each widget's `isPreview` render branch of ccstatusline
+  v2.2.26 (`src/preview/previewText.ts`, "faithful port"), reproduces the
+  renderer's separator-collapse and inherit-separator-color rules
+  (`renderers.ts`), down-samples colors to the chosen terminal level, and
+  draws powerline arrows as SVG so no Nerd Font is needed.
+- **Templates page**: ready-made configs applied in one click; a template
+  share link is `?tpl=<id>` and needs no backend.
+- **Share**: `POST /api/share` stores a user config in Workers KV and
+  returns `?s=<id>`; the receiver's editor loads it on open. Rate-limited
+  and "unavailable" are distinct user-facing failures.
+- **Apply**: a one-line command,
+  `npx -y @refinist/ccsa@latest '<json>'` (single-quoted JSON, `'\''`
+  escaping), where the companion CLI backs up the current settings to a
+  timestamped copy under `~/.config/ccsa/` and writes the file; `ccsa
+  export` pulls the live config back into the editor for round trips.
+- **Export image**: `html-to-image` renders the preview card at a fixed
+  terminal width and 2× scale so every screenshot is identical.
+- **Rotation page**: build a pool of themes, pick a period (hourly / daily
+  / weekly / custom) and a strategy (cycle / shuffle), or the "one look per
+  weekday" preset; export a bundle `{version: 1, period, strategy, themes:
+  [...], preset?}` that the CLI runs with `rotate on`; the CLI picks
+  `slotIndex(date, period) mod themeCount`, and because epoch day 0 was a
+  Thursday the editor rotates the Sunday-first card order into epoch order
+  on export.
+- i18n (en, zh-CN, zh-TW); tests colocated, heaviest under `src/preview/`.
+
+## 26. What garnish can take from it
+
+garnish has no web surface and does not need one to get most of the value.
+
+1. **Config as the sharing unit.** The editor's whole loop is "a config file
+   you can hand to someone, preview without installing, and apply with one
+   command". garnish's TOML already is that file. Tier A pieces:
+   - `garnish config share` prints the config as a single line
+     (`garnish config apply '<toml>'` on the other end, validating before
+     writing and backing up like `install` does). No server: the payload is
+     the TOML itself, base64 if it must survive a chat client.
+   - `garnish preview --config <file|->` renders a foreign config against
+     the bundled fixtures at a chosen width, so a shared config can be seen
+     before it is applied. `preview` already has `--width`; it needs
+     `--config` (or `GARNISH_CONFIG=-`).
+   - `garnish preview --png`/`--svg`: **not** a crate-free job; instead
+     `preview --html` emitting a self-contained HTML page (spans with
+     inline colors, monospace, fixed width) that a browser or
+     `html-to-image` can capture. Zero dependencies, and it doubles as the
+     README gallery generator (memory note: gallery samples must fit
+     GitHub's width).
+2. **Templates = the presets gallery** (`SPEC.md` § 12). The editor's
+   "apply a template then tweak" is `garnish config init --preset <gallery
+   name>` followed by editing; a setup TUI (§ 7) should open on the
+   gallery, not on an empty line, and show each preset rendered.
+3. **Rotation.** A daily/weekly theme rotation is a stateless function of
+   the clock, which garnish already has: `theme = ["nord", "dracula",
+   "catppuccin-mocha"]` with `[rotation] period = "day" | "hour" | "week"`,
+   `strategy = "cycle" | "shuffle"`, picked as `floor(now / period) mod n`
+   (shuffle = FNV of the slot). One weekday-pinned preset: `[rotation]
+   weekdays = { mon = "nord", tue = "dracula", … }`. No CLI toggle, no
+   bundle file, no schedule registration: the config re-reads every tick.
+   Same for `preset` and `icons` if wanted. Tier A, small.
+4. **Undo / history in the TUI** (if 7.3c): keep editor preferences out of
+   the saved config, keep `.bak` as the undo of last resort, and write the
+   live file on every change so Claude Code shows it immediately (§ 7.2).
+5. **A web preview later, if ever.** The honest version for garnish is a
+   static page that runs the *real* renderer compiled to WebAssembly
+   (`wasm32-unknown-unknown`, the render path has no I/O once payload and
+   config are strings), fed by a TOML textarea and a fixture picker. It
+   would never drift from the terminal output the way a hand-ported
+   preview can. Cost: a `wasm-bindgen` build target and a static site;
+   value: a gallery and share links (`?toml=<base64>`) with no backend.
+   Tier C (new build target); decision for Daniel, not a recommendation.
+
+### 26.1 Decisions for Part IV
+
+- [ ] `config share` / `config apply` / `preview --config` (Tier A).
+- [ ] `preview --html` for the gallery and screenshots (Tier A).
+- [ ] Theme/preset rotation keys (Tier A).
+- [ ] A WebAssembly preview page (Tier C).
+
 ## Appendix — where to look in ccstatusline (commit 016be1f)
 
 | topic | files |
@@ -1321,3 +1839,39 @@ against the binary and is the better number for A11.
 | fuzzy search | `src/utils/fuzzy.ts` |
 | update check | `src/utils/update-checker.ts` |
 | CI / publish | `.github/workflows/ci.yml`, `.github/workflows/publish.yml` |
+
+### ccsidekick (`packages/core/src/`, v1.8.0)
+
+| topic | files |
+|---|---|
+| invariants and architecture | repository `CLAUDE.md`, `README.md` |
+| classifier, failure regex, hook | `derived/classifier.ts`, `cli/classify.ts`, `cli/settings.ts` (hook matcher, `spinnerVerbs`, verify-then-rollback write) |
+| mood, pressure, pace band | `derived/mood.ts`, `derived/signals.ts`, `derived/quota.ts`, `domain/constants.ts` |
+| voice selection, pack schema, lint | `compose/character.ts`, `domain/pack.ts`, `packs/lint.ts`, `packages/packs/<name>/pack.json` |
+| figure and layout | `render/figure.ts`, `render/layout.ts`, `render/strip.ts`, `render/theme.ts`, `data/themes.ts` |
+| tips | `compose/helpful/catalog.ts`, `sources/helpfulEnv.ts`, `sources/markers.ts` |
+| cost engine and transcript scan | `derived/cost.ts`, `derived/pricing.ts`, `data/pricing.json`, `sources/transcript.ts`, `sources/costCache.ts` |
+| git | `sources/git.ts` |
+| state, events, analytics | `sources/state.ts`, `sources/events.ts`, `sources/storage/*`, `derived/analytics.ts`, `derived/persona.ts` |
+| setup CLI, TUI, plugin command | `cli/setup.ts`, `tui/shell/Wizard.tsx`, `tui/shell/Dashboard.tsx`, `tui/nav/keymap.data.ts`, `commands/ccsidekick-setup.md`, `.claude-plugin/plugin.json` |
+
+### codachi (`src/`, v0.3.0)
+
+| topic | files |
+|---|---|
+| species and frames | `animals/types.ts`, `animals/cat.ts` (and the four siblings) |
+| mood priority, messages | `mood.ts`, `messages/{events,idle,context,social,git}.ts` |
+| events and hook | `events.ts`, `hook.ts` |
+| state, memory, velocity, ETA | `state.ts` |
+| pace delta, widgets, compositor | `stdin.ts` (`computePaceDelta`), `widgets/*.ts`, `render/index.ts` |
+| plugins, i18n, stats | `plugins.ts`, `i18n.ts`, `stats.ts` |
+
+### ccstatusline-editor (`src/`, v2.2.26-ccse.1)
+
+| topic | files |
+|---|---|
+| faithful preview port | `preview/previewText.ts`, `preview/renderers.ts`, `preview/powerline.ts`, `preview/colors.ts` |
+| config store, undo, editor preferences | `stores/config.ts` |
+| share links, apply command, image export | `lib/shareConfig.ts`, `lib/applyCommand.ts`, `lib/exportImage.ts` |
+| rotation bundles and the weekday preset | `lib/rotationBundle.ts`, `lib/weeklyPreset.ts`, `stores/rotation.ts`, `ccsa-rotation-rainbow-week.json` |
+| templates, widget options | `templates/index.ts`, `widgets/options.ts` |
