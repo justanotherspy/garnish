@@ -206,6 +206,55 @@ renders dimmed with `✗` and the error is kept in the cache file for
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
 
+### 3.7 Text modules (target state; PLAN Phase 13)
+
+The 21 built-in modules stay the only ones that read the payload or run
+anything. **Text modules** are the one user-defined kind: a fixed string in
+a box of configurable width, declared under `[modules.text.<name>]` and
+placed on a line as `text.<name>`. Any number may exist. They never run a
+command, read a file or touch the cache, so they cost nothing on the tick.
+
+```toml
+[[line]]
+modules = ["path", "text.motd"]
+right   = ["text.tag", "clock"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 12             # cells; 0 = the text's own width
+pad      = 1              # extra cells added on each side of the box
+justify  = "left"         # left | right | center: where short text sits in the box
+overflow = "scroll"       # clip | scroll | scroll-wrap: text wider than the box
+step     = 1              # cells per tick (0.5 = every second tick)
+gap      = "   "          # scroll-wrap only: text between the end and the start
+color    = "accent"       # role or literal; icon = "" and the usual label/prefix/suffix apply
+
+[modules.text.tag]
+text  = "v0.2"
+color = "muted"
+```
+
+- **Box.** `width = 0` makes the box exactly as wide as the text; otherwise
+  the box is `width` cells and `pad` blank cells are added on both sides.
+  `justify` places text narrower than the box. The module's rendered width
+  is constant, which is what makes it useful as a fixed-width slot next to
+  aligned columns.
+- **Overflow.** `clip` cuts with the ellipsis. `scroll` shows a `width`-cell
+  window that moves `step` cells to the left each tick and, when the end of
+  the text has scrolled past, restarts from the beginning (no wrap-around
+  text). `scroll-wrap` is the ticker: the text is followed by `gap` and
+  then itself, so it flows continuously. Both are stateless: the offset is
+  `(now_secs × step) mod (text width + gap width)`, so a frozen clock
+  freezes the scroll and a cancelled tick loses nothing.
+- **Shared primitive.** The same scroller implements line-level
+  `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
+- **Escapes.** `text` is plain text: ANSI and OSC sequences are stripped,
+  control characters removed, so a config cannot break the row.
+- **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
+  reference gets one page for it; `config check` validates `justify`,
+  `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
+  table.
+
 ## 4. Configuration
 
 Location: `--config` > `$GARNISH_CONFIG` > `$XDG_CONFIG_HOME/garnish/garnish.toml`

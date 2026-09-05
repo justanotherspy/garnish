@@ -143,6 +143,7 @@ test.
 - [ ] Intentional empty lines: `modules = []` with no `right` is a spacer row that `hide_empty_lines` never drops; docs sample
 - [ ] `overflow = "ticker"` with `ticker_step` and `ticker_gap`: stateless scroll window derived from the tick clock, wraps around, right group untouched; golden at two `GARNISH_NOW` values shows the shift; document the 1 s minimum cadence
 - [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`)
+- [ ] Text modules (SPEC § 3.7, Daniel's idea 2026-09-05): `[modules.text.<name>]` with `text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, `color`; ids `text.<name>` on any line; the scroller in `ansi.rs` shared with the line ticker; ANSI/control stripped from `text`; `config check` validates the table exists for every placed id; `garnish modules` and the docs list the family; goldens at two `GARNISH_NOW` values for `scroll` and `scroll-wrap`; CLAUDE.md's "module set is fixed" convention amended to "fixed, plus the text family"
 - [ ] Each feature: schema/config → render → `make docs` → goldens → README/guide paragraph
 
 ## Phase 14 — Presets gallery (SPEC § 12)

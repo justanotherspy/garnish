@@ -236,7 +236,9 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - `docs/guide.md` is the only hand-written file under `docs/`; `garnish docs`
   never touches it. Keep it in step with `README.md` (install URL,
   requirements, troubleshooting).
-- The module set is fixed (21 ids listed in `SPEC.md`). No generic/plugin module.
+- The module set is fixed (21 ids listed in `SPEC.md`) plus the `text.<name>`
+  family (SPEC § 3.7: static text only, no commands, no files). No
+  generic/plugin module that runs anything.
 - Every time read goes through `time::now()`. Every path goes through
   `paths::*`. Every env hook is documented in `SPEC.md` § Test hooks:
   `GARNISH_NOW`, `GARNISH_CACHE_DIR`, `GARNISH_CONFIG`, `GARNISH_NO_SPAWN`,
