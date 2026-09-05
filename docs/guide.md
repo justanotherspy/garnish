@@ -236,8 +236,9 @@ the binary and written to `~/.claude/skills/<name>/` by `garnish install` or
 
 - `garnish-statusline` — an interactive config builder: it asks about your
   terminal and font, width, what matters most, colours, frame and alignment,
-  writes the config, previews it and validates it. It never edits
-  `settings.json` beyond what `garnish install` does.
+  drafts the config in a temp file, previews and validates it, and writes it
+  into place only once you approve. It never edits `settings.json` beyond
+  what `garnish install` does.
 - `garnish-feedback` — files a GitHub issue on `justanotherspy/garnish` with
   the environment, `garnish config show`, `garnish doctor` (glyph grid
   included) and the plain rendered line, labelled `feedback` (and

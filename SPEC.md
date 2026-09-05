@@ -563,7 +563,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 |---|---|
 | `garnish` | render from stdin (default) |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
-| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
+| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
@@ -671,8 +671,8 @@ binary. Everything else is a **gallery preset**: a complete config file under
   file (with the header stripped of tooling lines); `garnish presets`
   lists names and summaries. The three built-in names keep working.
 - **Screenshots and website.** `presets/screenshots/<name>.png` are optional
-  real-terminal captures contributed with a preset (the feedback skill in
-  § 13 tells people how). A later static site is built from `docs/presets.md`
+  real-terminal captures contributed with a preset (the submit-preset skill
+  in § 13 tells people how). A later static site is built from `docs/presets.md`
   and those screenshots; it is out of scope for the binary, which only has
   to keep the gallery page and the files honest.
 - **Seed set.** The configs exercised in the 2026-09-05 walkthrough
@@ -701,8 +701,8 @@ them needs network access from garnish itself, they drive `gh` and the
 - **`garnish-feedback`.** Files a GitHub issue on `justanotherspy/garnish`
   with `gh issue create` using a template: terminal application and
   version, font, OS, `garnish --version`, the config (`garnish config
-  show`), `garnish doctor` output, the rendered line (`garnish` on the
-  current payload with `--color never`), and asks the person to take a
+  show`), `garnish doctor` output, the rendered line (`garnish preview` on
+  a saved payload with `--color never`), and asks the person to take a
   screenshot and attach it to the issue. Labels: `feedback`, plus
   `alignment` when the report is about widths.
 - **`garnish-submit-preset`.** Reads the current config, asks for a name,

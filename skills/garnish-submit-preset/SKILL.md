@@ -1,6 +1,6 @@
 ---
 name: garnish-submit-preset
-description: Turn the current garnish config into a gallery preset proposal: name, summary, designed width, font requirement, author, a validated file with the gallery header, a rendered sample, and a GitHub issue labelled preset on justanotherspy/garnish. Use when someone wants to share or contribute their garnish status line layout.
+description: "Turn the current garnish config into a gallery preset proposal (name, summary, designed width, font requirement, author, a validated file with the gallery header, a rendered sample) and open a GitHub issue labelled preset on justanotherspy/garnish. Use when someone wants to share or contribute their garnish status line layout."
 ---
 
 # garnish-submit-preset
@@ -27,7 +27,8 @@ the person prefers the resolved form.
   `garnish presets` (check).
 - **Summary**: one line, what the layout is for.
 - **Columns**: the terminal width it was designed for; the sample is rendered
-  there and must fit uncut. Try `tput cols` as the default.
+  there and must fit uncut. Ask for it (`echo $COLUMNS` in their own
+  terminal; a shell without a tty reports 80 or nothing).
 - **Needs**: `nerd-font`, `emoji`, or nothing (does it use Nerd Font glyphs?
   `icons = "nerd"` means `nerd-font`).
 - **Author**: their GitHub handle, if they want credit.
@@ -40,14 +41,15 @@ The file is the header followed by the config:
 # name: <name>
 # summary: <summary>
 # columns: <N>
-# needs: nerd-font        # optional
-# author: <handle>        # optional
+# needs: nerd-font
+# author: <handle>
 
 <the config, verbatim>
 ```
 
-Write it to a temp path, then validate and render exactly as the gallery test
-does:
+`needs` and `author` are optional: leave the line out rather than writing a
+placeholder, since everything after `# needs: ` is taken literally. Write it
+to a temp path, then validate and render exactly as the gallery test does:
 
 ```sh
 garnish --config "$FILE" config check

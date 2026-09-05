@@ -175,8 +175,9 @@ Three Claude Code skills ship with garnish under `skills/` and are written to
 `~/.claude/skills/` by `garnish install` (or `garnish skills install`):
 
 - **garnish-statusline** builds or reworks a config interactively (terminal,
-  font, width, what matters, colours, frame, alignment), previews it with
-  `garnish preview`, validates it with `config check` and writes it.
+  font, width, what matters, colours, frame, alignment), previews a draft
+  with `garnish preview`, validates it with `config check` and writes it
+  once you approve.
 - **garnish-feedback** files an issue on this repository with `gh`, carrying
   the environment, `config show`, `doctor` (glyph grid included) and the
   rendered line, and asks for a screenshot.

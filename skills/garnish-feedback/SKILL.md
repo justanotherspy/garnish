@@ -1,6 +1,6 @@
 ---
 name: garnish-feedback
-description: File a garnish bug report or feedback as a GitHub issue on justanotherspy/garnish with the environment, config, doctor output and rendered line attached. Use when a garnish status line looks wrong (misaligned, cut, wrong glyph, stale), or when someone wants to report or request something about garnish.
+description: "File a garnish bug report or feedback as a GitHub issue on justanotherspy/garnish with the environment, config, doctor output and rendered line attached. Use when a garnish status line looks wrong (misaligned, cut, wrong glyph, stale), or when someone wants to report or request something about garnish."
 ---
 
 # garnish-feedback
@@ -16,12 +16,14 @@ garnish --version
 garnish doctor                                  # toolchain, settings, config, cache, glyph grid
 garnish config show                             # the fully resolved config
 garnish config path
-echo "$TERM_PROGRAM $TERM"; tput cols            # terminal application and width
+echo "$TERM_PROGRAM $TERM"                       # a hint at the terminal application
 ```
 
 Ask the person for what the commands cannot tell: the terminal application
-and version, the font (and whether it is a Nerd Font), the OS, and one
-sentence on what looks wrong versus what they expected. If the complaint is
+and version, the font (and whether it is a Nerd Font), the OS, the terminal
+width (`echo $COLUMNS` in their own terminal; a shell without a tty reports
+80 or nothing), and one sentence on what looks wrong versus what they
+expected. If the complaint is
 about widths or alignment (a wandering right edge, a `…` that should not be
 there, a glyph drawn wide), the doctor's **glyph grid** is the key evidence:
 keep it whole.
