@@ -397,7 +397,7 @@ mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
 
-    /// Why a glyph is unsafe for the `unicode`/`emoji` sets, if it is.
+    /// Why a glyph is unsafe for a built-in icon set, if it is.
     fn glyph_problem(g: &str) -> Option<&'static str> {
         // Box Drawing and Block Elements are East Asian Ambiguous by table,
         // but every terminal font draws them one cell wide (the bars and
@@ -428,15 +428,20 @@ mod tests {
     /// (`unicode-width` counts them 1 under `width`, 2 under `width_cjk`), on
     /// the Geometric Shapes block, and on emoji that need a variation
     /// selector (`U+FE0F`; COSMIC drew `⏱️ 🗄️` one cell wide while garnish
-    /// counted two, walkthrough bug 10). The `nerd` set is out of scope: a
-    /// Nerd Font's private-use glyphs are designed for one cell.
+    /// counted two, walkthrough bug 10). A Nerd Font's private-use glyphs
+    /// (U+E000–F8FF) are designed for one cell, so the `nerd` set is checked
+    /// only where it borrows a glyph from outside that range.
     #[test]
-    fn unicode_and_emoji_glyphs_have_one_width_in_every_terminal() {
+    fn built_in_glyphs_have_one_width_in_every_terminal() {
+        let private_use = |g: &str| g.chars().all(|c| ('\u{e000}'..='\u{f8ff}').contains(&c));
         let mut offenders = Vec::new();
         for schema in SCHEMAS.iter() {
             for icon in &schema.icons {
-                for set in [IconSet::Unicode, IconSet::Emoji] {
+                for set in [IconSet::Nerd, IconSet::Unicode, IconSet::Emoji] {
                     let g = icon.glyph.get(set);
+                    if set == IconSet::Nerd && private_use(g) {
+                        continue;
+                    }
                     if let Some(problem) = glyph_problem(g) {
                         let points: Vec<String> =
                             g.chars().map(|c| format!("U+{:04X}", u32::from(c))).collect();
@@ -456,7 +461,7 @@ mod tests {
         for bad in ["◆", "◔", "◫", "⧗", "▦", "●", "→", "¤", "⏱\u{fe0f}"] {
             assert!(glyph_problem(bad).is_some(), "{bad:?} must be rejected");
         }
-        for good in ["█", "░", "▏", "▁▃▅▇█", "─", "╭", "⏱", "⚡", "🌿", "❖", "✓"]
+        for good in ["█", "░", "▏", "▁▃▅▇█", "─", "╭", "⏱", "⚡", "🌿", "❖", "✓", "↻", "≣"]
         {
             assert_eq!(glyph_problem(good), None, "{good:?} must be accepted");
         }

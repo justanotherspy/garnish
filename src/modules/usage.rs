@@ -54,7 +54,7 @@ impl Module for LimitModule {
                 "Seven-day rate limit usage and time until reset.",
                 "Percentage of the rolling seven-day window consumed and a countdown to `resets_at`. Only present for Claude.ai Pro/Max subscriptions; hidden otherwise.",
                 &["rate_limits.seven_day.used_percentage", "rate_limits.seven_day.resets_at"],
-                glyph("\u{f073}", "⌗", "📅", "7d"),
+                glyph("\u{f073}", "≣", "📅", "7d"),
             ),
             Window::Spend => (
                 "Spend-limit usage behind a Claude apps gateway.",

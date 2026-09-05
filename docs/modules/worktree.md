@@ -47,7 +47,7 @@ Shown when the current directory is inside a linked git worktree (`workspace.git
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `worktree` | `U+F126` | `⑂` | `🌳` | `wt:` | Worktree icon. |
-| `arrow` | `→` | `➔` | `➡` | `->` | Original → branch arrow. |
+| `arrow` | `U+F178` | `➔` | `➡` | `->` | Original → branch arrow. |
 
 ## Colors
 

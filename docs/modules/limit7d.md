@@ -13,15 +13,15 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | preset | render |
 |---|---|
 | `minimal` | `41%` |
-| `default` | `⌗ 41% ⏱ 3d4h` |
-| `full` | `⌗ ███▎░░░░ 41% ⏱ 3d4h` |
+| `default` | `≣ 41% ⏱ 3d4h` |
+| `full` | `≣ ███▎░░░░ 41% ⏱ 3d4h` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` 41%  3d4h` |
-| `unicode` | `⌗ 41% ⏱ 3d4h` |
+| `unicode` | `≣ 41% ⏱ 3d4h` |
 | `emoji` | `📅 41% ⏰ 3d4h` |
 | `ascii` | `7d 41% reset 3d4h` |
 
@@ -49,7 +49,7 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `window` | `U+F073` | `⌗` | `📅` | `7d` | Window icon. |
+| `window` | `U+F073` | `≣` | `📅` | `7d` | Window icon. |
 | `reset` | `U+F017` | `⏱` | `⏰` | `reset` | Countdown glyph. |
 | `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |

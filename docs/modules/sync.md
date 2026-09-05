@@ -51,7 +51,7 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 |---|---|---|---|---|---|
 | `ahead` | `⇡` | `⇡` | `🔼` | `^` | Ahead glyph. |
 | `behind` | `⇣` | `⇣` | `🔽` | `v` | Behind glyph. |
-| `stale` | `U+F017` | `⏲` | `⌛` | `?` | Stale-fetch glyph. |
+| `stale` | `U+F017` | `↻` | `⌛` | `?` | Stale-fetch glyph. |
 | `no_upstream` | `U+F127` | `⊘` | `🚫` | `-` | No-upstream glyph. |
 
 ## Colors

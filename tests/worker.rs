@@ -179,7 +179,7 @@ fn worker_dirty_flag_and_stale_marker() {
         garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
     assert!(ok, "{err}");
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
-    assert!(!out.contains('●'), "{out}");
+    assert!(!out.contains('\u{f111}'), "{out}");
     std::fs::write(env.work.join("a.txt"), "changed\n").unwrap();
     let (_, err, ok) = garnish(
         &env,
@@ -189,13 +189,13 @@ fn worker_dirty_flag_and_stale_marker() {
     );
     assert!(ok, "{err}");
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
-    assert!(out.contains('●'), "{out}");
+    assert!(out.contains('\u{f111}'), "{out}");
     // Advance the clock past the TTL: the value is still shown, dimmed with ⟳, and a spawn is logged.
     let later = (NOW.parse::<u64>().unwrap() + 60).to_string();
     let before = spawns(&env).len();
     let (out, _, _) =
         garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
-    assert!(out.contains('●') && out.contains('⟳'), "{out}");
+    assert!(out.contains('\u{f111}') && out.contains('⟳'), "{out}");
     assert_eq!(spawns(&env).len(), before + 2, "{:?}", spawns(&env));
 }
 

@@ -33,10 +33,12 @@ pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: &Path) -
     );
     let _ = writeln!(o, "git      {}", git_version());
     let _ = writeln!(o);
+    let loaded = config::load(config_path, &SCHEMAS);
     settings_section(&mut o, settings);
-    config_section(&mut o, config_path);
+    config_section(&mut o, &loaded);
     cache_section(&mut o, cache);
     environment_section(&mut o);
+    glyph_section(&mut o, &loaded.config);
     o
 }
 
@@ -69,8 +71,7 @@ fn settings_section(o: &mut String, settings: &Path) {
     let _ = writeln!(o);
 }
 
-fn config_section(o: &mut String, config_path: Option<&Path>) {
-    let loaded = config::load(config_path, &SCHEMAS);
+fn config_section(o: &mut String, loaded: &config::Loaded) {
     match (&loaded.path, loaded.errors.is_empty()) {
         (None, _) => {
             let _ = writeln!(
@@ -169,22 +170,29 @@ fn environment_section(o: &mut String) {
         }
     }
     let _ = writeln!(o);
+}
 
+fn glyph_section(o: &mut String, config: &config::Config) {
     let _ = writeln!(
         o,
         "glyph test: every `|` should sit in a column with the ones above and below.\n\
-         A `|` pushed right marks a glyph your terminal draws wider than garnish counts\n\
-         (the number after it); a box means your font lacks the glyph. Override the\n\
-         glyph under [modules.<id>.icons] or paste this block into a feedback issue."
+         A `|` pushed out of its column marks a glyph your terminal draws wider or\n\
+         narrower than garnish counts (the number after it); a box means your font\n\
+         lacks the glyph. The `config` rows are the icons your config resolves to,\n\
+         overrides included. Override a glyph under [modules.<id>.icons], or paste\n\
+         this block into a feedback issue."
     );
     for set in IconSet::ALL {
         for row in glyph_rows(set) {
             let _ = writeln!(o, "{row}");
         }
     }
+    for row in config_glyph_rows(config) {
+        let _ = writeln!(o, "{row}");
+    }
 }
 
-/// The glyph-test rows for one icon set, one per module.
+/// The glyph-test rows for one built-in icon set, one per module.
 ///
 /// Each single-character icon is padded to two cells and followed by `|` and
 /// garnish's cell count, so every field is four cells wide and a glyph the
@@ -193,6 +201,22 @@ fn environment_section(o: &mut String) {
 /// not single cells and are left out.
 #[must_use]
 pub fn glyph_rows(set: IconSet) -> Vec<String> {
+    rows(set.name(), |_, icon| icon.glyph.get(set).to_owned())
+}
+
+/// The glyph-test rows for the icons a loaded config resolves to (icon set,
+/// presets and per-module overrides applied), labelled `config`.
+#[must_use]
+pub fn config_glyph_rows(config: &config::Config) -> Vec<String> {
+    rows("config", |schema, icon| {
+        config.modules.get(schema.id).map_or_else(String::new, |m| m.icon(icon.key).to_owned())
+    })
+}
+
+fn rows(
+    label: &str,
+    glyph_of: impl Fn(&crate::config::schema::ModuleSchema, &crate::config::schema::IconSpec) -> String,
+) -> Vec<String> {
     SCHEMAS
         .iter()
         .filter_map(|schema| {
@@ -200,8 +224,8 @@ pub fn glyph_rows(set: IconSet) -> Vec<String> {
                 .icons
                 .iter()
                 .filter_map(|icon| {
-                    let g = icon.glyph.get(set);
-                    let cells = display_width(g);
+                    let g = glyph_of(schema, icon);
+                    let cells = display_width(&g);
                     let single = g.chars().filter(|c| *c != '\u{fe0f}').count() == 1;
                     (single && (1..=2).contains(&cells)).then(|| {
                         format!("{g}{}|{cells}", " ".repeat(2_usize.saturating_sub(cells)))
@@ -209,7 +233,7 @@ pub fn glyph_rows(set: IconSet) -> Vec<String> {
                 })
                 .collect();
             (!fields.is_empty())
-                .then(|| format!("  {:<8} {:<13} {}", set.name(), schema.id, fields.join(" ")))
+                .then(|| format!("  {label:<8} {:<13} {}", schema.id, fields.join(" ")))
         })
         .collect()
 }
@@ -270,6 +294,46 @@ mod tests {
         let names: Vec<&str> = failed.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["repos/r1/sync", "sessions/s1/x"]);
         assert_eq!(failed[0].1.error, "git timed out");
+    }
+
+    #[test]
+    fn glyph_grid_fields_are_four_cells_and_config_rows_follow_the_config() {
+        for set in IconSet::ALL {
+            for row in glyph_rows(set) {
+                // `  <label:8> <module:13> ` is 25 ASCII bytes.
+                let (_, fields) = row.split_at(25);
+                // Fields are four cells plus one space apart, so every `|`
+                // lands on cell 2 of a five-cell period: the column property
+                // the grid promises.
+                // (The ASCII marker glyph is `|` itself, so check the cells,
+                // not the characters.)
+                let mut col = 0_usize;
+                let mut bars = 0_usize;
+                for c in fields.chars() {
+                    if col % 5 == 2 {
+                        assert_eq!(c, '|', "{row:?}: cell {col}");
+                        bars += 1;
+                    }
+                    col += crate::ansi::char_width(c);
+                }
+                assert!(bars > 0, "{row:?}: no fields");
+                assert_eq!(col, bars * 5 - 1, "{row:?}: total width");
+            }
+        }
+        let (default, _) = config::parse("", &SCHEMAS);
+        let expected: Vec<String> = glyph_rows(IconSet::Nerd)
+            .iter()
+            .map(|r| r.replacen("nerd    ", "config  ", 1))
+            .collect();
+        assert_eq!(config_glyph_rows(&default), expected);
+        let (custom, _) = config::parse(
+            "icons = \"unicode\"\n[modules.branch.icons]\nbranch = \"B\"\n",
+            &SCHEMAS,
+        );
+        let rows = config_glyph_rows(&custom);
+        let branch = rows.iter().find(|r| r.contains(" branch ")).unwrap();
+        assert!(branch.contains("B |1"), "override shows in the config row: {branch}");
+        assert!(branch.contains("✱ |1"), "the rest follows the unicode set: {branch}");
     }
 
     #[test]

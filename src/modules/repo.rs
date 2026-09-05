@@ -204,7 +204,7 @@ impl Module for WorktreeModule {
                 IconSpec {
                     key: "arrow",
                     doc: "Original → branch arrow.",
-                    glyph: glyph("→", "➔", "➡", "->"),
+                    glyph: glyph("\u{f178}", "➔", "➡", "->"),
                 },
             ],
             colors: vec![
@@ -292,14 +292,18 @@ impl Module for PrModule {
                 IconSpec {
                     key: "pending",
                     doc: "Pending review.",
-                    glyph: glyph("○", "❍", "🕓", ".."),
+                    glyph: glyph("\u{f10c}", "❍", "🕓", ".."),
                 },
                 IconSpec {
                     key: "changes_requested",
                     doc: "Changes requested.",
                     glyph: glyph("✗", "✗", "❌", "xx"),
                 },
-                IconSpec { key: "draft", doc: "Draft.", glyph: glyph("◌", "❏", "🚧", "wip") },
+                IconSpec {
+                    key: "draft",
+                    doc: "Draft.",
+                    glyph: glyph("\u{f192}", "❏", "🚧", "wip"),
+                },
             ],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent" },
@@ -398,7 +402,9 @@ impl Module for BranchModule {
                     glyph: glyph("\u{f0c1}", "➦", "📌", "@"),
                 },
                 IconSpec {
-                    key: "dirty", doc: "Dirty marker.", glyph: glyph("●", "✱", "✨", "*")
+                    key: "dirty",
+                    doc: "Dirty marker.",
+                    glyph: glyph("\u{f111}", "✱", "✨", "*"),
                 },
             ],
             colors: vec![
@@ -529,7 +535,7 @@ impl Module for SyncModule {
                 IconSpec {
                     key: "stale",
                     doc: "Stale-fetch glyph.",
-                    glyph: glyph("\u{f017}", "⏲", "⌛", "?"),
+                    glyph: glyph("\u{f017}", "↻", "⌛", "?"),
                 },
                 IconSpec {
                     key: "no_upstream",
