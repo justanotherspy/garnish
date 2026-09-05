@@ -116,9 +116,9 @@ not change as they tick. Both are shown in
 [config.md § Aligned columns](config.md#aligned-columns). Columns pair
 *positionally*: the third module of every line is padded to the same width
 whatever it shows, so a `–` placeholder sitting under a 24-cell context bar
-gets a 24-cell blank column. Put modules of similar width in the same column,
-or give the odd line its own `separator` (bars only line up between lines
-that share one).
+gets a 24-cell blank column. Alignment ignores separators, so the remedy is
+to put modules of similar width in the same column, or to move the odd
+module to a line of its own.
 
 ## 6. Presets, icons, colors
 
