@@ -1,1 +1,4 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
 # intentionally empty: golden renders use built-in defaults

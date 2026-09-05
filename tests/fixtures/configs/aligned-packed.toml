@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# The aligned two-line layout with `fill = false`: the right group follows the
+# left one after a separator, so the line is one left-aligned sequence of
+# columns and the last left module is padded when a right group follows it.
+
+align = true
+
+[frame]
+fill = false
+
+[[line]]
+modules = ["model", "session"]
+right   = ["session", "api"]
+
+[[line]]
+modules = ["session", "clock"]
+right   = ["model", "lines"]

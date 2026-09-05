@@ -1,0 +1,7 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600, 1738425601
+# Two instants one second apart: every timer and countdown prints two units
+# with the small one two digits wide, so the widths do not move between them.
+
+durations = "fixed"
