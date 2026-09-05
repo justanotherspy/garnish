@@ -175,6 +175,7 @@ fn environment_section(o: &mut String) {
         "GARNISH_NO_SPAWN",
         "GARNISH_COLUMNS",
         "GARNISH_DEBUG",
+        "GARNISH_ANIMATE",
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         "DISABLE_AUTO_COMPACT",

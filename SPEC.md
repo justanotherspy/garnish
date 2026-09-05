@@ -597,7 +597,7 @@ per-module render cost.
 | `GARNISH_NO_SPAWN` | record intended worker spawns instead of spawning |
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
-| `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session (§ 4.2; target state) |
+| `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session (§ 4.2) |
 
 ## 10. Documentation
 

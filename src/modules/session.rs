@@ -6,7 +6,7 @@ use jiff::tz::TimeZone;
 use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
-use crate::num::{percent_of, u64_to_usize};
+use crate::num::percent_of;
 
 use super::util::{percent, tokens};
 use super::{Ctx, Module, Rendered, icon, seg};
@@ -287,13 +287,8 @@ impl Module for ClockModule {
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("spinner") {
             let frames: Vec<char> = cfg.icon("spinner").chars().collect();
-            if !frames.is_empty() {
-                let len = i64::try_from(frames.len()).unwrap_or(1).max(1);
-                let idx =
-                    u64_to_usize(u64::try_from(ctx.now.as_second().rem_euclid(len)).unwrap_or(0));
-                if let Some(f) = frames.get(idx) {
-                    segs.push(seg(cfg, format!("{f} "), "spinner"));
-                }
+            if let Some(f) = frames.get(ctx.frame(1.0, frames.len())) {
+                segs.push(seg(cfg, format!("{f} "), "spinner"));
             }
         }
         let fmt = match (cfg.str("format") == "12h", cfg.bool("seconds")) {

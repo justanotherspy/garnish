@@ -92,6 +92,9 @@ pub struct Ctx<'a> {
     pub stale_after: u32,
     /// How elapsed times and countdowns print (`durations`).
     pub durations: crate::time::DurationStyle,
+    /// Whether animations advance with the clock (SPEC § 4.2); off, every
+    /// [`Ctx::frame`] is 0.
+    pub animate: bool,
     /// The repository for the payload's directory, discovered at most once.
     pub dirs: std::cell::OnceCell<Option<crate::git::Dirs>>,
 }
@@ -114,6 +117,15 @@ impl Ctx<'_> {
     #[must_use]
     pub fn countdown(&self, until_epoch_secs: i64) -> Option<String> {
         self.durations.countdown_at(until_epoch_secs, self.now.as_second())
+    }
+
+    /// The animation frame (or scroll offset) at this tick: [`crate::time::frame`]
+    /// of the tick's clock, or 0 when animations are off. Every moving part
+    /// goes through here so `animate = false` and `GARNISH_ANIMATE=0` freeze
+    /// all of them at once.
+    #[must_use]
+    pub fn frame(&self, step: f64, period: usize) -> usize {
+        if self.animate { crate::time::frame(self.now, step, period) } else { 0 }
     }
 
     /// The repository containing the payload's current directory, if any.

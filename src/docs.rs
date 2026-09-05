@@ -653,6 +653,10 @@ fn environment_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
+        "| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, ticker, patterned rule) at frame 0 for the session; for screen readers and recordings. |"
+    );
+    let _ = writeln!(
+        o,
         "| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact. |"
     );
 }
