@@ -9,7 +9,8 @@
 
 use std::sync::LazyLock;
 
-/// The embedded files, `(name, text)`, in the order they are listed.
+/// The embedded files, `(name, text)`, in alphabetical order (the unit test
+/// compares against the sorted directory listing).
 const FILES: [(&str, &str); 15] = [
     ("animated-dots", include_str!("../presets/animated-dots.toml")),
     ("bars-and-limits", include_str!("../presets/bars-and-limits.toml")),
@@ -74,20 +75,34 @@ pub fn find(name: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|p| p.name == name)
 }
 
-/// The value of a `# key: value` header line.
+/// The header block: the comment lines before the first blank line (SPEC
+/// § 12, "each file starts with a comment header"). A `# needs: …` remark
+/// further down is an ordinary comment.
+fn header_block(text: &str) -> &str {
+    text.split("\n\n").next().unwrap_or(text)
+}
+
+fn is_tooling_line(line: &str) -> bool {
+    HEADER_KEYS.iter().any(|k| line.starts_with(&format!("# {k}:")))
+}
+
+/// The value of a `# key: value` line in the header block.
 #[must_use]
 pub fn header<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let prefix = format!("# {key}: ");
-    text.lines().find_map(|l| l.strip_prefix(prefix.as_str())).map(str::trim)
+    header_block(text).lines().find_map(|l| l.strip_prefix(prefix.as_str())).map(str::trim)
 }
 
-/// The file without the tooling header lines and the blank lines that
-/// follow them: what `config init --preset <name>` writes.
+/// The file without the tooling lines of its header block and the blank
+/// lines that follow them: what `config init --preset <name>` writes.
 #[must_use]
 pub fn body(text: &str) -> String {
-    let lines = text
+    let head = header_block(text);
+    let rest = text.get(head.len()..).unwrap_or("");
+    let lines = head
         .lines()
-        .filter(|l| !HEADER_KEYS.iter().any(|k| l.starts_with(&format!("# {k}:"))))
+        .filter(|l| !is_tooling_line(l))
+        .chain(rest.lines())
         .skip_while(|l| l.trim().is_empty());
     let mut out = String::with_capacity(text.len());
     for line in lines {
@@ -117,10 +132,21 @@ mod tests {
             .collect();
         on_disk.sort();
         let embedded: Vec<&str> = PRESETS.iter().map(|p| p.name).collect();
-        assert_eq!(embedded, on_disk, "src/gallery.rs FILES must list every presets/*.toml");
+        assert_eq!(
+            embedded, on_disk,
+            "src/gallery.rs FILES must list every presets/*.toml, alphabetically"
+        );
         for preset in PRESETS.iter() {
             assert_eq!(header(preset.source, "name"), Some(preset.name), "{}", preset.name);
             assert!(!preset.summary.is_empty(), "{}: no summary", preset.name);
+            let declared: Option<usize> =
+                header(preset.source, "columns").and_then(|c| c.parse().ok());
+            assert_eq!(
+                declared,
+                Some(preset.columns),
+                "{}: `# columns:` must be an integer",
+                preset.name
+            );
             assert!((60..=400).contains(&preset.columns), "{}: columns", preset.name);
             let body = body(preset.source);
             assert!(!body.contains("# name:") && !body.contains("# columns:"), "{body}");
@@ -143,6 +169,10 @@ mod tests {
             );
         }
         assert!(find("minimal-clean").is_some() && find("nope").is_none());
+        // Only the header block is tooling: a `# needs:` remark in the body stays.
+        let text = "# name: x\n# summary: s\n# columns: 80\n\n# needs: a wide terminal, really\npreset = \"minimal\"\n";
+        assert_eq!(body(text), "# needs: a wide terminal, really\npreset = \"minimal\"\n");
+        assert_eq!(header(text, "needs"), None);
         assert_eq!(find("motd-ticker").unwrap().needs.as_deref(), Some("nerd-font"));
     }
 }
