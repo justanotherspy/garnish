@@ -453,6 +453,15 @@ mod tests {
             .collect();
         assert_eq!(last_bar(&packed[0]), last_bar(&packed[1]), "{packed:?}");
         assert!(packed[0].ends_with("⇄ 8m20s"), "no trailing pad: {}", packed[0]);
+        // Left-packed, the right group is already one sequence with the left
+        // one, so `right_justify` has nothing to decide.
+        assert_eq!(
+            plain(&format!(
+                "align = true\nright_justify = \"start\"\n[frame]\nfill = false\n{base}"
+            )),
+            packed.join("\n"),
+            "right_justify is a no-op with fill = false"
+        );
         // The default (align = false) render is untouched.
         assert_eq!(plain(base), plain(&format!("align = false\n{base}")));
     }
