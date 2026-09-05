@@ -397,10 +397,12 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   not cut with `…`; instead the line shows a window onto the group that
   advances `ticker_step` cells to the left on every tick and wraps around,
   with `ticker_gap` between the end and the start (a news ticker). The
-  offset is derived from the tick's clock (`now` modulo the group width plus
-  gap, times the step), so it is stateless, deterministic under
-  `GARNISH_NOW`, and survives the harness cancelling a tick. The right group
-  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour.
+  offset is the § 4.2 rule, `floor(now_secs × ticker_step) mod (group width
+  + gap width)`, so it is stateless, deterministic under `GARNISH_NOW`, and
+  survives the harness cancelling a tick. `ticker_gap` is plain text
+  (escapes and control characters stripped at config time). The right group
+  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
+  `truncate = false` hands the whole row over, ticker or not.
   A ticker only moves as often as the harness ticks (`refreshInterval`,
   minimum 1 s), which is the documented limit of the effect.
 - **Bars.** `util::bar` uses the fractional-eighth block glyphs only when

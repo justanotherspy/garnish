@@ -29,7 +29,7 @@ garnish preview tests/fixtures/payloads/subscription-full.json --width 120 \
 | `packed-heavy` | custom heavy frame, left-packed lines, a separator per line | 130 | nerd-font |
 | `dracula-256` | Dracula with role and per-module colour overrides in 256-colour mode | 130 | nerd-font |
 | `emoji-overrides` | emoji icons with per-module glyph overrides and name limits | 130 | emoji |
-| `single-line-full` | everything on one row; wider than the terminal it scrolls as a ticker | 200 | nerd-font |
+| `single-line-full` | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
 | `tall-eight-lines` | one module per row, eight rows, square frame | 100 | nerd-font |
 
 Contributing one: the `garnish-submit-preset` skill (SPEC § 13) will do this

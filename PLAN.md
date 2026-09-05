@@ -206,6 +206,8 @@ Items left unchecked when their phase closed, plus follow-ups from reviews
 and user feedback. Pick from here when no phase is in progress.
 
 - [x] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a golden test over them (`tests/config_golden.rs`, 2026-09-05)
+- [ ] Sanitise every string that reaches a row: `separator`, `label`, `prefix`, `suffix`, `fill_char` and per-line separators are never passed through `ansi::plain_text` (only a text module's `text`/`gap` and `ticker_gap` are, since Phase 15), and payload strings (`model.display_name`, `session_name`, `agent.name`, `output_style.name`) are trusted as given; `truncate` would split an escape sequence in any of them (Phase 15 review)
+- [ ] Question for Daniel: with `GARNISH_ANIMATE=0` a ticker is frozen at offset 0, which is a silent cut with no `…` (SPEC § 4.2 says frame 0); falling back to `truncate` when animations are off would mark the cut for the very users the switch exists for (Phase 15 review)
 - [ ] Phase 4: test a tick killed mid-run while the worker completes (needs a harness that can kill a process group deterministically)
 - [ ] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end
 - [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)

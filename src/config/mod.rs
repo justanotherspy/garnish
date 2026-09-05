@@ -802,7 +802,10 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         hide_empty_lines: raw.hide_empty_lines.unwrap_or(true),
         overflow: raw.overflow.unwrap_or_default(),
         ticker_step: resolve_step("ticker_step", raw.ticker_step, errors),
-        ticker_gap: raw.ticker_gap.clone().unwrap_or_else(|| DEFAULT_TICKER_GAP.to_owned()),
+        // Plain text only: an escape sequence in the gap would be cut by the window.
+        ticker_gap: crate::ansi::plain_text(
+            raw.ticker_gap.as_deref().unwrap_or(DEFAULT_TICKER_GAP),
+        ),
         durations: raw.durations.unwrap_or_default(),
         frame,
         lines,
@@ -1359,6 +1362,9 @@ x = 1
         assert_eq!(c.overflow, Overflow::Ticker);
         assert!((c.ticker_step - 2.0).abs() < f64::EPSILON);
         assert_eq!(c.ticker_gap, " · ");
+        let (c, errs) = parse("ticker_gap = \"\\u001b[31m G \\u001b[0m\\n\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.ticker_gap, " G ", "escapes and controls never reach the row");
         for bad in ["ticker_step = 0", "ticker_step = -0.5", "ticker_step = \"fast\""] {
             let (c, errs) = parse(bad, &schemas);
             assert_eq!(errs.len(), 1, "{bad}: {errs:?}");

@@ -348,7 +348,11 @@ fn cells(segments: &[Segment]) -> Vec<Cell<'_>> {
 /// Text no wider than the window is returned as is, padded on the right.
 /// The result is always exactly `width` cells: a wide cluster cut by either
 /// edge becomes spaces for its visible part. Styles and links follow their
-/// clusters; the gap and padding are plain.
+/// clusters; the gap and padding are plain. The period is the sum of the
+/// cluster widths, which for ligature scripts (Arabic `لا`, Lisu tone pairs)
+/// can exceed [`display_width`] of the whole string by a cell; callers that
+/// compute the period with `display_width` then see the window jump a cell
+/// at the wrap, the same limitation [`truncate`] has.
 #[must_use]
 pub fn scroll(
     segments: &[Segment],
@@ -461,6 +465,17 @@ impl Painter {
         }
         out
     }
+}
+
+/// Plain text only: escape sequences and control characters removed.
+///
+/// Every string a config may contribute to a row (a text module's `text`
+/// and `gap`, `ticker_gap`) goes through here at config time, so a cut
+/// window can never split an escape sequence and leak colour or a bare ESC
+/// into the row, and a newline can never add a row (SPEC § 3.7).
+#[must_use]
+pub fn plain_text(s: &str) -> String {
+    strip_ansi(s).chars().filter(|c| !c.is_control()).collect()
 }
 
 /// Remove ANSI CSI and OSC sequences from a string (used by docs and tests).
@@ -623,6 +638,20 @@ mod tests {
         assert_eq!(out[2].link.as_deref(), Some("https://x"));
         let out = scroll(&segs, 4, 5, " · ", true);
         assert_eq!(out[1].style, Style::PLAIN, "gap is plain: {out:?}");
+    }
+
+    #[test]
+    fn plain_text_strips_escapes_and_controls_but_keeps_text() {
+        assert_eq!(plain_text("ship it"), "ship it");
+        assert_eq!(plain_text("\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(plain_text("\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\"), "link");
+        assert_eq!(plain_text("a\tb\nc\u{7}d"), "abcd");
+        assert_eq!(plain_text("\x1b"), "", "a bare ESC never reaches the row");
+        assert_eq!(
+            plain_text("🌿 e\u{301} 👨\u{200d}💻"),
+            "🌿 e\u{301} 👨\u{200d}💻",
+            "marks and ZWJ stay"
+        );
     }
 
     #[test]

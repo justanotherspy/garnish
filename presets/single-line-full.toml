@@ -1,11 +1,13 @@
 # name: single-line-full
-# summary: everything on one row; wider than the terminal it scrolls as a ticker
+# summary: everything on one row, always scrolling as a ticker (200 columns is a comfortable window)
 # columns: 200
 # needs: nerd-font
 
-# Wider than most terminals: instead of a cut, the left group scrolls one
-# cell per second and wraps around (SPEC § 4.1 `overflow = "ticker"`); the
-# clock and the other right-hand modules stay put.
+# The full-preset row is about 340 cells wide, more than any terminal, so
+# instead of a cut the left group scrolls one cell per second and wraps around
+# (SPEC § 4.1 `overflow = "ticker"`); the clock and the other right-hand
+# modules stay put. The declared width is the window the sample is shown in,
+# not a width at which the row fits.
 
 preset = "full"
 icons  = "nerd"
