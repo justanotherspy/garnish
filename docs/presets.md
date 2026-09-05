@@ -1,6 +1,6 @@
 # Presets gallery
 
-Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0; presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.
+Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows the start of its scrolling window, not a cut); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.
 
 | name | summary | columns | needs |
 |---|---|---|---|

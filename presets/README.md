@@ -18,24 +18,11 @@ garnish preview tests/fixtures/payloads/subscription-full.json --width 120 \
   --config presets/full-aligned.toml --color always
 ```
 
-| name | summary | columns | needs |
-|---|---|---|---|
-| `minimal-clean` | one unframed line: path, context, limit, clock | 80 | nerd-font |
-| `compact-aligned` | two rounded lines with stacked bars, Catppuccin Mocha | 110 | nerd-font |
-| `full-aligned` | every module at full verbosity, columns aligned, fixed timers | 130 | nerd-font |
-| `three-lines-double` | repo / model / timers in a double frame | 130 | nerd-font |
-| `two-lines-powerline` | location and model only, powerline caps, no colour | 110 | nerd-font |
-| `labels-and-placeholders` | labels, brackets, dim `–` for absent modules, UTC clock with date | 170 | nerd-font |
-| `bars-and-limits` | 40-cell line-style context bar with window tag, mini bars on the limits | 130 | nerd-font |
-| `session-detail` | session, api, cache and cost detail, plain stale style, 1 s git refresh | 130 | nerd-font |
-| `packed-heavy` | custom heavy frame, left-packed lines, a separator per line | 130 | nerd-font |
-| `dracula-256` | Dracula with role and per-module colour overrides in 256-colour mode | 130 | nerd-font |
-| `emoji-overrides` | emoji icons with per-module glyph overrides and name limits | 130 | emoji |
-| `single-line-full` | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
-| `tall-eight-lines` | one module per row, eight rows, square frame | 100 | nerd-font |
-| `motd-ticker` | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
-| `animated-dots` | dots travelling along the rule, a pulsing separator and a cycling model icon | 100 | nerd-font |
+The list of presets with their summaries, widths and requirements lives in
+that generated page (and in `garnish presets`), so it cannot drift from the
+files; this README deliberately keeps no second copy.
 
-Contributing one: the `garnish-submit-preset` skill (SPEC § 13) will do this
-interactively; until it exists, open an issue with the file, its header and a
-screenshot from your terminal.
+Contributing one: the `garnish-submit-preset` skill (SPEC § 13) does this
+interactively; without it, open an issue with the file, its header and a
+screenshot from your terminal. A real-terminal capture accompanies a preset as
+`presets/screenshots/<name>.png`.
