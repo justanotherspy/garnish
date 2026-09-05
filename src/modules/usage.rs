@@ -48,19 +48,19 @@ impl Module for LimitModule {
                 "Five-hour rate limit usage and time until reset.",
                 "Percentage of the rolling five-hour window consumed and a countdown to `resets_at`. Only present for Claude.ai Pro/Max subscriptions; hidden otherwise.",
                 &["rate_limits.five_hour.used_percentage", "rate_limits.five_hour.resets_at"],
-                glyph("\u{f252}", "⧗", "⏳", "5h"),
+                glyph("\u{f252}", "⏳", "⏳", "5h"),
             ),
             Window::SevenDay => (
                 "Seven-day rate limit usage and time until reset.",
                 "Percentage of the rolling seven-day window consumed and a countdown to `resets_at`. Only present for Claude.ai Pro/Max subscriptions; hidden otherwise.",
                 &["rate_limits.seven_day.used_percentage", "rate_limits.seven_day.resets_at"],
-                glyph("\u{f073}", "▦", "📅", "7d"),
+                glyph("\u{f073}", "⌗", "📅", "7d"),
             ),
             Window::Spend => (
                 "Spend-limit usage behind a Claude apps gateway.",
                 "Percentage of the applicable spend limit consumed (can exceed 100%) and a countdown to the period reset. Hidden unless a gateway reports it.",
                 &["rate_limits.spend_limit.used_percentage", "rate_limits.spend_limit.resets_at"],
-                glyph("\u{f0d6}", "¤", "💳", "spend"),
+                glyph("\u{f0d6}", "$", "💳", "spend"),
             ),
         };
         ModuleSchema {
@@ -109,7 +109,7 @@ impl Module for LimitModule {
                 IconSpec {
                     key: "reset",
                     doc: "Countdown glyph.",
-                    glyph: glyph("\u{f017}", "⏱", "⏱\u{fe0f}", "reset"),
+                    glyph: glyph("\u{f017}", "⏱", "⏰", "reset"),
                 },
                 IconSpec {
                     key: "fill", doc: "Bar filled cell.", glyph: glyph("█", "█", "█", "#")

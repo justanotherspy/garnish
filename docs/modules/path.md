@@ -13,15 +13,15 @@ The base directory is the git top level when inside a repository, otherwise `wor
 | preset | render |
 |---|---|
 | `minimal` | `~/garnish` |
-| `default` | `▣ ~/projects/garnish` |
-| `full` | `▣ ~/projects/garnish` |
+| `default` | `❒ ~/projects/garnish` |
+| `full` | `❒ ~/projects/garnish` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` ~/projects/garnish` |
-| `unicode` | `▣ ~/projects/garnish` |
+| `unicode` | `❒ ~/projects/garnish` |
 | `emoji` | `📁 ~/projects/garnish` |
 | `ascii` | `~/projects/garnish` |
 
@@ -48,7 +48,7 @@ The base directory is the git top level when inside a repository, otherwise `wor
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `folder` | `U+F07B` | `▣` | `📁` | `` | Folder icon. |
+| `folder` | `U+F07B` | `❒` | `📁` | `` | Folder icon. |
 | `added` | `U+F067` | `+` | `➕` | `+` | Added-directories glyph. |
 
 ## Colors

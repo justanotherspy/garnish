@@ -14,7 +14,7 @@ Shown when the current directory is inside a linked git worktree (`workspace.git
 |---|---|
 | `minimal` | `feature-x` |
 | `default` | `⑂ feature-x` |
-| `full` | `⑂ feature-x main → worktree-feature-x` |
+| `full` | `⑂ feature-x main ➔ worktree-feature-x` |
 
 ## Icon sets (default preset)
 
@@ -47,7 +47,7 @@ Shown when the current directory is inside a linked git worktree (`workspace.git
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `worktree` | `U+F126` | `⑂` | `🌳` | `wt:` | Worktree icon. |
-| `arrow` | `→` | `→` | `→` | `->` | Original → branch arrow. |
+| `arrow` | `→` | `➔` | `➡` | `->` | Original → branch arrow. |
 
 ## Colors
 

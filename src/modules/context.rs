@@ -32,7 +32,7 @@ impl Module for ContextModule {
                 IconSpec {
                     key: "context",
                     doc: "Context icon.",
-                    glyph: glyph("\u{f2db}", "◫", "🧠", "ctx:"),
+                    glyph: glyph("\u{f2db}", "⊞", "🧠", "ctx:"),
                 },
                 IconSpec {
                     key: "fill", doc: "Filled cell.", glyph: glyph("█", "█", "█", "#")

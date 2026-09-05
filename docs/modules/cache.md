@@ -13,16 +13,16 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 | preset | render |
 |---|---|
 | `minimal` | `91%` |
-| `default` | `⛁ 91% 1h ● 47m` |
-| `full` | `⛁ 91% 1h ● 47m 2 misses 352kw` |
+| `default` | `⛁ 91% 1h ✦ 47m` |
+| `full` | `⛁ 91% 1h ✦ 47m 2 misses 352kw` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` 91% 1h  47m` |
-| `unicode` | `⛁ 91% 1h ● 47m` |
-| `emoji` | `🗄️ 91% 1h 🔥 47m` |
+| `unicode` | `⛁ 91% 1h ✦ 47m` |
+| `emoji` | `💾 91% 1h 🔥 47m` |
 | `ascii` | `cache: 91% 1h warm 47m` |
 
 ## Options
@@ -49,9 +49,9 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `cache` | `U+F1C0` | `⛁` | `🗄️` | `cache:` | Cache icon. |
-| `warm` | `U+F06D` | `●` | `🔥` | `warm` | Warm glyph. |
-| `cold` | `U+F2DC` | `○` | `❄️` | `cold` | Cold glyph. |
+| `cache` | `U+F1C0` | `⛁` | `💾` | `cache:` | Cache icon. |
+| `warm` | `U+F06D` | `✦` | `🔥` | `warm` | Warm glyph. |
+| `cold` | `U+F2DC` | `✧` | `🧊` | `cold` | Cold glyph. |
 
 ## Colors
 

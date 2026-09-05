@@ -119,7 +119,7 @@ impl Module for PathModule {
                 IconSpec {
                     key: "folder",
                     doc: "Folder icon.",
-                    glyph: glyph("\u{f07b}", "▣", "📁", ""),
+                    glyph: glyph("\u{f07b}", "❒", "📁", ""),
                 },
                 IconSpec {
                     key: "added",
@@ -204,7 +204,7 @@ impl Module for WorktreeModule {
                 IconSpec {
                     key: "arrow",
                     doc: "Original → branch arrow.",
-                    glyph: glyph("→", "→", "→", "->"),
+                    glyph: glyph("→", "➔", "➡", "->"),
                 },
             ],
             colors: vec![
@@ -292,14 +292,14 @@ impl Module for PrModule {
                 IconSpec {
                     key: "pending",
                     doc: "Pending review.",
-                    glyph: glyph("○", "○", "🕓", ".."),
+                    glyph: glyph("○", "❍", "🕓", ".."),
                 },
                 IconSpec {
                     key: "changes_requested",
                     doc: "Changes requested.",
                     glyph: glyph("✗", "✗", "❌", "xx"),
                 },
-                IconSpec { key: "draft", doc: "Draft.", glyph: glyph("◌", "◌", "📝", "wip") },
+                IconSpec { key: "draft", doc: "Draft.", glyph: glyph("◌", "❏", "🚧", "wip") },
             ],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent" },
@@ -398,9 +398,7 @@ impl Module for BranchModule {
                     glyph: glyph("\u{f0c1}", "➦", "📌", "@"),
                 },
                 IconSpec {
-                    key: "dirty",
-                    doc: "Dirty marker.",
-                    glyph: glyph("●", "●", "✏\u{fe0f}", "*"),
+                    key: "dirty", doc: "Dirty marker.", glyph: glyph("●", "✱", "✨", "*")
                 },
             ],
             colors: vec![
@@ -523,19 +521,15 @@ impl Module for SyncModule {
             ],
             icons: vec![
                 IconSpec {
-                    key: "ahead",
-                    doc: "Ahead glyph.",
-                    glyph: glyph("⇡", "⇡", "⬆\u{fe0f}", "^"),
+                    key: "ahead", doc: "Ahead glyph.", glyph: glyph("⇡", "⇡", "🔼", "^")
                 },
                 IconSpec {
-                    key: "behind",
-                    doc: "Behind glyph.",
-                    glyph: glyph("⇣", "⇣", "⬇\u{fe0f}", "v"),
+                    key: "behind", doc: "Behind glyph.", glyph: glyph("⇣", "⇣", "🔽", "v")
                 },
                 IconSpec {
                     key: "stale",
                     doc: "Stale-fetch glyph.",
-                    glyph: glyph("\u{f017}", "⧖", "🕰\u{fe0f}", "?"),
+                    glyph: glyph("\u{f017}", "⏲", "⌛", "?"),
                 },
                 IconSpec {
                     key: "no_upstream",

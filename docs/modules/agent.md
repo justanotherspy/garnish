@@ -13,16 +13,16 @@ Agent name.
 | preset | render |
 |---|---|
 | `minimal` | `security-reviewer` |
-| `default` | `☉ security-reviewer` |
-| `full` | `☉ security-reviewer ⋯` |
+| `default` | `✪ security-reviewer` |
+| `full` | `✪ security-reviewer ⋯` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` security-reviewer` |
-| `unicode` | `☉ security-reviewer` |
-| `emoji` | `🕵️ security-reviewer` |
+| `unicode` | `✪ security-reviewer` |
+| `emoji` | `👤 security-reviewer` |
 | `ascii` | `agent: security-reviewer` |
 
 ## Options
@@ -46,7 +46,7 @@ Agent name.
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `agent` | `U+F21B` | `☉` | `🕵️` | `agent:` | Agent icon. |
+| `agent` | `U+F21B` | `✪` | `👤` | `agent:` | Agent icon. |
 | `thinking` | `U+F0EB` | `⋯` | `💭` | `~` | Thinking glyph. |
 
 ## Colors

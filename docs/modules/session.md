@@ -22,7 +22,7 @@ Wall-clock time since the session started (`cost.total_duration_ms`; resets on `
 |---|---|
 | `nerd` | ` 1h12m` |
 | `unicode` | `⏱ 1h12m` |
-| `emoji` | `⏱️ 1h12m` |
+| `emoji` | `⌚ 1h12m` |
 | `ascii` | `t: 1h12m` |
 
 ## Options
@@ -46,7 +46,7 @@ Wall-clock time since the session started (`cost.total_duration_ms`; resets on `
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `session` | `U+F017` | `⏱` | `⏱️` | `t:` | Session icon. |
+| `session` | `U+F017` | `⏱` | `⌚` | `t:` | Session icon. |
 
 ## Colors
 

@@ -13,16 +13,16 @@ The name set with `--name` or `/rename`, or the AI-generated title. Hidden when 
 | preset | render |
 |---|---|
 | `minimal` | `garnish-dev` |
-| `default` | `♯ garnish-dev` |
-| `full` | `♯ garnish-dev sess-000` |
+| `default` | `❯ garnish-dev` |
+| `full` | `❯ garnish-dev sess-000` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` garnish-dev` |
-| `unicode` | `♯ garnish-dev` |
-| `emoji` | `🏷️ garnish-dev` |
+| `unicode` | `❯ garnish-dev` |
+| `emoji` | `🔖 garnish-dev` |
 | `ascii` | `garnish-dev` |
 
 ## Options
@@ -47,7 +47,7 @@ The name set with `--name` or `/rename`, or the AI-generated title. Hidden when 
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `name` | `U+F02B` | `♯` | `🏷️` | `` | Name icon. |
+| `name` | `U+F02B` | `❯` | `🔖` | `` | Name icon. |
 
 ## Colors
 

@@ -36,7 +36,7 @@ impl Module for SessionModule {
             icons: vec![IconSpec {
                 key: "session",
                 doc: "Session icon.",
-                glyph: glyph("\u{f017}", "⏱", "⏱\u{fe0f}", "t:"),
+                glyph: glyph("\u{f017}", "⏱", "⌚", "t:"),
             }],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent2" },
@@ -157,17 +157,17 @@ impl Module for CacheModule {
                 IconSpec {
                     key: "cache",
                     doc: "Cache icon.",
-                    glyph: glyph("\u{f1c0}", "⛁", "🗄\u{fe0f}", "cache:"),
+                    glyph: glyph("\u{f1c0}", "⛁", "💾", "cache:"),
                 },
                 IconSpec {
                     key: "warm",
                     doc: "Warm glyph.",
-                    glyph: glyph("\u{f06d}", "●", "🔥", "warm"),
+                    glyph: glyph("\u{f06d}", "✦", "🔥", "warm"),
                 },
                 IconSpec {
                     key: "cold",
                     doc: "Cold glyph.",
-                    glyph: glyph("\u{f2dc}", "○", "❄\u{fe0f}", "cold"),
+                    glyph: glyph("\u{f2dc}", "✧", "🧊", "cold"),
                 },
             ],
             colors: vec![

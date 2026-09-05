@@ -13,15 +13,15 @@ Shows `effort.level` (`low`, `medium`, `high`, `xhigh`, `max`). Hidden when the 
 | preset | render |
 |---|---|
 | `minimal` | `high` |
-| `default` | `◔ ▁▃▅▇█` |
-| `full` | `◔ ▁▃▅▇█ high` |
+| `default` | `⚙ ▁▃▅▇█` |
+| `full` | `⚙ ▁▃▅▇█ high` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` ▁▃▅▇█` |
-| `unicode` | `◔ ▁▃▅▇█` |
+| `unicode` | `⚙ ▁▃▅▇█` |
 | `emoji` | `🎯 ▁▃▅▇█` |
 | `ascii` | `.:=+#` |
 
@@ -46,7 +46,7 @@ Shows `effort.level` (`low`, `medium`, `high`, `xhigh`, `max`). Hidden when the 
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `effort` | `U+F0E4` | `◔` | `🎯` | `` | Effort icon. |
+| `effort` | `U+F0E4` | `⚙` | `🎯` | `` | Effort icon. |
 | `scale` | `▁▃▅▇█` | `▁▃▅▇█` | `▁▃▅▇█` | `.:=+#` | Five glyphs, one per level, lowest first. |
 
 ## Colors
