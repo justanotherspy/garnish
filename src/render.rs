@@ -256,7 +256,7 @@ pub fn render_lines_at(
 /// `left` one toward the left.
 fn rule_pattern(config: &Config, ctx: &Ctx<'_>) -> Option<crate::frame::Rule> {
     let cells = &config.frame.fill_pattern;
-    if cells.is_empty() {
+    if cells.is_empty() || !config.frame.fill {
         return None;
     }
     let n = cells.len();

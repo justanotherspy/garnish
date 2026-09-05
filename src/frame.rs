@@ -321,7 +321,10 @@ pub fn compose_line(
         // The rule's width never changes with the pattern, only which glyph
         // lands in each cell (SPEC § 4.2).
         match &layout.rule {
-            Some(rule) if !rule.cells.is_empty() && rule_cells > 0 => {
+            // A rule shorter than one period would show a lone pattern cell
+            // that is blank on most ticks (a collapsed rule after an overflow,
+            // or a narrow box): such a rule keeps the static fill.
+            Some(rule) if !rule.cells.is_empty() && rule_cells >= rule.cells.len() => {
                 out.push(Segment::styled(rule.paint(rule_cells), frame_style));
             }
             _ => {
@@ -514,6 +517,16 @@ mod tests {
             assert_eq!(s, expected(offset), "offset {offset}");
             assert_eq!(display_width(&s), 20);
         }
+        // A rule shorter than the pattern's period keeps the static fill: the
+        // collapsed one-cell join after an overflow must not blink.
+        let mut narrow = layout(FrameStyle::Rounded, true, 12);
+        narrow.rule = cells(1);
+        let wide_left = [Segment::plain("abcdefgh")];
+        let s = text(&compose_line(&narrow, &theme, 0, 1, &wide_left, &right, " │ "));
+        assert_eq!(s, "── a… ─ R ──", "collapsed rule: static fill, not a blinking dot");
+        let short = [Segment::plain("ab")];
+        let s = text(&compose_line(&narrow, &theme, 0, 1, &short, &right, " │ "));
+        assert_eq!(s, "── ab ─ R ──", "one rule cell, period three: static fill");
         assert_eq!(Rule { cells: vec!["ab".into()], offset: 5 }.paint(3), "ababab", "offset wraps");
         assert_eq!(Rule { cells: Vec::new(), offset: 0 }.paint(3), "", "no pattern, no rule text");
         // An empty pattern falls back to the fill character.

@@ -1068,6 +1068,15 @@ fn resolve_frame(
                 Vec::new()
             }
         });
+    let fill_pattern = if !fill && !fill_pattern.is_empty() {
+        errors.push(problem(
+            "frame.fill_pattern",
+            "has no effect with fill = false (there is no rule to paint)",
+        ));
+        Vec::new()
+    } else {
+        fill_pattern
+    };
     let separator_frames: Vec<String> =
         raw.and_then(|f| f.separator_frames.as_deref()).map_or_else(Vec::new, |frames| {
             let frames: Vec<String> = frames.iter().map(|s| crate::ansi::plain_text(s)).collect();
@@ -1566,7 +1575,7 @@ x = 1
     /// against drifting from the match arms).
     #[test]
     fn every_listed_key_is_accepted() {
-        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\nfill_pattern = \"-=\"\nfill_step = 2\nfill_direction = \"left\"\nseparator_frames = [\" | \", \" : \"]\nseparator_step = 0.5\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = true\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\nfill_pattern = \"-=\"\nfill_step = 2\nfill_direction = \"left\"\nseparator_frames = [\" | \", \" : \"]\nseparator_step = 0.5\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
     }
@@ -1673,6 +1682,11 @@ x = 1
             parse("[frame]\nseparator_frames = [\"\\u001b[1m|\\u001b[0m\", \":\"]\n", &schemas);
         assert_eq!(errs, Vec::new());
         assert_eq!(c.frame.separator_frames, vec!["|", ":"]);
+        // A pattern without a rule to paint is a dead key: said, not ignored.
+        let (c, errs) = parse("[frame]\nfill = false\nfill_pattern = \"·  \"\n", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "frame.fill_pattern");
+        assert_eq!(c.frame.fill_pattern, Vec::<String>::new());
     }
 
     #[test]
