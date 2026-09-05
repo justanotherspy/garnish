@@ -102,8 +102,8 @@ Every module color defaults to a role; override a role here to restyle every mod
 `powerline`
 
 ```text
-❖ Opus  ⊞ ████████▍░░░░░░░░░░▏ 42%                     ⠋ 16:00:00
-⏳ 24% ⏱ 2h13m  ≣ 41% ⏱ 3d4h                       ⛁ 91% 1h ✦ 47m
+ ❖ Opus  ⊞ ████████▍░░░░░░░░░░▏ 42%                   ⠋ 16:00:00 
+ ⏳ 24% ⏱ 2h13m  ≣ 41% ⏱ 3d4h                     ⛁ 91% 1h ✦ 47m 
 ```
 
 ### Aligned columns
