@@ -367,3 +367,21 @@ and user feedback. Pick from here when no phase is in progress.
   no behaviour changed. His live config at the end of the session is the
   eight-line step 7b layout; the pre-walkthrough full config is backed up
   next to it as `garnish.toml.bak-2026-09-05`.
+- **2026-09-05 (Phase 12, stack layers 1–4)** — Execution order decided
+  with Daniel: 12 → 14 → 13 → 15 → 16 → 17 → 18, the whole roadmap as one
+  `gh stack` chain (one layer per concern, drafts, Daniel merges, a single
+  `v0.2.0` once Phase 18 lands). Layer `phase-12/config-goldens`:
+  `tests/config_golden.rs` renders every `tests/fixtures/configs/*.toml` at
+  the instants its `# now:` header lists (plus `# fixture/columns/icons/env`),
+  so later phases can pin clock-driven keys; seeded with the aligned and
+  fixed-duration layouts. Layer `phase-12/glyphs`: the walkthrough's wide
+  glyphs were not the East Asian Ambiguous set alone (`◔ ◫` are not
+  ambiguous by table, the bars `█ ▏` are), so the guard rejects ambiguous
+  characters outside Box Drawing/Block Elements, the whole Geometric Shapes
+  block, the `⧖ ⧗` hourglasses and `U+FE0F`; fourteen unicode and nine emoji
+  glyphs replaced, nerd untouched; `doctor` prints a marker grid. Layer
+  `phase-12/frame-fixes`: powerline pad, muted zero sync counts
+  (`count_segments`), the line's own separator at the unfilled join
+  (`compose_line` parameter), a space in the fetch-age hint. Layer
+  `phase-12/cli-exit`: `cli::Quiet` → `ExitCode::FAILURE` without a report.
+  Bugs 3, 8 and 11 moved to the phases that own their config keys.
