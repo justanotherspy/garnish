@@ -1,0 +1,17 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601, 1738425602
+# icons: unicode
+# Separator frames cycle one per second (`│ ┃ ╎`), all one cell wide so the
+# columns never jitter; the second line keeps its own static separator
+# (SPEC § 4.2).
+
+[frame]
+separator_frames = [" │ ", " ┃ ", " ╎ "]
+
+[[line]]
+modules = ["model", "session", "api"]
+
+[[line]]
+modules   = ["api", "cache"]
+separator = " · "

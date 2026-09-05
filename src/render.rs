@@ -181,7 +181,10 @@ pub fn render_lines_at(
             now: clock.now,
             animate: clock.animate && config.animate,
         }),
+        rule: rule_pattern(config, &ctx),
     };
+    let separator_frame =
+        ctx.frame(config.frame.separator_step, config.frame.separator_frames.len());
     // Every line renders before any is composed: aligned columns need the
     // widths of all lines.
     let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
@@ -239,12 +242,30 @@ pub fn render_lines_at(
     kept.into_iter()
         .enumerate()
         .map(|(i, (line, left, right))| {
-            let sep = config.separator(line);
+            let sep = config.separator_at(line, separator_frame);
             let left = join_modules(left, sep, &config.theme);
             let right = join_modules(right, sep, &config.theme);
             compose_line(&layout, &config.theme, i, count, &left, &right, sep)
         })
         .collect()
+}
+
+/// The rule pattern at this tick, if the frame has one (SPEC § 4.2): the
+/// pattern index drawn in the rule's first cell advances `fill_step` per
+/// tick, so a `right` pattern appears to travel toward the right cap and a
+/// `left` one toward the left.
+fn rule_pattern(config: &Config, ctx: &Ctx<'_>) -> Option<crate::frame::Rule> {
+    let cells = &config.frame.fill_pattern;
+    if cells.is_empty() {
+        return None;
+    }
+    let n = cells.len();
+    let frame = ctx.frame(config.frame.fill_step, n);
+    let offset = match config.frame.fill_direction {
+        config::FillDirection::Left => frame,
+        config::FillDirection::Right => n.saturating_sub(frame).checked_rem(n).unwrap_or(0),
+    };
+    Some(crate::frame::Rule { cells: cells.clone(), offset })
 }
 
 /// Pad module `k` of every group to the widest module `k` among the groups
@@ -473,6 +494,51 @@ mod tests {
         assert!(errs.is_empty(), "{errs:?}");
         let out = strip_ansi(&render_plain_at(&payload, &config, Some(40), &Clock::fixed()));
         assert!(out.starts_with("❖ Opus"), "{out}");
+    }
+
+    /// SPEC § 4.2: the rule pattern travels one step per tick in the
+    /// configured direction and the separator cycles its frames; both freeze
+    /// with `animate = false`, and a per-line separator wins over the frames.
+    #[test]
+    fn frame_animation_moves_with_the_clock_and_freezes_on_request() {
+        let payload = fixture("subscription-full");
+        let render = |text: &str, secs: i64, animate: bool| {
+            let (config, errs) = config::parse(&format!("icons = \"unicode\"\n{text}"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = Clock {
+                now: jiff::Timestamp::from_second(secs).unwrap(),
+                animate,
+                ..Clock::fixed()
+            };
+            strip_ansi(&render_plain_at(&payload, &config, Some(40), &clock))
+        };
+        let pattern = "[frame]\nfill_pattern = \"·  \"\n[[line]]\nmodules = [\"model\"]\nright = [\"clock\"]\n";
+        // 1738425600 % 3 = 0: frame 0 → the pattern starts with its first cell.
+        let f0 = render(pattern, 1_738_425_600, true);
+        let f1 = render(pattern, 1_738_425_601, true);
+        let f2 = render(pattern, 1_738_425_602, true);
+        assert!(f0.contains("Opus ·  ·  ·"), "{f0}");
+        assert!(
+            f1.contains("Opus  ·  ·  ·"),
+            "right: the dots moved one cell toward the cap: {f1}"
+        );
+        assert!(f2.contains("Opus   ·  ·"), "{f2}");
+        assert!(render(pattern, 1_738_425_603, true).contains("Opus ·  ·  ·"), "period 3");
+        for out in [&f0, &f1, &f2] {
+            assert_eq!(display_width(out), 36, "{out}");
+        }
+        let frozen = render(pattern, 1_738_425_601, false);
+        assert!(frozen.contains("Opus ·  ·  ·") && frozen.contains("⠋ 16:00:01"), "{frozen}");
+        let left = "[frame]\nfill_pattern = \"·  \"\nfill_direction = \"left\"\n[[line]]\nmodules = [\"model\"]\nright = [\"clock\"]\n";
+        assert!(render(left, 1_738_425_601, true).contains("Opus   ·  ·"), "left: the other way");
+        let frames = "[frame]\nseparator_frames = [\" │ \", \" ┃ \", \" ╎ \"]\n[[line]]\nmodules = [\"model\", \"session\"]\n[[line]]\nmodules = [\"api\", \"cache\"]\nseparator = \" · \"\n";
+        let s0 = render(frames, 1_738_425_600, true);
+        let s1 = render(frames, 1_738_425_601, true);
+        assert!(s0.contains(" │ ") && !s0.contains(" ┃ "), "{s0}");
+        assert!(s1.contains(" ┃ ") && !s1.contains(" │ "), "{s1}");
+        assert!(s1.lines().nth(1).unwrap().contains(" · "), "per-line separator wins: {s1}");
+        let frozen = render(frames, 1_738_425_601, false);
+        assert!(frozen.contains(" │ ") && !frozen.contains(" ┃ "), "frozen at frame 0: {frozen}");
     }
 
     /// A spacer takes whatever cap its position calls for: first, last or,

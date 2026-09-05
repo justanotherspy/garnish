@@ -297,7 +297,8 @@ accent = "#89b4fa"
 style = "rounded"         # none | rounded | square | double | heavy | powerline | custom
 fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
-# custom: first middle last single fill right_first right_middle right_last separator pad
+# custom: first middle last single fill_char right_first right_middle right_last right_single separator pad
+# animation (§ 4.2): fill_pattern fill_step fill_direction separator_frames separator_step
 
 [[line]]
 modules = ["path", "branch", "sync", "worktree", "pr"]

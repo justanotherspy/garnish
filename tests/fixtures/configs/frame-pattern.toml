@@ -1,0 +1,17 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601, 1738425602
+# icons: unicode
+# An animated rule: the `·  ` pattern shifts one cell toward the right cap
+# every second (SPEC § 4.2); the rule's width and both groups never move.
+
+[frame]
+fill_pattern = "·  "
+
+[[line]]
+modules = ["model", "session"]
+right   = ["clock"]
+
+[[line]]
+modules = ["api"]
+right   = ["lines"]
