@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 70
+# now: 1738425601, 1738425603
+# icons: unicode
+# `animate = false` in the config freezes every animation at frame 0 with the
+# environment untouched: the spinner stays on `⠋`, the ticker window and the
+# scrolling text module stay at offset 0, while the clock keeps ticking
+# (SPEC § 4.2 master switch).
+
+animate  = false
+overflow = "ticker"
+
+[[line]]
+modules = ["model", "effort", "context", "session", "api", "cache", "text.motd"]
+right   = ["clock"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 12
+overflow = "scroll-wrap"
