@@ -826,9 +826,18 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     }
 }
 
+/// A text module name is a bare TOML key, so `text.<name>` is unambiguous on
+/// a line and `config show` can write `[modules.text.<name>]` back verbatim.
+fn is_bare_key(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// The `[modules.text.<name>]` tables (SPEC § 3.7): each is validated against
-/// the text schema under its own path; `refresh` and `preset` do not apply
-/// to text modules and `step` must be positive.
+/// the text schema under its own path. `refresh`, `preset` and `icons` do not
+/// apply to text modules, `step` must be positive, `color` is the shorthand
+/// for `colors.text` (an explicit `colors.text` wins), and `text` and `gap`
+/// are reduced to plain text so a scrolled window can never cut an escape
+/// sequence.
 fn resolve_texts(
     family: Option<&toml::Table>,
     icons: IconSet,
@@ -839,18 +848,33 @@ fn resolve_texts(
     let mut texts = BTreeMap::new();
     for (name, value) in family.into_iter().flatten() {
         let base = format!("modules.text.{name}");
+        if !is_bare_key(name) {
+            errors.push(problem(
+                &base,
+                "a text module name is letters, digits, `_` and `-` only (it becomes the id text.<name>)",
+            ));
+            continue;
+        }
         let Some(table) = value.as_table() else {
             errors.push(problem(&base, "expected a [modules.text.<name>] table"));
             continue;
         };
-        // `color = "…"` is the shorthand for `colors.text` (SPEC § 3.7).
         let mut table = table.clone();
         let color = table.remove("color");
+        for (key, why) in [
+            ("refresh", "text modules render every tick; remove this key"),
+            ("preset", "text modules have no presets; remove this key"),
+            ("icons", "text modules have no icons; remove this table"),
+        ] {
+            if table.remove(key).is_some() {
+                errors.push(problem(&format!("{base}.{key}"), why));
+            }
+        }
         let mut ov = parse_overrides(schema, &base, &table, errors);
         if let Some(color) = color {
             match color.as_str() {
                 Some(s) if Role::parse(s).is_some() || Color::parse(s).is_some() => {
-                    ov.colors.insert("text".to_owned(), s.to_owned());
+                    ov.colors.entry("text".to_owned()).or_insert_with(|| s.to_owned());
                 }
                 _ => errors.push(problem(
                     &format!("{base}.color"),
@@ -858,16 +882,6 @@ fn resolve_texts(
                 )),
             }
         }
-        for key in ["refresh", "preset"] {
-            if table.contains_key(key) {
-                errors.push(problem(
-                    &format!("{base}.{key}"),
-                    "text modules render every tick and have no presets; remove this key",
-                ));
-            }
-        }
-        ov.refresh = None;
-        ov.preset = None;
         if let Some(Value::Float(step)) = ov.opts.get("step")
             && !(step.is_finite() && *step > 0.0)
         {
@@ -876,6 +890,11 @@ fn resolve_texts(
                 "must be a positive number: cells per tick (0.5 = every second tick)",
             ));
             ov.opts.remove("step");
+        }
+        for key in ["text", "gap"] {
+            if let Some(Value::Str(s)) = ov.opts.get_mut(key) {
+                *s = crate::ansi::plain_text(s);
+            }
         }
         texts.insert(name.clone(), ModuleCfg::resolve(schema, Preset::Default, icons, theme, &ov));
     }
@@ -1438,7 +1457,7 @@ x = 1
         assert_eq!(tag.color("text"), c.theme.role(Role::Muted), "`color` shorthand");
         assert!(!c.modules.contains_key("text"), "the family is not a registry module");
 
-        let bad = "[[line]]\nmodules = [\"text.ghost\"]\n[modules.text.motd]\ntext = \"x\"\nrefresh = 5\npreset = \"full\"\nstep = 0\njustify = \"middle\"\ncolor = \"bogus\"\nwat = 1\n[modules.text]\nplain = 3\n";
+        let bad = "[[line]]\nmodules = [\"text.ghost\"]\n[modules.text.motd]\ntext = \"x\"\nrefresh = 5\npreset = \"bogus\"\nstep = 0\njustify = \"middle\"\ncolor = \"bogus\"\nwat = 1\n[modules.text.motd.icons]\nfoo = \"x\"\n[modules.text.\"sp ace\"]\ntext = \"y\"\n[modules.text]\nplain = 3\n";
         let (c, errs) = parse(bad, &schemas);
         let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
         for expected in [
@@ -1449,16 +1468,31 @@ x = 1
             "modules.text.motd.justify",
             "modules.text.motd.color",
             "modules.text.motd.wat",
+            "modules.text.motd.icons",
+            "modules.text.sp ace",
             "modules.text.plain",
         ] {
             assert!(paths.contains(&expected), "{expected} missing from {paths:?}");
         }
+        // One error per bad key, not one from the generic walk plus one from the family.
+        assert_eq!(paths.iter().filter(|p| **p == "modules.text.motd.preset").count(), 1);
+        assert_eq!(paths.iter().filter(|p| **p == "modules.text.motd.refresh").count(), 1);
+        assert!(!c.texts.contains_key("sp ace"), "a non-bare name is rejected");
         assert!(errs.iter().any(|e| e.message.contains("define [modules.text.ghost]")), "{errs:?}");
         let motd = c.texts.get("motd").unwrap();
         assert!((motd.float("step") - 1.0).abs() < f64::EPSILON, "bad step → default");
         assert_eq!(motd.str("justify"), "left", "bad justify → default");
         assert_eq!(motd.refresh, 0);
         assert_eq!(c.lines[0].left, vec!["text.ghost"], "the id stays; the render skips it");
+
+        // An explicit colors.text wins over the shorthand; text and gap are plain.
+        let text = "[modules.text.x]\ntext = \"\\u001b[31mred\\u001b[0m\\tnote\"\ngap = \" \\u001b[5m·\\u001b[0m \"\ncolor = \"muted\"\n[modules.text.x.colors]\ntext = \"red\"\n";
+        let (c, errs) = parse(text, &schemas);
+        assert_eq!(errs, Vec::new());
+        let x = c.texts.get("x").unwrap();
+        assert_eq!(x.color("text"), Color::Ansi(1), "explicit colors.text wins");
+        assert_eq!(x.str("text"), "rednote");
+        assert_eq!(x.str("gap"), " · ");
     }
 
     #[test]

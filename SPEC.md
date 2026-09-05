@@ -232,13 +232,17 @@ justify  = "left"         # left | right | center: where short text sits in the 
 overflow = "scroll"       # clip | scroll | scroll-wrap: text wider than the box
 step     = 1              # cells per tick (0.5 = every second tick)
 gap      = "   "          # scroll-wrap only: text between the end and the start
-color    = "accent"       # role or literal; icon = "" and the usual label/prefix/suffix apply
+color    = "accent"       # role or literal, shorthand for colors.text; label/prefix/suffix apply
 
 [modules.text.tag]
 text  = "v0.2"
 color = "muted"
 ```
 
+- **Names.** `<name>` is a bare key (letters, digits, `_`, `-`), so
+  `text.<name>` is one token on a line and `config show` writes the table
+  back verbatim; `config check` rejects anything else. Text modules have no
+  `icons` table.
 - **Box.** `width = 0` makes the box exactly as wide as the text; otherwise
   the box is `width` cells and `pad` blank cells are added on both sides.
   `justify` places text narrower than the box. The module's rendered width

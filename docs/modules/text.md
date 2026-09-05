@@ -56,7 +56,7 @@ No `preset` and no `refresh`: a text module renders every tick as configured.
 
 ## Colors
 
-`[modules.text.<name>.colors]`, or the shorthand `color = …` on the module
+`[modules.text.<name>.colors]`, or the shorthand `color = …` on the module (an explicit `colors.text` wins over the shorthand). A module name is letters, digits, `_` and `-` only, so `text.<name>` reads the same on a line and in `config show`.
 
 | key | default | description |
 |---|---|---|

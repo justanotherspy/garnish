@@ -8,7 +8,7 @@
 
 use std::sync::LazyLock;
 
-use crate::ansi::{Segment, display_width, scroll, strip_ansi, truncate};
+use crate::ansi::{Segment, display_width, scroll, truncate};
 use crate::config::schema::{ColorSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
 
@@ -83,19 +83,15 @@ fn schema() -> ModuleSchema {
     }
 }
 
-/// Plain text only: escape sequences and control characters cannot reach the
-/// row from a config file.
-#[must_use]
-pub fn sanitize(text: &str) -> String {
-    strip_ansi(text).chars().filter(|c| !c.is_control()).collect()
-}
-
-/// Render one text module for a tick. The result is always `pad + box + pad`
-/// cells wide (with `width = 0`, the box is the text), which is what makes a
-/// text module a fixed-width slot next to aligned columns.
+/// Render one text module for a tick.
+///
+/// The result is always `pad + box + pad` cells wide (with `width = 0`, the
+/// box is the text), which is what makes a text module a fixed-width slot
+/// next to aligned columns. `text` and `gap` are already plain text: the
+/// config reduced them with [`crate::ansi::plain_text`].
 #[must_use]
 pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
-    let text = sanitize(cfg.str("text"));
+    let text = cfg.str("text").to_owned();
     if text.is_empty() {
         return Rendered::empty();
     }
@@ -148,18 +144,4 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
     out.extend(body);
     out.push(blank);
     Rendered::fresh(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitize_strips_escapes_and_controls_but_keeps_text() {
-        assert_eq!(sanitize("ship it"), "ship it");
-        assert_eq!(sanitize("\x1b[31mred\x1b[0m"), "red");
-        assert_eq!(sanitize("\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\"), "link");
-        assert_eq!(sanitize("a\tb\nc\u{7}d"), "abcd");
-        assert_eq!(sanitize("🌿 ok"), "🌿 ok");
-    }
 }

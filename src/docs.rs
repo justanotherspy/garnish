@@ -489,7 +489,7 @@ pub fn text_page() -> String {
     );
     let _ = writeln!(
         o,
-        "## Colors\n\n`[modules.text.<name>.colors]`, or the shorthand `color = …` on the module\n"
+        "## Colors\n\n`[modules.text.<name>.colors]`, or the shorthand `color = …` on the module (an explicit `colors.text` wins over the shorthand). A module name is letters, digits, `_` and `-` only, so `text.<name>` reads the same on a line and in `config show`.\n"
     );
     let _ = writeln!(o, "| key | default | description |\n|---|---|---|");
     for color in &schema.colors {
@@ -923,6 +923,29 @@ mod tests {
         );
         assert!(config_page().contains("### Frame styles"));
         assert!(index_page().contains("[`context`](modules/context.md)"));
+    }
+
+    /// `config show` of a config with text modules parses back to the same
+    /// `Config`: names are bare keys and the `color` shorthand is written as
+    /// `colors.text`.
+    #[test]
+    fn resolved_config_round_trips_text_modules() {
+        let text = "[[line]]\nmodules = [\"path\", \"text.motd\"]\nright = [\"text.tag\"]\n[modules.text.motd]\ntext = \"ship it\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\nstep = 0.5\nlabel = \"motd\"\n[modules.text.tag]\ntext = \"v0.2\"\ncolor = \"muted\"\njustify = \"right\"\n";
+        let (cfg, errs) = config::parse(text, &SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        let shown = config_toml(&cfg, false);
+        assert!(
+            shown.contains("[modules.text.motd]") && shown.contains("[modules.text.tag.colors]"),
+            "{shown}"
+        );
+        let (again, errs) = config::parse(&shown, &SCHEMAS);
+        assert_eq!(errs, Vec::new(), "{shown}");
+        assert_eq!(again, cfg);
+        assert_eq!(config_toml(&again, false), shown, "show is idempotent");
+        // The annotated form carries the tables too and still parses.
+        let (from_init, errs) = config::parse(&config_toml(&cfg, true), &SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(from_init.texts.len(), 2);
     }
 
     #[test]
