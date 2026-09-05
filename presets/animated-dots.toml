@@ -1,0 +1,29 @@
+# name: animated-dots
+# summary: dots travelling along the rule, a pulsing separator and a spinning branch icon
+# columns: 100
+# needs: nerd-font
+
+# Everything that moves here is a pure function of the clock (SPEC § 4.2):
+# the `·  ` pattern drifts toward the right cap one cell per second, the
+# separator pulses through three weights, and the branch icon cycles. Set
+# `animate = false` (or `GARNISH_ANIMATE=0`) to freeze it all at frame 0.
+
+preset = "compact"
+icons  = "nerd"
+theme  = "tokyonight"
+
+[frame]
+style            = "rounded"
+fill_pattern     = "·  "
+separator_frames = [" │ ", " ┃ ", " ╎ "]
+
+[[line]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["clock"]
+
+[[line]]
+modules = ["model", "effort", "context", "limit5h", "cost"]
+right   = ["cache"]
+
+[modules.branch.icons]
+branch_frames = ["", "", ""]

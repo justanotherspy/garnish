@@ -322,7 +322,9 @@ fn render_group(
             if !cfg.enabled {
                 return None;
             }
-            let rendered = entry.module.render(ctx, cfg);
+            // Icons with `<key>_frames` show this tick's frame (SPEC § 4.2).
+            let view = cfg.animated(|n| ctx.frame(1.0, n));
+            let rendered = entry.module.render(ctx, &view);
             let rendered = match (config.stale_style, &rendered.freshness) {
                 (StaleStyle::Hide, Freshness::Stale | Freshness::Failed(_)) => Rendered::empty(),
                 (StaleStyle::Plain, _) => Rendered::fresh(rendered.segments),
@@ -494,6 +496,47 @@ mod tests {
         assert!(errs.is_empty(), "{errs:?}");
         let out = strip_ansi(&render_plain_at(&payload, &config, Some(40), &Clock::fixed()));
         assert!(out.starts_with("❖ Opus"), "{out}");
+    }
+
+    /// SPEC § 4.2 Animated glyphs: an icon with `<key>_frames` cycles one
+    /// frame per tick and stays on frame 0 when animations are off;
+    /// `spinner_frames` is the general form of the clock's spinner.
+    #[test]
+    fn icon_frames_cycle_with_the_clock() {
+        let payload = fixture("subscription-full");
+        let render = |secs: i64, animate: bool| {
+            let text = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"model\", \"clock\"]\n[modules.model.icons]\nmodel_frames = [\"◐\", \"◓\", \"◑\", \"◒\"]\n[modules.clock.icons]\nspinner_frames = [\"a\", \"b\", \"c\"]\n";
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = Clock {
+                now: jiff::Timestamp::from_second(secs).unwrap(),
+                animate,
+                ..Clock::fixed()
+            };
+            strip_ansi(&render_plain_at(&payload, &config, Some(60), &clock))
+        };
+        // 1738425600 % 4 = 0 and % 3 = 0.
+        assert!(
+            render(1_738_425_600, true).starts_with("◐ Opus  a 16:00:00"),
+            "{}",
+            render(1_738_425_600, true)
+        );
+        assert!(
+            render(1_738_425_601, true).starts_with("◓ Opus  b 16:00:01"),
+            "{}",
+            render(1_738_425_601, true)
+        );
+        assert!(
+            render(1_738_425_605, true).starts_with("◓ Opus  c 16:00:05"),
+            "{}",
+            render(1_738_425_605, true)
+        );
+        // Off: frame 0 of each cycle, like every other animation.
+        assert!(
+            render(1_738_425_601, false).starts_with("◐ Opus  a 16:00:01"),
+            "{}",
+            render(1_738_425_601, false)
+        );
     }
 
     /// SPEC § 4.2: the rule pattern travels one step per tick in the

@@ -55,6 +55,9 @@ The open PR (or GitLab MR) Claude Code found for the current branch, as a clicka
 | `changes_requested` | `✗` | `✗` | `❌` | `xx` | Changes requested. |
 | `draft` | `U+F192` | `❏` | `🚧` | `wip` | Draft. |
 
+Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
+
+
 ## Colors
 
 `[modules.pr.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).

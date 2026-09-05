@@ -179,9 +179,9 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `animate` top-level key (default `true`) and `GARNISH_ANIMATE=0`; the effective switch is `clock.animate && config.animate`, set once on `Ctx` and on the ticker, so every animation freezes at frame 0 (`Ctx::frame` returns 0); config golden `animate-config-off` (spinner, ticker and a text module at two instants); guide § 6 "Animation"; key row, `config init` line, SPEC § 4 block
 - [x] `[frame] fill_pattern`, `fill_step`, `fill_direction`: `FrameCfg` carries the validated one-cell pattern, `render::rule_pattern` turns the clock frame into a start index (reversed for `right` so the dots travel toward the cap), `frame::Rule::paint` fills exactly the rule's cells; `fill_char` stays the static case; config goldens `frame-pattern` (three instants) and `frame-pattern-left` (`fill_step = 0.5`)
 - [x] `[frame] separator_frames`, `separator_step`: `Config::separator_at(line, frame)` picks the frame, a per-line `separator` wins; validation rejects frames of unequal width and reduces every frame to plain text; config golden `separator-frames`; `config show`/`init` write the five keys (empty = static); key rows in docs/config.md with the frame-0 sentence
-- [ ] `<key>_frames` on any `[modules.<id>.icons]` key with equal-width validation; the `clock` spinner re-expressed as `spinner_frames` (default list unchanged, goldens byte-identical at frame 0)
-- [ ] Goldens at two `GARNISH_NOW` values for a pattern rule, an animated separator and an animated icon; docs render at frame 0 (`Clock::fixed()`), with a sentence saying so
-- [ ] Bench unchanged (frame lookup only); guide section "Animation" with the accessibility note; a `presets/animated-dots` entry
+- [x] `<key>_frames` on any `[modules.<id>.icons]` key: `parse_icons` validates (equal widths, plain text, at least one frame, a known base key), `ModuleCfg.icon_frames` keeps them, `ModuleCfg::animated` gives `render_group` a per-tick view in which every framed icon shows `frames[floor(now) mod n]` (borrowed, so a module without frames costs nothing); with animations off the static glyph shows. The clock spinner's built-in glyph string stays the default cycle (goldens byte-identical) and `spinner_frames` is the general form; `config show` writes `<key>_frames`
+- [x] Goldens: `frame-pattern`, `frame-pattern-left`, `separator-frames`, `icon-frames` at two or three instants; docs render at frame 0 (`Clock::fixed()`), said in the `[frame]` section and on every module page's icons table
+- [x] Bench unchanged (`Cow::Borrowed` when nothing animates; frame lookups only); guide § 6 "Animation" with the accessibility note; `presets/animated-dots`
 
 ## Phase 17 — Presets gallery (SPEC § 12)
 
@@ -437,3 +437,22 @@ and user feedback. Pick from here when no phase is in progress.
   `parse_overrides` (which now takes its path), `color = …` shorthand,
   `text.<name>` ids validated against the tables, `docs/modules/text.md`
   generated, `config show`/`init` emit the tables, preset `motd-ticker`.
+  Review of the phase: `gap`/`ticker_gap` were not sanitised (an escape
+  sequence cut by the window leaked colour), text-module names had to become
+  bare keys for `config show` to round-trip, `colors.text` now beats the
+  `color` shorthand, the presets test checks a ticker preset actually scrolls.
+- **2026-09-06 (Phase 16, three layers)** — Animation framework of
+  SPEC § 4.2. `phase-16/animate-switch`: the `animate` key, effective switch
+  `clock.animate && config.animate` on `Ctx` and the ticker; guide § 6.
+  `phase-16/frame-animation`: `fill_pattern`/`fill_step`/`fill_direction`
+  (`render::rule_pattern` turns the clock frame into the pattern index of
+  the rule's first cell, reversed for `right`; `frame::Rule::paint`),
+  `separator_frames`/`separator_step` through `Config::separator_at`;
+  validation (one-cell pattern glyphs, equal-width frames, plain text,
+  positive steps) with the static frame as fallback. `phase-16/icon-frames`:
+  `<key>_frames` on any icon via `parse_icons`, kept on `ModuleCfg`, applied
+  by `ModuleCfg::animated` as a per-tick view handed to `Module::render`
+  (borrowed when nothing animates, so no cost otherwise); with animations
+  off every cycle sits on frame 0, so the clock spinner's built-in glyph
+  string stays the default cycle and goldens are byte-identical. Four config
+  goldens at two or three instants, preset `animated-dots`.

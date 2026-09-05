@@ -266,7 +266,7 @@ impl Module for ClockModule {
             ],
             icons: vec![IconSpec {
                 key: "spinner",
-                doc: "Spinner frames, one character each.",
+                doc: "Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width.",
                 glyph: glyph("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛", "|/-\\"),
             }],
             colors: vec![

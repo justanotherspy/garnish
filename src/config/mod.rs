@@ -1192,6 +1192,32 @@ fn parse_icons(
     err: &mut impl FnMut(&str, String),
 ) {
     for (ik, iv) in table {
+        // `<key>_frames`: equal-width frames cycled one per tick (SPEC § 4.2).
+        if let Some(base) = ik.strip_suffix("_frames")
+            && schema.icon(base).is_some()
+        {
+            let frames: Option<Vec<String>> = iv.as_array().and_then(|items| {
+                items.iter().map(|f| f.as_str().map(crate::ansi::plain_text)).collect()
+            });
+            match frames {
+                Some(frames) if frames.is_empty() => {
+                    err(&format!("icons.{ik}"), "expected at least one frame".into());
+                }
+                Some(frames) => {
+                    let width = frames.first().map_or(0, |f| crate::ansi::display_width(f));
+                    if frames.iter().all(|f| crate::ansi::display_width(f) == width) {
+                        ov.icon_frames.insert(base.to_owned(), frames);
+                    } else {
+                        err(
+                            &format!("icons.{ik}"),
+                            "every frame must have the same width, or the row would jitter".into(),
+                        );
+                    }
+                }
+                None => err(&format!("icons.{ik}"), "expected a list of strings".into()),
+            }
+            continue;
+        }
         match (schema.icon(ik), iv.as_str()) {
             (Some(_), Some(s)) => {
                 ov.icons.insert(ik.clone(), s.to_owned());
@@ -1641,6 +1667,32 @@ x = 1
 
     /// SPEC § 4.2: a rule pattern is one-cell glyphs, separator frames share
     /// one width; bad values are reported and the static frame stays.
+    /// SPEC § 4.2 Animated glyphs: `<key>_frames` on any icon key, equal
+    /// widths enforced, plain text, unknown base keys and bad shapes reported.
+    #[test]
+    fn icon_frames_parse_and_validate() {
+        let schemas = schemas();
+        let text =
+            "[modules.path.icons]\nfolder_frames = [\"a\", \"\\u001b[1mb\\u001b[0m\", \"c\"]\n";
+        let (c, errs) = parse(text, &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.modules.get("path").unwrap().icon_frames("folder"), ["a", "b", "c"]);
+        for (bad, path) in [
+            (
+                "[modules.path.icons]\nfolder_frames = [\"a\", \"🌿\"]\n",
+                "modules.path.icons.folder_frames",
+            ),
+            ("[modules.path.icons]\nfolder_frames = []\n", "modules.path.icons.folder_frames"),
+            ("[modules.path.icons]\nfolder_frames = \"abc\"\n", "modules.path.icons.folder_frames"),
+            ("[modules.path.icons]\nghost_frames = [\"a\"]\n", "modules.path.icons.ghost_frames"),
+        ] {
+            let (c, errs) = parse(bad, &schemas);
+            assert_eq!(errs.len(), 1, "{bad}: {errs:?}");
+            assert_eq!(errs[0].path, path, "{bad}");
+            assert!(c.modules.get("path").unwrap().icon_frames("folder").is_empty(), "{bad}");
+        }
+    }
+
     #[test]
     fn frame_animation_keys_parse_and_validate() {
         let schemas = schemas();

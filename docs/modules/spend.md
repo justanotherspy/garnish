@@ -55,6 +55,9 @@ Percentage of the applicable spend limit consumed (can exceed 100%) and a countd
 | `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |
 
+Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
+
+
 ## Colors
 
 `[modules.spend.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).

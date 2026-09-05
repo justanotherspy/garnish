@@ -276,11 +276,20 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
         }
         if !schema.icons.is_empty() {
             let _ = writeln!(out, "[modules.{}.icons]", schema.id);
+            if annotated {
+                let _ = writeln!(
+                    out,
+                    "# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick."
+                );
+            }
             for icon in &schema.icons {
                 if annotated {
                     let _ = writeln!(out, "# {} — {}", icon.key, icon.doc);
                 }
                 let _ = writeln!(out, "{} = {}", icon.key, toml_string(m.icon(icon.key)));
+                if let Some(frames) = m.all_icon_frames().get(icon.key) {
+                    let _ = writeln!(out, "{}_frames = {}", icon.key, toml_list(frames));
+                }
             }
         }
         if !schema.colors.is_empty() {
@@ -571,6 +580,10 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
                 icon.doc
             );
         }
+        let _ = writeln!(
+            o,
+            "\nAny icon key also accepts `<key>_frames = [\"…\", \"…\"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).\n"
+        );
     }
     if !schema.colors.is_empty() {
         let _ = writeln!(

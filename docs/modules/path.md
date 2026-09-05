@@ -51,6 +51,9 @@ The base directory is the git top level when inside a repository, otherwise `wor
 | `folder` | `U+F07B` | `❒` | `📁` | `` | Folder icon. |
 | `added` | `U+F067` | `+` | `➕` | `+` | Added-directories glyph. |
 
+Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
+
+
 ## Colors
 
 `[modules.path.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).
