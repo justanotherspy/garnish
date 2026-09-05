@@ -67,6 +67,28 @@ pub enum StaleStyle {
     Plain,
 }
 
+/// Where a padded right-group module's text sits (`right_justify`, SPEC § 4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RightJustify {
+    /// Pad on the left: the text hugs the right cap.
+    #[default]
+    End,
+    /// Pad on the right: the text follows the separator, the gap sits before the cap.
+    Start,
+}
+
+impl RightJustify {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::End => "end",
+            Self::Start => "start",
+        }
+    }
+}
+
 /// Color emission choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -149,6 +171,8 @@ pub struct Config {
     /// Pad module columns to the widest module in each across lines so the
     /// separators line up (SPEC § 4).
     pub align: bool,
+    /// Which side of a padded right-group module the text sits on.
+    pub right_justify: RightJustify,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
     /// Frame.
@@ -202,6 +226,7 @@ struct RawConfig {
     stale_after: Option<u32>,
     padding: Option<u16>,
     align: Option<bool>,
+    right_justify: Option<RightJustify>,
     durations: Option<DurationStyle>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
@@ -209,7 +234,7 @@ struct RawConfig {
     modules: BTreeMap<String, toml::Table>,
 }
 
-const TOP_KEYS: [&str; 14] = [
+const TOP_KEYS: [&str; 15] = [
     "preset",
     "icons",
     "theme",
@@ -219,6 +244,7 @@ const TOP_KEYS: [&str; 14] = [
     "stale_after",
     "padding",
     "align",
+    "right_justify",
     "durations",
     "colors",
     "frame",
@@ -229,6 +255,7 @@ const TOP_KEYS: [&str; 14] = [
 const COLOR_CHOICES: &str = "auto, always, never, 256, truecolor";
 const STALE_STYLES: &str = "dim, hide, plain";
 const DURATION_STYLES: &str = "compact, fixed";
+const RIGHT_JUSTIFIES: &str = "end, start";
 
 impl RawConfig {
     // The table is taken by value so every field moves into place: cloning
@@ -248,6 +275,9 @@ impl RawConfig {
                 "stale_after" => raw.stale_after = field(&key, value, errors),
                 "padding" => raw.padding = field(&key, value, errors),
                 "align" => raw.align = field(&key, value, errors),
+                "right_justify" => {
+                    raw.right_justify = enum_field(&key, value, RIGHT_JUSTIFIES, errors);
+                }
                 "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
                 "colors" => match value {
                     toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
@@ -718,6 +748,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         stale_after,
         padding: usize::from(raw.padding.unwrap_or(0)),
         align: raw.align.unwrap_or(false),
+        right_justify: raw.right_justify.unwrap_or_default(),
         durations: raw.durations.unwrap_or_default(),
         frame,
         lines,
@@ -1036,6 +1067,14 @@ mod tests {
         assert_eq!(errs[0].path, "durations");
         assert_eq!(c.durations, DurationStyle::Compact, "and fall back to the default");
         assert!(c.align, "while the valid key next to it stays in effect");
+        assert_eq!(c.right_justify, RightJustify::End, "end is the default");
+        let (c, errs) = parse("right_justify = \"start\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.right_justify, RightJustify::Start);
+        let (c, errs) = parse("right_justify = \"middle\"", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].message.ends_with("expected one of end, start"), "{}", errs[0].message);
+        assert_eq!(c.right_justify, RightJustify::End);
     }
 
     #[test]
@@ -1216,7 +1255,7 @@ x = 1
     /// against drifting from the match arms).
     #[test]
     fn every_listed_key_is_accepted() {
-        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
     }

@@ -153,7 +153,7 @@ README/guide, adversarial review, tests for every bug found.
 
 ## Phase 13 — Alignment and line keys (SPEC § 4.1)
 
-- [ ] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output; test both on the two-line alignment config
+- [x] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output (goldens untouched); `align_columns` takes the pad side; only the filled-rule path is affected (with `fill = false` the line is one left-aligned sequence); unit test on the two-line alignment config, config golden `right-justify-start`
 - [ ] `hide_empty_lines = true` (bug 11): a line whose modules all rendered nothing is dropped; first/last caps follow the surviving lines; test with `pr-absent`
 - [ ] Intentional empty lines: `modules = []` with no `right` is a spacer row that `hide_empty_lines` never drops (empty framed row, or a blank row with `style = "none"`); docs sample
 - [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); an explicit `icons.fill`/`icons.empty` override still wins; guide troubleshooting entry

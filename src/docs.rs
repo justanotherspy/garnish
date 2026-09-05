@@ -45,6 +45,11 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     c(out, "Pad each module column to the widest module in it across lines, so the");
     c(out, "separators line up vertically.");
     let _ = writeln!(out, "align = {}", cfg.align);
+    c(
+        out,
+        "Where a padded right-group module's text sits: end (hugs the cap) | start (follows the separator)",
+    );
+    let _ = writeln!(out, "right_justify = {}", toml_string(cfg.right_justify.name()));
     c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
     let _ = writeln!(out, "durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
@@ -506,7 +511,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |"
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |"
     );
     let _ = writeln!(
         o,
