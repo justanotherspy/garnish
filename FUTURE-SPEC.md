@@ -1,4 +1,4 @@
-# FUTURE-SPEC.md — ideas mined from ccstatusline
+# FUTURE-SPEC.md — ideas mined from ccstatusline, ccsidekick, codachi and ccstatusline-editor
 
 **Status: proposals, not decisions.** Nothing in this file is part of the
 target design until it is moved into `SPEC.md` (with the reason) and given a
@@ -157,7 +157,7 @@ ported, § 5.4).
 | VimMode | `vim` | have | |
 | AgentName | `agent` | have | |
 | AccountEmail | — | missing (A9) | read `~/.claude.json` |
-| SandboxStatus / VoiceMode / RemoteControlStatus | — | missing (A9) | layered settings + `sessions/<pid>.json` |
+| SandboxStatus / VoiceMode / RemoteControlStatus | — | missing (A9) | layered settings + `sessions/*.json` matched by session id |
 | Skills (active skill via hooks) | — | missing (B4) | hooks write a per-session log |
 | FreeMemory / memory usage | — | out | not a property of the session |
 | Link (arbitrary OSC 8) | `text.<name>` | partial | a `url` key on text modules (A8) |
@@ -288,12 +288,13 @@ is a string in the config, so § 3.7 holds). Tick class: payload-only.
 **A9. Settings-derived identity modules.** ccstatusline reads Claude's
 settings in layer order project-local > project > user-local > user
 (`src/utils/claude-settings.ts`) for sandbox and voice mode, reads
-`<config>/sessions/<pid>.json` for a `bridgeSessionId` (remote control), and
+the `<config>/sessions/*.json` file whose `sessionId` matches the payload's
+`session_id` for a non-empty `bridgeSessionId` (remote control), and
 `~/.claude.json` for the account email. garnish already reads settings for
 the autocompact override, cached 30 s. Proposal: three small modules on the
 same cached read: `sandbox` (glyph when sandboxing is on), `remote` (glyph
-when the session is bridged to Remote Control; `sessions/<pid>.json` needs
-the harness pid, which is garnish's parent), `account` (email, hidden by
+when the session is bridged to Remote Control; matched by `session_id`,
+which garnish has), `account` (email, hidden by
 default; useful with several accounts). This raises the fixed module count
 from 21; the schema, docs and goldens absorb it. Tick class: cached file
 reads (30 s), no process.
@@ -587,7 +588,7 @@ Running the binary on a TTY (no piped stdin) opens the TUI
   is reflected in Claude Code within a second: no save-to-apply step and no
   "unsaved changes" dialog are needed, only an undo (keep a `.bak`).
 - The preview can be exact: garnish knows the box width from `COLUMNS`
-  (§ 3.3) and has `preview` fixtures; ccstatusline's preview is at terminal
+  (§ 3, item 3) and has `preview` fixtures; ccstatusline's preview is at terminal
   width minus a guess.
 - Every option, its type, default and doc string already lives in
   `ModuleSchema`; a TUI's per-module editor can be generated from it, as the
@@ -643,6 +644,8 @@ whether hooks (B4) will be added, then ask once.
   stands; revisit after each upgrade.
 - The binary contains the `api/oauth/usage` path and the `weekly_scoped`
   limit kind, confirming the API shape ccstatusline consumes.
+- Settings accept `spinnerVerbs: {mode: "append" | "replace", verbs: [...]}`
+  and `spinnerTipsOverride: {excludeDefault, tips: [...]}` (§ 24.9).
 
 ### 8.4 Payload table
 
@@ -666,8 +669,7 @@ should be re-tiered before anything network-related is built.
 - [ ] **Segments.** Is the Powerline-segment look (B1) wanted enough to
       justify a background role set in `theme.rs` and a second painter path?
 - [ ] **Verify items** (no decision, just work): A1 dim reset on screen;
-      NBSP behaviour in VS Code; where the autocompact notice renders; the
-      `spinnerVerbs` settings key (§ 24.9).
+      NBSP behaviour in VS Code; where the autocompact notice renders.
 - [ ] **Companion** (Part III): see § 24.11.
 - [ ] **Sharing, rotation, web preview** (Part IV): see § 26.1.
 
@@ -1683,9 +1685,12 @@ window and cooldown are latched in `state.json`.
 
 `install --spinner-verbs` writes `spinnerVerbs: {mode: "replace", verbs:
 [...]}` from the active pack (≥ 25 verbs) into Claude settings, preserving
-key order; `install --no-spinner-verbs`/uninstall removes it. **Verify**
-the key name and shape against the 2.1.261 binary before building; if it
-is not there, drop the idea (ccsidekick may target a newer harness).
+key order; `install --no-spinner-verbs`/uninstall removes it. **Verified
+in 2.1.261**: the settings schema has `spinnerVerbs: {mode: "append" |
+"replace", verbs: string[]}` (append adds to the ~200 built-in verbs,
+replace uses only yours) and a sibling `spinnerTipsOverride:
+{excludeDefault, tips: string[]}`; the spinner store reads them live. Both
+are available to garnish; `mode = "append"` is the polite default.
 
 ### 24.10 Small ports from these two (Tier A unless noted)
 
