@@ -1,0 +1,51 @@
+# name: emoji-overrides
+# summary: emoji icons with per-module glyph overrides and name limits
+# columns: 130
+# needs: emoji
+
+# Known caveat (PLAN Phase 12, bug 10): some terminals draw emoji that need a
+# variation selector one cell wide; until the emoji set is cleaned up the
+# right edge can drift on those terminals.
+
+preset = "default"
+icons  = "emoji"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[line]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name", "clock"]
+
+[[line]]
+modules = ["model", "effort", "context"]
+right   = ["session", "cache"]
+
+[modules.branch]
+max_length = 6            # a long feature branch gets cut with …
+
+[modules.session_name]
+max_length = 12
+show_id = true
+
+[modules.model]
+show_id = true            # append the raw model id
+show_thinking = true
+
+[modules.pr]
+show_state_word = true
+
+[modules.branch.icons]
+branch = "⎇"              # override just this glyph back to a text symbol
+
+[modules.context.icons]
+fill  = "▰"
+empty = "▱"
+marker = "▏"
+
+[modules.clock.icons]
+spinner = ""              # no spinner glyph at all

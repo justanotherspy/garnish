@@ -1,0 +1,45 @@
+# name: bars-and-limits
+# summary: 40-cell line-style context bar with window tag, mini bars on the limits
+# columns: 130
+# needs: nerd-font
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[line]]
+modules = ["path", "branch", "context"]
+right   = ["clock"]
+
+[[line]]
+modules = ["limit5h", "limit7d", "spend", "cost"]
+right   = ["lines"]
+
+[modules.context]
+width = 40                     # wide bar
+show_window = true             # 1M / 200k tag
+show_compaction_percent = true # print the threshold as a percentage too
+thresholds = [40, 60, 80]      # colour bands move earlier
+[modules.context.icons]
+fill  = "━"                    # line-style bar: no fractional blocks, no font gaps
+empty = "─"
+marker = "┃"
+
+[modules.limit5h]
+preset = "full"
+bar_width = 12
+
+[modules.limit7d]
+preset = "full"
+bar_width = 12
+show_reset = false
+
+[modules.lines]
+show_net = true
+hide_zero = false

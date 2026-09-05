@@ -1,0 +1,53 @@
+# name: session-detail
+# summary: session, api, cache and cost detail, plain stale style, 1 s git refresh
+# columns: 130
+# needs: nerd-font
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+stale_style = "plain"     # dim | hide | plain: overdue values show unchanged
+stale_after = 1           # style stale after one missed TTL (default 5)
+
+[frame]
+style = "rounded"
+
+[[line]]
+modules = ["path", "branch", "sync"]
+right   = ["clock"]
+
+[[line]]
+modules = ["session", "api", "cache"]
+right   = ["cost", "lines"]
+
+[modules.branch]
+refresh = 1               # worker every second (about 13 ms of CPU each)
+show_sha = true
+
+[modules.sync]
+refresh = 1
+show_zero = true          # show ⇡0 ⇣0 instead of hiding
+show_upstream = true
+
+[modules.session]
+show_start = true
+
+[modules.api]
+show_share = true
+
+[modules.cache]
+show_ttl = true
+show_countdown = true
+show_misses = true
+show_writes = true
+
+[modules.cost]
+only_without_rate_limits = false  # show even on a subscription
+decimals = 3
+show_lines = true
+
+[modules.clock]
+seconds = false

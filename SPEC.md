@@ -297,15 +297,81 @@ digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
 elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
 the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
 
+### 4.1 Layout keys decided on 2026-09-05 (target state; see PLAN Phase 13)
+
+These came out of the live config walkthrough with Daniel. They are part of
+the target design; the implementation status is in `PLAN.md`.
+
+```toml
+right_justify = "end"     # end | start: where a padded right-group module's text sits
+hide_empty_lines = true   # drop a line whose modules all rendered nothing
+overflow = "truncate"     # truncate | ticker: what happens to a left group wider than the box
+ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
+ticker_gap = "   "        # text inserted between the end and the wrapped-around start
+
+[[line]]
+modules = []              # an intentionally empty line: a blank framed row (spacer)
+```
+
+- **`right_justify`.** With `align = true` a right-group module is padded to
+  its column width. `end` (default, today's behaviour) puts the pad on the
+  left so the text hugs the cap: `│          api  8m20s ─╯`. `start` puts the
+  pad on the right so the text follows the separator and the gap sits
+  before the cap: `│ api  8m20s          ─╯`. The left group always pads on
+  the right. Columns pair *positionally*: column 3 of every line is padded
+  to the same width whatever module is in it, so a `–` placeholder under a
+  wide bar gets a wide blank column; the guide says so.
+- **Empty lines.** A line whose every module rendered nothing (outside a
+  repository, `branch`, `sync` and `pr` are all empty) is dropped when
+  `hide_empty_lines = true` (default); the frame's first/last caps follow the
+  surviving lines. A line configured with `modules = []` and no `right` is an
+  *intentional* spacer and is always kept, drawn as an empty framed row
+  (`├─ ────…────┤`, or a blank row with `style = "none"`). Setting
+  `hide_empty_lines = false` restores today's behaviour for the accidental
+  case too.
+- **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
+  not cut with `…`; instead the line shows a window onto the group that
+  advances `ticker_step` cells to the left on every tick and wraps around,
+  with `ticker_gap` between the end and the start (a news ticker). The
+  offset is derived from the tick's clock (`now` modulo the group width plus
+  gap, times the step), so it is stateless, deterministic under
+  `GARNISH_NOW`, and survives the harness cancelling a tick. The right group
+  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour.
+  A ticker only moves as often as the harness ticks (`refreshInterval`,
+  minimum 1 s), which is the documented limit of the effect.
+- **Bars.** `util::bar` uses the fractional-eighth block glyphs only when
+  the fill glyph is `█`; any other fill (`━`/`─`, `▰`/`▱`) gives a bar with
+  no partial cell. Some terminal fonts draw `█` a hair narrower than a cell,
+  which shows as hairline gaps between filled blocks; the line-style fill is
+  the documented workaround, and a per-module `bar = "blocks" | "line"`
+  shorthand sets the two glyphs at once.
+- **Glyph sets.** Every glyph in the built-in `unicode` and `emoji` sets
+  must be one cell wide in the common terminals (COSMIC, Ghostty, Kitty,
+  WezTerm, iTerm2, VS Code) or two cells by every table. Emoji sequences
+  that need a variation selector (U+FE0F) are banned from the emoji set
+  because terminals disagree on their width; a unit test enforces it.
+- **Frames.** The `powerline` style pads its caps with one space by default.
+- **Separators.** With `fill = false`, the separator between the left and
+  right groups is the line's own `separator`, not the frame default.
+- **`sync`.** Zero counts shown by `show_zero` use the muted role; only
+  non-zero counts carry the ahead/behind colours. The fetch-age hint has a
+  space between its glyph and the age like every other module.
+
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
-ids, unknown presets, bad colors, all reported with TOML paths.
+ids, unknown presets, bad colors, all reported with TOML paths; on problems
+the command lists them and exits 1 without an error report.
 
 ## 5. Failure behaviour
 
 `garnish` (render) always exits 0 and always prints something:
 
-- invalid config → render with built-in defaults, append dim
-  `⚠ config: <path>:<line> <msg>`;
+- invalid config → keep every valid key and substitute the built-in default
+  for each invalid one (the resolver already does this per key), append dim
+  `⚠ config: <path>:<line> <msg>`; only a TOML syntax error falls back to
+  the built-in defaults wholesale. (Decided 2026-09-05: one bad colour used
+  to discard the whole file, frame and lines included, which made a typo
+  look like a different program. Until PLAN Phase 12 lands, any error still
+  falls back wholesale.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
 
@@ -361,8 +427,9 @@ cache dir, last worker errors, and a glyph test line.
 | `garnish` | render from stdin (default) |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics |
-| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force`; `show` prints the fully resolved config |
+| `garnish doctor` | diagnostics; the glyph test prints every icon of every set followed by a marker column so a terminal that draws a glyph wide is visible at a glance |
+| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
+| `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
@@ -429,6 +496,8 @@ per-module render cost.
   by the same test.
 - `README.md` is for users and links to the guide and the reference;
   `CLAUDE.md`, `PLAN.md` and `SPRITE.md` are for building the project.
+- `presets/` (§ 12) holds complete, named example configs; `docs/presets.md`
+  is generated from them.
 
 ## 11. Assumptions
 
@@ -441,3 +510,65 @@ per-module render cost.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
   small terminals.
+
+## 12. Presets gallery (target state; PLAN Phase 14)
+
+The four built-in top-level presets stay the only ones compiled into the
+binary. Everything else is a **gallery preset**: a complete config file under
+`presets/<name>.toml`, chosen by name.
+
+- **File contract.** Each file starts with a comment header the tooling
+  parses: `# name: <kebab-case>`, `# summary: <one line>`, `# columns: <N>`
+  (the terminal width the sample is rendered at), `# needs: nerd-font`
+  (optional, `nerd-font` | `emoji` | none), `# author: <github handle>`
+  (optional). The rest is an ordinary config that passes `config check`.
+- **Gallery page.** `garnish docs` renders every preset with the pinned clock
+  and the `subscription-full` payload at its declared width into
+  `docs/presets.md`: name, summary, requirements, the sample, and the file's
+  contents in a collapsed block. `tests/docs_sync.rs` keeps it in sync;
+  `tests/presets.rs` checks that every file validates, renders without `…`
+  at its declared width, and has a unique name matching its filename.
+- **Choosing one.** `garnish config init --preset <gallery name>` writes the
+  file (with the header stripped of tooling lines); `garnish presets`
+  lists names and summaries. The three built-in names keep working.
+- **Screenshots and website.** `presets/screenshots/<name>.png` are optional
+  real-terminal captures contributed with a preset (the feedback skill in
+  § 13 tells people how). A later static site is built from `docs/presets.md`
+  and those screenshots; it is out of scope for the binary, which only has
+  to keep the gallery page and the files honest.
+- **Seed set.** The configs exercised in the 2026-09-05 walkthrough
+  (`presets/` in this repository) are the first entries.
+
+## 13. Skills (target state; PLAN Phase 15)
+
+Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
+in the repository, are embedded in the binary (`include_str!`) so a
+`cargo install` has them, and are written to `~/.claude/skills/<name>/` by
+`garnish install` (or `garnish skills install`). Each skill is plain
+Markdown with frontmatter (`name`, `description`) and instructions; none of
+them needs network access from garnish itself, they drive `gh` and the
+`garnish` CLI.
+
+- **`garnish-statusline`.** Interactive config builder. Asks, with
+  recommended defaults: terminal and font (Nerd Font? decides `icons`),
+  usual terminal width (decides preset and line count), what matters most
+  (repo, model/context, usage limits, timers), colour preference (theme,
+  or match the terminal), frame taste (rounded / powerline / none), whether
+  columns should line up (`align`, `durations`), and offers a free-text
+  "describe what you want" step. It writes the config with
+  `garnish config init --force` semantics after showing a `garnish preview`
+  of it, validates with `config check`, and explains how to tweak it. It
+  never edits `settings.json` beyond what `garnish install` does.
+- **`garnish-feedback`.** Files a GitHub issue on `justanotherspy/garnish`
+  with `gh issue create` using a template: terminal application and
+  version, font, OS, `garnish --version`, the config (`garnish config
+  show`), `garnish doctor` output, the rendered line (`garnish` on the
+  current payload with `--color never`), and asks the person to take a
+  screenshot and attach it to the issue. Labels: `feedback`, plus
+  `alignment` when the report is about widths.
+- **`garnish-submit-preset`.** Reads the current config, asks for a name,
+  a one-line summary, the terminal width it was designed for, the font
+  requirement and an author handle, renders the sample, checks it with
+  `config check`, and opens a GitHub issue labelled `preset` containing the
+  file with its § 12 header and the sample, asking for a screenshot. A
+  maintainer turns accepted issues into `presets/<name>.toml` PRs.

@@ -1,0 +1,36 @@
+# name: tall-eight-lines
+# summary: one module per row, eight rows, square frame
+# columns: 100
+# needs: nerd-font
+
+preset = "full"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+truncate = true
+
+[frame]
+style = "square"
+
+[[line]]
+modules = ["path"]
+right   = ["clock"]
+[[line]]
+modules = ["branch"]
+[[line]]
+modules = ["sync"]
+[[line]]
+modules = ["pr"]
+right   = ["session_name"]
+[[line]]
+modules = ["model"]
+[[line]]
+modules = ["context"]
+right   = ["limit5h"]
+[[line]]
+modules = ["session"]
+[[line]]
+modules = ["cache"]
+right   = ["lines"]

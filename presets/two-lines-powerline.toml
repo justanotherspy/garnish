@@ -1,0 +1,27 @@
+# name: two-lines-powerline
+# summary: location and model only, powerline caps, no colour
+# columns: 110
+# needs: nerd-font
+
+preset = "default"
+icons  = "nerd"
+theme  = "mono"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "powerline"
+pad   = " "               # powerline ships with no space between the caps and the text
+
+[[line]]
+modules = ["path", "branch", "sync", "worktree", "pr"]
+right   = ["session_name", "clock"]
+
+[[line]]
+modules = ["model", "context", "limit5h"]
+right   = ["session", "cost"]
+
+[modules.context]
+preset = "full"
+width  = 30

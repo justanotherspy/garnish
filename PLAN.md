@@ -117,6 +117,51 @@ lines, with column widths that do not jitter as timers tick.
 - [x] Docs: config keys, `### Aligned columns` sample in `docs/config.md`, README and guide
 - [x] Tests: fixed-duration table, config parse/fallback, two-line alignment (separator columns equal, last module unpadded, right group mirrored), fixed durations in a full render
 
+## Phase 12 — Walkthrough fixes (bugs 1–11 from 2026-09-05)
+
+Bugs found by Daniel and by me while switching the live config through the
+presets, themes, frames, icon sets and module options (SPEC § 4.1, § 5).
+Every fix gets a unit test; user-visible ones get a golden or integration
+test.
+
+- [ ] Bug 1: `icons = "unicode"` misaligns the right edge in COSMIC Terminal on any line carrying one of `◆ ◔ ◫ ⧗ ▦` (garnish counts 1 cell, the terminal advances 2; nerd icons on the same layout line up). First make `garnish doctor`'s glyph test print each glyph followed by a marker column so the wide one is obvious, then replace it in the unicode set (and note the override path in the guide)
+- [ ] Bug 2: `powerline` frame ships with an empty `pad`; default it to one space, regenerate the docs sample
+- [ ] Bug 3: hairline gaps between `█` blocks in bars are the terminal font; add the troubleshooting entry (line-style fill `━`/`─` or `▰`/`▱`, which also drops the fractional cell) and the per-module `bar = "blocks" | "line"` shorthand
+- [ ] Bug 5: `sync` with `show_zero` colours `⇡0 ⇣0` with the ahead/behind roles; zero counts use muted
+- [ ] Bug 6: with `fill = false` the left/right join uses the frame's separator instead of the line's own (`compose_line`, the `!fill` branch); pass the line separator through `Layout`
+- [ ] Bug 7: `garnish config check` prints the problems and then a color-eyre report with a source location; exit 1 quietly (map a `ConfigInvalid` error to an `ExitCode` in `main`, no report); same for `config init` refusing to overwrite
+- [ ] Bug 8 (SPEC § 5 change, approved by Daniel 2026-09-05): one invalid value discarded the whole config; keep every valid key and default only the bad ones, wholesale fallback only on TOML syntax errors. Test: bad colour + custom frame keeps the frame
+- [ ] Bug 9: the `sync` fetch-age hint has no space between glyph and age (`⧖2h13m`); add it (goldens change)
+- [ ] Bug 10: the emoji set contains variation-selector sequences (`⏱️ 🗄️ 🏷️ 🕰️`) that COSMIC draws one cell wide while garnish counts two; replace with default-emoji glyphs (`⏳`/`⌛`, `💾`/`📦`, `🔖`, `⏰`), add a unit test that no emoji-set glyph contains U+FE0F, warn in the guide about overrides
+- [ ] Bug 11: a line whose modules all rendered nothing is emitted as an empty framed row; implement `hide_empty_lines = true` (SPEC § 4.1), caps follow the surviving lines, test with `pr-absent`
+- [ ] Item 4 (guide): explain that aligned columns pair positionally, so a `–` placeholder under a wide bar gets a wide blank column
+- [ ] Tour follow-up: the `garnish doctor` glyph test should render every set through the real width code and print the expected cell count per glyph so a mismatch report can be pasted into a feedback issue
+
+## Phase 13 — Layout features from the walkthrough (SPEC § 4.1)
+
+- [ ] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output; test both on the two-line alignment config
+- [ ] Intentional empty lines: `modules = []` with no `right` is a spacer row that `hide_empty_lines` never drops; docs sample
+- [ ] `overflow = "ticker"` with `ticker_step` and `ticker_gap`: stateless scroll window derived from the tick clock, wraps around, right group untouched; golden at two `GARNISH_NOW` values shows the shift; document the 1 s minimum cadence
+- [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`)
+- [ ] Each feature: schema/config → render → `make docs` → goldens → README/guide paragraph
+
+## Phase 14 — Presets gallery (SPEC § 12)
+
+- [ ] `presets/` seeded with the walkthrough configs (in this PR: files with the `# name/summary/columns/needs` header)
+- [ ] `tests/presets.rs`: every file validates, renders without `…` at its declared width, name matches filename and is unique (in this PR: validation only)
+- [ ] `garnish docs` renders `docs/presets.md` (name, summary, needs, sample at the declared width, collapsed file contents); `docs_sync` covers it
+- [ ] `garnish presets` lists names + summaries; `garnish config init --preset <gallery name>` writes the file (tooling header lines stripped)
+- [ ] `presets/screenshots/<name>.png` convention and a README note on contributing one
+- [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary)
+
+## Phase 15 — Bundled skills (SPEC § 13)
+
+- [ ] `skills/garnish-statusline/SKILL.md`: interactive config builder (terminal/font → icons, width → preset, priorities → lines, theme, frame, align/durations, free-text wish), previews with `garnish preview`, writes with `config init --force`, validates
+- [ ] `skills/garnish-feedback/SKILL.md`: `gh issue create` with terminal app + version, font, OS, `garnish --version`, `config show`, `doctor`, the plain render, and a screenshot request; labels `feedback` (+ `alignment`)
+- [ ] `skills/garnish-submit-preset/SKILL.md`: asks name/summary/columns/needs/author, renders and validates, opens a `preset` issue with the § 12 header
+- [ ] `garnish skills install [--dir D] | list`; skills embedded with `include_str!`; `garnish install` runs it unless `--no-skills`; README/guide section; an integration test that `install` writes the three directories
+- [ ] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`) and the `feedback`, `alignment`, `preset` labels
+
 ## Backlog (open after v0.1.0)
 
 Items left unchecked when their phase closed, plus follow-ups from reviews
@@ -258,3 +303,27 @@ and user feedback. Pick from here when no phase is in progress.
   whose first, last and rightmost modules all differ in width, so padding
   the last module, not mirroring the right group, or padding it on the
   wrong side each fail it, plus a test with hidden modules.
+- **2026-09-05 (live walkthrough, roadmap)** — With #9, #10 and #11 merged
+  and the binary reinstalled, Daniel and I switched his live config
+  through every preset, theme, frame style and icon set, then seven
+  module-option steps (labels and placeholders; context and limit bars;
+  session/api/cache/cost detail with fast refreshes; per-line separators,
+  custom frame and `fill = false`; colours and 256-colour mode; emoji and
+  icon overrides with truncation limits; one 362-cell line with
+  `truncate = false`, then eight one-module lines). The config is re-read
+  every tick, so each change showed within a second. Findings are Phase 12
+  (eleven bugs and notes, with the diagnosis for each: the COSMIC Terminal
+  width mismatches come from specific unicode glyphs and from emoji that
+  need a variation selector; a bad colour discarded the whole config;
+  `config check` printed an error report; powerline caps had no padding;
+  `fill = false` ignored the line separator at the join; zero sync counts
+  were coloured; empty lines stayed as empty rows). Daniel's ideas became
+  SPEC § 4.1 (`right_justify`, intentional empty lines, a ticker for
+  overflow), § 12 (a `presets/` gallery with a generated page, screenshots
+  and eventually a website) and § 13 (three bundled skills:
+  `garnish-statusline` config builder, `garnish-feedback` issue filer,
+  `garnish-submit-preset`), planned as Phases 13–15. This PR is
+  documentation plus the seed `presets/` files and a validation test;
+  no behaviour changed. His live config at the end of the session is the
+  eight-line step 7b layout; the pre-walkthrough full config is backed up
+  next to it as `garnish.toml.bak-2026-09-05`.
