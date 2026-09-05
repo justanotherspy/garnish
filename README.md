@@ -18,8 +18,9 @@
 ## Why
 
 Claude Code re-runs your status line command every second. garnish makes that
-free: it parses the session JSON, renders **21 small modules** from a TOML
-config, and keeps anything slow (git, worktrees) in a detached background
+free: it parses the session JSON, renders **21 small modules** (plus any
+number of your own fixed-width text boxes) from a TOML config, and keeps
+anything slow (git, worktrees) in a detached background
 worker so a tick never waits. Dozens of sessions on one machine, no
 contention.
 

@@ -835,3 +835,16 @@ removed = "danger"
 # net — Net delta.
 net = "muted"
 
+# text.<name> — Static text in a box of fixed width; define any number as `[modules.text.<name>]`.
+# Place it on a line as "text.<name>"; any number may exist.
+# [modules.text.motd]
+# text = ""  # The text. ANSI/OSC sequences and control characters are stripped.
+# width = 0  # Box width in cells; 0 = the text's own width.
+# pad = 0  # Blank cells added on each side of the box.
+# justify = "left"  # Where text narrower than the box sits.
+# overflow = "scroll"  # Text wider than the box: `clip` cuts with an ellipsis, `scroll` slides a window and restarts after the end, `scroll-wrap` flows continuously with `gap` between end and start.
+# step = 1  # Cells scrolled per tick (> 0; 0.5 = every second tick).
+# gap = "   "  # `scroll-wrap` only: text between the end and the start.
+# [modules.text.motd.colors]
+# text = "accent"
+

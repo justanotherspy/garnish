@@ -249,8 +249,10 @@ color = "muted"
   the text has scrolled past, restarts from the beginning (no wrap-around
   text). `scroll-wrap` is the ticker: the text is followed by `gap` and
   then itself, so it flows continuously. Both are stateless: the offset is
-  `(now_secs × step) mod (text width + gap width)`, so a frozen clock
-  freezes the scroll and a cancelled tick loses nothing.
+  `floor(now_secs × step) mod period`, where the period is the text width
+  for `scroll` and text plus gap for `scroll-wrap`, so a frozen clock
+  freezes the scroll and a cancelled tick loses nothing. Text modules have
+  no `preset` and no `refresh`; `config check` rejects both.
 - **Shared primitive.** The same scroller implements line-level
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
 - **Escapes.** `text` is plain text: ANSI and OSC sequences are stripped,

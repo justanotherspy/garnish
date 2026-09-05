@@ -106,6 +106,27 @@ right   = ["limit5h", "limit7d", "cost"]
 | usage | `limit5h` `limit7d` `spend` `cost` |
 | session | `session` `api` `cache` `clock` |
 | identity | `session_name` `vim` `agent` `lines` |
+| yours | `text.<name>`: a fixed string in a box, any number of them |
+
+A text module is the one thing you define yourself: plain text (escape
+sequences are stripped) in a box of fixed width, so it doubles as a
+fixed-width slot next to aligned columns. Longer text scrolls or is cut:
+
+```toml
+[[line]]
+modules = ["path", "text.motd"]
+right   = ["text.tag", "clock"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 12             # cells; 0 = the text's own width
+overflow = "scroll-wrap"  # clip | scroll | scroll-wrap
+gap      = " · "
+
+[modules.text.tag]
+text  = "v0.2"
+color = "muted"
+```
 
 Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is

@@ -170,9 +170,9 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `time::frame(now, step, period) -> usize`: the one stateless rule (`floor(now_secs × step) mod period`), with unit tests at the boundaries and for `step = 0.5`; `Clock.animate` (`GARNISH_ANIMATE=0`, and `Clock::fixed()` is frozen so docs show frame 0) feeds `Ctx::frame`, through which every moving part goes; the `clock` spinner is its first user (goldens byte-identical: 1738425600 mod 10 = 0); config golden `animate-off` at two instants
 - [x] `ansi::scroll(segments, width, offset, gap, wrap)`: window onto a segment list, cluster-aware like `truncate` (a wide cluster cut by an edge becomes spaces), `wrap = false` restarts at 0 after the end passes, `wrap = true` cycles text + gap; property test over widths × offsets × wrap that the window is always exactly `width` cells, plus slide/restart/wrap/style tests
 - [x] `overflow = "truncate" | "ticker"` with `ticker_step` (> 0, shared `resolve_step`) and `ticker_gap`: `Layout.ticker` carries step, gap, clock and the animate switch, `compose_line` scrolls the left group through `ansi::scroll` when it is over budget, right group untouched; config goldens `ticker` at three instants and `ticker-frozen` with `GARNISH_ANIMATE=0`; `truncate = false` keeps meaning "hand the harness the whole row"; `presets/single-line-full.toml` switches to it and `tests/presets.rs` asserts every preset renders uncut inside the box at its declared width (it collects every offender; `compact-aligned` and `three-lines-double` had been cut at their declared 100/110 columns all along and now declare 110/130); criterion `tick_in_process_ticker`
-- [ ] Text modules: `[modules.text.<name>]` (`text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, `color`, plus the common `label`/`prefix`/`suffix`), ids `text.<name>` on any line, resolved from the config rather than the fixed schema table; ANSI/control stripped from `text`; `config check` validates `justify`/`overflow`/`step` and that every placed id has a table; `garnish modules` and the generated reference list the family with one page; goldens at two `GARNISH_NOW` values for `scroll` and `scroll-wrap`
-- [ ] CLAUDE.md convention amended (done in the roadmap PR: "fixed, plus the text family"); presets: add `single-line-ticker` and a text-module example to `presets/`
-- [ ] Bench: the scroller runs only when a group overflows or a text module scrolls; warm tick unchanged
+- [x] Text modules: `src/modules/text.rs` with a `SCHEMA` (`text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, colour `text`, plus the common `label`/`prefix`/`suffix`/`hide_when_empty`); `Config.texts` is built by `resolve_texts` from `[modules.text.<name>]` through the shared `parse_overrides` (now taking its path), `refresh`/`preset` rejected, `step` must be positive; `text.<name>` line ids are valid only with a table; `render_group` branches on the prefix; ANSI/OSC/control stripped (`text::sanitize`); `garnish modules` lists the family, `docs/modules/text.md` is generated from the schema with the SPEC example, `config show`/`init` emit the tables (or a commented example); config goldens `text-scroll` and `text-scroll-wrap` at three instants, `text-boxes` for clip/justify/pad/hug
+- [x] CLAUDE.md convention amended (done in the roadmap PR: "fixed, plus the text family"); presets: `single-line-full` is the ticker preset (Phase 15 ticker layer) and `motd-ticker` is the text-module example
+- [x] Bench: the scroller runs only when a group overflows or a text module scrolls; the warm default tick is untouched (`tick_in_process_default` 13.8 µs); a full-preset row squeezed into 60 columns and scrolling (`tick_in_process_ticker`, nine modules) takes 31.7 µs in-process, well inside the 0.2 ms line, and `bench/run.sh`'s warm scenarios never overflow
 
 ## Phase 16 — Animation framework (SPEC § 4.2)
 
@@ -420,3 +420,20 @@ and user feedback. Pick from here when no phase is in progress.
   is invisible; documented in SPEC § 2.1/§ 4.1 and CLAUDE.md rather than
   worked around, glyph choice left to Daniel), the `stale_style = "hide"`
   height change, and that the ascii set got `━`/`─` (now `=`/`-`).
+- **2026-09-05 (Phase 15, four layers)** — Clock-driven scrolling.
+  `phase-15/frame-rule`: `time::frame` (`floor(now × step) mod period`,
+  saturating), `Clock.animate` from `GARNISH_ANIMATE` and false for
+  `Clock::fixed()` so docs show frame 0, `Ctx::frame` as the single entry
+  point; the `clock` spinner moved onto it with byte-identical goldens.
+  `phase-15/scroller`: `ansi::scroll`, cluster-aware like `truncate`, with a
+  property test that the window is always exactly the requested width.
+  `phase-15/line-ticker`: `overflow = "ticker"`, `ticker_step`, `ticker_gap`
+  through `Layout.ticker` into `compose_line`; `single-line-full` became the
+  ticker preset, and tightening `tests/presets.rs` to "uncut and inside the
+  box at the declared width" showed `compact-aligned` and
+  `three-lines-double` had been cut all along (now 110/130 columns).
+  `phase-15/text-modules`: `src/modules/text.rs` with its own schema,
+  `Config.texts` built by `resolve_texts` through the shared
+  `parse_overrides` (which now takes its path), `color = …` shorthand,
+  `text.<name>` ids validated against the tables, `docs/modules/text.md`
+  generated, `config show`/`init` emit the tables, preset `motd-ticker`.

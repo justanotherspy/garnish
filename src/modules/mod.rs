@@ -19,6 +19,7 @@ pub mod identity;
 pub mod model;
 pub mod repo;
 pub mod session;
+pub mod text;
 pub mod usage;
 pub mod util;
 

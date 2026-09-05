@@ -156,7 +156,56 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     let _ = writeln!(out);
 
     write_modules(&mut out, cfg, annotated);
+    write_texts(&mut out, cfg, annotated);
     out
+}
+
+/// The `[modules.text.<name>]` tables (SPEC § 3.7): every defined text module
+/// with its resolved values, or, in an annotated file without any, one
+/// commented example so the family is discoverable from `config init`.
+fn write_texts(out: &mut String, cfg: &Config, annotated: bool) {
+    let schema = &*crate::modules::text::SCHEMA;
+    if cfg.texts.is_empty() {
+        if annotated {
+            let _ = writeln!(out, "# text.<name> — {}", schema.summary);
+            let _ = writeln!(out, "# Place it on a line as \"text.<name>\"; any number may exist.");
+            let _ = writeln!(out, "# [modules.text.motd]");
+            for opt in &schema.opts {
+                let _ = writeln!(out, "# {} = {}  # {}", opt.key, opt.default.to_toml(), opt.doc);
+            }
+            let _ = writeln!(out, "# [modules.text.motd.colors]");
+            for color in &schema.colors {
+                let _ = writeln!(out, "# {} = {}", color.key, toml_string(color.default));
+            }
+            let _ = writeln!(out);
+        }
+        return;
+    }
+    for (name, m) in &cfg.texts {
+        if annotated {
+            let _ = writeln!(out, "# text.{name} — {}", schema.summary);
+        }
+        let _ = writeln!(out, "[modules.text.{name}]");
+        let _ = writeln!(out, "enabled = {}", m.enabled);
+        let _ = writeln!(out, "label = {}", toml_string(&m.label));
+        let _ = writeln!(out, "prefix = {}", toml_string(&m.prefix));
+        let _ = writeln!(out, "suffix = {}", toml_string(&m.suffix));
+        let _ = writeln!(out, "hide_when_empty = {}", m.hide_when_empty);
+        for opt in &schema.opts {
+            if annotated {
+                let _ = writeln!(out, "# {} — {}", opt.key, opt.doc);
+            }
+            let value = m.value(opt.key).map_or_else(|| opt.default.to_toml(), Value::to_toml);
+            let _ = writeln!(out, "{} = {}", opt.key, value);
+        }
+        let _ = writeln!(out, "[modules.text.{name}.colors]");
+        for color in &schema.colors {
+            let spec =
+                if annotated { color.default.to_owned() } else { m.color(color.key).to_spec() };
+            let _ = writeln!(out, "{} = {}", color.key, toml_string(&spec));
+        }
+        let _ = writeln!(out);
+    }
 }
 
 fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
@@ -391,6 +440,62 @@ pub fn module_page(id: &str) -> Option<String> {
 
     module_reference(&mut o, schema);
     Some(o)
+}
+
+/// The config the text-module page renders: the SPEC § 3.7 example.
+const TEXT_SAMPLE: &str = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.motd\", \"text.clip\", \"text.tag\"]\n[modules.text.motd]\ntext = \"ship it before lunch, then write the docs\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\n[modules.text.clip]\ntext = \"a rather long note\"\nwidth = 8\noverflow = \"clip\"\n[modules.text.tag]\ntext = \"v0.2\"\nwidth = 8\njustify = \"right\"\npad = 1\ncolor = \"muted\"\n";
+
+/// The `docs/modules/text.md` page for the `text.<name>` family (SPEC § 3.7).
+#[must_use]
+pub fn text_page() -> String {
+    let schema = &*crate::modules::text::SCHEMA;
+    let mut o = String::new();
+    let _ = writeln!(o, "# `text.<name>`\n\n{}\n\n{}\n", schema.summary, schema.doc);
+    let _ = writeln!(
+        o,
+        "**Sources:** the config file only. **Refresh:** every tick; nothing to cache.\n"
+    );
+    let (cfg, _) = config::parse(TEXT_SAMPLE, &SCHEMAS);
+    let sample = render_plain_at(&fixture("subscription-full"), &cfg, Some(80), &Clock::fixed());
+    let _ = writeln!(
+        o,
+        "## Example\n\n```toml\n{}```\n\nrenders (frame 0; the first box scrolls in a live session) as\n\n```text\n{}\n```\n",
+        TEXT_SAMPLE
+            .trim_start_matches("icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n"),
+        sample.trim_end()
+    );
+    let _ = writeln!(o, "## Options\n\n`[modules.text.<name>]`\n");
+    let _ = writeln!(o, "| key | type | default | description |\n|---|---|---|---|");
+    let _ = writeln!(o, "| `enabled` | bool | `true` | Render this module. |");
+    let _ = writeln!(o, "| `label` | string | `\"\"` | Dim text before the value. |");
+    let _ = writeln!(o, "| `prefix`, `suffix` | string | `\"\"` | Text around the module. |");
+    let _ = writeln!(
+        o,
+        "| `hide_when_empty` | bool | `true` | With an empty `text`, hide the module instead of showing a dim `–`. |"
+    );
+    for opt in &schema.opts {
+        let _ = writeln!(
+            o,
+            "| `{}` | {} | `{}` | {} |",
+            opt.key,
+            opt.kind.doc_name(),
+            opt.default.to_toml().replace('|', "\\|"),
+            opt.doc.replace('|', "\\|")
+        );
+    }
+    let _ = writeln!(
+        o,
+        "\nNo `preset` and no `refresh`: a text module renders every tick as configured.\n"
+    );
+    let _ = writeln!(
+        o,
+        "## Colors\n\n`[modules.text.<name>.colors]`, or the shorthand `color = …` on the module\n"
+    );
+    let _ = writeln!(o, "| key | default | description |\n|---|---|---|");
+    for color in &schema.colors {
+        let _ = writeln!(o, "| `{}` | `{}` | {} |", color.key, color.default, color.doc);
+    }
+    o
 }
 
 /// The option, icon and color tables of a module page.
@@ -639,7 +744,7 @@ fn presets_section(o: &mut String) {
 
     let _ = writeln!(
         o,
-        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/).\n"
+        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
     );
 }
 
@@ -706,6 +811,11 @@ pub fn index_page() -> String {
     }
     let _ = writeln!(
         o,
+        "| [`text.<name>`](modules/text.md) | {} | tick |",
+        crate::modules::text::SCHEMA.summary
+    );
+    let _ = writeln!(
+        o,
         "\n## Default preset, unicode icons\n\n```text\n{}\n```",
         preset_sample(config::presets::TopPreset::Default, IconSet::Unicode)
     );
@@ -729,6 +839,8 @@ pub fn generate(out: &Path) -> std::io::Result<usize> {
             n = n.saturating_add(1);
         }
     }
+    std::fs::write(out.join("modules").join("text.md"), text_page())?;
+    n = n.saturating_add(1);
     Ok(n)
 }
 
@@ -817,7 +929,9 @@ mod tests {
     fn generate_writes_all_pages() {
         let dir = tempfile::tempdir().unwrap();
         let n = generate(dir.path()).unwrap();
-        assert_eq!(n, 2 + SCHEMAS.len());
+        assert_eq!(n, 3 + SCHEMAS.len(), "index, config, one page per module, the text family");
         assert!(dir.path().join("modules").join("clock.md").exists());
+        let text = std::fs::read_to_string(dir.path().join("modules").join("text.md")).unwrap();
+        assert!(text.contains("| `overflow` |") && text.contains("v0.2"), "{text}");
     }
 }

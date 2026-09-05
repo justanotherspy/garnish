@@ -1,0 +1,31 @@
+# name: motd-ticker
+# summary: repo line plus a scrolling message of the day in a fixed 24-cell box
+# columns: 100
+# needs: nerd-font
+
+# A text module (SPEC § 3.7) as a ticker: the message flows through a 24-cell
+# box one cell per second and wraps around after ` · `; the second line is the
+# usual model/context/limit row. Change `text` to whatever you want to keep in
+# view.
+
+preset = "compact"
+icons  = "nerd"
+theme  = "garnish"
+
+[frame]
+style = "rounded"
+
+[[line]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["text.motd", "clock"]
+
+[[line]]
+modules = ["model", "effort", "context", "limit5h", "cost"]
+right   = ["cache"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 24
+overflow = "scroll-wrap"
+gap      = " · "
+color    = "accent2"
