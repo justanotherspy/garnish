@@ -256,7 +256,10 @@ mod tests {
         assert!(!text.starts_with('\u{feff}'));
         assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
         let backup = first.backup.unwrap();
-        assert!(backup.starts_with(real.parent().unwrap()));
+        // The backup sits next to the link target; compare canonical paths
+        // because macOS temp dirs live under the `/var` → `/private/var` symlink.
+        let real_dir = std::fs::canonicalize(real.parent().unwrap()).unwrap();
+        assert!(backup.starts_with(&real_dir), "{backup:?} not under {real_dir:?}");
         assert_eq!(std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
         // a second change in the same second gets its own backup
         std::fs::write(&real, "{\"dot\":2}").unwrap();

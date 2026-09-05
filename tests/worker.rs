@@ -199,6 +199,39 @@ fn worker_dirty_flag_and_stale_marker() {
     assert_eq!(spawns(&env).len(), before + 2, "{:?}", spawns(&env));
 }
 
+/// SPEC § 3.6: a value past its TTL spawns a worker but renders unchanged
+/// until it is `stale_after` TTLs overdue; `stale_after = 1` restores the
+/// old dim-at-TTL behaviour.
+#[test]
+fn worker_overdue_value_renders_plain_until_stale_after_ttls() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, err, ok) =
+        garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
+    assert!(ok, "{err}");
+    let now: u64 = NOW.parse().unwrap();
+    // TTL is 5 s: 8 s later the entry is past its TTL (spawn) but well inside
+    // the default 5-TTL grace, so no dimming and no ⟳.
+    let before = spawns(&env).len();
+    let t8 = (now + 8).to_string();
+    let (out, _, _) =
+        garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", t8.as_str())]);
+    assert!(out.contains("main") && !out.contains('⟳'), "{out}");
+    assert!(!out.contains("\x1b[2m"), "no dim escape expected: {out:?}");
+    assert_eq!(spawns(&env).len(), before + 2, "{:?}", spawns(&env));
+    // 26 s later it is more than 5 TTLs overdue: dimmed with ⟳.
+    let t26 = (now + 26).to_string();
+    let (out, _, _) =
+        garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", t26.as_str())]);
+    assert!(out.contains('⟳'), "{out}");
+    // stale_after = 1: dim as soon as the TTL passes.
+    config(&env, &format!("stale_after = 1\n{ONE_LINE}"));
+    let (out, _, _) =
+        garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", t8.as_str())]);
+    assert!(out.contains('⟳'), "{out}");
+}
+
 #[test]
 fn cache_live_lock_suppresses_spawn_and_dead_lock_is_reclaimed() {
     let env = setup();
@@ -257,7 +290,19 @@ fn spawn_thirty_two_concurrent_ticks_produce_one_worker_per_module() {
         assert!(c.wait_with_output().unwrap().status.success());
     }
     let s = spawns(&env);
-    assert_eq!(s.len(), 2, "{s:?}");
+    if cfg!(target_os = "linux") {
+        // The tick takes the lock and hands it over, so the 32 ticks agree on
+        // exactly one worker per module.
+        assert_eq!(s.len(), 2, "{s:?}");
+    } else {
+        // Elsewhere the worker takes the lock itself (see `spawn_refresh`):
+        // every tick may spawn, the workers dedupe, and no tick hands over.
+        assert!(s.len() >= 2 && s.len() <= 64, "{s:?}");
+        assert!(s.iter().all(|line| !line.contains("--lock-held")), "{s:?}");
+        for module in ["branch", "sync"] {
+            assert!(s.iter().any(|line| line.contains(&format!("--module {module} "))), "{s:?}");
+        }
+    }
 }
 
 #[test]

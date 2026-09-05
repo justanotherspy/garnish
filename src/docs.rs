@@ -47,6 +47,8 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     let _ = writeln!(out, "truncate = {}", cfg.truncate);
     c(&mut out, "Stale cached values: dim | hide | plain");
     let _ = writeln!(out, "stale_style = {}", toml_string(stale_name(cfg.stale_style)));
+    c(&mut out, "TTL periods a cached value may be overdue before it is styled stale (>= 1).");
+    let _ = writeln!(out, "stale_after = {}", cfg.stale_after);
     c(&mut out, "Cells subtracted from the width (mirror statusLine.padding).");
     let _ = writeln!(out, "padding = {}", cfg.padding);
     let _ = writeln!(out);
@@ -475,7 +477,11 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `stale_style` | `dim` \\| `hide` \\| `plain` | `dim` | How cached values past their TTL are shown while a worker refreshes them. |"
+        "| `stale_style` | `dim` \\| `hide` \\| `plain` | `dim` | How overdue cached values are shown. |"
+    );
+    let _ = writeln!(
+        o,
+        "| `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |"
     );
     let _ = writeln!(
         o,

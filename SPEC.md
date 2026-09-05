@@ -180,10 +180,16 @@ Spinner frame = `now_secs mod frames.len()` (stateless).
 
 ### 3.6 Staleness
 
-A cached module whose entry is older than its TTL renders the last value
-dimmed with a trailing `⟳` while a worker runs; if the last refresh failed it
+A cached module whose entry is older than its TTL spawns a worker but keeps
+rendering the last value normally: a refresh in flight is not a problem the
+user needs to see. Only once the entry is older than `stale_after` TTLs
+(default 5, so 25 s for a 5 s module) is it *overdue* and rendered dimmed
+with a trailing `⟳`; an entry computed for another situation (branch or
+upstream changed) is overdue at once. If the last refresh failed the module
 renders dimmed with `✗` and the error is kept in the cache file for
 `garnish doctor`. A missing entry renders the module's placeholder.
+(Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
+value on every fifth tick, which read as flicker.)
 
 ## 4. Configuration
 
@@ -198,6 +204,7 @@ theme  = "garnish"        # garnish | catppuccin-mocha | nord | dracula | tokyon
 color  = "auto"           # auto | always | never | 256 | truecolor
 truncate = true
 stale_style = "dim"
+stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
@@ -270,8 +277,9 @@ cache dir, last worker errors, and a glyph test line.
   sessions in one worktree share it. Never keyed on `transcript_path`.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
   or the error text. Malformed = miss. Written as `<file>.tmp.<pid>` + rename.
-- Tick: fresh → render; stale → dim `⟳` + spawn worker unless `<module>.lock`
-  is live; `err` → dim `✗`. A failed entry is fresh for its TTL like any
+- Tick: fresh → render; past TTL → spawn worker unless `<module>.lock` is
+  live, rendering the last value unchanged; older than `stale_after` TTLs
+  (or computed for another head/upstream) → dim `⟳`; `err` → dim `✗`. A failed entry is fresh for its TTL like any
   other (a broken git is retried once per TTL, never once per tick). Entries
   record what they were computed for (`head`, `upstream`); a render whose
   situation differs treats the entry as stale.

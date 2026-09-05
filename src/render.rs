@@ -156,6 +156,7 @@ pub fn render_lines_at(
         home: clock.home.clone(),
         settings_env: clock.settings_env.clone(),
         git: clock.git,
+        stale_after: config.stale_after,
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
@@ -310,10 +311,12 @@ mod tests {
 
     #[test]
     fn every_fixture_renders_every_preset_without_panicking() {
+        use rayon::prelude::*;
         let dir = format!("{}/tests/fixtures/payloads", env!("CARGO_MANIFEST_DIR"));
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            let payload = Payload::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let paths: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        // 400+ renders: fan out so a slow CI runner stays inside the test timeout.
+        paths.par_iter().for_each(|path| {
+            let payload = Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
             for preset in ["default", "minimal", "full", "compact"] {
                 for icons in ["nerd", "unicode", "emoji", "ascii"] {
                     let text = format!("preset = \"{preset}\"\nicons = \"{icons}\"");
@@ -324,6 +327,6 @@ mod tests {
                     }
                 }
             }
-        }
+        });
     }
 }

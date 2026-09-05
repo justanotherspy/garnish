@@ -28,7 +28,7 @@ jobs:
       # Installs the channel and components pinned in rust-toolchain.toml.
       - run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+      - uses: taiki-e/install-action@5bf6ce016fd2e72eefc647cbca1e4213f65955b8 # v2.87.5
         with:
           tool: nextest
       - run: ./scripts/ci.sh 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+      - uses: taiki-e/install-action@5bf6ce016fd2e72eefc647cbca1e4213f65955b8 # v2.87.5
         with:
           tool: nextest
       - run: make check 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+      - uses: taiki-e/install-action@5bf6ce016fd2e72eefc647cbca1e4213f65955b8 # v2.87.5
         with:
           tool: hyperfine
       - run: ./bench/run.sh

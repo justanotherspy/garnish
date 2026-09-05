@@ -9,6 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use rayon::prelude::*;
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -58,28 +60,37 @@ fn golden_renders_match() {
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .collect();
     fixtures.sort();
-    let mut failures = Vec::new();
-    for fixture in &fixtures {
-        let name = fixture.file_stem().unwrap().to_str().unwrap();
-        for preset in ["default", "minimal", "full", "compact"] {
-            for icons in ["nerd", "unicode", "emoji", "ascii"] {
-                let actual = render(fixture, preset, icons);
-                let golden = golden_dir.join(format!("{name}--{preset}--{icons}.txt"));
-                if update {
-                    std::fs::write(&golden, &actual).unwrap();
-                    continue;
-                }
-                match std::fs::read_to_string(&golden) {
-                    Ok(expected) if expected == actual => {}
-                    Ok(expected) => failures.push(format!(
-                        "{}:\n--- expected\n{expected}--- actual\n{actual}",
-                        golden.display()
-                    )),
-                    Err(_) => failures
-                        .push(format!("{}: missing (run with UPDATE_GOLDEN=1)", golden.display())),
-                }
+    // 400+ binary invocations: fan out so a slow CI runner stays inside the
+    // test timeout. Results are collected in a deterministic order.
+    let combos: Vec<(&PathBuf, &str, &str)> = fixtures
+        .iter()
+        .flat_map(|f| {
+            ["default", "minimal", "full", "compact"].into_iter().flat_map(move |preset| {
+                ["nerd", "unicode", "emoji", "ascii"]
+                    .into_iter()
+                    .map(move |icons| (f, preset, icons))
+            })
+        })
+        .collect();
+    let failures: Vec<String> = combos
+        .par_iter()
+        .filter_map(|&(fixture, preset, icons)| {
+            let name = fixture.file_stem().unwrap().to_str().unwrap();
+            let actual = render(fixture, preset, icons);
+            let golden = golden_dir.join(format!("{name}--{preset}--{icons}.txt"));
+            if update {
+                std::fs::write(&golden, &actual).unwrap();
+                return None;
             }
-        }
-    }
+            match std::fs::read_to_string(&golden) {
+                Ok(expected) if expected == actual => None,
+                Ok(expected) => Some(format!(
+                    "{}:\n--- expected\n{expected}--- actual\n{actual}",
+                    golden.display()
+                )),
+                Err(_) => Some(format!("{}: missing (run with UPDATE_GOLDEN=1)", golden.display())),
+            }
+        })
+        .collect();
     assert!(failures.is_empty(), "{} golden mismatches:\n{}", failures.len(), failures.join("\n"));
 }

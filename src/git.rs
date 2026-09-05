@@ -451,7 +451,12 @@ mod tests {
         let dirs = discover(&wt).unwrap();
         assert!(dirs.linked_worktree);
         assert_eq!(dirs.toplevel, wt);
-        assert_eq!(dirs.common_dir, work.join(".git"));
+        // git reports the common dir canonicalised; on macOS the temp dir
+        // sits behind the `/var` → `/private/var` symlink.
+        assert_eq!(
+            dirs.common_dir.canonicalize().unwrap(),
+            work.join(".git").canonicalize().unwrap()
+        );
         assert_eq!(head(&dirs), Some(Head::Branch("feature".into())));
         assert!(head_commit(&dirs).is_some());
         assert_ne!(dirs.cache_key(), discover(&work).unwrap().cache_key());
