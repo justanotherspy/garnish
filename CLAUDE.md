@@ -276,9 +276,10 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   footer box is laid out with are the same number: the hook runner copies
   `process.stdout.columns` into the env, and the Ink root's terminal size
   comes from `options.stdout.columns` (its `stdoutSize()`), so the 4-cell
-  arithmetic holds without any further conversion. To re-verify after a Claude Code upgrade: `strings` the
-  binary, find `paddingX:` next to `gap:2` in the status line component and
-  `var Vne=2,Gne=1` (footer padding and column gap) near `FooterHintLine`.
+  arithmetic holds without any further conversion. To re-verify after a
+  Claude Code upgrade: `strings` the binary, find `paddingX:` next to
+  `gap:2` in the status line component and `var Vne=2,Gne=1` (footer
+  padding and column gap) near `FooterHintLine`.
 - Nerd icons must come from the BMP private-use area (U+E000–U+F8FF);
   the Material Design range at U+F0000+ only exists in Nerd Fonts v3 and
   renders as a box elsewhere.

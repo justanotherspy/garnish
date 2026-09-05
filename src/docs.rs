@@ -319,8 +319,9 @@ fn frame_sample(style: FrameStyle) -> String {
     render_plain_at(&fixture("subscription-full"), &cfg, Some(72), &Clock::fixed())
 }
 
-/// Narrowest terminal width at which a preset's sample shows no `…`. Kept
-/// small so the samples read on GitHub without a horizontal scroll bar.
+/// Terminal width for a preset's sample: a round number at which nothing is
+/// cut, kept small so the samples read on GitHub without a scroll bar
+/// (`full` is the exception; its four lines need about 120 columns).
 const fn preset_columns(preset: config::presets::TopPreset) -> usize {
     use config::presets::TopPreset;
     match preset {

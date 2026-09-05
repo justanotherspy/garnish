@@ -41,6 +41,11 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     assert!(out.contains("would write"), "{out}");
     assert!(out.contains("\"hideVimModeIndicator\": true"), "{out}");
     assert!(out.contains("would write a default config"), "{out}");
+    let (out, _, ok) = run(&["install", "--dry-run", "--absolute", "--padding", "1"], home, &[]);
+    assert!(
+        ok && out.contains("would write a default config") && out.contains("(padding = 2)"),
+        "{out}"
+    );
     assert!(std::fs::read_to_string(&settings).unwrap().contains("old.sh"));
     assert!(!home.join(".config/garnish/garnish.toml").exists());
 
@@ -69,10 +74,16 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     // statusLine.padding = 1 pads both sides, so the config mirrors it doubled.
     assert!(cfg_text.contains("\npadding = 2\n"), "{cfg_text}");
 
-    let (out, _, ok) =
+    let (out, err, ok) =
         run(&["install", "--absolute", "--refresh-interval", "2", "--padding", "1"], home, &[]);
     assert!(ok && out.contains("already up to date"), "{out}");
-    assert!(out.contains("set `padding = 2`"), "existing config gets the hint: {out}");
+    assert!(err.contains("set `padding = 2`"), "existing config gets the hint on stderr: {err}");
+    assert!(!out.contains("padding"), "{out}");
+    // The config key is a u16; a value that would not round-trip is refused up front.
+    let (_, err, ok) = run(&["install", "--dry-run", "--padding", "40000"], home, &[]);
+    assert!(!ok && err.contains("40000"), "{err}");
+    let (out, _, ok) = run(&["install", "--dry-run", "--padding", "3"], home, &[]);
+    assert!(ok && !out.contains("would write a default config"), "config exists: {out}");
 
     let (out, err, _) = run(&["install", "--dry-run"], home, &[("PATH", "/nonexistent")]);
     assert!(err.contains("not on PATH"), "{err}");

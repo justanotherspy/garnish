@@ -125,7 +125,7 @@ pub enum Command {
         refresh_interval: u64,
         /// `statusLine.padding`; the generated config gets `padding = 2N`
         /// to match (the harness pads both sides).
-        #[arg(long, value_name = "N")]
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(0..=32_767))]
         padding: Option<u64>,
         /// Write the absolute path of this binary instead of `garnish`.
         #[arg(long)]
@@ -334,16 +334,17 @@ fn install(
     let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
     // The harness pads both sides, so the config mirrors statusLine.padding doubled (SPEC § 2.1).
     let config_padding = padding.map(|p| p.saturating_mul(2));
+    let seeded = config_padding.map_or_else(String::new, |p| format!(" (padding = {p})"));
     if target.exists() {
+        // stderr, like the PATH warning: --dry-run's stdout is the settings preview.
         if let Some(p) = config_padding {
-            writeln!(
-                stdout,
+            eprintln!(
                 "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
                 target.display()
-            )?;
+            );
         }
     } else if dry_run {
-        writeln!(stdout, "would write a default config to {}", target.display())?;
+        writeln!(stdout, "would write a default config to {}{seeded}", target.display())?;
     } else {
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -352,7 +353,7 @@ fn install(
         let (cfg, _) = config::parse(&seed, &SCHEMAS);
         std::fs::write(&target, crate::docs::config_toml(&cfg, true))
             .with_context(|| format!("writing {}", target.display()))?;
-        writeln!(stdout, "wrote default config to {}", target.display())?;
+        writeln!(stdout, "wrote default config to {}{seeded}", target.display())?;
     }
     Ok(())
 }

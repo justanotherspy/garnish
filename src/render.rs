@@ -355,7 +355,7 @@ mod tests {
             render_plain(&fixture("api-key"), &loaded("preset = \"default\"\n[frame\nx"), Some(40));
         let last = out.lines().last().unwrap();
         assert!(last.starts_with("⚠ config: config:2 "), "{last}");
-        assert!(display_width(last) <= 40, "{last}");
+        assert!(display_width(last) <= 36, "COLUMNS=40 leaves 36 cells: {last}");
         assert!(last.ends_with('…'), "{last}");
         let out = render_plain(
             &fixture("api-key"),

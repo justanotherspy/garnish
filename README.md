@@ -26,8 +26,8 @@ contention.
 ## Presets
 
 Four top-level presets pick the lines and how much each module says. Set
-`preset = "…"` in the config; the samples use unicode icons and are rendered
-at the narrowest terminal width where nothing is cut.
+`preset = "…"` in the config; the samples use unicode icons, rendered at a
+terminal width where nothing is cut.
 
 `default`, four lines, at 80 columns:
 
@@ -52,7 +52,7 @@ at the narrowest terminal width where nothing is cut.
 ```
 
 `full`, every module at full verbosity; it wants a wide terminal, here 120
-columns:
+columns (this block is the one that may scroll on a narrow screen):
 
 ```text
 ╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────────────────────────── ♯ garnish-dev sess-000 ─╮

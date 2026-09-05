@@ -65,6 +65,37 @@ fn generated_docs_match_committed_docs() {
     );
 }
 
+/// Every rendered status line block in `README.md` is pasted from
+/// `docs/config.md`, so a render change that regenerates the docs must be
+/// carried into the README by hand; this catches the drift.
+#[test]
+fn readme_render_blocks_match_generated_docs() {
+    let readme = std::fs::read_to_string(root().join("README.md")).unwrap();
+    let config_md = std::fs::read_to_string(root().join("docs").join("config.md")).unwrap();
+    let mut blocks: Vec<String> = Vec::new();
+    let mut current: Option<Vec<&str>> = None;
+    for line in readme.lines() {
+        match (current.as_mut(), line) {
+            (None, "```text") => current = Some(Vec::new()),
+            (Some(block), "```") => {
+                blocks.push(block.join("\n"));
+                current = None;
+            }
+            (Some(block), l) => block.push(l),
+            (None, _) => {}
+        }
+    }
+    let renders: Vec<&String> =
+        blocks.iter().filter(|b| b.contains('─') || b.contains("16:00")).collect();
+    assert!(renders.len() >= 4, "expected the preset samples in README, found {}", renders.len());
+    for block in renders {
+        assert!(
+            config_md.contains(block.as_str()),
+            "README render block is not in docs/config.md (regenerate and paste):\n{block}"
+        );
+    }
+}
+
 #[test]
 fn example_config_matches_config_init() {
     let example = root().join("examples").join("garnish.toml");

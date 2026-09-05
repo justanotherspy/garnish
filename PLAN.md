@@ -31,7 +31,7 @@ phase closed goes in the **Backlog**; host trouble does not belong here.
 - [x] `config/mod.rs`: top-level model, `[frame]`, `[[line]]` (left `modules` + `right`), `[modules.<id>]`, resolution order, validation with TOML paths
 - [x] Icon sets: nerd, unicode, emoji, ascii
 - [x] Themes: garnish, catppuccin-mocha, nord, dracula, tokyonight, mono; role overrides
-- [x] `frame.rs`: none/rounded/square/double/heavy/powerline/custom; fill to `$COLUMNS`; overflow rules
+- [x] `frame.rs`: none/rounded/square/double/heavy/powerline/custom; fill to the box width (`$COLUMNS − 4 − padding` since 2026-09-05); overflow rules
 - [x] `garnish config init|check|path|show`
 - [x] Top-level presets: default, minimal, full, compact
 - [~] Config fixtures + matrix test — in-process matrix test exists (`render::tests`); TOML config fixtures still to add (backlog)
@@ -224,9 +224,16 @@ and user feedback. Pick from here when no phase is in progress.
   are both `process.stdout.columns`. README: the hand-written sample was
   still 100 cells wide; it is now the generated `default` sample at 80
   columns plus one sample per preset (docs `preset_columns`: 80/80/90/120,
-  the narrowest width at which each preset shows no `…`), so nothing
-  scrolls on GitHub, and a note that explicit `[[line]]`/`[frame]` blocks
-  in a config override the preset's lines.
+  a round width at which each preset shows no `…`; `full` still needs 120
+  and is the one block that may scroll), and a note that explicit
+  `[[line]]`/`[frame]` blocks in a config override the preset's lines. A
+  docs-sync test now checks that every render block in README appears
+  verbatim in `docs/config.md`. Second review round (same day): `--padding`
+  is range-checked (`u16` in the config; larger values used to parse as 0
+  silently), the "config exists" note goes to stderr so `--dry-run` stdout
+  stays a clean preview, the dry run names the padding it would seed, the
+  third slack test tightened, SPEC § 7 install row and § 9 width bound,
+  and the Phase 2 checklist wording updated.
 - **2026-09-05 (Phase 11)** — Daniel asked for an option that lines the
   `│` separators up across lines and stops module widths jittering as
   timers tick. Two top-level keys, spec'd first (§ 4): `align = true` pads
