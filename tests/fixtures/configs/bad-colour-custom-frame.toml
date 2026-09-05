@@ -1,5 +1,5 @@
 # fixture: subscription-full
-# columns: 80
+# columns: 160
 # now: 1738425600
 # icons: unicode
 # Three bad values and an unknown key must not discard the rest (SPEC § 5,

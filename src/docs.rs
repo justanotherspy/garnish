@@ -466,7 +466,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "An invalid file never blanks the status line: garnish renders the defaults and appends a dim `⚠ config: <file>:<line> <message>` line.\n"
+        "A bad key never blanks the status line: every valid key stays in effect, the built-in default stands in for the bad one, and a dim `⚠ config: <file> <path>: <message>` line is appended; only a file that does not parse as TOML falls back to the defaults wholesale, with the line of the syntax error.\n"
     );
 
     let _ =

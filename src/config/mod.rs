@@ -175,7 +175,8 @@ pub struct Overlay {
 /// The result of loading a config file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
-    /// The config in effect (defaults when the file was invalid).
+    /// The config in effect: the file with the built-in default standing in
+    /// for each bad key, or the defaults when the file does not parse.
     pub config: Config,
     /// The file that was read, if any.
     pub path: Option<PathBuf>,
@@ -225,56 +226,66 @@ const TOP_KEYS: [&str; 14] = [
     "modules",
 ];
 
+const COLOR_CHOICES: &str = "auto, always, never, 256, truecolor";
+const STALE_STYLES: &str = "dim, hide, plain";
+const DURATION_STYLES: &str = "compact, fixed";
+
 impl RawConfig {
-    fn from_table(table: &toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+    // The table is taken by value so every field moves into place: cloning
+    // each value cost a fifth of the parse on the full annotated file.
+    fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
         let mut raw = Self::default();
+        let presets = TopPreset::ALL.iter().map(|p| p.name()).collect::<Vec<_>>().join(", ");
+        let icon_sets = IconSet::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
         for (key, value) in table {
             match key.as_str() {
-                "preset" => raw.preset = field(key, value, errors),
-                "icons" => raw.icons = field(key, value, errors),
-                "theme" => raw.theme = field(key, value, errors),
-                "color" => raw.color = field(key, value, errors),
-                "truncate" => raw.truncate = field(key, value, errors),
-                "stale_style" => raw.stale_style = field(key, value, errors),
-                "stale_after" => raw.stale_after = field(key, value, errors),
-                "padding" => raw.padding = field(key, value, errors),
-                "align" => raw.align = field(key, value, errors),
-                "durations" => raw.durations = field(key, value, errors),
-                "colors" => match value.as_table() {
-                    Some(t) => raw.colors = string_table("colors", t, errors),
-                    None => errors.push(problem("colors", "expected a table of role = color")),
+                "preset" => raw.preset = enum_field(&key, value, &presets, errors),
+                "icons" => raw.icons = enum_field(&key, value, &icon_sets, errors),
+                "theme" => raw.theme = field(&key, value, errors),
+                "color" => raw.color = enum_field(&key, value, COLOR_CHOICES, errors),
+                "truncate" => raw.truncate = field(&key, value, errors),
+                "stale_style" => raw.stale_style = enum_field(&key, value, STALE_STYLES, errors),
+                "stale_after" => raw.stale_after = field(&key, value, errors),
+                "padding" => raw.padding = field(&key, value, errors),
+                "align" => raw.align = field(&key, value, errors),
+                "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
+                "colors" => match value {
+                    toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
+                    _ => errors.push(problem("colors", "expected a table of role = color")),
                 },
-                "frame" => match value.as_table() {
-                    Some(t) => raw.frame = Some(RawFrame::from_table(t, errors)),
-                    None => errors.push(problem("frame", "expected a table")),
+                "frame" => match value {
+                    toml::Value::Table(t) => raw.frame = Some(RawFrame::from_table(t, errors)),
+                    _ => errors.push(problem("frame", "expected a [frame] table")),
                 },
-                "line" => match value.as_array() {
-                    Some(items) => {
-                        for (i, item) in items.iter().enumerate() {
+                "line" => match value {
+                    toml::Value::Array(items) => {
+                        for (i, item) in items.into_iter().enumerate() {
                             let path = format!("line[{i}]");
-                            match item.as_table() {
-                                Some(t) => raw.line.push(RawLine::from_table(&path, t, errors)),
-                                None => errors.push(problem(&path, "expected a [[line]] table")),
+                            match item {
+                                toml::Value::Table(t) => {
+                                    raw.line.push(RawLine::from_table(&path, t, errors));
+                                }
+                                _ => errors.push(problem(&path, "expected a [[line]] table")),
                             }
                         }
                     }
-                    None => errors.push(problem("line", "expected [[line]] tables")),
+                    _ => errors.push(problem("line", "expected [[line]] tables")),
                 },
-                "modules" => match value.as_table() {
-                    Some(t) => {
+                "modules" => match value {
+                    toml::Value::Table(t) => {
                         for (id, module) in t {
-                            match module.as_table() {
-                                Some(m) => {
-                                    raw.modules.insert(id.clone(), m.clone());
+                            match module {
+                                toml::Value::Table(m) => {
+                                    raw.modules.insert(id, m);
                                 }
-                                None => errors.push(problem(
+                                _ => errors.push(problem(
                                     &format!("modules.{id}"),
                                     "expected a [modules.<id>] table",
                                 )),
                             }
                         }
                     }
-                    None => errors.push(problem("modules", "expected [modules.<id>] tables")),
+                    _ => errors.push(problem("modules", "expected [modules.<id>] tables")),
                 },
                 other => errors.push(problem(
                     other,
@@ -320,8 +331,9 @@ const FRAME_KEYS: [&str; 13] = [
 ];
 
 impl RawFrame {
-    fn from_table(table: &toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+    fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
         let mut f = Self::default();
+        let styles = FrameStyle::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
         for (key, value) in table {
             let path = format!("frame.{key}");
             let text_slot = match key.as_str() {
@@ -343,7 +355,7 @@ impl RawFrame {
                 continue;
             }
             match key.as_str() {
-                "style" => f.style = field(&path, value, errors),
+                "style" => f.style = enum_field(&path, value, &styles, errors),
                 "fill" => f.fill = field(&path, value, errors),
                 _ => errors.push(problem(
                     &path,
@@ -363,13 +375,13 @@ struct RawLine {
 }
 
 impl RawLine {
-    fn from_table(path: &str, table: &toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+    fn from_table(path: &str, table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
         let mut line = Self::default();
         for (key, value) in table {
             let path = format!("{path}.{key}");
             match key.as_str() {
-                "modules" => line.modules = field(&path, value, errors).unwrap_or_default(),
-                "right" => line.right = field(&path, value, errors).unwrap_or_default(),
+                "modules" => line.modules = id_list(&path, value, errors),
+                "right" => line.right = id_list(&path, value, errors),
                 "separator" => line.separator = field(&path, value, errors),
                 _ => errors
                     .push(problem(&path, "unknown key; expected one of modules, right, separator")),
@@ -383,10 +395,10 @@ impl RawLine {
 /// `path` and leaving the field unset so its default applies.
 fn field<T: serde::de::DeserializeOwned>(
     path: &str,
-    value: &toml::Value,
+    value: toml::Value,
     errors: &mut Vec<ConfigError>,
 ) -> Option<T> {
-    match value.clone().try_into::<T>() {
+    match value.try_into::<T>() {
         Ok(v) => Some(v),
         Err(e) => {
             errors.push(problem(path, e.message()));
@@ -395,19 +407,60 @@ fn field<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// [`field`] for a key with a fixed vocabulary, naming the choices in the
+/// message: `try_into` alone says "invalid type: unit variant" for a
+/// non-string and reads a table's keys as if they were the value.
+fn enum_field<T: serde::de::DeserializeOwned>(
+    path: &str,
+    value: toml::Value,
+    options: &str,
+    errors: &mut Vec<ConfigError>,
+) -> Option<T> {
+    let Some(text) = value.as_str().map(str::to_owned) else {
+        errors.push(problem(path, &format!("expected a string, one of {options}")));
+        return None;
+    };
+    value.try_into::<T>().ok().or_else(|| {
+        errors.push(problem(path, &format!("unknown value {text:?}; expected one of {options}")));
+        None
+    })
+}
+
+/// A `[[line]]` module list kept item by item: a non-string item is reported
+/// under its index and skipped, the rest of the line stays (one typo must not
+/// blank a whole row, SPEC § 5).
+fn id_list(path: &str, value: toml::Value, errors: &mut Vec<ConfigError>) -> Vec<String> {
+    let toml::Value::Array(items) = value else {
+        errors.push(problem(path, "expected a list of module ids"));
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(j, item)| {
+            if let toml::Value::String(s) = item {
+                Some(s)
+            } else {
+                errors.push(problem(&format!("{path}[{j}]"), "expected a module id string"));
+                None
+            }
+        })
+        .collect()
+}
+
 /// A table of string values, skipping (and reporting) entries of another type.
 fn string_table(
     path: &str,
-    table: &toml::Table,
+    table: toml::Table,
     errors: &mut Vec<ConfigError>,
 ) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for (k, v) in table {
-        match v.as_str() {
-            Some(s) => {
-                out.insert(k.clone(), s.to_owned());
+        match v {
+            toml::Value::String(s) => {
+                out.insert(k, s);
             }
-            None => errors.push(problem(&format!("{path}.{k}"), "expected a string")),
+            _ => errors.push(problem(&format!("{path}.{k}"), "expected a string")),
         }
     }
     out
@@ -446,8 +499,9 @@ pub fn default_path() -> PathBuf {
     base.unwrap_or_else(|| PathBuf::from(".")).join("garnish").join("garnish.toml")
 }
 
-/// Load and resolve the configuration. Never fails: an invalid file yields
-/// the built-in defaults plus the list of errors.
+/// Load and resolve the configuration. Never fails: a bad key is reported
+/// and defaulted on its own; only an unreadable or non-TOML file yields the
+/// built-in defaults wholesale, plus the error.
 #[must_use]
 pub fn load(explicit: Option<&Path>, schemas: &[ModuleSchema]) -> Loaded {
     load_with(explicit, schemas, &Overlay::default())
@@ -507,10 +561,12 @@ pub fn parse_with(
         }
     };
     let mut errors = Vec::new();
-    let mut raw = RawConfig::from_table(&table, &mut errors);
+    let mut raw = RawConfig::from_table(table, &mut errors);
     if overlay.preset.is_some() {
+        // The preset's lines replace the file's, so their problems are moot.
         raw.preset = overlay.preset;
         raw.line.clear();
+        errors.retain(|e| !e.path.starts_with("line["));
     }
     raw.icons = overlay.icons.or(raw.icons);
     raw.theme = overlay.theme.clone().or(raw.theme);
@@ -1118,6 +1174,59 @@ x = 1
         let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &cached);
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].path, "modules.path.refresh");
+    }
+
+    #[test]
+    fn a_bad_list_item_or_table_shape_reports_itself_and_keeps_the_rest() {
+        let (c, errs) = parse("[[line]]\nmodules = [\"clock\", 3]\nright = \"x\"\n", &schemas());
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["line[0].modules[1]", "line[0].right"]);
+        assert_eq!(c.lines[0].left, vec!["clock"], "the good item stays");
+        for (text, path) in [
+            ("line = \"x\"", "line"),
+            ("modules = 1", "modules"),
+            ("colors = 1", "colors"),
+            ("frame = \"x\"", "frame"),
+            ("[[frame]]\nstyle = \"heavy\"", "frame"),
+            ("[modules]\nclock = 1", "modules.clock"),
+        ] {
+            let (c, errs) = parse(text, &schemas());
+            assert_eq!(errs.len(), 1, "{text}: {errs:?}");
+            assert_eq!(errs[0].path, path, "{text}");
+            assert_eq!(c.lines.len(), 4, "{text}: the default lines stand in");
+        }
+    }
+
+    #[test]
+    fn enum_keys_name_their_choices() {
+        let text = "color = 1\npreset = { a = 1 }\ndurations = \"loose\"\n[frame]\nstyle = 7\n";
+        let (_, errs) = parse(text, &schemas());
+        let msgs: Vec<String> = errs.iter().map(|e| format!("{}: {}", e.path, e.message)).collect();
+        for expected in [
+            "color: expected a string, one of auto, always, never, 256, truecolor",
+            "preset: expected a string, one of default, minimal, full, compact",
+            "durations: unknown value \"loose\"; expected one of compact, fixed",
+            "frame.style: expected a string, one of none, rounded, square, double, heavy, powerline, custom",
+        ] {
+            assert!(msgs.iter().any(|m| m == expected), "{expected}\n{msgs:?}");
+        }
+    }
+
+    /// Every key the walk lists as valid is accepted (guards the key tables
+    /// against drifting from the match arms).
+    #[test]
+    fn every_listed_key_is_accepted() {
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let (_, errs) = parse(text, &schemas());
+        assert_eq!(errs, Vec::new());
+    }
+
+    #[test]
+    fn preset_overlay_drops_line_errors_with_the_lines() {
+        let overlay = Overlay { preset: Some(TopPreset::Minimal), ..Default::default() };
+        let (c, errs) = parse_with("[[line]]\nmodules = [3]\n", &schemas(), &overlay);
+        assert_eq!(errs, Vec::new(), "the overlay replaces the lines, so their problems are moot");
+        assert_eq!(c.lines.len(), 1);
     }
 
     #[test]

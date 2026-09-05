@@ -385,3 +385,17 @@ and user feedback. Pick from here when no phase is in progress.
   (`compose_line` parameter), a space in the fetch-age hint. Layer
   `phase-12/cli-exit`: `cli::Quiet` → `ExitCode::FAILURE` without a report.
   Bugs 3, 8 and 11 moved to the phases that own their config keys.
+- **2026-09-05 (Phase 14, one layer)** — Per-key config fallback (bug 8).
+  The serde-derived `RawConfig` with `deny_unknown_fields` rejected the
+  whole file on the first bad key; it is now built by walking a
+  `toml::Table` (taken by value: cloning every value cost a fifth of the
+  parse on the full annotated file) and converting each top-level,
+  `[frame]` and `[[line]]` key on its own, module lists item by item, enum
+  keys with a message that names the choices. A syntax error is the only
+  wholesale fallback and the only error with a line; value errors carry the
+  TOML path. Review found that a bad list item blanked its whole row and
+  that `try_into`'s messages for enum keys given a table were misleading;
+  both fixed with tests, plus a doctor sentence for the syntax-error case
+  and the stale "renders the defaults" sentence in `docs/config.md`. Config
+  golden `bad-colour-custom-frame` at 160 columns shows the heavy frame,
+  both lines and the `⚠ config: … (+3 more)` note.
