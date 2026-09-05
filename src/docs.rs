@@ -50,6 +50,8 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         "Where a padded right-group module's text sits: end (hugs the cap) | start (follows the separator)",
     );
     let _ = writeln!(out, "right_justify = {}", toml_string(cfg.right_justify.name()));
+    c(out, "Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).");
+    let _ = writeln!(out, "hide_empty_lines = {}", cfg.hide_empty_lines);
     c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
     let _ = writeln!(out, "durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
@@ -511,7 +513,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |"
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. |"
     );
     let _ = writeln!(
         o,
@@ -591,7 +593,7 @@ fn align_sample(align: bool) -> String {
 fn presets_section(o: &mut String) {
     let _ = writeln!(
         o,
-        "## `[[line]]`\n\nEach entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped.\n"
+        "## `[[line]]`\n\nEach entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays.\n"
     );
     let _ = writeln!(
         o,

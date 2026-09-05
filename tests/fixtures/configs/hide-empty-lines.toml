@@ -1,0 +1,14 @@
+# fixture: pr-absent
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# Outside a repository `branch`, `sync` and `pr` all render nothing, so the
+# first line is dropped and the second gets the single-line caps
+# (SPEC § 4.1, walkthrough bug 11). Compare `keep-empty-lines`.
+
+[[line]]
+modules = ["branch", "sync", "pr"]
+
+[[line]]
+modules = ["model", "context"]
+right   = ["clock"]

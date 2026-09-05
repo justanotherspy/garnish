@@ -1,0 +1,17 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# `modules = []` with no `right` is an intentional spacer: an empty framed row
+# between the two lines that `hide_empty_lines` never drops (SPEC § 4.1).
+
+[[line]]
+modules = ["model", "context"]
+right   = ["clock"]
+
+[[line]]
+modules = []
+
+[[line]]
+modules = ["session", "api"]
+right   = ["lines"]

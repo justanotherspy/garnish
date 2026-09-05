@@ -109,7 +109,10 @@ right   = ["limit5h", "limit7d", "cost"]
 
 Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is
-open, `vim` only with vim mode on.
+open, `vim` only with vim mode on. A line whose modules all have nothing to
+show is dropped too (outside a repository, a line of `branch sync pr` would
+otherwise be an empty framed row); set `hide_empty_lines = false` to keep
+such rows, or write `modules = []` for a spacer row that always stays.
 
 With several lines, `align = true` (top level) pads every module column to
 the widest module in it so the `│` separators stack vertically, and
