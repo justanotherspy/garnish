@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width, strip_ansi};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
-use crate::frame::{Layout, compose_line, join_modules};
+use crate::frame::{Layout, Ticker, compose_line, join_modules};
 use crate::icons::IconSet;
 use crate::modules::{self, Ctx, Freshness, Rendered, SCHEMAS, decorate};
 use crate::payload::Payload;
@@ -175,6 +175,12 @@ pub fn render_lines_at(
         width,
         truncate: config.truncate,
         ellipsis: if config.icons == IconSet::Ascii { "..".into() } else { "…".into() },
+        ticker: (config.overflow == config::Overflow::Ticker).then(|| Ticker {
+            step: config.ticker_step,
+            gap: config.ticker_gap.clone(),
+            now: clock.now,
+            animate: clock.animate,
+        }),
     };
     // Every line renders before any is composed: aligned columns need the
     // widths of all lines.

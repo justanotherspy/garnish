@@ -19,9 +19,9 @@ garnish preview tests/fixtures/payloads/subscription-full.json --width 120 \
 | name | summary | columns | needs |
 |---|---|---|---|
 | `minimal-clean` | one unframed line: path, context, limit, clock | 80 | nerd-font |
-| `compact-aligned` | two rounded lines with stacked bars, Catppuccin Mocha | 100 | nerd-font |
+| `compact-aligned` | two rounded lines with stacked bars, Catppuccin Mocha | 110 | nerd-font |
 | `full-aligned` | every module at full verbosity, columns aligned, fixed timers | 130 | nerd-font |
-| `three-lines-double` | repo / model / timers in a double frame | 110 | nerd-font |
+| `three-lines-double` | repo / model / timers in a double frame | 130 | nerd-font |
 | `two-lines-powerline` | location and model only, powerline caps, no colour | 110 | nerd-font |
 | `labels-and-placeholders` | labels, brackets, dim `–` for absent modules, UTC clock with date | 170 | nerd-font |
 | `bars-and-limits` | 40-cell line-style context bar with window tag, mini bars on the limits | 130 | nerd-font |
@@ -29,7 +29,7 @@ garnish preview tests/fixtures/payloads/subscription-full.json --width 120 \
 | `packed-heavy` | custom heavy frame, left-packed lines, a separator per line | 130 | nerd-font |
 | `dracula-256` | Dracula with role and per-module colour overrides in 256-colour mode | 130 | nerd-font |
 | `emoji-overrides` | emoji icons with per-module glyph overrides and name limits | 130 | emoji |
-| `single-line-full` | everything on one row, never truncated by garnish (ticker candidate) | 200 | nerd-font |
+| `single-line-full` | everything on one row; wider than the terminal it scrolls as a ticker | 200 | nerd-font |
 | `tall-eight-lines` | one module per row, eight rows, square frame | 100 | nerd-font |
 
 Contributing one: the `garnish-submit-preset` skill (SPEC § 13) will do this

@@ -23,6 +23,7 @@ fn every_preset_has_a_header_validates_and_renders() {
     let dir = root().join("presets");
     let mut names = BTreeSet::new();
     let mut count = 0;
+    let mut failures: Vec<String> = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap().flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|e| e != "toml") {
@@ -74,7 +75,28 @@ fn every_preset_has_a_header_validates_and_renders() {
             .unwrap();
         let out = String::from_utf8_lossy(&render.stdout);
         assert!(render.status.success(), "{stem}: preview failed:\n{out}");
-        assert!(out.lines().count() >= 2, "{stem}: preview printed nothing:\n{out}");
+        // The first line is preview's `── name` header; the rest is the render,
+        // which at the declared width must fit Claude Code's box uncut (SPEC § 12).
+        let rows: Vec<&str> = out.lines().skip(1).collect();
+        assert!(!rows.is_empty(), "{stem}: preview printed nothing:\n{out}");
+        for row in &rows {
+            if row.contains('…') {
+                failures.push(format!("{stem}: cut at its declared width {columns}:\n{row}"));
+            }
+            let width = garnish::ansi::display_width(row);
+            if width > columns - 4 {
+                failures.push(format!(
+                    "{stem}: {width} cells, wider than the {}-cell box at {columns} columns:\n{row}",
+                    columns - 4
+                ));
+            }
+        }
     }
     assert!(count >= 10, "expected the seed presets, found {count}");
+    assert!(
+        failures.is_empty(),
+        "{} preset(s) do not fit:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }

@@ -1,11 +1,11 @@
 # name: single-line-full
-# summary: everything on one row, never truncated by garnish (ticker candidate)
+# summary: everything on one row; wider than the terminal it scrolls as a ticker
 # columns: 200
 # needs: nerd-font
 
-# Wider than most terminals: Claude Code cuts the row with its own … at the
-# box edge. Once SPEC § 4.1's `overflow = "ticker"` exists, this is the preset
-# that scrolls instead.
+# Wider than most terminals: instead of a cut, the left group scrolls one
+# cell per second and wraps around (SPEC § 4.1 `overflow = "ticker"`); the
+# clock and the other right-hand modules stay put.
 
 preset = "full"
 icons  = "nerd"
@@ -13,7 +13,7 @@ theme  = "garnish"
 color  = "auto"
 align  = true
 durations = "fixed"
-truncate = false          # never cut the left group; overflow is the harness's problem
+overflow  = "ticker"
 
 [frame]
 style = "rounded"

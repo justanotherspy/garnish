@@ -278,6 +278,9 @@ padding = 0               # extra cells subtracted from the width, on top of the
 align = false             # pad each module column to the widest module in it across lines, so separators line up
 right_justify = "end"     # end | start: where a padded right-group module's text sits (§ 4.1)
 hide_empty_lines = true   # drop a line whose modules all rendered nothing; `modules = []` spacers stay (§ 4.1)
+overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider than the box (§ 4.1)
+ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
+ticker_gap = "   "        # text between the end and the wrapped-around start
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4

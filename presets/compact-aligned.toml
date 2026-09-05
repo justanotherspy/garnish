@@ -1,6 +1,6 @@
 # name: compact-aligned
 # summary: two rounded lines with stacked bars, Catppuccin Mocha
-# columns: 100
+# columns: 110
 # needs: nerd-font
 
 preset = "compact"

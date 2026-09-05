@@ -68,6 +68,17 @@ fn tick_in_process(c: &mut Criterion) {
     c.bench_function("tick_in_process_default", |b| {
         b.iter(|| render_lines_at(black_box(&payload), &cfg, Some(120), &clock));
     });
+    // A full-preset row squeezed into 60 columns scrolls: the scroller's cost
+    // on top of a plain overflow (which truncates).
+    let (ticker, _) = config::parse(
+        "preset = \"full\"\noverflow = \"ticker\"\n[[line]]\nmodules = [\"path\", \"model\", \"effort\", \"context\", \"limit5h\", \"limit7d\", \"session\", \"api\", \"cache\"]\nright = [\"clock\"]\n",
+        &SCHEMAS,
+    );
+    let mut animated = Clock::fixed();
+    animated.animate = true;
+    c.bench_function("tick_in_process_ticker", |b| {
+        b.iter(|| render_lines_at(black_box(&payload), &ticker, Some(60), &animated));
+    });
 }
 
 criterion_group!(benches, parse_payload, resolve_config, render_modules, tick_in_process);
