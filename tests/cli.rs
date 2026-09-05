@@ -106,17 +106,24 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     assert!(ok && out.contains("no config file"), "{out}");
     let (out, _, ok) = run(&["config", "init", "--preset", "compact"], home, &[]);
     assert!(ok && out.starts_with("wrote "), "{out}");
-    let (_, _, ok) = run(&["config", "init"], home, &[]);
+    let (out, err, ok) = run(&["config", "init"], home, &[]);
     assert!(!ok, "refuses to overwrite without --force");
+    // A refusal is one line on stderr, not an error report (walkthrough bug 7).
+    assert!(err.contains("pass --force"), "{err}");
+    assert!(!err.contains("Location:") && !err.contains("Error:"), "{err}");
+    assert!(out.is_empty(), "{out}");
     let (out, _, ok) = run(&["config", "check"], home, &[]);
     assert!(ok && out.contains(": ok"), "{out}");
     let (out, _, ok) = run(&["config", "show"], home, &[]);
     assert!(ok && out.contains("preset = \"compact\"") && out.contains("[modules.clock]"), "{out}");
     let cfg = home.join(".config/garnish/garnish.toml");
     std::fs::write(&cfg, "theme = \"nope\"\n[modules.context]\nwidth = -1\n").unwrap();
-    let (out, _, ok) = run(&["config", "check"], home, &[]);
+    let (out, err, ok) = run(&["config", "check"], home, &[]);
     assert!(!ok);
     assert!(out.contains("theme:") && out.contains("modules.context.width"), "{out}");
+    // The problem list and the count are the whole output: no report on stderr (bug 7).
+    assert!(out.trim_end().ends_with("2 problem(s) found"), "{out}");
+    assert!(err.is_empty(), "{err}");
 
     let (out, _, ok) = run(&["modules"], home, &[]);
     assert!(ok);

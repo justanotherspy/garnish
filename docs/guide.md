@@ -113,7 +113,12 @@ With several lines, `align = true` (top level) pads every module column to
 the widest module in it so the `│` separators stack vertically, and
 `durations = "fixed"` prints timers as `9m00s` / `1h05m` so their width does
 not change as they tick. Both are shown in
-[config.md § Aligned columns](config.md#aligned-columns).
+[config.md § Aligned columns](config.md#aligned-columns). Columns pair
+*positionally*: the third module of every line is padded to the same width
+whatever it shows, so a `–` placeholder sitting under a 24-cell context bar
+gets a 24-cell blank column. Put modules of similar width in the same column,
+or give the odd line its own `separator` (bars only line up between lines
+that share one).
 
 ## 6. Presets, icons, colors
 
