@@ -1010,6 +1010,296 @@ exist already; the rest are the A-tier keys in Part I.
   them. garnish's worker model already has this shape; C1–C3 workers must
   spawn only when their module is configured on some line.
 
+## 18. Data sources: worker and cache designs
+
+Everything here runs off the tick in garnish. The subsections record the
+exact commands, file formats and fallbacks ccstatusline uses, then the
+worker shape for garnish.
+
+### 18.1 Local git (`src/utils/git.ts`)
+
+Commands, one per widget, each cached separately: `status --porcelain -z`
+(flags for staged / unstaged / untracked, and conflicts when a line starts
+with `DD|AU|UD|UA|DU|AA|UU`), `diff --shortstat` (insertions/deletions),
+`rev-list --left-right --count HEAD...@{upstream}`, `ls-files --unmerged`
+(conflict count), `rev-parse --short HEAD`, `symbolic-ref --short HEAD`
+(null when detached), `stash list`, `remote get-url origin`, `rev-parse
+--git-dir` (worktree detection: `.git/worktrees/<name>`). Cache: in-memory
+key `command|cwd`; on disk one file per repository
+`~/.cache/ccstatusline/git-cache/git-<sha256(gitdir)>.json` keyed by
+command, entries `{output | null, createdAt, headMtimeMs, indexMtimeMs}`;
+fresh iff both mtimes are unchanged **and** (`ttl == 0` or age ≤ ttl, ttl
+0–60 s, default 5); failures cached as `null`; written via one stable
+`.tmp` path and `rename`. `GIT_OPTIONAL_LOCKS=0` in the environment, not
+the flag, for old git.
+
+garnish shape: the `branch` worker already runs `status --porcelain=v2
+--branch`, which yields branch, upstream, ahead/behind, and every file
+flag in one call; add `stash list` to the same run and store
+`head_mtime`/`index_mtime` in the entry so the existing validator treats a
+commit or a `git add` between ticks as a miss. Expose the extra data as
+options (`show = ["sha", "dirty", "counts", "stash", "conflicts"]`), not
+modules. Display vocabulary worth copying: `+staged *unstaged ?untracked
+!conflicts` as single glyphs with counts.
+
+### 18.2 PR and CI (`src/utils/git-review-cache.ts`, `git-remote.ts`)
+
+- Cache file `git-review-<sha256(cwd ‖ "\0" ‖ ref)[..16]>.json` where `ref`
+  is `branch:<name>` or `head:<short sha>`; TTL 30 s; entry records whether
+  checks were queried so enabling the CI widget forces one refresh.
+- Miss or stale → spawn self detached with
+  `--internal-refresh-git-review-cache <cwd> <metadata|checks> <lockPath>`
+  after taking a lock next to the cache file (stale after 30 s); the tick
+  returns the stale data meanwhile. The refresh mode reads no stdin and
+  prints nothing, and only unlinks the lock path it can derive itself (so
+  the hidden flag is not an arbitrary-delete primitive).
+- Provider: origin URL → ssh alias resolved with `ssh -G <host>` → github.com
+  ⇒ `gh`, gitlab.com ⇒ `glab`, anything else ⇒ probe `gh auth status
+  --hostname` and `glab auth status --hostname`, keep the authed ones; CLI
+  timeout 5 s shared across the attempts.
+- Fetch: `gh pr view --json url,number,title,state,reviewDecision[,statusCheckRollup]`;
+  if the checks field errors (token lacks scope), retry without it; if the
+  CLI resolves nothing, retry `gh pr view <branch> --repo <origin ref>`
+  (forks). `glab mr view --output json` with state mapping.
+- Label: MERGED, CLOSED, APPROVED, CHANGES_REQ, OPEN. CI rollup: CheckRun
+  rows use `status`+`conclusion`, StatusContext rows use `state`;
+  NEUTRAL/SKIPPED ignored; glyphs `✓ ✗ ●`, `-` when no checks.
+
+garnish shape: `pr` already has number/url/review state from the payload,
+so only checks need a worker. Option B3a reads shuck's daemon state if it
+persists one; B3b is a `refresh --module pr` worker running `gh pr view
+--json statusCheckRollup` with the lock/TTL machinery (60 s), the
+"checks unavailable → metadata only" fallback, and `head` in the validator.
+
+### 18.3 Usage API (`src/utils/usage-fetch.ts`, `usage-prefetch.ts`, `usage-windows.ts`)
+
+Flow of `fetchUsageData`: in-memory cache (180 s; error entries 30 s) →
+disk cache `~/.cache/ccstatusline/usage.json` (180 s by mtime, only if the
+stored `tokenHash` matches the current token's fingerprint and the fields
+the configured widgets need are present) → no token ⇒ `no-credentials`
+error → active lock (`usage.lock` JSON `{blockedUntil, error}`, capped at
+24 h) ⇒ serve stale → write lock `now + 30 s` → HTTPS GET
+`https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer
+<token>` and `anthropic-beta: oauth-2025-04-20`, via `HTTPS_PROXY` if set,
+5 s timeout → 429 ⇒ lock `now + Retry-After` (default 300 s) → parse →
+write cache with token hash. Token: `~/.claude/.credentials.json`
+`.claudeAiOauth.accessToken`, or on macOS the keychain item "Claude
+Code-credentials" (newest of several candidates by modification date).
+Response: `five_hour`/`seven_day` `{utilization, resets_at}` (a null bucket
+means 0 % on Enterprise, issue #343), `limits[]` of `{kind: session |
+weekly_all | weekly_scoped, utilization, resets_at, scope.model.display_name}`
+(newer accounts, issue #503), `extra_usage {is_enabled, monthly_limit,
+used_credits, utilization, currency}`. Per-model registry
+(`WEEKLY_MODEL_USAGE_BUCKETS`): Sonnet ↔ `seven_day_sonnet`, Opus ↔
+`seven_day_opus`, Fable ↔ `weekly_scoped` only. Stdin `rate_limits` wins
+over the API for the fields it carries; only missing fields trigger a
+fetch (`usage-prefetch.ts` computes the requirement set from the configured
+widgets).
+
+garnish shape, if § 9 approves network: `refresh --module usage` worker
+(`reqwest::blocking`, 5 s timeout, proxy from env), cache `<cache>/usage.json`
+plus the existing lock file (with the 24 h horizon), stale-serve on any
+failure, token fingerprint in the entry. Modules: `limit7d` gains `model =
+"all" | "sonnet" | "opus" | "<display name>"` (server-supplied names, so no
+hard-coded model list) and a new `extra` module for extra-usage credits
+with `show_limit`. Everything reads the cache on the tick.
+
+### 18.4 Transcript (`src/utils/jsonl-*.ts`, `compaction.ts`)
+
+Row shapes that matter: `{type: "user" | "assistant" | "system", subtype?,
+isSidechain?, isApiErrorMessage?, timestamp, message: {usage:
+{input_tokens, output_tokens, cache_read_input_tokens,
+cache_creation_input_tokens}, stop_reason?, content}}`; compaction rows are
+`type: "system", subtype: "compact_boundary", compactMetadata: {trigger:
+"auto" | "manual", preTokens, postTokens}`; subagent transcripts live in
+`subagents/agent-<id>.jsonl` beside the main file and are read only when
+speed metrics include subagents. Derivations: token totals (sidechain and
+API-error rows excluded from "main chain"; when `stop_reason` exists only
+rows with a stop reason count, to avoid double-counting streamed
+partials); context length = usage of the newest main-chain row after the
+last boundary, else `postTokens`, else 0; compaction stats = count, split
+by trigger, Σ max(0, pre − post) reclaimed; speed = per assistant row an
+interval from the previous user row's timestamp, intervals merged, tokens ÷
+merged duration, optionally over a rolling window of 0–120 s; session
+duration = first to last timestamp when the payload lacks
+`total_duration_ms`; session name from title rows; thinking effort from
+`<local-command-stdout>` rows printed by `/model` and `/effort` (garnish
+has `effort.level` in the payload; skip). Reading: a streaming line
+iterator, a reverse iterator for tail lookups, and for the cache timer a
+32 KB tail read that grows backwards until a full row is found.
+
+garnish shape (C1): a `refresh --module compactions` worker that stores
+`{offset, size, inode}` in its cache entry and reads only bytes appended
+since the last run, so a long session costs O(new rows) per refresh; TTL
+2–5 s (the harness debounces at 300 ms). `speed` keeps a ring of the last
+N `(user_ts, assistant_ts, output_tokens)` triples in the same entry. The
+tick reads the cache. Render `compactions` as `⟲ 3` with `(2 auto, 1
+manual)` and `↓ 240k reclaimed` in the full preset.
+
+### 18.5 Hooks and skills (`src/utils/hooks.ts`, `hook-handler.ts`, `skills.ts`)
+
+Hook stdin: `{session_id, hook_event_name, tool_name, tool_input: {skill},
+prompt}`. `PreToolUse` with matcher `Skill` → `tool_input.skill`;
+`UserPromptSubmit` → `/^\/([a-zA-Z0-9_:-]+)/` on the prompt. Appends
+`{timestamp, session_id, skill, source}` to
+`~/.cache/ccstatusline/skills/skills-<session>.jsonl`; metrics are total
+invocations, unique skills, last skill. Settings entries are written as
+`{_tag: "ccstatusline-managed", matcher, hooks: [{type: "command",
+command: "<statusLine command> --hook"}]}`, re-synced on every save
+(needed set derived from configured widgets), stripped on uninstall, and
+legacy untagged entries matching the command pattern are removed too.
+
+garnish shape (B4): `garnish hook` (hidden) appends to
+`<cache>/<session>/skills.jsonl`; `install --hooks` writes tagged entries
+(`_tag: "garnish-managed"`), `install --no-hooks`/uninstall removes them;
+a `skill` module with `show = "last" | "count" | "list"` and `hide =
+["empty"]`; `gc` sweeps the log with the session dir.
+
+### 18.6 Settings-derived state (`src/utils/claude-settings.ts`)
+
+Layer order project `.claude/settings.local.json` → project
+`.claude/settings.json` → user `settings.local.json` → user `settings.json`
+(user dir honours `CLAUDE_CONFIG_DIR`); first layer that defines the key
+wins; "no file exists at all" → `null` (hide), "files exist but no key" →
+`false`. Keys: `sandbox.enabled`, `voice.enabled`. Remote control: scan
+`<config>/sessions/*.json` for the file whose `sessionId` equals the
+payload's `session_id`; enabled iff `bridgeSessionId` is a non-empty
+string. Account: `~/.claude.json` (or `<CLAUDE_CONFIG_DIR>/.claude.json`)
+→ `oauthAccount.emailAddress`.
+
+garnish shape (A9): one cached settings read (30 s, already exists for the
+autocompact override) feeding `sandbox`, `voice`, `remote`, `account`;
+`remote` matches on `session_id`, which garnish has in the payload.
+
+### 18.7 Timers recorded for completeness (Tier D)
+
+- Cache timer: newest main-chain row is a `user` row ⇒ HOT (🔥, Claude is
+  working); else countdown `ttl − 5 s − (now − last assistant row with
+  cache activity)`, TTL 5 m or 1 h; glyphs 🟢 > 50 %, 🟡 > 20 %, 🔴, ❄️
+  COLD. garnish's `cache` reads `prompt_cache.expires_at`; only the glyph
+  ladder is worth borrowing as `cache.glyphs = true` mapped to ok/warn/danger.
+- Block timer: glob `~/.claude/projects/**/*.jsonl`, newest mtime first,
+  progressive lookback 10 → 20 → 48 h, collect every row timestamp, walk
+  from the newest until a gap ≥ 5 h, floor the block start to the hour,
+  cache until the window ends, cache an empty result for 1 min. garnish:
+  `resets_at` arithmetic (A10).
+
+### 18.8 Service status (`src/utils/claude-service-status.ts`) — Tier C
+
+`GET status.claude.com/api/v2/status.json` → `status.indicator` (none /
+minor / major / critical / maintenance); `incidents.json` only when a
+widget enables history; 5 min cache, 30 s failure backoff, stale served on
+failure; history = 8 buckets × 6 h, each colored by the worst overlapping
+incident impact, drawn with `▮`.
+
+## 19. Config lifecycle: schema versions, recovery, import/export
+
+- `version: 4` in the settings file; migrations v1→v2 (add version),
+  v2→v3, v3→v4 (per-widget `hideNoGit`-style booleans → `metadata.hide`);
+  `detectVersion` treats a missing field as v1.
+- Load: parse JSON → if unversioned, validate against the v1 schema then
+  migrate → else migrate if older → validate current schema → **persist the
+  migrated file only if validation passed** → run. Any failure: log, set
+  `lastLoadError`, run on in-memory defaults, render the red badge, and
+  never write the file. The TUI asks for confirmation before `Save` would
+  replace an invalid file.
+- Writes are atomic through the symlink target: resolve the link, write
+  `<name>.<pid>.<ts>.tmp` in the target's directory, `rename`.
+- Import: refuses a newer `version`, migrates an older one, validates;
+  preview lists the keys that would change; `replace` keeps `installation`,
+  `merge` overlays only the keys present in the import; `installation`,
+  `version`, `updatemessage`, `exportedBy` are never imported.
+
+garnish shape: TOML plus per-key fallback already survives unknown keys, so
+no version field is needed until a key is *renamed*; when that day comes,
+`garnish config migrate` (rename in place, `.bak` first, refuse on parse
+error) is the whole feature. Add to `SPEC.md` § 5: "a config that fails to
+parse is never rewritten by any command". `config export` is `cat`; a
+`config import <file> [--merge]` that validates then writes is cheap and
+gives the TUI its import screen.
+
+## 20. Installer and TUI mechanics (detail for § 7)
+
+- **Install** (`installStatusLine`): backup `settings.json.orig` (first
+  install) and `.bak` (every save); write `statusLine = {type: "command",
+  command, padding: 0}`; keep an existing `refreshInterval`, else set 10
+  when the detected Claude Code version supports it (`claude --version`,
+  compared semver-wise); save installation metadata `{method: auto-update |
+  pinned | self-managed | unknown, packageManager, installedVersion}`; sync
+  hooks. `isInstalled` = the command is one of the known forms and
+  `padding` is 0 or absent. `classifyInstallation` recognises the install
+  style from the command string. Uninstall removes `statusLine`, the
+  metadata and the managed hooks.
+- **Screens** (24): main, lines, items, colors, colorLines, powerline,
+  terminalConfig, terminalWidth, globalOverrides, configureStatusLine,
+  refreshInterval, exportConfig, importConfig, importPreview, install,
+  manageInstallation, uninstallOptions, updates, confirm, save, exit,
+  flowNotice, starGithub, valid.
+- **Items editor keys**: ↑↓ select, Enter toggles move mode, `a`dd / `i`nsert
+  via the picker, `k` clone, `d`elete, `c`lear line, `r`aw value, `m`erge,
+  e`x`clude from align, `.` precision, `h`ide…, plus the widget's own keys;
+  the footer lists only keys that apply to the highlighted item; each row
+  shows modifiers in dim text (`(compact)`, `(raw value)`, `(merged→)`).
+- **Widget picker**: two-level fuzzy search, category then widget, with
+  initialism matching (`gab` → GitAheadBehind).
+- **Color menu keys**: `f` toggles foreground/background editing, `h`ex
+  input (truecolor only), `a`nsi256 input (256 mode only), `g`radient
+  picker (presets plus custom start/end hex), `b`old, `d`im cycles off →
+  whole → parens, `r`eset item, `c`lear all (confirm), `s`how separators.
+  Footer warns VS Code users that "Terminal › Integrated: Minimum Contrast
+  Ratio" alters colors.
+- **Powerline setup**: `t`oggle mode (warns it removes manual separators),
+  `a`lign, `c`ontinue theme, `i`nstall fonts after a "what will happen"
+  list (clone URL, install script steps, `fc-cache`, requirements, restart
+  terminal); separator editor accepts 4–6 hex digits for a code point;
+  theme selector with `c`ustomize (copies theme colors to widgets after a
+  confirm) and a 16-color warning.
+- **Preview pane**: bordered box titled "Preview (ctrl+s to save
+  configuration at any time)", one truncated row per line, a flag when any
+  line would be cut.
+- **Terminal options**: width mode (three options with long descriptions
+  of the autocompact wrap problem), color level with sanitisation.
+- **Configure Status Line**: refresh interval (empty removes the key), git
+  cache TTL 0–60 s. **Export/Import**: path prompts; preview; Replace All /
+  Merge / Cancel. **Manage installation**: shows method, checks the npm
+  registry, uninstall "settings only" or "package too". **Update check**
+  messages differ for auto-update (nothing to do) vs pinned (run this
+  command).
+
+## 21. Their test suite, and what garnish should copy
+
+About 170 `bun test` files: renderer tests per feature (`renderer-ansi`,
+`renderer-dim`, `renderer-flex-width`, `renderer-merge-target-hidden`,
+`renderer-padding-side`, `renderer-powerline-theme`,
+`renderer-separator-collapse`, `renderer-config-warning`), one test per
+widget plus shared-behaviour suites (`GitWidgetSharedBehavior`,
+`JjWidgetSharedBehavior`) that run the same assertions over every widget
+of a family, TUI component tests through ink-testing-library, migration
+tests per version step, and a schema/registry parity test that fails when
+a usage field is added to one table but not the other.
+
+garnish already has goldens and config goldens. Worth adding: a
+**module-matrix test generated from `ModuleSchema`** that renders every
+module × every hide state × `max_width` × icon set and asserts the
+invariants (never wider than `max_width`, hidden states render nothing,
+OSC 8 wrappers balanced), so a new module gets the shared behaviour for
+free. Their hand-written shared suites are the same idea done manually.
+
+## 22. Payload comparison
+
+Their stdin schema (`src/types/StatusJSON.ts`, a loose object) declares
+`session_id`, `transcript_path`, `cwd`, `model` (string or object),
+`workspace.{current_dir, project_dir}`, `version`, `output_style`, `effort`,
+`cost`, `context_window` (with `current_usage`), `vim`, `worktree`,
+`rate_limits`. It does **not** model `session_name`, `prompt_cache`,
+`fast_mode`, `thinking`, `agent`, `pr`, `exceeds_200k_tokens`,
+`workspace.added_dirs / git_worktree / repo`. garnish's `SPEC.md` § 2.2 is
+the more complete map; ccstatusline recovers several of those from the
+transcript or from git instead. Their model-context table assumes 200 k
+with `[1m]` suffix inference for 1 M models and an 80 % "usable" ratio;
+garnish's `effective_window − 13 000` autocompact threshold was verified
+against the binary and is the better number for A11.
+
 ## Appendix — where to look in ccstatusline (commit 016be1f)
 
 | topic | files |
