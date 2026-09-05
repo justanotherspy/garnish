@@ -28,14 +28,47 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Every `# key: value` line for `key`.
-fn headers<'a>(text: &'a str, key: &str) -> Vec<&'a str> {
-    let prefix = format!("# {key}: ");
-    text.lines().filter_map(|l| l.strip_prefix(prefix.as_str())).map(str::trim).collect()
+const HEADER_KEYS: [&str; 5] = ["fixture", "columns", "now", "icons", "env"];
+
+/// The header lines of one fixture, validated: a comment that names a header
+/// key must be exactly `# key: value` with a non-empty value (a typo would
+/// otherwise fall back to the default silently and pin the wrong render), and
+/// every key but `env` may appear once.
+struct Header {
+    values: Vec<(String, String)>,
 }
 
-fn header<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-    headers(text, key).into_iter().next()
+impl Header {
+    fn parse(name: &str, text: &str) -> Self {
+        let mut values: Vec<(String, String)> = Vec::new();
+        for line in text.lines().filter(|l| l.starts_with('#')) {
+            let body = line.trim_start_matches('#').trim_start();
+            let Some((key, value)) = body.split_once(':') else { continue };
+            let key = key.trim();
+            if !HEADER_KEYS.contains(&key) {
+                continue;
+            }
+            let exact = format!("# {key}: ");
+            assert!(
+                line.starts_with(&exact) && !value.trim().is_empty(),
+                "{name}: header line must be `# {key}: <value>`, found {line:?}"
+            );
+            assert!(
+                key == "env" || values.iter().all(|(k, _)| k != key),
+                "{name}: duplicate `# {key}:` header"
+            );
+            values.push((key.to_owned(), value.trim().to_owned()));
+        }
+        Self { values }
+    }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        self.values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    fn all(&self, key: &str) -> Vec<&str> {
+        self.values.iter().filter(|(k, _)| k == key).map(|(_, v)| v.as_str()).collect()
+    }
 }
 
 struct Case {
@@ -60,16 +93,18 @@ fn cases() -> Vec<Case> {
     for config in files {
         let name = config.file_stem().unwrap().to_str().unwrap().to_owned();
         let text = std::fs::read_to_string(&config).unwrap();
+        let header = Header::parse(&name, &text);
         let fixture = root()
             .join("tests/fixtures/payloads")
-            .join(format!("{}.json", header(&text, "fixture").unwrap_or("subscription-full")));
+            .join(format!("{}.json", header.get("fixture").unwrap_or("subscription-full")));
         assert!(fixture.is_file(), "{name}: unknown payload fixture {}", fixture.display());
-        let columns = header(&text, "columns").unwrap_or("100").to_owned();
+        let columns = header.get("columns").unwrap_or("100").to_owned();
         columns
             .parse::<usize>()
             .unwrap_or_else(|_| panic!("{name}: `# columns:` must be an integer"));
-        let icons = header(&text, "icons").map(str::to_owned);
-        let env: Vec<(String, String)> = headers(&text, "env")
+        let icons = header.get("icons").map(str::to_owned);
+        let env: Vec<(String, String)> = header
+            .all("env")
             .iter()
             .map(|kv| {
                 let (k, v) = kv
@@ -78,8 +113,15 @@ fn cases() -> Vec<Case> {
                 (k.trim().to_owned(), v.trim().to_owned())
             })
             .collect();
-        let nows = header(&text, "now").unwrap_or("1738425600");
-        for now in nows.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        let nows: Vec<&str> = header
+            .get("now")
+            .unwrap_or("1738425600")
+            .split(',')
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .collect();
+        assert!(!nows.is_empty(), "{name}: `# now:` names no instant");
+        for now in nows {
             now.parse::<i64>().unwrap_or_else(|_| panic!("{name}: `# now:` must be epoch seconds"));
             out.push(Case {
                 name: name.clone(),
