@@ -39,7 +39,8 @@ pub struct RenderArgs {
     /// Color mode override.
     #[arg(long, value_name = "auto|always|never|256|truecolor")]
     pub color: Option<String>,
-    /// Width override (defaults to `COLUMNS`, then 120).
+    /// Terminal width to lay out for (defaults to `COLUMNS`, then 120); the
+    /// lines come out 4 cells narrower, the width of Claude Code's box.
     #[arg(long, value_name = "N")]
     pub width: Option<usize>,
 }
@@ -122,8 +123,9 @@ pub enum Command {
         /// `statusLine.refreshInterval` in seconds.
         #[arg(long, default_value_t = 1)]
         refresh_interval: u64,
-        /// `statusLine.padding`.
-        #[arg(long)]
+        /// `statusLine.padding`; the generated config gets `padding = 2N`
+        /// to match (the harness pads both sides).
+        #[arg(long, value_name = "N")]
         padding: Option<u64>,
         /// Write the absolute path of this binary instead of `garnish`.
         #[arg(long)]
@@ -326,20 +328,31 @@ fn install(
             (true, None) => writeln!(stdout, "wrote {}", plan.settings.display())?,
         }
     }
+    if no_config {
+        return Ok(());
+    }
     let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
-    if !no_config && !target.exists() {
-        if dry_run {
-            writeln!(stdout, "would write a default config to {}", target.display())?;
-        } else {
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("creating {}", dir.display()))?;
-            }
-            let (cfg, _) = config::parse("", &SCHEMAS);
-            std::fs::write(&target, crate::docs::config_toml(&cfg, true))
-                .with_context(|| format!("writing {}", target.display()))?;
-            writeln!(stdout, "wrote default config to {}", target.display())?;
+    // The harness pads both sides, so the config mirrors statusLine.padding doubled (SPEC § 2.1).
+    let config_padding = padding.map(|p| p.saturating_mul(2));
+    if target.exists() {
+        if let Some(p) = config_padding {
+            writeln!(
+                stdout,
+                "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
+                target.display()
+            )?;
         }
+    } else if dry_run {
+        writeln!(stdout, "would write a default config to {}", target.display())?;
+    } else {
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        let seed = config_padding.map_or_else(String::new, |p| format!("padding = {p}\n"));
+        let (cfg, _) = config::parse(&seed, &SCHEMAS);
+        std::fs::write(&target, crate::docs::config_toml(&cfg, true))
+            .with_context(|| format!("writing {}", target.display()))?;
+        writeln!(stdout, "wrote default config to {}", target.display())?;
     }
     Ok(())
 }

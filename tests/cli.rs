@@ -64,11 +64,15 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     assert_eq!(backups.len(), 1);
     let cfg = home.join(".config/garnish/garnish.toml");
     assert!(cfg.exists());
-    assert!(std::fs::read_to_string(&cfg).unwrap().contains("[modules.context]"));
+    let cfg_text = std::fs::read_to_string(&cfg).unwrap();
+    assert!(cfg_text.contains("[modules.context]"));
+    // statusLine.padding = 1 pads both sides, so the config mirrors it doubled.
+    assert!(cfg_text.contains("\npadding = 2\n"), "{cfg_text}");
 
     let (out, _, ok) =
         run(&["install", "--absolute", "--refresh-interval", "2", "--padding", "1"], home, &[]);
     assert!(ok && out.contains("already up to date"), "{out}");
+    assert!(out.contains("set `padding = 2`"), "existing config gets the hint: {out}");
 
     let (out, err, _) = run(&["install", "--dry-run"], home, &[("PATH", "/nonexistent")]);
     assert!(err.contains("not on PATH"), "{err}");

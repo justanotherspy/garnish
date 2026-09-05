@@ -40,7 +40,7 @@ fn render_modules(c: &mut Criterion) {
         theme: &cfg.theme,
         icons: cfg.icons,
         now: clock.now,
-        width: 120,
+        width: cfg.width(Some(120)),
         cache: &cache,
         tz: clock.tz.clone(),
         home: clock.home,

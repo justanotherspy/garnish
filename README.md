@@ -7,13 +7,13 @@
 </p>
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────────────────────────────── ♯ garnish-dev ─╮
-├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────────────────────────────┤
-├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────────────────────────────── Δ +156 −23 ─┤
-╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────────────────────────────── ⠋ 16:00:00 ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────── ♯ garnish-dev ─╮
+├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────── ⠋ 16:00:00 ─╯
 ```
 
-<sub>The default preset with unicode icons at 100 columns, rendered from a saved payload (inside a repository the first line also carries the branch, ahead/behind and worktree). Every preset and frame style is rendered in [docs/config.md](docs/config.md).</sub>
+<sub>The default preset with unicode icons in an 80-column terminal, rendered from a saved payload (inside a repository the first line also carries the branch, ahead/behind and worktree). The other presets are below; every frame style is rendered in [docs/config.md](docs/config.md).</sub>
 
 ## Why
 
@@ -22,6 +22,52 @@ free: it parses the session JSON, renders **21 small modules** from a TOML
 config, and keeps anything slow (git, worktrees) in a detached background
 worker so a tick never waits. Dozens of sessions on one machine, no
 contention.
+
+## Presets
+
+Four top-level presets pick the lines and how much each module says. Set
+`preset = "…"` in the config; the samples use unicode icons and are rendered
+at the narrowest terminal width where nothing is cut.
+
+`default`, four lines, at 80 columns:
+
+```text
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────── ♯ garnish-dev ─╮
+├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────── ⠋ 16:00:00 ─╯
+```
+
+`compact`, two lines, at 90 columns:
+
+```text
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ────────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% │ ⧗ 24% ⏱ 2h13m ─── ⛁ 91% 1h ● 47m ─╯
+```
+
+`minimal`, one line and no frame, at 80 columns:
+
+```text
+~/garnish  42%  24%                                                    16:00
+```
+
+`full`, every module at full verbosity; it wants a wide terminal, here 120
+columns:
+
+```text
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────────────────────────── ♯ garnish-dev sess-000 ─╮
+├─ ◆ Opus ⋯ claude-opus-5 │ ◔ ▁▃▅▇█ high │ ◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼ │ ✎ default ───────────┤
+├─ ⧗ █▉░░░░░░ 24% ⏱ 2h13m │ ▦ ███▎░░░░ 41% ⏱ 3d4h ───────────────────────────────────────────── Δ +156 −23 (+133) ─┤
+╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ● 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
+```
+
+A config written by `garnish config init` (or `garnish install`) spells out
+every `[[line]]` and the `[frame]`; those explicit blocks win over the
+preset, so changing `preset` in such a file only changes what each module
+shows, not the lines. To switch presets outright, delete the `[[line]]` and
+`[frame]` blocks (or start from a file that holds only `preset`, `icons` and
+`theme`). Each preset's module list is in
+[docs/config.md](docs/config.md#top-level-presets).
 
 ## Requirements
 

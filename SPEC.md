@@ -229,7 +229,7 @@ accent = "#89b4fa"
 
 [frame]
 style = "rounded"         # none | rounded | square | double | heavy | powerline | custom
-fill = true               # rule to $COLUMNS and close with the right cap
+fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
 # custom: first middle last single fill right_first right_middle right_last separator pad
 

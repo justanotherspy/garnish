@@ -209,9 +209,24 @@ and user feedback. Pick from here when no phase is in progress.
   `HARNESS_PADDING` (4) before `padding`, uniformly for `COLUMNS`,
   `GARNISH_COLUMNS`, `--width` and the 120 fallback so `preview` stays
   WYSIWYG; `padding` now documented as `2 × statusLine.padding`. Goldens
-  regenerated (fill length only), SPEC § 2.1 and § 4 layout rule, README and
-  guide troubleshooting, `CLAUDE.md` facts (with how to re-verify after an
-  upgrade). Backlog item closed.
+  regenerated (the rule is 4 cells shorter; the `full` preset at 100
+  columns also truncates its left group 4 cells earlier), SPEC § 2.1 and
+  § 4 layout rule, README and guide troubleshooting, `CLAUDE.md` facts
+  (with how to re-verify after an upgrade). Backlog item closed.
+- **2026-09-05 (review follow-ups)** — The adversarial review of the width
+  fix landed after the merge. Fixed: `install --padding N` now seeds the
+  generated config with `padding = 2N` (or prints the value to set when a
+  config exists) and its help says so; the two render tests that allowed 4
+  cells of slack assert the real box width; `benches/tick.rs` builds its
+  `Ctx` with `Config::width`; every "fills to `$COLUMNS`" phrase in the
+  generated docs, SPEC, guide and `CLAUDE.md` names the real width;
+  `CLAUDE.md` records that the `COLUMNS` env and the footer's layout width
+  are both `process.stdout.columns`. README: the hand-written sample was
+  still 100 cells wide; it is now the generated `default` sample at 80
+  columns plus one sample per preset (docs `preset_columns`: 80/80/90/120,
+  the narrowest width at which each preset shows no `…`), so nothing
+  scrolls on GitHub, and a note that explicit `[[line]]`/`[frame]` blocks
+  in a config override the preset's lines.
 - **2026-09-05 (Phase 11)** — Daniel asked for an option that lines the
   `│` separators up across lines and stops module widths jittering as
   timers tick. Two top-level keys, spec'd first (§ 4): `align = true` pads

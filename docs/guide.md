@@ -155,7 +155,8 @@ accent = "bright-blue"   # restyle every module that uses the role
 ## 8. Under the hood
 
 stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[line]]` renders
-its modules → frame joins left/right groups and fills to `$COLUMNS` → stdout.
+its modules → frame joins left/right groups and fills to the width of Claude
+Code's box (`$COLUMNS − 4 − padding`, § 7) → stdout.
 Cached modules read one small file each; when it is past its TTL the tick
 spawns `garnish refresh` in its own process group to recompute it and keeps
 showing the last value, dimmed only once it is `stale_after` TTLs overdue.

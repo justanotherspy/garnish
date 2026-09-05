@@ -319,14 +319,30 @@ fn frame_sample(style: FrameStyle) -> String {
     render_plain_at(&fixture("subscription-full"), &cfg, Some(72), &Clock::fixed())
 }
 
-/// Render a whole top-level preset.
+/// Narrowest terminal width at which a preset's sample shows no `…`. Kept
+/// small so the samples read on GitHub without a horizontal scroll bar.
+const fn preset_columns(preset: config::presets::TopPreset) -> usize {
+    use config::presets::TopPreset;
+    match preset {
+        TopPreset::Default | TopPreset::Minimal => 80,
+        TopPreset::Compact => 90,
+        TopPreset::Full => 120,
+    }
+}
+
+/// Render a whole top-level preset at [`preset_columns`].
 fn preset_sample(preset: config::presets::TopPreset, icons: IconSet) -> String {
     let (cfg, _) = config::parse_with(
         "",
         &SCHEMAS,
         &Overlay { preset: Some(preset), icons: Some(icons), ..Default::default() },
     );
-    render_plain_at(&fixture("subscription-full"), &cfg, Some(100), &Clock::fixed())
+    render_plain_at(
+        &fixture("subscription-full"),
+        &cfg,
+        Some(preset_columns(preset)),
+        &Clock::fixed(),
+    )
 }
 
 /// The `docs/modules/<id>.md` page for one module.
@@ -486,7 +502,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `truncate` | bool | `true` | Truncate the left group when a line overflows `$COLUMNS`; the right group is never cut. |"
+        "| `truncate` | bool | `true` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is never cut. |"
     );
     let _ = writeln!(
         o,
@@ -538,7 +554,7 @@ fn frame_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `fill` | `true` | Extend the rule between the left and right groups to `$COLUMNS` and close with the right cap. With `false`, lines are left-packed. |"
+        "| `fill` | `true` | Extend the rule between the left and right groups to the full width and close with the right cap. With `false`, lines are left-packed. |"
     );
     let _ = writeln!(o, "| `separator` | style-dependent | Default separator between modules. |");
     let _ = writeln!(
@@ -605,10 +621,11 @@ fn presets_section(o: &mut String) {
             .collect();
         let _ = writeln!(
             o,
-            "### `{}`\n\nModule preset `{}`. Lines:\n\n{}\n\n```text\n{}\n```\n",
+            "### `{}`\n\nModule preset `{}`. Lines:\n\n{}\n\nAt {} columns, unicode icons:\n\n```text\n{}\n```\n",
             preset.name(),
             preset.module_preset().name(),
             lines.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n"),
+            preset_columns(preset),
             preset_sample(preset, IconSet::Unicode)
         );
     }
@@ -623,7 +640,7 @@ fn environment_section(o: &mut String) {
     let _ = writeln!(o, "## Environment\n\n| variable | effect |\n|---|---|");
     let _ = writeln!(
         o,
-        "| `COLUMNS` | Width of the status line (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. |"
+        "| `COLUMNS` | Terminal width (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. The lines are rendered 4 cells narrower, plus `padding`: the width of Claude Code's status line box. |"
     );
     let _ = writeln!(o, "| `NO_COLOR` | Disables escape codes under `color = \"auto\"`. |");
     let _ = writeln!(o, "| `GARNISH_CONFIG` | Config file path. |");
