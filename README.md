@@ -168,6 +168,8 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
   glyph grid in which every `|` should line up; the one pushed out of its
   column names the glyph. Override it under `[modules.<id>.icons]`, and paste
   the grid into an issue so the built-in set can be fixed.
+- **Hairline gaps between the blocks of a bar**: the font draws `█` a shade
+  narrower than a cell; set `bar = "line"` on the module for a `━`/`─` bar.
 - **A value with `⟳` or `✗` after it**: the background refresh is overdue or
   failed; `garnish doctor` shows the last error.
 - **Nothing changes after editing the config**: `garnish config path` shows

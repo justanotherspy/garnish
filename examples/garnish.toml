@@ -338,6 +338,8 @@ suffix = ""
 hide_when_empty = true
 # width (integer) — Bar width in cells; 0 hides the bar. [minimal=0 default=20 full=30]
 # width = 20
+# bar (`blocks` | `line`) — Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
+# bar = "blocks"
 # show_icon (bool) — Show the context icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_percent (bool) — Show the percentage after the bar. [minimal=true default=true full=true]
@@ -432,6 +434,8 @@ hide_when_empty = true
 # show_reset = true
 # bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
+# bar (`blocks` | `line`) — Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
+# bar = "blocks"
 # thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
@@ -471,6 +475,8 @@ hide_when_empty = true
 # show_reset = true
 # bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
+# bar (`blocks` | `line`) — Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
+# bar = "blocks"
 # thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
@@ -510,6 +516,8 @@ hide_when_empty = true
 # show_reset = true
 # bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
+# bar (`blocks` | `line`) — Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
+# bar = "blocks"
 # thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]

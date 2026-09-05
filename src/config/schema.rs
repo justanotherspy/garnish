@@ -316,7 +316,7 @@ impl ModuleCfg {
         theme: &Theme,
         overrides: &Overrides,
     ) -> Self {
-        let opts = schema
+        let opts: BTreeMap<&'static str, Value> = schema
             .opts
             .iter()
             .map(|o| {
@@ -328,7 +328,7 @@ impl ModuleCfg {
                 (o.key, v)
             })
             .collect();
-        let icons = schema
+        let mut icons: BTreeMap<&'static str, String> = schema
             .icons
             .iter()
             .map(|i| {
@@ -340,6 +340,18 @@ impl ModuleCfg {
                 (i.key, v)
             })
             .collect();
+        // `bar = "line"` is a shorthand for the line glyphs (SPEC § 4.1); it
+        // is applied here so the resolved icons are what renders and what
+        // `config show` prints. An explicit icon override still wins.
+        if matches!(opts.get("bar"), Some(Value::Str(style)) if style == "line") {
+            for (key, glyph) in [("fill", "━"), ("empty", "─")] {
+                if !overrides.icons.contains_key(key)
+                    && let Some(slot) = icons.get_mut(key)
+                {
+                    glyph.clone_into(slot);
+                }
+            }
+        }
         let colors = schema
             .colors
             .iter()

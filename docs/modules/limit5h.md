@@ -40,6 +40,7 @@ Percentage of the rolling five-hour window consumed and a countdown to `resets_a
 | `show_icon` | bool | `false` | `true` | `true` | Show the window icon. |
 | `show_reset` | bool | `false` | `true` | `true` | Show the countdown to the reset. |
 | `bar_width` | integer | `0` | `0` | `8` | Mini bar width in cells; 0 hides it. |
+| `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
 | `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the color changes. |
 | `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band. |
 

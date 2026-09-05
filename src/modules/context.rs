@@ -6,7 +6,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{bar, percent, rounded, tokens};
+use super::util::{BAR_STYLES, bar, percent, rounded, tokens};
 use super::{Ctx, Module, Rendered, icon, seg};
 
 /// `context`: smooth usage bar + percentage + compaction marker.
@@ -128,6 +128,12 @@ fn opts() -> Vec<OptSpec> {
         OptSpec::new("width", Kind::Int, "Bar width in cells; 0 hides the bar.", Value::Int(20))
             .minimal(Value::Int(0))
             .full(Value::Int(30)),
+        OptSpec::new(
+            "bar",
+            Kind::Enum(BAR_STYLES),
+            "Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
+            Value::Str("blocks".into()),
+        ),
         OptSpec::new("show_icon", Kind::Bool, "Show the context icon.", Value::Bool(true))
             .minimal(Value::Bool(false)),
         OptSpec::new(

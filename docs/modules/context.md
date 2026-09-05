@@ -38,6 +38,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `prefix` / `suffix` | string | `""` | `""` | `""` | Text around the module. |
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
 | `width` | integer | `0` | `20` | `30` | Bar width in cells; 0 hides the bar. |
+| `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the context icon. |
 | `show_percent` | bool | `true` | `true` | `true` | Show the percentage after the bar. |
 | `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the band color changes. |

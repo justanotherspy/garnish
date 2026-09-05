@@ -5,7 +5,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::icons::{Glyph, glyph};
 use crate::payload::RateWindow;
 
-use super::util::{bar, dollars, percent, percent_unclamped, rounded};
+use super::util::{BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded};
 use super::{Ctx, Module, Rendered, icon, seg};
 
 /// Which rate-limit window a limit module shows.
@@ -86,6 +86,12 @@ impl Module for LimitModule {
                     Value::Int(0),
                 )
                 .full(Value::Int(8)),
+                OptSpec::new(
+                    "bar",
+                    Kind::Enum(BAR_STYLES),
+                    "Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
+                    Value::Str("blocks".into()),
+                ),
                 OptSpec::new(
                     "thresholds",
                     Kind::NumList,
