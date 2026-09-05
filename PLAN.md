@@ -34,7 +34,7 @@ phase closed goes in the **Backlog**; host trouble does not belong here.
 - [x] `frame.rs`: none/rounded/square/double/heavy/powerline/custom; fill to the box width (`$COLUMNS − 4 − padding` since 2026-09-05); overflow rules
 - [x] `garnish config init|check|path|show`
 - [x] Top-level presets: default, minimal, full, compact
-- [~] Config fixtures + matrix test — in-process matrix test exists (`render::tests`); TOML config fixtures still to add (backlog)
+- [x] Config fixtures + matrix test — in-process matrix in `render::tests` (presets × icon sets × fixtures) plus config-driven goldens (`tests/config_golden.rs`, 2026-09-05)
 
 ## Phase 3 — Payload-only modules
 
@@ -122,42 +122,48 @@ lines, with column widths that do not jitter as timers tick.
 Bugs found by Daniel and by me while switching the live config through the
 presets, themes, frames, icon sets and module options (SPEC § 4.1, § 5).
 Every fix gets a unit test; user-visible ones get a golden or integration
-test.
+test. Bugs that add a config key live in the phase that owns the key: bug 3
+(`bar` shorthand) and bug 11 (`hide_empty_lines`) in Phase 13, bug 8
+(per-key fallback) in Phase 14.
 
+- [x] Config-driven golden harness (`tests/config_golden.rs`): one config file per case under `tests/fixtures/configs/` with a `# fixture/columns/now/icons/env` header, one golden per `# now:` instant, so every later phase can pin a key at two clock values; seeded with the aligned and fixed-duration layouts (closes the Phase 2 backlog item)
 - [ ] Bug 1: `icons = "unicode"` misaligns the right edge in COSMIC Terminal on any line carrying one of `◆ ◔ ◫ ⧗ ▦` (garnish counts 1 cell, the terminal advances 2; nerd icons on the same layout line up). First make `garnish doctor`'s glyph test print each glyph followed by a marker column so the wide one is obvious, then replace it in the unicode set (and note the override path in the guide)
 - [ ] Bug 2: `powerline` frame ships with an empty `pad`; default it to one space, regenerate the docs sample
-- [ ] Bug 3: hairline gaps between `█` blocks in bars are the terminal font; add the troubleshooting entry (line-style fill `━`/`─` or `▰`/`▱`, which also drops the fractional cell) and the per-module `bar = "blocks" | "line"` shorthand
 - [ ] Bug 5: `sync` with `show_zero` colours `⇡0 ⇣0` with the ahead/behind roles; zero counts use muted
 - [ ] Bug 6: with `fill = false` the left/right join uses the frame's separator instead of the line's own (`compose_line`, the `!fill` branch); pass the line separator through `Layout`
 - [ ] Bug 7: `garnish config check` prints the problems and then a color-eyre report with a source location; exit 1 quietly (map a `ConfigInvalid` error to an `ExitCode` in `main`, no report); same for `config init` refusing to overwrite
-- [ ] Bug 8 (SPEC § 5 change, approved by Daniel 2026-09-05): one invalid value discarded the whole config; keep every valid key and default only the bad ones, wholesale fallback only on TOML syntax errors. Test: bad colour + custom frame keeps the frame
 - [ ] Bug 9: the `sync` fetch-age hint has no space between glyph and age (`⧖2h13m`); add it (goldens change)
 - [ ] Bug 10: the emoji set contains variation-selector sequences (`⏱️ 🗄️ 🏷️ 🕰️`) that COSMIC draws one cell wide while garnish counts two; replace with default-emoji glyphs (`⏳`/`⌛`, `💾`/`📦`, `🔖`, `⏰`), add a unit test that no emoji-set glyph contains U+FE0F, warn in the guide about overrides
-- [ ] Bug 11: a line whose modules all rendered nothing is emitted as an empty framed row; implement `hide_empty_lines = true` (SPEC § 4.1), caps follow the surviving lines, test with `pr-absent`
 - [ ] Item 4 (guide): explain that aligned columns pair positionally, so a `–` placeholder under a wide bar gets a wide blank column
 - [ ] Tour follow-up: the `garnish doctor` glyph test should render every set through the real width code and print the expected cell count per glyph so a mismatch report can be pasted into a feedback issue
 
 Phases 13–18 implement the spec changes of 2026-09-05, one phase per spec
-section, in dependency order: the clock-driven `frame`/offset rule (Phase
-15) is shared by the ticker, text modules and animations, so it lands
-first among the moving parts. Each phase follows the phase protocol in
+section. **Execution order (decided 2026-09-05): 12 → 14 → 13 → 15 → 16 →
+17 → 18.** Per-key config fallback (Phase 14) lands before any new config
+key so a typo in one can no longer discard a hand-edited config; the
+clock-driven `frame`/offset rule (Phase 15) is shared by the ticker, text
+modules and animations, so it lands first among the moving parts. The whole
+roadmap is one `gh stack` chain, one layer (PR) per concern, named
+`phase-N/<concern>` (`CLAUDE.md` § Session protocol); the bottom layer of
+each phase carries that phase's document sync, its top layer the session-log
+entry and the adversarial review. One release, `v0.2.0`, once the last
+Phase 18 layer has merged. Each phase follows the phase protocol in
 `CLAUDE.md`: spec re-read, schema → render → `make docs` → goldens →
 README/guide, adversarial review, tests for every bug found.
 
 ## Phase 13 — Alignment and line keys (SPEC § 4.1)
 
 - [ ] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output; test both on the two-line alignment config
-- [ ] `hide_empty_lines = true` (bug 11 lands here if Phase 12 did not): a line whose modules all rendered nothing is dropped; first/last caps follow the surviving lines; test with `pr-absent`
+- [ ] `hide_empty_lines = true` (bug 11): a line whose modules all rendered nothing is dropped; first/last caps follow the surviving lines; test with `pr-absent`
 - [ ] Intentional empty lines: `modules = []` with no `right` is a spacer row that `hide_empty_lines` never drops (empty framed row, or a blank row with `style = "none"`); docs sample
-- [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`); guide sentence on positional columns (item 4)
+- [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); an explicit `icons.fill`/`icons.empty` override still wins; guide troubleshooting entry
 - [ ] Goldens for each key; README and guide paragraphs
 
 ## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
 
 - [ ] Per-key fallback (bug 8): `parse_with` returns the resolved config with defaults substituted only for the bad values; wholesale fallback only on TOML syntax errors; the `⚠ config:` line unchanged; test: bad colour + custom frame keeps the frame, syntax error still falls back
 - [ ] `config check` exits 1 quietly on problems (bug 7): a `ConfigInvalid` error mapped to an `ExitCode` in `main`, no color-eyre report; same for `config init` refusing to overwrite; `tests/cli.rs` asserts stderr has no "Location:"
-- [ ] `garnish doctor` glyph test prints every set through the real width code with a marker column and the expected cell count per glyph (tour follow-up), so a mismatch can be pasted into a feedback issue
-- [ ] `config init --preset` accepts gallery names once Phase 17 exists (cross-reference)
+- [ ] Per-key errors lose their line number (every `resolve()` error already has `line: None`); syntax errors keep theirs. `Loaded.errors` doc, doctor's `INVALID (defaults in effect)` wording, SPEC § 5 "until Phase 14 lands" sentence and the README/guide troubleshooting updated to match
 
 ## Phase 15 — Clock-driven scrolling: line ticker and text modules (SPEC § 3.7, § 4.1 ticker)
 
@@ -199,7 +205,7 @@ README/guide, adversarial review, tests for every bug found.
 Items left unchecked when their phase closed, plus follow-ups from reviews
 and user feedback. Pick from here when no phase is in progress.
 
-- [ ] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a matrix test over them (the in-process matrix in `render::tests` covers presets only)
+- [x] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a golden test over them (`tests/config_golden.rs`, 2026-09-05)
 - [ ] Phase 4: test a tick killed mid-run while the worker completes (needs a harness that can kill a process group deterministically)
 - [ ] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end
 - [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)
