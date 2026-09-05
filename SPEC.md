@@ -406,9 +406,62 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   non-zero counts carry the ahead/behind colours. The fetch-age hint has a
   space between its glyph and the age like every other module.
 
+### 4.2 Animation (target state; PLAN Phase 13)
+
+Every animation in garnish is a pure function of the tick's clock: frame
+index or scroll offset = `floor(now_secs × step) mod period`. No state is
+kept between ticks, so a cancelled tick loses nothing, every session on the
+machine animates in step, and `GARNISH_NOW` freezes everything for goldens.
+The cadence is whatever the harness ticks at (`refreshInterval`, minimum
+1 s); `step` below 1 slows an animation down (0.5 = every second tick).
+
+```toml
+animate = true            # master switch; false freezes every animation at frame 0
+
+[frame]
+fill_pattern   = "·  "    # repeated across the rule instead of fill_char
+fill_step      = 1        # cells the pattern shifts per tick
+fill_direction = "right"  # left | right
+separator_frames = [" │ ", " ┃ ", " │ ", " ╎ "]   # cycle one frame per tick
+separator_step   = 1
+
+[modules.clock.icons]
+spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]  # already a spinner; same rule
+
+[modules.branch.icons]
+branch_frames = ["", ""]  # any icon key accepts <key>_frames; the key itself is frame 0
+```
+
+- **Animated rule.** `fill_pattern` is a string of one-cell glyphs repeated
+  across the gap between the left and right groups; each tick it shifts
+  `fill_step` cells in `fill_direction`, so dots appear to travel along the
+  rule. The rule's *width* never changes (it is computed from the groups
+  as today), only which glyph lands in each cell; with `align` on, the
+  rule still starts at a fixed column. `fill_char` remains the static
+  single-glyph case and is what the pattern falls back to when `animate`
+  is off.
+- **Animated separators.** `separator_frames` cycles the separator
+  string one frame per tick; every frame must have the same cell width
+  (validation rejects mismatched widths so columns cannot jitter), and
+  `separator` stays the static fallback and frame 0. Per-line `separator`
+  overrides win over the frames.
+- **Animated glyphs.** Any icon key in `[modules.<id>.icons]` accepts a
+  `<key>_frames` list; frames must all have the icon's cell width. The
+  spinner in `clock` becomes an instance of this rule rather than a special
+  case.
+- **Scrollers.** The line ticker (§ 4.1) and text modules (§ 3.7) use the
+  same clock rule with a cell offset instead of a frame index.
+- **Cost.** Animation adds no I/O and no allocation beyond the frame
+  lookup; the tick budget (§ 8) is unchanged. Docs render with
+  `Clock::fixed()`, so the generated samples show frame 0.
+- **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
+  session) freezes everything at frame 0; the guide recommends it for
+  screen readers and for recordings.
+
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
-ids, unknown presets, bad colors, all reported with TOML paths; on problems
-the command lists them and exits 1 without an error report.
+ids, unknown presets, bad colors, animation frames of unequal width, all
+reported with TOML paths; on problems the command lists them and exits 1
+without an error report.
 
 ## 5. Failure behaviour
 
@@ -531,6 +584,7 @@ per-module render cost.
 | `GARNISH_NO_SPAWN` | record intended worker spawns instead of spawning |
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
+| `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session (§ 4.2; target state) |
 
 ## 10. Documentation
 
