@@ -344,7 +344,10 @@ impl ModuleCfg {
         // is applied here so the resolved icons are what renders and what
         // `config show` prints. An explicit icon override still wins.
         if matches!(opts.get("bar"), Some(Value::Str(style)) if style == "line") {
-            for (key, glyph) in [("fill", "━"), ("empty", "─")] {
+            // The ASCII set stays ASCII: `=`/`-` instead of `━`/`─`.
+            let (fill, empty) =
+                if icon_set == IconSet::Ascii { ("=", "-") } else { ("━", "─") };
+            for (key, glyph) in [("fill", fill), ("empty", empty)] {
                 if !overrides.icons.contains_key(key)
                     && let Some(slot) = icons.get_mut(key)
                 {

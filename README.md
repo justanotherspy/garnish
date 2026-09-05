@@ -126,11 +126,14 @@ width  = 30
 Every module has `minimal` / `default` / `full` presets plus its own icons,
 colors and refresh interval. Put any module on any line, left or right.
 
-Two top-level keys keep a multi-line layout tidy: `align = true` pads every
+A few top-level keys keep a multi-line layout tidy: `align = true` pads every
 module column to the widest module in it, so the `│` separators stack
-vertically instead of drifting with each line's content, and
-`durations = "fixed"` prints timers as `9m00s` / `1h05m` instead of `9m` /
-`1h5m`, so they keep their width as they tick.
+vertically instead of drifting with each line's content (`right_justify =
+"start"` keeps a padded right-side module next to its separator instead of
+the cap); `durations = "fixed"` prints timers as `9m00s` / `1h05m` instead of
+`9m` / `1h5m`, so they keep their width as they tick; and `hide_empty_lines`
+(on by default) drops a line whose modules all have nothing to show, while
+`modules = []` makes a spacer row that always stays.
 
 ```text
 ╭─ ❖ Opus         │ ⊞ ████████▍░░░░░░░░░░▏ 42% ─────────────── ⠋ 16:00:00 ─╮

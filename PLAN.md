@@ -157,7 +157,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `hide_empty_lines = true` (bug 11): a line whose modules all rendered nothing is dropped after rendering and alignment; first/last caps follow the surviving lines; unit test and config goldens `hide-empty-lines` / `keep-empty-lines` with `pr-absent`
 - [x] Intentional empty lines: `LineCfg.spacer` is set for `modules = []` with no `right`; a spacer is an empty framed row that `hide_empty_lines` never drops; config golden `spacer-line`, `[[line]]` section of docs/config.md
 - [x] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); `ModuleCfg::resolve` applies it to the `fill`/`empty` icons so the resolved config is what renders and what `config show` prints; an explicit `icons.fill`/`icons.empty` override still wins; unit test, config golden `bar-line`, guide and README troubleshooting entries
-- [ ] Goldens for each key; README and guide paragraphs
+- [x] Goldens for each key (`right-justify-start`, `hide-empty-lines`, `keep-empty-lines`, `spacer-line`, `bar-line`); README layout paragraph, guide § 5 and § 7, SPEC § 4 config block. Review: an unframed spacer is whitespace only and Claude Code drops whitespace-only rows (SPEC § 2.1, CLAUDE.md fact), `stale_style = "hide"` can make a line come and go (documented), the ascii set keeps `=`/`-` under `bar = "line"`, tests for `right_justify` under `fill = false`, spacer caps, `spend` and the `config show` round trip
 
 ## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
 
@@ -413,3 +413,8 @@ and user feedback. Pick from here when no phase is in progress.
   rendering `━`; it is now applied once in `ModuleCfg::resolve`, so the
   resolved icons are what renders and what `show` prints. Each key has a
   config golden, a key row in `docs/config.md` and a `config init` line.
+  Review of the phase: nothing blocking; it found that Claude Code drops
+  whitespace-only rows from the script output (so a `style = "none"` spacer
+  is invisible; documented in SPEC § 2.1/§ 4.1 and CLAUDE.md rather than
+  worked around, glyph choice left to Daniel), the `stale_style = "hide"`
+  height change, and that the ascii set got `━`/`─` (now `=`/`-`).

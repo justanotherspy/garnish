@@ -131,7 +131,7 @@ fn opts() -> Vec<OptSpec> {
         OptSpec::new(
             "bar",
             Kind::Enum(BAR_STYLES),
-            "Bar glyphs: `blocks` (`█`/`░`, fractional cells) or `line` (`━`/`─`, whole cells; no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
+            "Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
             Value::Str("blocks".into()),
         ),
         OptSpec::new("show_icon", Kind::Bool, "Show the context icon.", Value::Bool(true))
