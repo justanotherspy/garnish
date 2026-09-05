@@ -581,12 +581,8 @@ impl Module for SyncModule {
             && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
             && !cfg.icon("stale").is_empty()
         {
-            let sp = if segs.is_empty() { "" } else { " " };
-            segs.push(seg(
-                cfg,
-                format!("{sp}{} {}", cfg.icon("stale"), ctx.duration(age)),
-                "stale",
-            ));
+            let hint = fetch_age_hint(cfg.icon("stale"), &ctx.duration(age), !segs.is_empty());
+            segs.push(seg(cfg, hint, "stale"));
         }
         let _ = remote;
         let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
@@ -666,12 +662,27 @@ fn count_segments(
     segs
 }
 
+/// The fetch-age hint: glyph, a space, the age (`↻ 2h13m`), preceded by a
+/// space when something already stands before it. Every other module puts a
+/// space between its glyph and its value; this one used not to (bug 9).
+fn fetch_age_hint(icon: &str, age: &str, after_text: bool) -> String {
+    let sp = if after_text { " " } else { "" };
+    format!("{sp}{icon} {age}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::schema::{Overrides, Preset};
     use crate::icons::IconSet;
     use crate::theme::{Role, Theme};
+
+    #[test]
+    fn fetch_age_hint_separates_glyph_and_age() {
+        assert_eq!(fetch_age_hint("↻", "2h13m", false), "↻ 2h13m");
+        assert_eq!(fetch_age_hint("↻", "2h13m", true), " ↻ 2h13m");
+        assert_eq!(fetch_age_hint("?", "12m", true), " ? 12m");
+    }
 
     #[test]
     fn zero_sync_counts_are_muted_and_non_zero_coloured() {
