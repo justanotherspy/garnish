@@ -13,7 +13,8 @@ truncate = true
 stale_style = "dim"
 # TTL periods a cached value may be overdue before it is styled stale (>= 1).
 stale_after = 5
-# Cells subtracted from the width (mirror statusLine.padding).
+# Extra cells subtracted from the width, on top of the 4 Claude Code's box
+# always takes; set 2 x statusLine.padding when that setting is non-zero.
 padding = 0
 
 # Role color overrides; every module color defaults to one of these roles.

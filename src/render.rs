@@ -255,8 +255,9 @@ mod tests {
         let out = render_plain(&fixture("subscription-full"), &loaded(""), Some(100));
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 4, "{out}");
+        // COLUMNS=100 leaves 96 cells inside Claude Code's box (SPEC § 2.1).
         for l in &lines {
-            assert_eq!(display_width(l), 100, "{l}");
+            assert_eq!(display_width(l), 96, "{l}");
         }
         assert!(lines[0].starts_with("╭─"));
         assert!(lines[3].starts_with("╰─"));

@@ -114,7 +114,7 @@ and user feedback. Pick from here when no phase is in progress.
 - [ ] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a matrix test over them (the in-process matrix in `render::tests` covers presets only)
 - [ ] Phase 4: test a tick killed mid-run while the worker completes (needs a harness that can kill a process group deterministically)
 - [ ] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end
-- [ ] Right-side `…` truncation reported by Daniel (2026-09-04): garnish never cuts the right group, so the row is wider than the harness's Ink box; `padding = N` works around it, root cause still open
+- [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)
 - [ ] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fix the wording in `docs.rs` and regenerate
 - [ ] `Cargo.toml` still says `repository = "local"`; point it at the GitHub URL before any release beyond the local tag
 - [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened
@@ -188,3 +188,16 @@ and user feedback. Pick from here when no phase is in progress.
   `scripts/setup.sh`/`make setup` for prerequisites on any host, CI switched
   from `taiki-e/install-action` to the same script. `docs/` verified in
   sync. Next: backlog.
+- **2026-09-05 (later)** — Right-edge `…` root cause. Daniel installed
+  from `main` and the default config still lost its right cap. Read the
+  2.1.261 binary: the footer is an Ink box of `width: columns` with
+  `paddingX: 2`, the status line sits inside it in a box with
+  `paddingX: statusLine.padding`, and each row is `wrap="truncate"`, so the
+  box is `COLUMNS − 4 − 2 × statusLine.padding` and garnish, filling to
+  `COLUMNS`, was 4 cells over on every tick. Fix: `Config::width` subtracts
+  `HARNESS_PADDING` (4) before `padding`, uniformly for `COLUMNS`,
+  `GARNISH_COLUMNS`, `--width` and the 120 fallback so `preview` stays
+  WYSIWYG; `padding` now documented as `2 × statusLine.padding`. Goldens
+  regenerated (fill length only), SPEC § 2.1 and § 4 layout rule, README and
+  guide troubleshooting, `CLAUDE.md` facts (with how to re-verify after an
+  upgrade). Backlog item closed.

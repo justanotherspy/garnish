@@ -15,7 +15,7 @@ An invalid file never blanks the status line: garnish renders the defaults and a
 | `truncate` | bool | `true` | Truncate the left group when a line overflows `$COLUMNS`; the right group is never cut. |
 | `stale_style` | `dim` \| `hide` \| `plain` | `dim` | How overdue cached values are shown. |
 | `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |
-| `padding` | integer | `0` | Cells subtracted from the width; mirror `statusLine.padding`. |
+| `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |
 
 ## `[colors]` — theme roles
 
@@ -65,43 +65,43 @@ Every module color defaults to a role; override a role here to restyle every mod
 `none`
 
 ```text
-◆ Opus  ◫ ████████▍░░░░░░░░░░▏ 42%                            ⠋ 16:00:00
-⧗ 24% ⏱ 2h13m  ▦ 41% ⏱ 3d4h                               ⛁ 91% 1h ● 47m
+◆ Opus  ◫ ████████▍░░░░░░░░░░▏ 42%                        ⠋ 16:00:00
+⧗ 24% ⏱ 2h13m  ▦ 41% ⏱ 3d4h                           ⛁ 91% 1h ● 47m
 ```
 
 `rounded`
 
 ```text
-╭─ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ─────────────────── ⠋ 16:00:00 ─╮
-╰─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────── ⛁ 91% 1h ● 47m ─╯
+╭─ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ─────────────── ⠋ 16:00:00 ─╮
+╰─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────── ⛁ 91% 1h ● 47m ─╯
 ```
 
 `square`
 
 ```text
-┌─ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ─────────────────── ⠋ 16:00:00 ─┐
-└─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────── ⛁ 91% 1h ● 47m ─┘
+┌─ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ─────────────── ⠋ 16:00:00 ─┐
+└─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────── ⛁ 91% 1h ● 47m ─┘
 ```
 
 `double`
 
 ```text
-╔═ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ═══════════════════ ⠋ 16:00:00 ═╗
-╚═ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ══════════════════════ ⛁ 91% 1h ● 47m ═╝
+╔═ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ═══════════════ ⠋ 16:00:00 ═╗
+╚═ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ══════════════════ ⛁ 91% 1h ● 47m ═╝
 ```
 
 `heavy`
 
 ```text
-┏━ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ━━━━━━━━━━━━━━━━━━━ ⠋ 16:00:00 ━┓
-┗━ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ━━━━━━━━━━━━━━━━━━━━━━ ⛁ 91% 1h ● 47m ━┛
+┏━ ◆ Opus │ ◫ ████████▍░░░░░░░░░░▏ 42% ━━━━━━━━━━━━━━━ ⠋ 16:00:00 ━┓
+┗━ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ━━━━━━━━━━━━━━━━━━ ⛁ 91% 1h ● 47m ━┛
 ```
 
 `powerline`
 
 ```text
-◆ Opus  ◫ ████████▍░░░░░░░░░░▏ 42%                         ⠋ 16:00:00
-⧗ 24% ⏱ 2h13m  ▦ 41% ⏱ 3d4h                            ⛁ 91% 1h ● 47m
+◆ Opus  ◫ ████████▍░░░░░░░░░░▏ 42%                     ⠋ 16:00:00
+⧗ 24% ⏱ 2h13m  ▦ 41% ⏱ 3d4h                        ⛁ 91% 1h ● 47m
 ```
 
 ## `[[line]]`
@@ -127,10 +127,10 @@ Module preset `default`. Lines:
 - `session api cache` ⟶ clock
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────────────────────────────── ♯ garnish-dev ─╮
-├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────────────────────────────┤
-├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────────────────────────────── Δ +156 −23 ─┤
-╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────────────────────────────── ⠋ 16:00:00 ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────────────────────────── ♯ garnish-dev ─╮
+├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────────────────────────┤
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────────────────────────── ⠋ 16:00:00 ─╯
 ```
 
 ### `minimal`
@@ -140,7 +140,7 @@ Module preset `minimal`. Lines:
 - `path branch context limit5h cost` ⟶ clock
 
 ```text
-~/garnish  42%  24%                                                                            16:00
+~/garnish  42%  24%                                                                        16:00
 ```
 
 ### `full`
@@ -153,10 +153,10 @@ Module preset `full`. Lines:
 - `session api cache` ⟶ clock
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────────── ♯ garnish-dev sess-000 ─╮
-├─ ◆ Opus ⋯ claude-opus-5 │ ◔ ▁▃▅▇█ high │ ◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼ │ ✎… ──┤
-├─ ⧗ █▉░░░░░░ 24% ⏱ 2h13m │ ▦ ███▎░░░░ 41% ⏱ 3d4h ───────────────────────────── Δ +156 −23 (+133) ─┤
-╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ● 47m 2 misses … ─ ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────── ♯ garnish-dev sess-000 ─╮
+├─ ◆ Opus ⋯ claude-opus-5 │ ◔ ▁▃▅▇█ high │ ◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼… ──┤
+├─ ⧗ █▉░░░░░░ 24% ⏱ 2h13m │ ▦ ███▎░░░░ 41% ⏱ 3d4h ───────────────────────── Δ +156 −23 (+133) ─┤
+╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ● 47m 2 mis… ─ ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
 ### `compact`
@@ -167,8 +167,8 @@ Module preset `default`. Lines:
 - `model effort context limit5h cost` ⟶ cache
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ──────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
-╰─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% │ ⧗ 24% ⏱ 2h13m ───────────────── ⛁ 91% 1h ● 47m ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ──────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% │ ⧗ 24% ⏱ 2h13m ───────────── ⛁ 91% 1h ● 47m ─╯
 ```
 
 ## `[modules.<id>]`

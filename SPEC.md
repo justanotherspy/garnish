@@ -37,7 +37,7 @@ sessions on one host do not notice it running.
 
 ## 2. Claude Code contract
 
-Verified against docs (code.claude.com/docs/en/statusline) and v2.1.260.
+Verified against docs (code.claude.com/docs/en/statusline) and v2.1.261.
 Minimum supported Claude Code: **2.1.251** (adds `prompt_cache`, `effort`).
 
 ### 2.1 Settings
@@ -54,6 +54,18 @@ new trigger fires**, so anything slow must survive the tick being killed.
 
 The script gets `COLUMNS`/`LINES` in its environment. Output supports multiple
 lines, ANSI colors, and OSC 8 hyperlinks.
+
+**The status line box is narrower than `COLUMNS`.** The harness renders it
+inside its footer box, which has a fixed horizontal padding of 2 cells on
+each side, and then inside a box padded by `statusLine.padding` on each
+side. Each output row is an Ink `<Text wrap="truncate">`, so a row wider than
+
+    COLUMNS − 4 − 2 × statusLine.padding
+
+is cut with `…` on the right. garnish renders to exactly that width: the
+4-cell frame is always subtracted, and the top-level `padding` key adds
+`2 × statusLine.padding` when that setting is non-zero (verified in the
+2.1.261 binary: footer `paddingX: 2`, status box `paddingX: padding`).
 
 ### 2.2 Payload (stdin JSON)
 
@@ -208,7 +220,7 @@ color  = "auto"           # auto | always | never | 256 | truecolor
 truncate = true           # cut the left group when a line overflows; the right group is never cut
 stale_style = "dim"       # dim | hide | plain: how overdue cached values are shown
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
-padding = 0               # cells subtracted from the width; mirror statusLine.padding
+padding = 0               # extra cells subtracted from the width, on top of the harness's 4; set 2 × statusLine.padding
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
@@ -253,8 +265,11 @@ Top-level presets: `default` (four lines above), `minimal` (one line, frame
 right `cache`).
 
 Layout rules: left group joined by `separator`; right group likewise; the frame
-rule fills the gap to `$COLUMNS − padding`; right cap after. Overflow: drop the
-fill, then truncate the **left** group (ANSI-aware, `…`); never the right group.
+rule fills the gap to the width `$COLUMNS − 4 − padding` (§ 2.1; never below
+10); right cap after. Overflow: drop the fill, then truncate the **left** group
+(ANSI-aware, `…`); never the right group. `--width` and `GARNISH_COLUMNS`
+stand in for `$COLUMNS` and get the same subtraction, so `preview` shows what
+Claude Code would show at that terminal width.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, all reported with TOML paths.

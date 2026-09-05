@@ -114,6 +114,14 @@ pub struct FrameCfg {
     pub fill: bool,
 }
 
+/// Cells Claude Code's status line box loses to the harness's own footer
+/// padding (2 on each side, `COLUMNS − 4`; SPEC § 2.1, verified in 2.1.261).
+/// A row wider than the box is cut with `…` by the harness.
+pub const HARNESS_PADDING: usize = 4;
+
+/// Narrowest width garnish will render to, whatever `COLUMNS` says.
+pub const MIN_WIDTH: usize = 10;
+
 /// The fully resolved configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -134,7 +142,8 @@ pub struct Config {
     /// TTL periods a cached value may be overdue before it is styled stale
     /// (≥ 1; SPEC § 3.6).
     pub stale_after: u32,
-    /// Extra horizontal padding subtracted from the width.
+    /// Extra cells subtracted from the width on top of [`HARNESS_PADDING`]
+    /// (`2 × statusLine.padding` when that setting is non-zero).
     pub padding: usize,
     /// Frame.
     pub frame: FrameCfg,
@@ -327,10 +336,16 @@ impl Config {
         resolve(&RawConfig::default(), schemas, &mut errors)
     }
 
-    /// Effective width for rendering: `COLUMNS` (or `GARNISH_COLUMNS`) minus padding.
+    /// Effective width for rendering: `COLUMNS` (or `GARNISH_COLUMNS`,
+    /// `--width`, then 120) minus [`HARNESS_PADDING`] minus `padding`,
+    /// never below [`MIN_WIDTH`].
     #[must_use]
     pub fn width(&self, columns: Option<usize>) -> usize {
-        columns.unwrap_or(120).saturating_sub(self.padding).max(10)
+        columns
+            .unwrap_or(120)
+            .saturating_sub(HARNESS_PADDING)
+            .saturating_sub(self.padding)
+            .max(MIN_WIDTH)
     }
 
     /// Separator for a line.
@@ -728,7 +743,19 @@ mod tests {
         assert_eq!(c.frame.style, FrameStyle::Rounded);
         assert!(c.frame.fill);
         assert_eq!(c.modules.get("path").map(|m| m.int("depth")), Some(2));
-        assert_eq!(c.width(Some(100)), 100);
+        assert_eq!(c.width(Some(100)), 96);
+    }
+
+    #[test]
+    fn width_subtracts_the_harness_frame_then_padding() {
+        let schemas = schemas();
+        let c = Config::defaults(&schemas);
+        assert_eq!(c.width(None), 116, "default COLUMNS is 120");
+        assert_eq!(c.width(Some(80)), 76);
+        assert_eq!(c.width(Some(12)), MIN_WIDTH, "never below the floor");
+        assert_eq!(c.width(Some(0)), MIN_WIDTH);
+        let (c, _) = parse("padding = 2", &schemas);
+        assert_eq!(c.width(Some(80)), 74, "statusLine.padding = 1 costs two more cells");
     }
 
     #[test]
@@ -793,7 +820,7 @@ format = "12h"
         assert_eq!(path.icon("folder"), ">");
         assert_eq!(path.color("dir"), c.theme.role(Role::Danger));
         assert_eq!(c.modules.get("clock").unwrap().str("format"), "12h");
-        assert_eq!(c.width(Some(100)), 98);
+        assert_eq!(c.width(Some(100)), 94);
     }
 
     #[test]

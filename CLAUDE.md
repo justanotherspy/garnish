@@ -252,7 +252,7 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `bench/run.sh` enforces it. If a change costs more than 0.2 ms, justify it in
   the commit message.
 
-## Claude Code facts we depend on (verified 2026-09-04, v2.1.260)
+## Claude Code facts we depend on (verified 2026-09-05, v2.1.261)
 
 - Payload fields and absence rules: see `SPEC.md` § Payload. `rate_limits`
   present ⇒ subscription; absent ⇒ show `cost`.
@@ -265,8 +265,15 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
   ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is
   an Ink `<Text wrap="truncate">`, so a row wider than the harness's box is
-  cut with `…` on the right; garnish's top-level `padding` subtracts cells
-  to compensate when that happens.
+  cut with `…` on the right. **That box is `COLUMNS − 4 − 2 × statusLine.padding`
+  wide**: the footer is `<Box width={columns} paddingX={2} flexWrap="wrap">`
+  holding the status line column and, on its right, the mode/shortcut block
+  (which wraps below when the status line is wide); the status line sits in
+  a `<Box paddingX={statusLine.padding}>` inside that. `Config::width`
+  subtracts the 4 (`HARNESS_PADDING`), and the top-level `padding` key
+  covers the rest. To re-verify after a Claude Code upgrade: `strings` the
+  binary, find `paddingX:` next to `gap:2` in the status line component and
+  `var Vne=2,Gne=1` (footer padding and column gap) near `FooterHintLine`.
 - Nerd icons must come from the BMP private-use area (U+E000–U+F8FF);
   the Material Design range at U+F0000+ only exists in Nerd Fonts v3 and
   renders as a box elsewhere.

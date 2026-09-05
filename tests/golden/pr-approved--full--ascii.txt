@@ -1,4 +1,4 @@
-╭─ ~/projects/garnish │ PR #42 ok approved ───────────────────────────────── garnish-dev sess-000 ─╮
-├─ Opus ~ claude-opus-5 │ .:=+# high │ ctx: ############-----------------| 42% compact@99% 1.0.. ──┤
-├─ 5h #------- 24% reset 2h13m │ 7d ###----- 41% reset 3d4h ───────────────────── +156 -23 (+133) ─┤
-╰─ t: 1h12m since 14:48 │ api: 8m20s (12%) │ cache: 91% 1h warm .. ─ | 16:00:00 Sat 01 Feb +00:00 ─╯
+╭─ ~/projects/garnish │ PR #42 ok approved ───────────────────────────── garnish-dev sess-000 ─╮
+├─ Opus ~ claude-opus-5 │ .:=+# high │ ctx: ############-----------------| 42% compact@99%.. ──┤
+├─ 5h #------- 24% reset 2h13m │ 7d ###----- 41% reset 3d4h ───────────────── +156 -23 (+133) ─┤
+╰─ t: 1h12m since 14:48 │ api: 8m20s (12%) │ cache: 91% 1h w.. ─ | 16:00:00 Sat 01 Feb +00:00 ─╯
