@@ -164,6 +164,16 @@ ported, § 5.4).
 | Separator / FlexSeparator / Spacer / CustomText | `frame.separator`, `right`, `text.<name>` | partial | multiple flex points (A2) |
 | CustomCommand | — | out | `SPEC.md` § 3.7 |
 | jj (Jujutsu) widgets | — | out | |
+| ContextWindow (size only) | `context` full preset | have | window tag |
+| ClaudeSessionId | `session_name` full preset | have | short `session_id` |
+| GitCleanStatus / GitIsFork / GitUpstreamOwner / GitUpstreamRepo / GitUpstreamOwnerRepo | — | partial | B2 (`show = ["owner"]`, fork detection needs `gh`, B3) |
+| GitInsertions / GitDeletions | `lines` | have | see GitChanges note: theirs is `git diff`, ours is Claude's edits |
+| WorktreeMode / WorktreeName / WorktreeBranch / WorktreeOriginalBranch | `worktree` | have | payload `worktree.*` |
+| CacheHitRate / CacheRead / CacheWrite | `cache` | have | hit ratio, writes and misses in the full preset; per-turn vs session scope is theirs only |
+| ResetTimer / WeeklyResetTimer | `limit5h` / `limit7d` | have | reset countdown; absolute time is A10 |
+| CustomSymbol | `text.<name>` | have | a text module holding one glyph |
+| VoiceStatus | — | missing (A9) | `voice.enabled` from layered settings |
+| TerminalWidth (debug) | `garnish doctor` | have | width shown by `doctor`; not a module |
 | Gradients, Powerline segments, global overrides, number formats, hide states, dim-parens | — | missing | A3 A4 A5 A6, B1 |
 
 ## 5. Proposals
