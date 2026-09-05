@@ -1,12 +1,13 @@
 # name: animated-dots
-# summary: dots travelling along the rule, a pulsing separator and a spinning branch icon
+# summary: dots travelling along the rule, a pulsing separator and a cycling model icon
 # columns: 100
 # needs: nerd-font
 
 # Everything that moves here is a pure function of the clock (SPEC § 4.2):
 # the `·  ` pattern drifts toward the right cap one cell per second, the
-# separator pulses through three weights, and the branch icon cycles. Set
-# `animate = false` (or `GARNISH_ANIMATE=0`) to freeze it all at frame 0.
+# separator pulses through three weights, and the model icon cycles through
+# four moon phases. Set `animate = false` (or `GARNISH_ANIMATE=0`) to freeze
+# it all at frame 0.
 
 preset = "compact"
 icons  = "nerd"
@@ -25,5 +26,5 @@ right   = ["clock"]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
-[modules.branch.icons]
-branch_frames = ["", "", ""]
+[modules.model.icons]
+model_frames = ["", "", "", ""]

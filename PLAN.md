@@ -455,4 +455,10 @@ and user feedback. Pick from here when no phase is in progress.
   (borrowed when nothing animates, so no cost otherwise); with animations
   off every cycle sits on frame 0, so the clock spinner's built-in glyph
   string stays the default cycle and goldens are byte-identical. Four config
-  goldens at two or three instants, preset `animated-dots`.
+  goldens at two or three instants, preset `animated-dots`. Review of the
+  phase: the clock still split a multi-character `spinner_frames` frame into
+  characters (fixed, two-cell frames in the fixture and test), a rule shorter
+  than one period blinked (static fill below one period), `fill_pattern`
+  with `fill = false` is now reported, SPEC § 4.2 says "frame 0 when off"
+  everywhere, the presets test checks every animated preset moves, and
+  `animated-dots` animates the model icon (the fixture has no branch).

@@ -28,7 +28,7 @@ overflow = "truncate"
 # Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start
 ticker_step = 1
 ticker_gap = "   "
-# Master switch for every animation (spinner, scrolling, ticker); false freezes them at frame 0.
+# Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.
 animate = true
 # Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)
 durations = "compact"

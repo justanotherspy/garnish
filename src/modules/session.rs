@@ -286,9 +286,16 @@ impl Module for ClockModule {
         let zoned = ctx.now.to_zoned(zone);
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("spinner") {
-            let frames: Vec<char> = cfg.icon("spinner").chars().collect();
-            if let Some(f) = frames.get(ctx.frame(1.0, frames.len())) {
-                segs.push(seg(cfg, format!("{f} "), "spinner"));
+            // With `spinner_frames` the icon already is this tick's frame
+            // (SPEC § 4.2, frames of any one width); the built-in glyph is
+            // a string of one-character frames cycled here.
+            if cfg.icon_frames("spinner").is_empty() {
+                let frames: Vec<char> = cfg.icon("spinner").chars().collect();
+                if let Some(f) = frames.get(ctx.frame(1.0, frames.len())) {
+                    segs.push(seg(cfg, format!("{f} "), "spinner"));
+                }
+            } else {
+                segs.push(seg(cfg, format!("{} ", cfg.icon("spinner")), "spinner"));
             }
         }
         let fmt = match (cfg.str("format") == "12h", cfg.bool("seconds")) {

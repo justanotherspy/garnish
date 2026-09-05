@@ -505,7 +505,7 @@ mod tests {
     fn icon_frames_cycle_with_the_clock() {
         let payload = fixture("subscription-full");
         let render = |secs: i64, animate: bool| {
-            let text = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"model\", \"clock\"]\n[modules.model.icons]\nmodel_frames = [\"◐\", \"◓\", \"◑\", \"◒\"]\n[modules.clock.icons]\nspinner_frames = [\"a\", \"b\", \"c\"]\n";
+            let text = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"model\", \"clock\"]\n[modules.model.icons]\nmodel_frames = [\"◐\", \"◓\", \"◑\", \"◒\"]\n[modules.clock.icons]\nspinner_frames = [\"ab\", \"cd\", \"ef\"]\n";
             let (config, errs) = config::parse(text, &SCHEMAS);
             assert!(errs.is_empty(), "{errs:?}");
             let clock = Clock {
@@ -517,23 +517,23 @@ mod tests {
         };
         // 1738425600 % 4 = 0 and % 3 = 0.
         assert!(
-            render(1_738_425_600, true).starts_with("◐ Opus  a 16:00:00"),
+            render(1_738_425_600, true).starts_with("◐ Opus  ab 16:00:00"),
             "{}",
             render(1_738_425_600, true)
         );
         assert!(
-            render(1_738_425_601, true).starts_with("◓ Opus  b 16:00:01"),
+            render(1_738_425_601, true).starts_with("◓ Opus  cd 16:00:01"),
             "{}",
             render(1_738_425_601, true)
         );
         assert!(
-            render(1_738_425_605, true).starts_with("◓ Opus  c 16:00:05"),
+            render(1_738_425_605, true).starts_with("◓ Opus  ef 16:00:05"),
             "{}",
             render(1_738_425_605, true)
         );
         // Off: frame 0 of each cycle, like every other animation.
         assert!(
-            render(1_738_425_601, false).starts_with("◐ Opus  a 16:00:01"),
+            render(1_738_425_601, false).starts_with("◐ Opus  ab 16:00:01"),
             "{}",
             render(1_738_425_601, false)
         );

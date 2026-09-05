@@ -84,9 +84,15 @@ fn every_preset_has_a_header_validates_and_renders() {
         // At the declared width the render must fit Claude Code's box uncut
         // (SPEC § 12). A ticker preset never shows `…`, so for it the promise
         // is different: its row is exactly the box and it moves between ticks.
-        let ticker = text
-            .lines()
-            .any(|l| l.trim_start().starts_with("overflow") && l.contains("\"ticker\""));
+        // A preset that promises movement (a ticker, a rule pattern, separator
+        // or icon frames) must render differently one second later.
+        let ticker = text.lines().any(|l| {
+            let l = l.trim_start();
+            (l.starts_with("overflow") && l.contains("\"ticker\""))
+                || l.starts_with("fill_pattern")
+                || l.starts_with("separator_frames")
+                || (l.contains("_frames") && !l.starts_with('#'))
+        });
         for row in &rows {
             if row.contains('…') {
                 failures.push(format!("{stem}: cut at its declared width {columns}:\n{row}"));
@@ -103,7 +109,7 @@ fn every_preset_has_a_header_validates_and_renders() {
             let later = render_at("1738425601");
             if later == rows {
                 failures.push(format!(
-                    "{stem}: declares overflow = \"ticker\" but nothing scrolls at {columns} columns"
+                    "{stem}: promises an animation but nothing moves between two ticks at {columns} columns"
                 ));
             }
         }
