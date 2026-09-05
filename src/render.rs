@@ -413,6 +413,32 @@ mod tests {
         assert_eq!(display_width(rows[1]), 56);
     }
 
+    /// A spacer takes whatever cap its position calls for: first, last or,
+    /// alone, the single-line caps.
+    #[test]
+    fn spacer_caps_follow_its_position() {
+        let payload = fixture("subscription-full");
+        let plain = |text: &str| {
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(40), &Clock::fixed()))
+        };
+        let first = plain("[[line]]\nmodules = []\n[[line]]\nmodules = [\"model\"]\n");
+        let rows: Vec<&str> = first.lines().collect();
+        assert!(rows[0].starts_with("╭─") && rows[0].ends_with("╮"), "{first}");
+        let last = plain("[[line]]\nmodules = [\"model\"]\n[[line]]\nmodules = []\n");
+        let rows: Vec<&str> = last.lines().collect();
+        assert!(rows[1].starts_with("╰─") && rows[1].ends_with("╯"), "{last}");
+        let only = plain("[[line]]\nmodules = []\n");
+        assert_eq!(only.lines().count(), 1, "{only}");
+        assert!(only.starts_with("──") && only.ends_with("──"), "{only}");
+        assert_eq!(display_width(&only), 36);
+        // Unframed, a spacer is whitespace only: shown by preview, dropped by
+        // Claude Code (SPEC § 2.1), which is why the docs ask for a frame.
+        let none = plain("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n");
+        assert_eq!(none.trim(), "", "{none:?}");
+    }
+
     #[test]
     fn config_warning_names_the_first_problem_and_counts_the_rest() {
         let out = render_plain(
