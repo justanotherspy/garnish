@@ -41,6 +41,10 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     assert!(out.contains("would write"), "{out}");
     assert!(out.contains("\"hideVimModeIndicator\": true"), "{out}");
     assert!(out.contains("would write a default config"), "{out}");
+    assert!(out.contains("would write 3 skill(s)"), "{out}");
+    assert!(!home.join(".claude/skills").exists(), "dry run writes nothing");
+    let (out, _, ok) = run(&["install", "--dry-run", "--absolute", "--no-skills"], home, &[]);
+    assert!(ok && !out.contains("skill"), "{out}");
     let (out, _, ok) = run(&["install", "--dry-run", "--absolute", "--padding", "1"], home, &[]);
     assert!(
         ok && out.contains("would write a default config") && out.contains("(padding = 2)"),
@@ -69,6 +73,12 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     assert_eq!(backups.len(), 1);
     let cfg = home.join(".config/garnish/garnish.toml");
     assert!(cfg.exists());
+    // The skills land next to settings.json (SPEC § 13).
+    assert!(out.contains("wrote 3 skill(s)"), "{out}");
+    for name in ["garnish-statusline", "garnish-feedback", "garnish-submit-preset"] {
+        let skill = home.join(".claude/skills").join(name).join("SKILL.md");
+        assert!(std::fs::read_to_string(&skill).unwrap().starts_with("---\nname: "), "{name}");
+    }
     let cfg_text = std::fs::read_to_string(&cfg).unwrap();
     assert!(cfg_text.contains("[modules.context]"));
     // statusLine.padding = 1 pads both sides, so the config mirrors it doubled.
@@ -155,4 +165,13 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     let (_, err, ok) = run(&["config", "init", "--force", "--preset", "nope"], home, &[]);
     assert!(!ok && err.contains("gallery name") && err.contains("minimal-clean"), "{err}");
     assert!(!err.contains("Location:"), "a typo is one line, not a report: {err}");
+
+    // Skills: listed with descriptions, and written to a chosen directory.
+    let (out, _, ok) = run(&["skills", "list"], home, &[]);
+    assert!(ok && out.lines().count() == 3, "{out}");
+    assert!(out.lines().all(|l| l.starts_with("garnish-") && l.len() > 30), "{out}");
+    let dir = home.join("my-skills");
+    let (out, _, ok) = run(&["skills", "install", "--dir", dir.to_str().unwrap()], home, &[]);
+    assert!(ok && out.contains("wrote 3 skill(s)"), "{out}");
+    assert!(dir.join("garnish-feedback/SKILL.md").exists());
 }

@@ -20,6 +20,7 @@ pub mod modules;
 pub mod num;
 pub mod payload;
 pub mod render;
+pub mod skills;
 pub mod spawn;
 pub mod theme;
 pub mod time;
