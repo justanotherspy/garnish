@@ -1,0 +1,11 @@
+# name: full-aligned
+# summary: every module at full verbosity, columns aligned, fixed timers
+# columns: 130
+# needs: nerd-font
+
+preset = "full"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true             # pad each module column to its widest module so the │ bars stack
+durations = "fixed"       # 9m00s / 1h05m instead of 9m / 1h5m, so timers keep their width

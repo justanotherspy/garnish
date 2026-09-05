@@ -1,0 +1,23 @@
+# name: single-line-full
+# summary: everything on one row, never truncated by garnish (ticker candidate)
+# columns: 200
+# needs: nerd-font
+
+# Wider than most terminals: Claude Code cuts the row with its own … at the
+# box edge. Once SPEC § 4.1's `overflow = "ticker"` exists, this is the preset
+# that scrolls instead.
+
+preset = "full"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+truncate = false          # never cut the left group; overflow is the harness's problem
+
+[frame]
+style = "rounded"
+
+[[line]]
+modules = ["path", "branch", "sync", "worktree", "pr", "model", "effort", "context", "style", "limit5h", "limit7d", "spend", "cost", "session", "api", "cache"]
+right   = ["session_name", "agent", "vim", "lines", "clock"]

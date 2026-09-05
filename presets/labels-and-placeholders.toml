@@ -1,0 +1,58 @@
+# name: labels-and-placeholders
+# summary: labels, brackets, dim – for absent modules, UTC clock with date
+# columns: 170
+# needs: nerd-font
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[line]]
+modules = ["path", "branch", "sync", "worktree", "pr"]
+right   = ["session_name", "clock"]
+
+[[line]]
+modules = ["model", "effort", "context", "vim"]
+right   = ["session", "api"]
+
+[modules.path]
+label = "in"              # label goes before the value
+depth = 0                 # keep every path component
+show_added = true
+
+[modules.branch]
+show_sha = true
+dirty = true
+prefix = "["
+suffix = "]"
+
+[modules.worktree]
+hide_when_empty = false   # show a dim – instead of vanishing outside a worktree
+
+[modules.pr]
+hide_when_empty = false
+label = "pr"
+
+[modules.vim]
+hide_when_empty = false
+label = "vim"
+
+[modules.clock]
+tz = "UTC"
+date = true
+utc_offset = true
+spinner = false
+
+[modules.session]
+label = "up"
+show_start = true
+
+[modules.api]
+label = "api"
+show_share = true

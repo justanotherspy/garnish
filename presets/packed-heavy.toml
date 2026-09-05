@@ -1,0 +1,40 @@
+# name: packed-heavy
+# summary: custom heavy frame, left-packed lines, a separator per line
+# columns: 130
+# needs: nerd-font
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "custom"
+fill  = false             # no rule to the right edge; lines are left-packed
+first        = "┏"
+middle       = "┃"
+last         = "┗"
+single       = "━"
+fill_char    = " "
+right_first  = ""
+right_middle = ""
+right_last   = ""
+right_single = ""
+pad          = " "
+separator    = " ⋮ "        # default separator for lines that do not set one
+
+[[line]]
+modules = ["path", "branch", "sync"]
+right   = ["session_name", "clock"]
+separator = "  "          # this line: two spaces, no bar
+
+[[line]]
+modules = ["model", "effort", "context"]
+right   = ["limit5h", "limit7d"]
+
+[[line]]
+modules = ["session", "api", "cache"]
+right   = ["lines"]
+separator = " • "

@@ -1,0 +1,43 @@
+# name: dracula-256
+# summary: Dracula with role and per-module colour overrides in 256-colour mode
+# columns: 130
+# needs: nerd-font
+
+preset = "default"
+icons  = "nerd"
+theme  = "dracula"
+color  = "256"            # quantise every colour to the 256-colour cube
+align  = true
+durations = "fixed"
+
+[colors]                  # role overrides: every module that uses the role follows
+accent = "#ff79c6"        # dracula pink for all icons
+frame  = "#6272a4"        # comment blue for the box
+muted  = "gray"           # named colour
+warn   = "yellow"         # named colour for the middle band / behind counts
+
+[frame]
+style = "heavy"
+
+[[line]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name", "clock"]
+
+[[line]]
+modules = ["model", "effort", "context"]
+right   = ["limit5h", "limit7d", "cache"]
+
+[modules.path.colors]
+base    = "#8be9fd"       # cyan base directory
+subpath = "#bd93f9"       # purple below it
+
+[modules.branch.colors]
+icon = "#50fa7b"          # this icon ignores the accent override
+
+[modules.context]
+band_colors = ["#50fa7b", "#f1fa8c", "#ffb86c", "#ff5555"]
+[modules.context.colors]
+percent = "#f8f8f2"
+
+[modules.clock.colors]
+time = "214"              # 256-colour index (orange)

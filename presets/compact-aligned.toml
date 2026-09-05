@@ -1,0 +1,11 @@
+# name: compact-aligned
+# summary: two rounded lines with stacked bars, Catppuccin Mocha
+# columns: 100
+# needs: nerd-font
+
+preset = "compact"
+icons  = "nerd"
+theme  = "catppuccin-mocha"
+color  = "auto"
+align  = true
+durations = "fixed"

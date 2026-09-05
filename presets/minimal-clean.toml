@@ -1,0 +1,9 @@
+# name: minimal-clean
+# summary: one unframed line: path, context, limit, clock
+# columns: 80
+# needs: nerd-font
+
+preset = "minimal"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"

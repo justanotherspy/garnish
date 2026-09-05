@@ -206,6 +206,55 @@ renders dimmed with `✗` and the error is kept in the cache file for
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
 
+### 3.7 Text modules (target state; PLAN Phase 15)
+
+The 21 built-in modules stay the only ones that read the payload or run
+anything. **Text modules** are the one user-defined kind: a fixed string in
+a box of configurable width, declared under `[modules.text.<name>]` and
+placed on a line as `text.<name>`. Any number may exist. They never run a
+command, read a file or touch the cache, so they cost nothing on the tick.
+
+```toml
+[[line]]
+modules = ["path", "text.motd"]
+right   = ["text.tag", "clock"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 12             # cells; 0 = the text's own width
+pad      = 1              # extra cells added on each side of the box
+justify  = "left"         # left | right | center: where short text sits in the box
+overflow = "scroll"       # clip | scroll | scroll-wrap: text wider than the box
+step     = 1              # cells per tick (0.5 = every second tick)
+gap      = "   "          # scroll-wrap only: text between the end and the start
+color    = "accent"       # role or literal; icon = "" and the usual label/prefix/suffix apply
+
+[modules.text.tag]
+text  = "v0.2"
+color = "muted"
+```
+
+- **Box.** `width = 0` makes the box exactly as wide as the text; otherwise
+  the box is `width` cells and `pad` blank cells are added on both sides.
+  `justify` places text narrower than the box. The module's rendered width
+  is constant, which is what makes it useful as a fixed-width slot next to
+  aligned columns.
+- **Overflow.** `clip` cuts with the ellipsis. `scroll` shows a `width`-cell
+  window that moves `step` cells to the left each tick and, when the end of
+  the text has scrolled past, restarts from the beginning (no wrap-around
+  text). `scroll-wrap` is the ticker: the text is followed by `gap` and
+  then itself, so it flows continuously. Both are stateless: the offset is
+  `(now_secs × step) mod (text width + gap width)`, so a frozen clock
+  freezes the scroll and a cancelled tick loses nothing.
+- **Shared primitive.** The same scroller implements line-level
+  `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
+- **Escapes.** `text` is plain text: ANSI and OSC sequences are stripped,
+  control characters removed, so a config cannot break the row.
+- **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
+  reference gets one page for it; `config check` validates `justify`,
+  `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
+  table.
+
 ## 4. Configuration
 
 Location: `--config` > `$GARNISH_CONFIG` > `$XDG_CONFIG_HOME/garnish/garnish.toml`
@@ -297,15 +346,134 @@ digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
 elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
 the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
 
+### 4.1 Layout keys decided on 2026-09-05 (target state; PLAN Phase 13, ticker in Phase 15)
+
+These came out of the live config walkthrough with Daniel. They are part of
+the target design; the implementation status is in `PLAN.md`.
+
+```toml
+right_justify = "end"     # end | start: where a padded right-group module's text sits
+hide_empty_lines = true   # drop a line whose modules all rendered nothing
+overflow = "truncate"     # truncate | ticker: what happens to a left group wider than the box
+ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
+ticker_gap = "   "        # text inserted between the end and the wrapped-around start
+
+[[line]]
+modules = []              # an intentionally empty line: a blank framed row (spacer)
+```
+
+- **`right_justify`.** With `align = true` a right-group module is padded to
+  its column width. `end` (default, today's behaviour) puts the pad on the
+  left so the text hugs the cap: `│          api  8m20s ─╯`. `start` puts the
+  pad on the right so the text follows the separator and the gap sits
+  before the cap: `│ api  8m20s          ─╯`. The left group always pads on
+  the right. Columns pair *positionally*: column 3 of every line is padded
+  to the same width whatever module is in it, so a `–` placeholder under a
+  wide bar gets a wide blank column; the guide says so.
+- **Empty lines.** A line whose every module rendered nothing (outside a
+  repository, `branch`, `sync` and `pr` are all empty) is dropped when
+  `hide_empty_lines = true` (default); the frame's first/last caps follow the
+  surviving lines. A line configured with `modules = []` and no `right` is an
+  *intentional* spacer and is always kept, drawn as an empty framed row
+  (`├─ ────…────┤`, or a blank row with `style = "none"`). Setting
+  `hide_empty_lines = false` restores today's behaviour for the accidental
+  case too.
+- **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
+  not cut with `…`; instead the line shows a window onto the group that
+  advances `ticker_step` cells to the left on every tick and wraps around,
+  with `ticker_gap` between the end and the start (a news ticker). The
+  offset is derived from the tick's clock (`now` modulo the group width plus
+  gap, times the step), so it is stateless, deterministic under
+  `GARNISH_NOW`, and survives the harness cancelling a tick. The right group
+  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour.
+  A ticker only moves as often as the harness ticks (`refreshInterval`,
+  minimum 1 s), which is the documented limit of the effect.
+- **Bars.** `util::bar` uses the fractional-eighth block glyphs only when
+  the fill glyph is `█`; any other fill (`━`/`─`, `▰`/`▱`) gives a bar with
+  no partial cell. Some terminal fonts draw `█` a hair narrower than a cell,
+  which shows as hairline gaps between filled blocks; the line-style fill is
+  the documented workaround, and a per-module `bar = "blocks" | "line"`
+  shorthand sets the two glyphs at once.
+- **Glyph sets.** Every glyph in the built-in `unicode` and `emoji` sets
+  must be one cell wide in the common terminals (COSMIC, Ghostty, Kitty,
+  WezTerm, iTerm2, VS Code) or two cells by every table. Emoji sequences
+  that need a variation selector (U+FE0F) are banned from the emoji set
+  because terminals disagree on their width; a unit test enforces it.
+- **Frames.** The `powerline` style pads its caps with one space by default.
+- **Separators.** With `fill = false`, the separator between the left and
+  right groups is the line's own `separator`, not the frame default.
+- **`sync`.** Zero counts shown by `show_zero` use the muted role; only
+  non-zero counts carry the ahead/behind colours. The fetch-age hint has a
+  space between its glyph and the age like every other module.
+
+### 4.2 Animation (target state; PLAN Phase 16)
+
+Every animation in garnish is a pure function of the tick's clock: frame
+index or scroll offset = `floor(now_secs × step) mod period`. No state is
+kept between ticks, so a cancelled tick loses nothing, every session on the
+machine animates in step, and `GARNISH_NOW` freezes everything for goldens.
+The cadence is whatever the harness ticks at (`refreshInterval`, minimum
+1 s); `step` below 1 slows an animation down (0.5 = every second tick).
+
+```toml
+animate = true            # master switch; false freezes every animation at frame 0
+
+[frame]
+fill_pattern   = "·  "    # repeated across the rule instead of fill_char
+fill_step      = 1        # cells the pattern shifts per tick
+fill_direction = "right"  # left | right
+separator_frames = [" │ ", " ┃ ", " │ ", " ╎ "]   # cycle one frame per tick
+separator_step   = 1
+
+[modules.clock.icons]
+spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]  # already a spinner; same rule
+
+[modules.branch.icons]
+branch_frames = ["", ""]  # any icon key accepts <key>_frames; the key itself is frame 0
+```
+
+- **Animated rule.** `fill_pattern` is a string of one-cell glyphs repeated
+  across the gap between the left and right groups; each tick it shifts
+  `fill_step` cells in `fill_direction`, so dots appear to travel along the
+  rule. The rule's *width* never changes (it is computed from the groups
+  as today), only which glyph lands in each cell; with `align` on, the
+  rule still starts at a fixed column. `fill_char` remains the static
+  single-glyph case and is what the pattern falls back to when `animate`
+  is off.
+- **Animated separators.** `separator_frames` cycles the separator
+  string one frame per tick; every frame must have the same cell width
+  (validation rejects mismatched widths so columns cannot jitter), and
+  `separator` stays the static fallback and frame 0. Per-line `separator`
+  overrides win over the frames.
+- **Animated glyphs.** Any icon key in `[modules.<id>.icons]` accepts a
+  `<key>_frames` list; frames must all have the icon's cell width. The
+  spinner in `clock` becomes an instance of this rule rather than a special
+  case.
+- **Scrollers.** The line ticker (§ 4.1) and text modules (§ 3.7) use the
+  same clock rule with a cell offset instead of a frame index.
+- **Cost.** Animation adds no I/O and no allocation beyond the frame
+  lookup; the tick budget (§ 8) is unchanged. Docs render with
+  `Clock::fixed()`, so the generated samples show frame 0.
+- **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
+  session) freezes everything at frame 0; the guide recommends it for
+  screen readers and for recordings.
+
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
-ids, unknown presets, bad colors, all reported with TOML paths.
+ids, unknown presets, bad colors, animation frames of unequal width, all
+reported with TOML paths; on problems the command lists them and exits 1
+without an error report.
 
 ## 5. Failure behaviour
 
 `garnish` (render) always exits 0 and always prints something:
 
-- invalid config → render with built-in defaults, append dim
-  `⚠ config: <path>:<line> <msg>`;
+- invalid config → keep every valid key and substitute the built-in default
+  for each invalid one (the resolver already does this per key), append dim
+  `⚠ config: <path>:<line> <msg>`; only a TOML syntax error falls back to
+  the built-in defaults wholesale. (Decided 2026-09-05: one bad colour used
+  to discard the whole file, frame and lines included, which made a typo
+  look like a different program. Until PLAN Phase 14 lands, any error still
+  falls back wholesale.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
 
@@ -361,8 +529,9 @@ cache dir, last worker errors, and a glyph test line.
 | `garnish` | render from stdin (default) |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics |
-| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force`; `show` prints the fully resolved config |
+| `garnish doctor` | diagnostics; the glyph test prints every icon of every set followed by a marker column so a terminal that draws a glyph wide is visible at a glance |
+| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
+| `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
@@ -415,6 +584,7 @@ per-module render cost.
 | `GARNISH_NO_SPAWN` | record intended worker spawns instead of spawning |
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
+| `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session (§ 4.2; target state) |
 
 ## 10. Documentation
 
@@ -429,6 +599,8 @@ per-module render cost.
   by the same test.
 - `README.md` is for users and links to the guide and the reference;
   `CLAUDE.md`, `PLAN.md` and `SPRITE.md` are for building the project.
+- `presets/` (§ 12) holds complete, named example configs; `docs/presets.md`
+  is generated from them.
 
 ## 11. Assumptions
 
@@ -441,3 +613,65 @@ per-module render cost.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
   small terminals.
+
+## 12. Presets gallery (target state; PLAN Phase 17)
+
+The four built-in top-level presets stay the only ones compiled into the
+binary. Everything else is a **gallery preset**: a complete config file under
+`presets/<name>.toml`, chosen by name.
+
+- **File contract.** Each file starts with a comment header the tooling
+  parses: `# name: <kebab-case>`, `# summary: <one line>`, `# columns: <N>`
+  (the terminal width the sample is rendered at), `# needs: nerd-font`
+  (optional, `nerd-font` | `emoji` | none), `# author: <github handle>`
+  (optional). The rest is an ordinary config that passes `config check`.
+- **Gallery page.** `garnish docs` renders every preset with the pinned clock
+  and the `subscription-full` payload at its declared width into
+  `docs/presets.md`: name, summary, requirements, the sample, and the file's
+  contents in a collapsed block. `tests/docs_sync.rs` keeps it in sync;
+  `tests/presets.rs` checks that every file validates, renders without `…`
+  at its declared width, and has a unique name matching its filename.
+- **Choosing one.** `garnish config init --preset <gallery name>` writes the
+  file (with the header stripped of tooling lines); `garnish presets`
+  lists names and summaries. The three built-in names keep working.
+- **Screenshots and website.** `presets/screenshots/<name>.png` are optional
+  real-terminal captures contributed with a preset (the feedback skill in
+  § 13 tells people how). A later static site is built from `docs/presets.md`
+  and those screenshots; it is out of scope for the binary, which only has
+  to keep the gallery page and the files honest.
+- **Seed set.** The configs exercised in the 2026-09-05 walkthrough
+  (`presets/` in this repository) are the first entries.
+
+## 13. Skills (target state; PLAN Phase 18)
+
+Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
+in the repository, are embedded in the binary (`include_str!`) so a
+`cargo install` has them, and are written to `~/.claude/skills/<name>/` by
+`garnish install` (or `garnish skills install`). Each skill is plain
+Markdown with frontmatter (`name`, `description`) and instructions; none of
+them needs network access from garnish itself, they drive `gh` and the
+`garnish` CLI.
+
+- **`garnish-statusline`.** Interactive config builder. Asks, with
+  recommended defaults: terminal and font (Nerd Font? decides `icons`),
+  usual terminal width (decides preset and line count), what matters most
+  (repo, model/context, usage limits, timers), colour preference (theme,
+  or match the terminal), frame taste (rounded / powerline / none), whether
+  columns should line up (`align`, `durations`), and offers a free-text
+  "describe what you want" step. It writes the config with
+  `garnish config init --force` semantics after showing a `garnish preview`
+  of it, validates with `config check`, and explains how to tweak it. It
+  never edits `settings.json` beyond what `garnish install` does.
+- **`garnish-feedback`.** Files a GitHub issue on `justanotherspy/garnish`
+  with `gh issue create` using a template: terminal application and
+  version, font, OS, `garnish --version`, the config (`garnish config
+  show`), `garnish doctor` output, the rendered line (`garnish` on the
+  current payload with `--color never`), and asks the person to take a
+  screenshot and attach it to the issue. Labels: `feedback`, plus
+  `alignment` when the report is about widths.
+- **`garnish-submit-preset`.** Reads the current config, asks for a name,
+  a one-line summary, the terminal width it was designed for, the font
+  requirement and an author handle, renders the sample, checks it with
+  `config check`, and opens a GitHub issue labelled `preset` containing the
+  file with its § 12 header and the sample, asking for a screenshot. A
+  maintainer turns accepted issues into `presets/<name>.toml` PRs.
