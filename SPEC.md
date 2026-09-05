@@ -229,7 +229,7 @@ accent = "#89b4fa"
 
 [frame]
 style = "rounded"         # none | rounded | square | double | heavy | powerline | custom
-fill = true               # rule to $COLUMNS and close with the right cap
+fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
 # custom: first middle last single fill right_first right_middle right_last separator pad
 
@@ -360,7 +360,7 @@ cache dir, last worker errors, and a glyph test line.
 |---|---|
 | `garnish` | render from stdin (default) |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
-| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent; warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
+| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force`; `show` prints the fully resolved config |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
@@ -400,7 +400,7 @@ per-module render cost.
   completes; 32 concurrent ticks → exactly one worker; GC bounds.
 - **Config matrix**: every preset, one-module-per-line, all-on-one-line, every
   frame style, custom frame, each module in each preset × fixtures → no panic,
-  correct line count, width ≤ COLUMNS; golden files under `tests/golden/`
+  correct line count, width ≤ `COLUMNS − 4` (§ 2.1); golden files under `tests/golden/`
   (`UPDATE_GOLDEN=1` regenerates).
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.

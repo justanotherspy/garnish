@@ -219,7 +219,8 @@ chosen crate.
 
 stdin JSON → `Payload` → `Config` (TOML + presets) → for each `[[line]]`, each
 module id renders `Vec<Segment>` from the payload or from its cache file → the
-frame joins left/right groups and fills to `$COLUMNS` → stdout. A cached
+frame joins left/right groups and fills to `$COLUMNS − 4 − padding` (the
+width of Claude Code's box, `Config::width`) → stdout. A cached
 module past its TTL spawns a detached `garnish refresh` worker (own process
 group, lock file) and keeps showing the last value; only once it is
 `stale_after` TTLs overdue does it render dimmed with `⟳`. **No child process
@@ -271,9 +272,14 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   (which wraps below when the status line is wide); the status line sits in
   a `<Box paddingX={statusLine.padding}>` inside that. `Config::width`
   subtracts the 4 (`HARNESS_PADDING`), and the top-level `padding` key
-  covers the rest. To re-verify after a Claude Code upgrade: `strings` the
-  binary, find `paddingX:` next to `gap:2` in the status line component and
-  `var Vne=2,Gne=1` (footer padding and column gap) near `FooterHintLine`.
+  covers the rest. The `COLUMNS` the script receives and the `columns` that
+  footer box is laid out with are the same number: the hook runner copies
+  `process.stdout.columns` into the env, and the Ink root's terminal size
+  comes from `options.stdout.columns` (its `stdoutSize()`), so the 4-cell
+  arithmetic holds without any further conversion. To re-verify after a
+  Claude Code upgrade: `strings` the binary, find `paddingX:` next to
+  `gap:2` in the status line component and `var Vne=2,Gne=1` (footer
+  padding and column gap) near `FooterHintLine`.
 - Nerd icons must come from the BMP private-use area (U+E000–U+F8FF);
   the Material Design range at U+F0000+ only exists in Nerd Fonts v3 and
   renders as a box elsewhere.

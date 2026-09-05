@@ -12,7 +12,7 @@ An invalid file never blanks the status line: garnish renders the defaults and a
 | `icons` | `nerd` \| `unicode` \| `emoji` \| `ascii` | `nerd` | Glyph set. `nerd` needs a Nerd Font. |
 | `theme` | `garnish` \| `catppuccin-mocha` \| `nord` \| `dracula` \| `tokyonight` \| `mono` | `garnish` | Color palette (see below). |
 | `color` | `auto` \| `always` \| `never` \| `256` \| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set. |
-| `truncate` | bool | `true` | Truncate the left group when a line overflows `$COLUMNS`; the right group is never cut. |
+| `truncate` | bool | `true` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is never cut. |
 | `stale_style` | `dim` \| `hide` \| `plain` | `dim` | How overdue cached values are shown. |
 | `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |
 | `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |
@@ -55,7 +55,7 @@ Every module color defaults to a role; override a role here to restyle every mod
 | key | default | meaning |
 |---|---|---|
 | `style` | `rounded` (`none` for the `minimal` preset) | `none` \| `rounded` \| `square` \| `double` \| `heavy` \| `powerline` \| `custom` |
-| `fill` | `true` | Extend the rule between the left and right groups to `$COLUMNS` and close with the right cap. With `false`, lines are left-packed. |
+| `fill` | `true` | Extend the rule between the left and right groups to the full width and close with the right cap. With `false`, lines are left-packed. |
 | `separator` | style-dependent | Default separator between modules. |
 | `first` `middle` `last` `single` | style-dependent | Line prefixes (`single` when there is one line). |
 | `right_first` `right_middle` `right_last` `right_single` | style-dependent | Right caps. |
@@ -144,11 +144,13 @@ Module preset `default`. Lines:
 - `limit5h limit7d spend cost` ⟶ lines
 - `session api cache` ⟶ clock
 
+At 80 columns, unicode icons:
+
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────────────────────────── ♯ garnish-dev ─╮
-├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────────────────────────┤
-├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────────────────────────── Δ +156 −23 ─┤
-╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────────────────────────── ⠋ 16:00:00 ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────── ♯ garnish-dev ─╮
+├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
+├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────── ⠋ 16:00:00 ─╯
 ```
 
 ### `minimal`
@@ -157,8 +159,10 @@ Module preset `minimal`. Lines:
 
 - `path branch context limit5h cost` ⟶ clock
 
+At 80 columns, unicode icons:
+
 ```text
-~/garnish  42%  24%                                                                        16:00
+~/garnish  42%  24%                                                    16:00
 ```
 
 ### `full`
@@ -170,11 +174,13 @@ Module preset `full`. Lines:
 - `limit5h limit7d spend cost` ⟶ lines
 - `session api cache` ⟶ clock
 
+At 120 columns, unicode icons:
+
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────── ♯ garnish-dev sess-000 ─╮
-├─ ◆ Opus ⋯ claude-opus-5 │ ◔ ▁▃▅▇█ high │ ◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼… ──┤
-├─ ⧗ █▉░░░░░░ 24% ⏱ 2h13m │ ▦ ███▎░░░░ 41% ⏱ 3d4h ───────────────────────── Δ +156 −23 (+133) ─┤
-╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ● 47m 2 mis… ─ ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────────────────────────── ♯ garnish-dev sess-000 ─╮
+├─ ◆ Opus ⋯ claude-opus-5 │ ◔ ▁▃▅▇█ high │ ◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼ │ ✎ default ───────────┤
+├─ ⧗ █▉░░░░░░ 24% ⏱ 2h13m │ ▦ ███▎░░░░ 41% ⏱ 3d4h ───────────────────────────────────────────── Δ +156 −23 (+133) ─┤
+╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ● 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
 ### `compact`
@@ -184,9 +190,11 @@ Module preset `default`. Lines:
 - `path branch sync pr` ⟶ clock
 - `model effort context limit5h cost` ⟶ cache
 
+At 90 columns, unicode icons:
+
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ──────────────────────────────────────────────── ⠋ 16:00:00 ─╮
-╰─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% │ ⧗ 24% ⏱ 2h13m ───────────── ⛁ 91% 1h ● 47m ─╯
+╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ────────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% │ ⧗ 24% ⏱ 2h13m ─── ⛁ 91% 1h ● 47m ─╯
 ```
 
 ## `[modules.<id>]`
@@ -197,7 +205,7 @@ Every module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`
 
 | variable | effect |
 |---|---|
-| `COLUMNS` | Width of the status line (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. |
+| `COLUMNS` | Terminal width (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. The lines are rendered 4 cells narrower, plus `padding`: the width of Claude Code's status line box. |
 | `NO_COLOR` | Disables escape codes under `color = "auto"`. |
 | `GARNISH_CONFIG` | Config file path. |
 | `GARNISH_CACHE_DIR` | Cache root (default `$XDG_RUNTIME_DIR/garnish`, `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish`). |

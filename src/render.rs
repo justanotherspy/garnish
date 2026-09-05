@@ -355,7 +355,7 @@ mod tests {
             render_plain(&fixture("api-key"), &loaded("preset = \"default\"\n[frame\nx"), Some(40));
         let last = out.lines().last().unwrap();
         assert!(last.starts_with("⚠ config: config:2 "), "{last}");
-        assert!(display_width(last) <= 40, "{last}");
+        assert!(display_width(last) <= 36, "COLUMNS=40 leaves 36 cells: {last}");
         assert!(last.ends_with('…'), "{last}");
         let out = render_plain(
             &fixture("api-key"),
@@ -489,8 +489,9 @@ mod tests {
     fn ascii_icons_and_narrow_width_never_overflow() {
         let out =
             render_plain(&fixture("subscription-full"), &loaded("icons = \"ascii\""), Some(40));
+        // COLUMNS=40 leaves 36 cells inside Claude Code's box.
         for l in out.lines() {
-            assert!(display_width(l) <= 40, "{l}");
+            assert!(display_width(l) <= 36, "{l}");
             assert!(l.is_ascii() || l.contains('─') || l.contains('╭'), "{l}");
         }
     }
@@ -508,8 +509,9 @@ mod tests {
                     let text = format!("preset = \"{preset}\"\nicons = \"{icons}\"");
                     let out = render_plain(&payload, &loaded(&text), Some(120));
                     assert!(!out.trim().is_empty(), "{path:?} {preset} {icons}");
+                    // COLUMNS=120 leaves 116 cells inside Claude Code's box.
                     for l in out.lines() {
-                        assert!(display_width(l) <= 120, "{path:?} {preset} {icons}: {l}");
+                        assert!(display_width(l) <= 116, "{path:?} {preset} {icons}: {l}");
                     }
                 }
             }
