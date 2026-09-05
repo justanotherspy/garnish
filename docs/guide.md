@@ -138,8 +138,15 @@ accent = "bright-blue"   # restyle every module that uses the role
 
 - **Boxes or missing glyphs** → your font lacks Nerd Font icons; set
   `icons = "unicode"`.
-- **Misaligned right edge** → the terminal renders some emoji one cell wide;
-  use `icons = "unicode"` or override the offending glyph.
+- **Misaligned right edge on some lines** → the terminal draws a glyph wider
+  or narrower than garnish counts. The built-in `unicode` and `emoji` sets
+  avoid the characters terminals disagree on (East Asian Ambiguous widths,
+  the Geometric Shapes block, emoji that need a variation selector), but an
+  override under `[modules.<id>.icons]` can bring one back. `garnish doctor`
+  ends with a glyph grid: every icon is followed by `|` and the cell count
+  garnish uses, in fixed four-cell fields, so the `|` of a glyph your
+  terminal draws differently is pushed out of its column. Override that glyph
+  and paste the grid into an issue.
 - **`⟳` next to a value** → the cached value has not been refreshed for
   `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
   refresh failed. `garnish doctor` shows the error.

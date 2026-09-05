@@ -3,6 +3,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::ansi::display_width;
 use crate::cache::{Cache, Entry, Status};
 use crate::config;
 use crate::icons::IconSet;
@@ -169,11 +170,48 @@ fn environment_section(o: &mut String) {
     }
     let _ = writeln!(o);
 
-    let _ =
-        writeln!(o, "glyph test (each line should align; boxes mean your font lacks the glyphs)");
+    let _ = writeln!(
+        o,
+        "glyph test: every `|` should sit in a column with the ones above and below.\n\
+         A `|` pushed right marks a glyph your terminal draws wider than garnish counts\n\
+         (the number after it); a box means your font lacks the glyph. Override the\n\
+         glyph under [modules.<id>.icons] or paste this block into a feedback issue."
+    );
     for set in IconSet::ALL {
-        let _ = writeln!(o, "  {:<8} {}", set.name(), crate::docs::glyph_test_line(set));
+        for row in glyph_rows(set) {
+            let _ = writeln!(o, "{row}");
+        }
     }
+}
+
+/// The glyph-test rows for one icon set, one per module.
+///
+/// Each single-character icon is padded to two cells and followed by `|` and
+/// garnish's cell count, so every field is four cells wide and a glyph the
+/// terminal draws wider than counted pushes its `|` out of the column.
+/// Multi-character icons (spinner frames, the effort scale, ASCII words) are
+/// not single cells and are left out.
+#[must_use]
+pub fn glyph_rows(set: IconSet) -> Vec<String> {
+    SCHEMAS
+        .iter()
+        .filter_map(|schema| {
+            let fields: Vec<String> = schema
+                .icons
+                .iter()
+                .filter_map(|icon| {
+                    let g = icon.glyph.get(set);
+                    let cells = display_width(g);
+                    let single = g.chars().filter(|c| *c != '\u{fe0f}').count() == 1;
+                    (single && (1..=2).contains(&cells)).then(|| {
+                        format!("{g}{}|{cells}", " ".repeat(2_usize.saturating_sub(cells)))
+                    })
+                })
+                .collect();
+            (!fields.is_empty())
+                .then(|| format!("  {:<8} {:<13} {}", set.name(), schema.id, fields.join(" ")))
+        })
+        .collect()
 }
 
 fn git_version() -> String {
