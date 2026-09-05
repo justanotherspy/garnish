@@ -1,5 +1,5 @@
 //! End-to-end tests of the user-facing subcommands: `install`, `doctor`,
-//! `modules`, and `config init|check|show|path`.
+//! `modules`, `presets`, and `config init|check|show|path`.
 
 // Integration tests are not `#[cfg(test)]` modules, so the clippy.toml test
 // allowances do not apply; panicking on setup failure is the right behaviour here.
@@ -154,4 +154,5 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     assert!(ok && out.contains(": ok"), "{out}");
     let (_, err, ok) = run(&["config", "init", "--force", "--preset", "nope"], home, &[]);
     assert!(!ok && err.contains("gallery name") && err.contains("minimal-clean"), "{err}");
+    assert!(!err.contains("Location:"), "a typo is one line, not a report: {err}");
 }

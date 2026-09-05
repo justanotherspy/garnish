@@ -467,27 +467,29 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         ConfigAction::Init { force, preset } => {
             // A built-in name gets the annotated default file for that preset;
             // a gallery name gets the preset's file without its tooling header.
-            let text = match TopPreset::parse(preset) {
-                Some(top) => {
-                    let (cfg, _) = config::parse_with(
-                        "",
-                        &SCHEMAS,
-                        &Overlay { preset: Some(top), ..Default::default() },
-                    );
-                    crate::docs::config_toml(&cfg, true)
-                }
-                None => crate::gallery::find(preset)
-                    .map(|p| crate::gallery::body(p.source))
-                    .ok_or_else(|| {
-                        eyre!(
+            let text = if let Some(top) = TopPreset::parse(preset) {
+                let (cfg, _) = config::parse_with(
+                    "",
+                    &SCHEMAS,
+                    &Overlay { preset: Some(top), ..Default::default() },
+                );
+                crate::docs::config_toml(&cfg, true)
+            } else {
+                {
+                    let Some(p) = crate::gallery::find(preset) else {
+                        // A typo, not a fault: one line, no report (bug 7).
+                        eprintln!(
                             "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
                             crate::gallery::PRESETS
                                 .iter()
                                 .map(|p| p.name)
                                 .collect::<Vec<_>>()
                                 .join(", ")
-                        )
-                    })?,
+                        );
+                        return Err(Quiet.into());
+                    };
+                    crate::gallery::body(p.source)
+                }
             };
             let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
             if target.exists() && !force {
