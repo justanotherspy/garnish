@@ -454,7 +454,7 @@ separator_step   = 1
 spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]  # already a spinner; same rule
 
 [modules.branch.icons]
-branch_frames = ["", ""]  # any icon key accepts <key>_frames; the key itself is frame 0
+branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
 ```
 
 - **Animated rule.** `fill_pattern` is a string of one-cell glyphs repeated
@@ -474,9 +474,13 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames; the key itself is
   `animate` off the frames sit on frame 0. Per-line `separator` overrides
   win over the frames.
 - **Animated glyphs.** Any icon key in `[modules.<id>.icons]` accepts a
-  `<key>_frames` list; frames must all have the icon's cell width. The
-  spinner in `clock` becomes an instance of this rule rather than a special
-  case.
+  `<key>_frames` list of plain-text frames that all share one width
+  (validation rejects a mismatch); frame `floor(now) mod n` replaces the
+  icon while animations run and frame 0 when they are off, so the static
+  `<key>` is what shows when no frames are configured.
+  The `clock` spinner's built-in glyph is a string of one-character frames
+  cycled the same way; `spinner_frames` is the general form and takes frames
+  of any one width.
 - **Scrollers.** The line ticker (§ 4.1) and text modules (§ 3.7) use the
   same clock rule with a cell offset instead of a frame index.
 - **Cost.** Animation adds no I/O; the pattern and separator frames are a

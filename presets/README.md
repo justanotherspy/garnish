@@ -32,6 +32,7 @@ garnish preview tests/fixtures/payloads/subscription-full.json --width 120 \
 | `single-line-full` | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
 | `tall-eight-lines` | one module per row, eight rows, square frame | 100 | nerd-font |
 | `motd-ticker` | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
+| `animated-dots` | dots travelling along the rule, a pulsing separator and a cycling model icon | 100 | nerd-font |
 
 Contributing one: the `garnish-submit-preset` skill (SPEC § 13) will do this
 interactively; until it exists, open an issue with the file, its header and a

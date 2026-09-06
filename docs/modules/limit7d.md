@@ -55,6 +55,9 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |
 
+Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
+
+
 ## Colors
 
 `[modules.limit7d.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).

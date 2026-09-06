@@ -66,7 +66,7 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     let _ = writeln!(out, "ticker_gap = {}", toml_string(&cfg.ticker_gap));
     c(
         out,
-        "Master switch for every animation (spinner, scrolling, ticker); false freezes them at frame 0.",
+        "Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.",
     );
     let _ = writeln!(out, "animate = {}", cfg.animate);
     c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
@@ -276,11 +276,20 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
         }
         if !schema.icons.is_empty() {
             let _ = writeln!(out, "[modules.{}.icons]", schema.id);
+            if annotated {
+                let _ = writeln!(
+                    out,
+                    "# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick."
+                );
+            }
             for icon in &schema.icons {
                 if annotated {
                     let _ = writeln!(out, "# {} — {}", icon.key, icon.doc);
                 }
                 let _ = writeln!(out, "{} = {}", icon.key, toml_string(m.icon(icon.key)));
+                if let Some(frames) = m.all_icon_frames().get(icon.key) {
+                    let _ = writeln!(out, "{}_frames = {}", icon.key, toml_list(frames));
+                }
             }
         }
         if !schema.colors.is_empty() {
@@ -571,6 +580,10 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
                 icon.doc
             );
         }
+        let _ = writeln!(
+            o,
+            "\nAny icon key also accepts `<key>_frames = [\"…\", \"…\"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).\n"
+        );
     }
     if !schema.colors.is_empty() {
         let _ = writeln!(
@@ -806,7 +819,7 @@ fn environment_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, ticker, patterned rule) at frame 0 for the session; for screen readers and recordings. |"
+        "| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames) at frame 0 for the session; for screen readers and recordings. |"
     );
     let _ = writeln!(
         o,
@@ -964,6 +977,21 @@ mod tests {
     /// `config show` of a config with text modules parses back to the same
     /// `Config`: names are bare keys and the `color` shorthand is written as
     /// `colors.text`.
+    /// Every animation key survives `config show`: frames, steps, direction
+    /// and pattern come back as the same `Config`.
+    #[test]
+    fn resolved_config_round_trips_animation_keys() {
+        let text = "animate = false\n[frame]\nfill_pattern = \"·  \"\nfill_step = 0.5\nfill_direction = \"left\"\nseparator_frames = [\" │ \", \" ┃ \"]\nseparator_step = 2\n[modules.model.icons]\nmodel_frames = [\"◐\", \"◓\"]\n[modules.clock.icons]\nspinner_frames = [\"ab\", \"cd\"]\n";
+        let (cfg, errs) = config::parse(text, &SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        let shown = config_toml(&cfg, false);
+        assert!(shown.contains("model_frames = [\"◐\", \"◓\"]"), "{shown}");
+        let (again, errs) = config::parse(&shown, &SCHEMAS);
+        assert_eq!(errs, Vec::new(), "{shown}");
+        assert_eq!(again, cfg);
+        assert_eq!(config_toml(&again, false), shown, "show is idempotent");
+    }
+
     #[test]
     fn resolved_config_round_trips_text_modules() {
         let text = "[[line]]\nmodules = [\"path\", \"text.motd\"]\nright = [\"text.tag\"]\n[modules.text.motd]\ntext = \"ship it\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\nstep = 0.5\nlabel = \"motd\"\n[modules.text.tag]\ntext = \"v0.2\"\ncolor = \"muted\"\njustify = \"right\"\n";

@@ -48,6 +48,9 @@ Time spent waiting for API responses.
 |---|---|---|---|---|---|
 | `api` | `U+F0EC` | `⇄` | `📡` | `api:` | API icon. |
 
+Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
+
+
 ## Colors
 
 `[modules.api.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).

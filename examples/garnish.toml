@@ -28,7 +28,7 @@ overflow = "truncate"
 # Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start
 ticker_step = 1
 ticker_gap = "   "
-# Master switch for every animation (spinner, scrolling, ticker); false freezes them at frame 0.
+# Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.
 animate = true
 # Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)
 durations = "compact"
@@ -100,6 +100,7 @@ hide_when_empty = true
 # show_added (bool) — Show the count of added directories. [minimal=false default=false full=true]
 # show_added = false
 [modules.path.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # folder — Folder icon.
 folder = ""
 # added — Added-directories glyph.
@@ -135,6 +136,7 @@ hide_when_empty = true
 # max_length (integer) — Truncate longer names (0 = no limit). [minimal=40 default=40 full=40]
 # max_length = 40
 [modules.branch.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # branch — Branch icon.
 branch = ""
 # detached — Detached HEAD icon.
@@ -174,6 +176,7 @@ hide_when_empty = true
 # fetch_interval (integer) — Run `git fetch` in the background every N seconds (0 = never). [minimal=0 default=0 full=0]
 # fetch_interval = 0
 [modules.sync.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # ahead — Ahead glyph.
 ahead = "⇡"
 # behind — Behind glyph.
@@ -209,6 +212,7 @@ hide_when_empty = true
 # show_original (bool) — Show `original → branch`. [minimal=false default=false full=true]
 # show_original = false
 [modules.worktree.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # worktree — Worktree icon.
 worktree = ""
 # arrow — Original → branch arrow.
@@ -242,6 +246,7 @@ hide_when_empty = true
 # link (bool) — Make the number a clickable link. [minimal=true default=true full=true]
 # link = true
 [modules.pr.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # pr — Pull request icon.
 pr = ""
 # mr — Merge request icon.
@@ -289,6 +294,7 @@ hide_when_empty = true
 # show_thinking (bool) — Show a glyph when extended thinking is enabled. [minimal=false default=false full=true]
 # show_thinking = false
 [modules.model.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # model — Model icon.
 model = ""
 # fast — Fast mode.
@@ -324,6 +330,7 @@ hide_when_empty = true
 # show_icon (bool) — Show the effort icon. [minimal=false default=true full=true]
 # show_icon = true
 [modules.effort.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # effort — Effort icon.
 effort = ""
 # scale — Five glyphs, one per level, lowest first.
@@ -375,6 +382,7 @@ hide_when_empty = true
 # warn_at (number) — Extra warning badge at or above this percentage; 0 disables. [minimal=0 default=0 full=0]
 # warn_at = 0
 [modules.context.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # context — Context icon.
 context = ""
 # fill — Filled cell.
@@ -422,6 +430,7 @@ hide_when_empty = true
 # show_icon (bool) — Show the style icon. [minimal=false default=true full=true]
 # show_icon = true
 [modules.style.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # style — Style icon.
 style = ""
 [modules.style.colors]
@@ -455,6 +464,7 @@ hide_when_empty = true
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.limit5h.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
 # reset — Countdown glyph.
@@ -496,6 +506,7 @@ hide_when_empty = true
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.limit7d.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
 # reset — Countdown glyph.
@@ -537,6 +548,7 @@ hide_when_empty = true
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.spend.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
 # reset — Countdown glyph.
@@ -574,6 +586,7 @@ hide_when_empty = true
 # show_lines (bool) — Append lines added/removed. [minimal=false default=false full=true]
 # show_lines = false
 [modules.cost.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # cost — Cost icon.
 cost = ""
 # added — Lines-added glyph.
@@ -607,6 +620,7 @@ hide_when_empty = true
 # show_start (bool) — Append the start time (HH:MM). [minimal=false default=false full=true]
 # show_start = false
 [modules.session.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # session — Session icon.
 session = ""
 [modules.session.colors]
@@ -634,6 +648,7 @@ hide_when_empty = true
 # show_share (bool) — Append the share of the session. [minimal=false default=false full=true]
 # show_share = false
 [modules.api.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # api — API icon.
 api = ""
 [modules.api.colors]
@@ -667,6 +682,7 @@ hide_when_empty = true
 # show_writes (bool) — Show tokens written to the cache. [minimal=false default=false full=true]
 # show_writes = false
 [modules.cache.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # cache — Cache icon.
 cache = ""
 # warm — Warm glyph.
@@ -712,7 +728,8 @@ hide_when_empty = true
 # tz (string) — IANA time zone; empty means the system zone. [minimal="" default="" full=""]
 # tz = ""
 [modules.clock.icons]
-# spinner — Spinner frames, one character each.
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
+# spinner — Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width.
 spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 [modules.clock.colors]
 # spinner — Spinner.
@@ -741,6 +758,7 @@ hide_when_empty = true
 # max_length (integer) — Truncate longer names (0 = no limit). [minimal=32 default=32 full=32]
 # max_length = 32
 [modules.session_name.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # name — Name icon.
 name = ""
 [modules.session_name.colors]
@@ -768,6 +786,7 @@ hide_when_empty = true
 # show_icon (bool) — Show the vim icon. [minimal=false default=false full=true]
 # show_icon = false
 [modules.vim.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # vim — Vim icon.
 vim = ""
 [modules.vim.colors]
@@ -797,6 +816,7 @@ hide_when_empty = true
 # show_thinking (bool) — Show the thinking glyph. [minimal=false default=false full=true]
 # show_thinking = false
 [modules.agent.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # agent — Agent icon.
 agent = ""
 # thinking — Thinking glyph.
@@ -828,6 +848,7 @@ hide_when_empty = true
 # hide_zero (bool) — Hide when nothing changed. [minimal=true default=true full=true]
 # hide_zero = true
 [modules.lines.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # lines — Diff icon.
 lines = ""
 # added — Added glyph.

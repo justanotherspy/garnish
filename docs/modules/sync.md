@@ -54,6 +54,9 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 | `stale` | `U+F017` | `↻` | `⌛` | `?` | Stale-fetch glyph. |
 | `no_upstream` | `U+F127` | `⊘` | `🚫` | `-` | No-upstream glyph. |
 
+Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
+
+
 ## Colors
 
 `[modules.sync.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).

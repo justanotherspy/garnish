@@ -301,6 +301,9 @@ pub struct ModuleCfg {
     pub hide_when_empty: bool,
     opts: BTreeMap<&'static str, Value>,
     icons: BTreeMap<&'static str, String>,
+    /// Frames an icon cycles through when animations run (`<key>_frames`);
+    /// absent keys keep their static glyph.
+    icon_frames: BTreeMap<&'static str, Vec<String>>,
     colors: BTreeMap<&'static str, Color>,
     schema: ModuleSchema,
 }
@@ -379,9 +382,45 @@ impl ModuleCfg {
             hide_when_empty: overrides.hide_when_empty.unwrap_or(true),
             opts,
             icons,
+            icon_frames: schema
+                .icons
+                .iter()
+                .filter_map(|i| overrides.icon_frames.get(i.key).map(|f| (i.key, f.clone())))
+                .collect(),
             colors,
             schema: schema.clone(),
         }
+    }
+
+    /// The animation frames of an icon (`<key>_frames`); empty when static.
+    #[must_use]
+    pub fn icon_frames(&self, key: &str) -> &[String] {
+        self.icon_frames.get(key).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every icon that has animation frames, for `config show` and docs.
+    #[must_use]
+    pub const fn all_icon_frames(&self) -> &BTreeMap<&'static str, Vec<String>> {
+        &self.icon_frames
+    }
+
+    /// This config as seen at one tick: every icon that has frames shows
+    /// `frames[frame_of(frames.len())]` (SPEC § 4.2). Borrowed when nothing
+    /// animates, so the common case costs nothing.
+    #[must_use]
+    pub fn animated(&self, frame_of: impl Fn(usize) -> usize) -> std::borrow::Cow<'_, Self> {
+        if self.icon_frames.is_empty() {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut view = self.clone();
+        for (key, frames) in &self.icon_frames {
+            if let Some(frame) = frames.get(frame_of(frames.len()))
+                && let Some(slot) = view.icons.get_mut(key)
+            {
+                frame.clone_into(slot);
+            }
+        }
+        std::borrow::Cow::Owned(view)
     }
 
     /// The schema this config was resolved from.
@@ -512,6 +551,8 @@ pub struct Overrides {
     pub icons: BTreeMap<String, String>,
     /// Color overrides (unresolved specs).
     pub colors: BTreeMap<String, String>,
+    /// `<key>_frames`: animation frames for an icon key (SPEC § 4.2).
+    pub icon_frames: BTreeMap<String, Vec<String>>,
 }
 
 #[cfg(test)]
@@ -564,6 +605,16 @@ mod tests {
         assert!(cfg.bool("show"));
         assert_eq!(cfg.icon("leaf"), "🌿");
         assert_eq!(cfg.refresh, 0);
+        // Frames: the animated view swaps the glyph per tick; borrowed when static.
+        assert!(matches!(cfg.animated(|_| 1), std::borrow::Cow::Borrowed(_)));
+        o.icon_frames.insert("leaf".into(), vec!["a".into(), "b".into(), "c".into()]);
+        o.icon_frames.insert("ghost".into(), vec!["x".into()]);
+        let cfg = ModuleCfg::resolve(&s, Preset::Full, IconSet::Nerd, &theme, &o);
+        assert_eq!(cfg.icon_frames("leaf"), ["a", "b", "c"]);
+        assert!(cfg.icon_frames("ghost").is_empty(), "unknown keys are dropped");
+        assert_eq!(cfg.animated(|n| 2 % n).icon("leaf"), "c");
+        assert_eq!(cfg.animated(|_| 0).icon("leaf"), "a");
+        assert_eq!(cfg.icon("leaf"), "🌿", "the static glyph is untouched");
         assert_eq!(cfg.color("main"), Color::Rgb(1, 2, 3));
         assert_eq!(cfg.color_list("bands", &theme).len(), 2);
         assert_eq!(cfg.size("width"), 7);

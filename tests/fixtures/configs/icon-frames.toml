@@ -1,0 +1,17 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601, 1738425602
+# icons: unicode
+# `<key>_frames` on any icon: the model icon cycles four moon phases and the
+# clock's spinner three two-cell frames, one frame per second (SPEC § 4.2
+# animated glyphs). With `animate = false` both would stay on their first frame.
+
+[[line]]
+modules = ["model", "session"]
+right   = ["clock"]
+
+[modules.model.icons]
+model_frames = ["◐", "◓", "◑", "◒"]
+
+[modules.clock.icons]
+spinner_frames = ["ab", "cd", "ef"]
