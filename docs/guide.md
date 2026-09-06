@@ -172,6 +172,17 @@ icon = "#ff8800"         # …or a literal color
 accent = "bright-blue"   # restyle every module that uses the role
 ```
 
+### Animation
+
+Everything that moves in garnish (the clock spinner, a scrolling text
+module, the line ticker, the animated frame parts) is a pure function of the
+clock: frame = `floor(now × step) mod period`. Nothing is stored between
+ticks, every session on the machine animates in step, and the cadence is
+whatever Claude Code ticks at (`refreshInterval`, at least 1 s); a `step`
+below 1 slows an animation down (0.5 = every second tick). `animate = false`
+in the config, or `GARNISH_ANIMATE=0` in the environment, freezes every
+animation at frame 0; use it for screen readers and recordings.
+
 ## 7. Troubleshooting
 
 - **Boxes or missing glyphs** → your font lacks Nerd Font icons; set

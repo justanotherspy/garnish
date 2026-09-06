@@ -165,7 +165,7 @@ pub fn render_lines_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
-        animate: clock.animate,
+        animate: clock.animate && config.animate,
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
@@ -179,7 +179,7 @@ pub fn render_lines_at(
             step: config.ticker_step,
             gap: config.ticker_gap.clone(),
             now: clock.now,
-            animate: clock.animate,
+            animate: clock.animate && config.animate,
         }),
     };
     // Every line renders before any is composed: aligned columns need the

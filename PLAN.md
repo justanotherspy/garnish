@@ -176,7 +176,7 @@ README/guide, adversarial review, tests for every bug found.
 
 ## Phase 16 — Animation framework (SPEC § 4.2)
 
-- [ ] `animate` top-level key and `GARNISH_ANIMATE=0`; both freeze every animation at frame 0 (`time::frame` returns 0)
+- [x] `animate` top-level key (default `true`) and `GARNISH_ANIMATE=0`; the effective switch is `clock.animate && config.animate`, set once on `Ctx` and on the ticker, so every animation freezes at frame 0 (`Ctx::frame` returns 0); config golden `animate-config-off` (spinner, ticker and a text module at two instants); guide § 6 "Animation"; key row, `config init` line, SPEC § 4 block
 - [ ] `[frame] fill_pattern`, `fill_step`, `fill_direction`: the rule is painted from the pattern at the clock offset; its width is still computed from the groups; with `animate = false` the pattern's frame 0 is used; `fill_char` stays the static case
 - [ ] `[frame] separator_frames`, `separator_step`: cycle per tick; validation rejects frames of unequal cell width; per-line `separator` overrides win
 - [ ] `<key>_frames` on any `[modules.<id>.icons]` key with equal-width validation; the `clock` spinner re-expressed as `spinner_frames` (default list unchanged, goldens byte-identical at frame 0)

@@ -287,6 +287,7 @@ hide_empty_lines = true   # drop a line whose modules all rendered nothing; `mod
 overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider than the box (§ 4.1)
 ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
 ticker_gap = "   "        # text between the end and the wrapped-around start
+animate = true            # master switch for every animation; false freezes them at frame 0 (§ 4.2)
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4

@@ -172,6 +172,9 @@ pub const HARNESS_PADDING: usize = 4;
 pub const MIN_WIDTH: usize = 10;
 
 /// The fully resolved configuration.
+// Four independent switches that mirror config keys one to one; a bitset
+// would only obscure the mapping.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// Top-level preset.
@@ -207,6 +210,9 @@ pub struct Config {
     pub ticker_step: f64,
     /// Text between the end of a scrolled group and its wrapped-around start.
     pub ticker_gap: String,
+    /// Master switch for every animation; `false` freezes them at frame 0
+    /// (SPEC § 4.2). `GARNISH_ANIMATE=0` does the same for a session.
+    pub animate: bool,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
     /// Frame.
@@ -268,6 +274,7 @@ struct RawConfig {
     overflow: Option<Overflow>,
     ticker_step: Option<f64>,
     ticker_gap: Option<String>,
+    animate: Option<bool>,
     durations: Option<DurationStyle>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
@@ -275,7 +282,7 @@ struct RawConfig {
     modules: BTreeMap<String, toml::Table>,
 }
 
-const TOP_KEYS: [&str; 19] = [
+const TOP_KEYS: [&str; 20] = [
     "preset",
     "icons",
     "theme",
@@ -290,6 +297,7 @@ const TOP_KEYS: [&str; 19] = [
     "overflow",
     "ticker_step",
     "ticker_gap",
+    "animate",
     "durations",
     "colors",
     "frame",
@@ -330,6 +338,7 @@ impl RawConfig {
                 "overflow" => raw.overflow = enum_field(&key, value, OVERFLOWS, errors),
                 "ticker_step" => raw.ticker_step = field(&key, value, errors),
                 "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
+                "animate" => raw.animate = field(&key, value, errors),
                 "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
                 "colors" => match value {
                     toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
@@ -773,28 +782,8 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         }
     }
     // Preset lines are valid by construction; only explicit lines need checking.
-    for (i, line) in lines.iter().enumerate().filter(|_| !raw.line.is_empty()) {
-        for (field, ids) in [("modules", &line.left), ("right", &line.right)] {
-            for (j, id) in ids.iter().enumerate() {
-                let path = format!("line[{i}].{field}[{j}]");
-                if let Some(name) = id.strip_prefix(crate::modules::text::PREFIX) {
-                    if !texts.contains_key(name) {
-                        errors.push(problem(
-                            &path,
-                            &format!("unknown text module {name:?}; define [modules.text.{name}]"),
-                        ));
-                    }
-                } else if !schemas.iter().any(|s| s.id == id) {
-                    errors.push(problem(
-                        &path,
-                        &format!(
-                            "unknown module {id:?}; expected one of {}, or text.<name>",
-                            schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
-                        ),
-                    ));
-                }
-            }
-        }
+    if !raw.line.is_empty() {
+        check_line_ids(&lines, schemas, &texts, errors);
     }
 
     let stale_after = resolve_stale_after(raw.stale_after, errors);
@@ -818,11 +807,44 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         ticker_gap: crate::ansi::plain_text(
             raw.ticker_gap.as_deref().unwrap_or(DEFAULT_TICKER_GAP),
         ),
+        animate: raw.animate.unwrap_or(true),
         durations: raw.durations.unwrap_or_default(),
         frame,
         lines,
         modules,
         texts,
+    }
+}
+
+/// Every id on a `[[line]]` is a registered module or a defined `text.<name>`.
+fn check_line_ids(
+    lines: &[LineCfg],
+    schemas: &[ModuleSchema],
+    texts: &BTreeMap<String, ModuleCfg>,
+    errors: &mut Vec<ConfigError>,
+) {
+    for (i, line) in lines.iter().enumerate() {
+        for (field, ids) in [("modules", &line.left), ("right", &line.right)] {
+            for (j, id) in ids.iter().enumerate() {
+                let path = format!("line[{i}].{field}[{j}]");
+                if let Some(name) = id.strip_prefix(crate::modules::text::PREFIX) {
+                    if !texts.contains_key(name) {
+                        errors.push(problem(
+                            &path,
+                            &format!("unknown text module {name:?}; define [modules.text.{name}]"),
+                        ));
+                    }
+                } else if !schemas.iter().any(|s| s.id == id) {
+                    errors.push(problem(
+                        &path,
+                        &format!(
+                            "unknown module {id:?}; expected one of {}, or text.<name>",
+                            schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
+                        ),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -1431,7 +1453,7 @@ x = 1
     /// against drifting from the match arms).
     #[test]
     fn every_listed_key_is_accepted() {
-        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
     }
