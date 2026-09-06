@@ -568,23 +568,8 @@ impl Module for SyncModule {
         let counts = lookup.entry.as_ref().and_then(|e| {
             Some((e.get("ahead")?.parse::<u64>().ok()?, e.get("behind")?.parse::<u64>().ok()?))
         });
-        let show_zero = cfg.bool("show_zero");
         if let Some((ahead, behind)) = counts {
-            if ahead > 0 || show_zero {
-                segs.push(Segment::styled(
-                    format!("{}{ahead}", cfg.icon("ahead")),
-                    Style::fg(cfg.color("ahead")).bolded(),
-                ));
-            }
-            if behind > 0 || show_zero {
-                if !segs.is_empty() {
-                    segs.push(Segment::plain(" "));
-                }
-                segs.push(Segment::styled(
-                    format!("{}{behind}", cfg.icon("behind")),
-                    Style::fg(cfg.color("behind")).bolded(),
-                ));
-            }
+            segs.extend(count_segments(cfg, ctx.theme, ahead, behind, cfg.bool("show_zero")));
         }
         if cfg.bool("show_upstream") {
             let sp = if segs.is_empty() { "" } else { " " };
@@ -596,8 +581,8 @@ impl Module for SyncModule {
             && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
             && !cfg.icon("stale").is_empty()
         {
-            let sp = if segs.is_empty() { "" } else { " " };
-            segs.push(seg(cfg, format!("{sp}{}{}", cfg.icon("stale"), ctx.duration(age)), "stale"));
+            let hint = fetch_age_hint(cfg.icon("stale"), &ctx.duration(age), !segs.is_empty());
+            segs.push(seg(cfg, hint, "stale"));
         }
         let _ = remote;
         let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
@@ -648,9 +633,86 @@ impl Module for SyncModule {
     }
 }
 
+/// The `⇡N ⇣M` counts.
+///
+/// A non-zero count carries its `ahead`/`behind` colour; a zero shown because
+/// of `show_zero` is muted, so only real drift is coloured (SPEC § 4.1 `sync`).
+fn count_segments(
+    cfg: &ModuleCfg,
+    theme: &crate::theme::Theme,
+    ahead: u64,
+    behind: u64,
+    show_zero: bool,
+) -> Vec<Segment> {
+    let mut segs: Vec<Segment> = Vec::new();
+    for (count, key) in [(ahead, "ahead"), (behind, "behind")] {
+        if count == 0 && !show_zero {
+            continue;
+        }
+        if !segs.is_empty() {
+            segs.push(Segment::plain(" "));
+        }
+        let text = format!("{}{count}", cfg.icon(key));
+        segs.push(if count == 0 {
+            crate::modules::muted(theme, text)
+        } else {
+            Segment::styled(text, Style::fg(cfg.color(key)).bolded())
+        });
+    }
+    segs
+}
+
+/// The fetch-age hint: glyph, a space, the age (`↻ 2h13m`), preceded by a
+/// space when something already stands before it. Every other module puts a
+/// space between its glyph and its value; this one used not to (bug 9).
+fn fetch_age_hint(icon: &str, age: &str, after_text: bool) -> String {
+    let sp = if after_text { " " } else { "" };
+    format!("{sp}{icon} {age}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::schema::{Overrides, Preset};
+    use crate::icons::IconSet;
+    use crate::theme::{Role, Theme};
+
+    #[test]
+    fn fetch_age_hint_separates_glyph_and_age() {
+        assert_eq!(fetch_age_hint("↻", "2h13m", false), "↻ 2h13m");
+        assert_eq!(fetch_age_hint("↻", "2h13m", true), " ↻ 2h13m");
+        assert_eq!(fetch_age_hint("?", "12m", true), " ? 12m");
+    }
+
+    #[test]
+    fn zero_sync_counts_are_muted_and_non_zero_coloured() {
+        let theme = Theme::default();
+        let cfg = ModuleCfg::resolve(
+            &SyncModule.schema(),
+            Preset::Default,
+            IconSet::Unicode,
+            &theme,
+            &Overrides::default(),
+        );
+        let text = |segs: &[Segment]| crate::ansi::Painter::PLAIN.paint(segs);
+        // Without show_zero a zero count is not shown at all.
+        let segs = count_segments(&cfg, &theme, 2, 0, false);
+        assert_eq!(text(&segs), "⇡2");
+        assert_eq!(segs[0].style.fg, cfg.color("ahead"));
+        assert!(segs[0].style.bold);
+        assert_eq!(count_segments(&cfg, &theme, 0, 0, false), Vec::new());
+        // With show_zero the zero is muted, the non-zero keeps its colour.
+        let segs = count_segments(&cfg, &theme, 0, 3, true);
+        assert_eq!(text(&segs), "⇡0 ⇣3");
+        assert_eq!(segs[0].style.fg, theme.role(Role::Muted), "zero ahead is muted");
+        assert!(segs[0].style.dim && !segs[0].style.bold);
+        assert_eq!(segs[2].style.fg, cfg.color("behind"), "non-zero behind keeps its colour");
+        let both = count_segments(&cfg, &theme, 0, 0, true);
+        assert_eq!(text(&both), "⇡0 ⇣0");
+        assert!(
+            both.iter().filter(|s| s.text != " ").all(|s| s.style.fg == theme.role(Role::Muted))
+        );
+    }
 
     #[test]
     fn path_helpers() {

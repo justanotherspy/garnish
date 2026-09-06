@@ -1,0 +1,19 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# `fill = false` with a per-line separator: the join between the left and the
+# right group is the line's own separator (` · ` on the first line), not the
+# frame default (` │ `, still used on the second line). Walkthrough bug 6.
+
+[frame]
+fill = false
+
+[[line]]
+modules   = ["model", "context"]
+right     = ["clock"]
+separator = " · "
+
+[[line]]
+modules = ["session", "api"]
+right   = ["lines"]

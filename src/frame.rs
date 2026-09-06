@@ -121,7 +121,8 @@ impl FrameChars {
                 right_middle: s("\u{e0b4}"),
                 right_last: s("\u{e0b4}"),
                 right_single: s("\u{e0b4}"),
-                pad: String::new(),
+                // The caps are half-circles; without a pad the text touches them.
+                pad: s(" "),
                 separator: s(" \u{e0b1} "),
             },
         }
@@ -184,7 +185,11 @@ pub struct Layout {
     pub ellipsis: String,
 }
 
-/// Compose one line. `left` and `right` are already-joined module segments.
+/// Compose one line.
+///
+/// `left` and `right` are already-joined module segments; `separator` is the
+/// line's own separator (per-line override or the frame default), used to
+/// join the two groups when the rule is not filled.
 ///
 /// Rules: prefix + pad + left + pad + rule + pad + right + pad + cap. On
 /// overflow the rule collapses to a single fill cell, then the left group is
@@ -197,6 +202,7 @@ pub fn compose_line(
     count: usize,
     left: &[Segment],
     right: &[Segment],
+    separator: &str,
 ) -> Vec<Segment> {
     let frame_style = Style::fg(theme.role(Role::Frame));
     let (prefix, cap) = layout.chars.ends(index, count);
@@ -221,7 +227,7 @@ pub fn compose_line(
     } else if right.is_empty() {
         0
     } else {
-        display_width(&layout.chars.separator)
+        display_width(separator)
     };
     let left_budget = layout
         .width
@@ -271,7 +277,7 @@ pub fn compose_line(
         }
     } else if !right.is_empty() {
         if !left.is_empty() {
-            out.push(Segment::styled(&layout.chars.separator, Style::fg(theme.role(Role::Muted))));
+            out.push(Segment::styled(separator, Style::fg(theme.role(Role::Muted))));
         }
         out.extend(right.iter().cloned());
     }
@@ -320,14 +326,15 @@ mod tests {
         let l = layout(FrameStyle::Rounded, true, 30);
         let left = [Segment::plain("left")];
         let right = [Segment::plain("R")];
-        let line = compose_line(&l, &theme, 0, 2, &left, &right);
+        let sep = l.chars.separator.clone();
+        let line = compose_line(&l, &theme, 0, 2, &left, &right, &sep);
         let s = text(&line);
         assert_eq!(s, format!("╭─ left {} R ─╮", "─".repeat(17)));
         assert_eq!(display_width(&s), 30);
-        let last = text(&compose_line(&l, &theme, 1, 2, &left, &[]));
+        let last = text(&compose_line(&l, &theme, 1, 2, &left, &[], &sep));
         assert_eq!(last, format!("╰─ left {}╯", "─".repeat(21)));
         assert_eq!(display_width(&last), 30);
-        let single = text(&compose_line(&l, &theme, 0, 1, &left, &right));
+        let single = text(&compose_line(&l, &theme, 0, 1, &left, &right, &sep));
         assert!(single.starts_with("── left") && single.ends_with("R ──"));
         assert_eq!(display_width(&single), 30);
     }
@@ -338,39 +345,60 @@ mod tests {
         let l = layout(FrameStyle::Rounded, true, 20);
         let left = [Segment::plain("a very long left group")];
         let right = [Segment::plain("RIGHT")];
-        let s = text(&compose_line(&l, &theme, 0, 1, &left, &right));
+        let s = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(display_width(&s), 20);
         assert!(s.ends_with("RIGHT ──"), "{s}");
         assert!(s.contains('…'));
     }
 
     #[test]
-    fn no_fill_uses_separator_and_prefix_only() {
+    fn no_fill_uses_the_lines_separator_and_prefix_only() {
         let theme = Theme::default();
         let l = layout(FrameStyle::Square, false, 80);
-        let s =
-            text(&compose_line(&l, &theme, 1, 3, &[Segment::plain("L")], &[Segment::plain("R")]));
+        let (left, right) = ([Segment::plain("L")], [Segment::plain("R")]);
+        let s = text(&compose_line(&l, &theme, 1, 3, &left, &right, &l.chars.separator));
         assert_eq!(s, "├─ L │ R");
+        // A per-line separator joins the groups (walkthrough bug 6: the frame
+        // default used to be taken regardless).
+        let s = text(&compose_line(&l, &theme, 1, 3, &left, &right, " · "));
+        assert_eq!(s, "├─ L · R");
         let none = layout(FrameStyle::None, false, 80);
+        let s = text(&compose_line(&none, &theme, 0, 1, &left, &right, &none.chars.separator));
+        assert_eq!(s, "L  R");
+        let s = text(&compose_line(&none, &theme, 0, 1, &left, &[], &none.chars.separator));
+        assert_eq!(s, "L");
+    }
+
+    #[test]
+    fn powerline_caps_are_padded() {
+        let theme = Theme::default();
+        let l = layout(FrameStyle::Powerline, true, 20);
         let s = text(&compose_line(
-            &none,
+            &l,
             &theme,
             0,
             1,
             &[Segment::plain("L")],
             &[Segment::plain("R")],
+            " ",
         ));
-        assert_eq!(s, "L  R");
-        let s = text(&compose_line(&none, &theme, 0, 1, &[Segment::plain("L")], &[]));
-        assert_eq!(s, "L");
+        assert_eq!(s, "\u{e0b6} L              R \u{e0b4}");
+        assert_eq!(display_width(&s), 20);
     }
 
     #[test]
     fn none_style_with_fill_pads_to_width() {
         let theme = Theme::default();
         let l = layout(FrameStyle::None, true, 12);
-        let s =
-            text(&compose_line(&l, &theme, 0, 1, &[Segment::plain("ab")], &[Segment::plain("cd")]));
+        let s = text(&compose_line(
+            &l,
+            &theme,
+            0,
+            1,
+            &[Segment::plain("ab")],
+            &[Segment::plain("cd")],
+            "  ",
+        ));
         assert_eq!(s, "ab        cd");
         assert_eq!(display_width(&s), 12);
     }

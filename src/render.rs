@@ -216,7 +216,7 @@ pub fn render_lines_at(
             let sep = config.separator(line);
             let left = join_modules(left, sep, &config.theme);
             let right = join_modules(right, sep, &config.theme);
-            compose_line(&layout, &config.theme, i, count, &left, &right)
+            compose_line(&layout, &config.theme, i, count, &left, &right, sep)
         })
         .collect()
 }
