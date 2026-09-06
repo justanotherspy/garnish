@@ -60,6 +60,35 @@ pub fn parse_now(value: &str) -> Option<Timestamp> {
         .or_else(|| v.parse::<Timestamp>().ok())
 }
 
+/// Environment variable that freezes every animation at frame 0 when set to `0`.
+pub const ANIMATE_ENV: &str = "GARNISH_ANIMATE";
+
+/// Whether animations run for this process (`GARNISH_ANIMATE=0` freezes them).
+#[must_use]
+pub fn animate_from_env() -> bool {
+    !std::env::var(ANIMATE_ENV).is_ok_and(|v| v.trim() == "0")
+}
+
+/// The one stateless animation rule (SPEC § 4.2): the frame index or scroll
+/// offset at `now` is `floor(now_secs × step) mod period`.
+///
+/// Every animation in garnish (spinner frames, scrolling text, the ticker,
+/// a patterned rule) derives from this, so no state is kept between ticks, a
+/// cancelled tick loses nothing, every session on the machine animates in
+/// step, and `GARNISH_NOW` freezes everything for goldens. `step` below 1
+/// slows an animation (0.5 = every second tick). A zero period, or a step
+/// that is not a positive finite number, gives frame 0.
+#[must_use]
+pub fn frame(now: Timestamp, step: f64, period: usize) -> usize {
+    if period == 0 || !step.is_finite() || step <= 0.0 {
+        return 0;
+    }
+    let secs = u64::try_from(now.as_second()).unwrap_or(0);
+    let ticks = crate::num::floor_to_u64(crate::num::u64_to_f64(secs) * step);
+    let period = u64::try_from(period).unwrap_or(u64::MAX);
+    crate::num::u64_to_usize(ticks.checked_rem(period).unwrap_or(0))
+}
+
 /// Epoch seconds of [`now`].
 #[must_use]
 pub fn now_secs() -> i64 {
@@ -213,6 +242,34 @@ mod tests {
         assert_eq!(DurationStyle::Fixed.countdown_at(1_060, 1_000), Some("1m00s".into()));
         assert_eq!(DurationStyle::Fixed.countdown_at(1_000, 1_000), None);
         assert_eq!(DurationStyle::Fixed.name(), "fixed");
+    }
+
+    #[test]
+    fn frame_is_floor_of_seconds_times_step_mod_period() {
+        let at = |secs: i64| Timestamp::from_second(secs).unwrap();
+        // The docs clock: 1738425600 is a multiple of 10, so a ten-frame
+        // spinner shows frame 0 there (the goldens rely on it).
+        assert_eq!(frame(at(1_738_425_600), 1.0, 10), 0);
+        assert_eq!(frame(at(1_738_425_601), 1.0, 10), 1);
+        assert_eq!(frame(at(1_738_425_609), 1.0, 10), 9);
+        assert_eq!(frame(at(1_738_425_610), 1.0, 10), 0);
+        // step 0.5: every second tick; step 2: two frames per second.
+        assert_eq!(frame(at(1_738_425_601), 0.5, 10), 0);
+        assert_eq!(frame(at(1_738_425_602), 0.5, 10), 1);
+        assert_eq!(frame(at(1_738_425_603), 0.5, 10), 1);
+        assert_eq!(frame(at(1_738_425_601), 2.0, 10), 2);
+        // a period that does not divide the clock still cycles
+        assert_eq!(frame(at(1_738_425_600), 1.0, 7), 1_738_425_600 % 7);
+        assert_eq!(frame(at(1_738_425_600), 1.0, 1), 0);
+        // degenerate inputs never panic and give frame 0
+        assert_eq!(frame(at(1_738_425_600), 1.0, 0), 0);
+        assert_eq!(frame(at(1_738_425_600), 0.0, 10), 0);
+        assert_eq!(frame(at(1_738_425_600), -1.0, 10), 0);
+        assert_eq!(frame(at(1_738_425_600), f64::NAN, 10), 0);
+        assert_eq!(frame(at(1_738_425_600), f64::INFINITY, 10), 0);
+        assert_eq!(frame(at(-5), 1.0, 10), 0, "before the epoch counts as 0");
+        // year 9999 with a huge step: the tick count saturates and still reduces
+        assert!(frame(at(253_402_207_200), f64::MAX, 3) < 3);
     }
 
     #[test]

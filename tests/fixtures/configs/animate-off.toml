@@ -1,0 +1,10 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425601, 1738425602
+# icons: unicode
+# env: GARNISH_ANIMATE=0
+# With animations frozen the spinner stays on frame 0 (`⠋`) at both instants
+# while the clock itself keeps ticking (SPEC § 4.2 accessibility switch).
+
+[[line]]
+modules = ["clock"]

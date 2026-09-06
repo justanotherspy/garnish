@@ -95,10 +95,14 @@ pub struct Clock {
     pub settings_env: crate::claude_settings::Env,
     /// Whether repository discovery is allowed.
     pub git: bool,
+    /// Whether animations advance with the clock; off freezes every frame
+    /// index and scroll offset at 0 (`GARNISH_ANIMATE=0`, SPEC § 4.2).
+    pub animate: bool,
 }
 
 impl Clock {
-    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME` and the process environment.
+    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME`, `GARNISH_ANIMATE`
+    /// and the process environment.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
@@ -107,12 +111,14 @@ impl Clock {
             home: std::env::var("HOME").ok().filter(|h| !h.is_empty()),
             settings_env: crate::claude_settings::Env::from_process(),
             git: true,
+            animate: crate::time::animate_from_env(),
         }
     }
 
     /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev`, no
-    /// auto-compaction overrides and no repository discovery — what the
-    /// generated docs use, so they come out identical on every machine.
+    /// auto-compaction overrides, no repository discovery and animations
+    /// frozen at frame 0 — what the generated docs use, so they come out
+    /// identical on every machine.
     #[must_use]
     pub fn fixed() -> Self {
         Self {
@@ -121,6 +127,7 @@ impl Clock {
             home: Some("/home/dev".to_owned()),
             settings_env: crate::claude_settings::Env::default(),
             git: false,
+            animate: false,
         }
     }
 }
@@ -158,6 +165,7 @@ pub fn render_lines_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
+        animate: clock.animate,
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);

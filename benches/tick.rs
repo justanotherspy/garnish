@@ -48,6 +48,7 @@ fn render_modules(c: &mut Criterion) {
         git: clock.git,
         stale_after: cfg.stale_after,
         durations: cfg.durations,
+        animate: clock.animate,
         dirs: std::cell::OnceCell::new(),
     };
     let mut group = c.benchmark_group("render_module");

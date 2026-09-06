@@ -213,4 +213,5 @@ Every module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`
 | `GARNISH_CACHE_DIR` | Cache root (default `$XDG_RUNTIME_DIR/garnish`, `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish`). |
 | `GARNISH_NOW` | Freeze the clock (epoch seconds or RFC 3339) for reproducible renders. |
 | `GARNISH_NO_SPAWN` | Log intended background refreshes to `<cache>/spawns.log` instead of spawning them (tests). |
+| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, ticker, patterned rule) at frame 0 for the session; for screen readers and recordings. |
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact. |
