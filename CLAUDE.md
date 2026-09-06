@@ -169,8 +169,11 @@ What that means when writing code:
   For float→int use `to_int_unchecked`-free helpers in `num.rs` that saturate.
 - Arithmetic must be `checked_*`, `saturating_*`, or `wrapping_*` when the
   operands are not compile-time constants. Prefer `saturating_sub` for durations.
-- `main` returns `color_eyre::Result<()>`. `render` must never exit non-zero:
-  errors become a dim `⚠ garnish: …` line on stdout and a note on stderr.
+- `main` returns `color_eyre::Result<ExitCode>`: an unexpected error gets a
+  color-eyre report, a `cli::Quiet` error (the problem was already printed,
+  as `config check` and `config init` do) exits 1 with no report. `render`
+  must never exit non-zero: errors become a dim `⚠ garnish: …` line on stdout
+  and a note on stderr.
 - `#[allow(clippy::…)]` only with a one-line justification comment above it.
   Integration tests under `tests/` are not `#[cfg(test)]` modules, so they
   carry a crate-level `#![allow(clippy::unwrap_used, …)]` with that comment.

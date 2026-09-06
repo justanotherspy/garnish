@@ -167,11 +167,37 @@ pub enum ConfigAction {
     },
 }
 
-/// Entry point used by `main`.
+/// A failure that was already reported to the user.
+///
+/// The problem list is on stdout or a one-line note on stderr, so the process
+/// exits non-zero without an error report: a source location would only
+/// obscure the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Quiet;
+
+impl std::fmt::Display for Quiet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("reported above")
+    }
+}
+
+impl std::error::Error for Quiet {}
+
+/// Entry point used by `main`: the exit code, or an error worth a report.
 ///
 /// # Errors
-/// Returns an error for subcommand failures; `render` itself never fails.
-pub fn run() -> Result<()> {
+/// Returns an error for unexpected subcommand failures; a [`Quiet`] failure
+/// becomes [`std::process::ExitCode::FAILURE`] instead, and `render` itself
+/// never fails.
+pub fn run() -> Result<std::process::ExitCode> {
+    match run_command() {
+        Ok(()) => Ok(std::process::ExitCode::SUCCESS),
+        Err(e) if e.downcast_ref::<Quiet>().is_some() => Ok(std::process::ExitCode::FAILURE),
+        Err(e) => Err(e),
+    }
+}
+
+fn run_command() -> Result<()> {
     let cli = Cli::parse();
     let config_path = cli.config.as_deref();
     let command = cli.command.unwrap_or(Command::Render);
@@ -416,7 +442,8 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
                     for e in &loaded.errors {
                         writeln!(stdout, "{}: {e}", p.display())?;
                     }
-                    return Err(eyre!("{} problem(s) found", loaded.errors.len()));
+                    writeln!(stdout, "{} problem(s) found", loaded.errors.len())?;
+                    return Err(Quiet.into());
                 }
             }
         }
@@ -428,7 +455,8 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             let top = TopPreset::parse(preset).ok_or_else(|| eyre!("unknown preset {preset:?}"))?;
             let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
             if target.exists() && !force {
-                return Err(eyre!("{} exists; pass --force to overwrite", target.display()));
+                eprintln!("{} exists; pass --force to overwrite", target.display());
+                return Err(Quiet.into());
             }
             if let Some(dir) = target.parent() {
                 std::fs::create_dir_all(dir)

@@ -131,10 +131,10 @@ test. Bugs that add a config key live in the phase that owns the key: bug 3
 - [x] Bug 2: `powerline` frame shipped with an empty `pad`; it is one space (unit test `powerline_caps_are_padded`), docs sample regenerated
 - [x] Bug 5: `sync` with `show_zero` coloured `⇡0 ⇣0` with the ahead/behind roles; the counts are a pure `count_segments` helper, zero counts muted, with a unit test on the styles
 - [x] Bug 6: with `fill = false` the left/right join used the frame's separator instead of the line's own; `compose_line` takes the line separator as a parameter (unit test, config golden `packed-line-separator`)
-- [ ] Bug 7: `garnish config check` prints the problems and then a color-eyre report with a source location; exit 1 quietly (map a `ConfigInvalid` error to an `ExitCode` in `main`, no report); same for `config init` refusing to overwrite
+- [x] Bug 7: `garnish config check` printed the problems and then a color-eyre report with a source location; a `cli::Quiet` error is mapped to `ExitCode::FAILURE` in `cli::run` (main returns `Result<ExitCode>`), `check` ends with `N problem(s) found` on stdout, `config init` refusing to overwrite is one stderr line; `tests/cli.rs` asserts stderr carries no report
 - [x] Bug 9: the `sync` fetch-age hint had no space between glyph and age (`⧖2h13m`); it has one (no golden renders inside a repository with `FETCH_HEAD`, so none changed)
 - [x] Bug 10: the emoji set contained variation-selector sequences (`⏱️ 🗄️ 🏷️ 🕰️ 🕵️ ❄️ ✏️ ⬆️ ⬇️`) that COSMIC draws one cell wide while garnish counts two; replaced with default-emoji glyphs (`⌚ ⏰ 💾 🔖 ⌛ 👤 🧊 ✨ 🔼 🔽`), the same unit test rejects U+FE0F, the guide warns about overrides
-- [ ] Item 4 (guide): explain that aligned columns pair positionally, so a `–` placeholder under a wide bar gets a wide blank column
+- [x] Item 4 (guide): aligned columns pair positionally, so a `–` placeholder under a wide bar gets a wide blank column (guide § 5)
 - [x] Tour follow-up: the `garnish doctor` glyph test is a grid (`doctor::glyph_rows`), one row per icon set and module, every single-character icon padded to two cells and followed by `|` and garnish's cell count, so a glyph the terminal draws wider pushes its `|` out of the column and the block can be pasted into a feedback issue
 
 Phases 13–18 implement the spec changes of 2026-09-05, one phase per spec
@@ -367,3 +367,21 @@ and user feedback. Pick from here when no phase is in progress.
   no behaviour changed. His live config at the end of the session is the
   eight-line step 7b layout; the pre-walkthrough full config is backed up
   next to it as `garnish.toml.bak-2026-09-05`.
+- **2026-09-05 (Phase 12, stack layers 1–4)** — Execution order decided
+  with Daniel: 12 → 14 → 13 → 15 → 16 → 17 → 18, the whole roadmap as one
+  `gh stack` chain (one layer per concern, drafts, Daniel merges, a single
+  `v0.2.0` once Phase 18 lands). Layer `phase-12/config-goldens`:
+  `tests/config_golden.rs` renders every `tests/fixtures/configs/*.toml` at
+  the instants its `# now:` header lists (plus `# fixture/columns/icons/env`),
+  so later phases can pin clock-driven keys; seeded with the aligned and
+  fixed-duration layouts. Layer `phase-12/glyphs`: the walkthrough's wide
+  glyphs were not the East Asian Ambiguous set alone (`◔ ◫` are not
+  ambiguous by table, the bars `█ ▏` are), so the guard rejects ambiguous
+  characters outside Box Drawing/Block Elements, the whole Geometric Shapes
+  block, the `⧖ ⧗` hourglasses and `U+FE0F`; fourteen unicode and nine emoji
+  glyphs replaced, nerd untouched; `doctor` prints a marker grid. Layer
+  `phase-12/frame-fixes`: powerline pad, muted zero sync counts
+  (`count_segments`), the line's own separator at the unfilled join
+  (`compose_line` parameter), a space in the fetch-age hint. Layer
+  `phase-12/cli-exit`: `cli::Quiet` → `ExitCode::FAILURE` without a report.
+  Bugs 3, 8 and 11 moved to the phases that own their config keys.
