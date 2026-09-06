@@ -522,3 +522,16 @@ and user feedback. Pick from here when no phase is in progress.
   CRLF too, both golden suites refuse to bake in `⚠ garnish:` (and config
   goldens declare `# expect: config-warning`), the stale bug-10 caveat left
   `emoji-overrides`, CHANGELOG/SPEC wording. Bench unchanged (warm 1.07 ms).
+  A focused review of the two layers then found: the HOME guard still let
+  `install --settings` and `config init` under `GARNISH_CONFIG` write
+  `./garnish/garnish.toml` (root fix: `default_path`/`default_settings_path`
+  return `None` without a home, `config init` resolves `--config` →
+  `GARNISH_CONFIG` → default), `modules = [1, 2]` was still a spacer
+  (length compare), `config show` wrote an emptied line as `modules = []`
+  and so turned a hidden row into a drawn spacer (skipped; the round-trip
+  test now compares renders), `bar_width` escaped the cap, DCS/SOS/PM/APC
+  payloads showed as text (consumed to ST), and the golden guards are
+  anchored at a row start. Open from that review: `Segment.text` is `pub`
+  (the plain-text invariant is by convention; a private field with an
+  accessor would let the compiler hold it) and a schema-level `max` on
+  `OptSpec` (backlog).

@@ -546,8 +546,11 @@ impl RawLine {
             let path = format!("{path}.{key}");
             match key.as_str() {
                 "modules" | "right" => {
-                    line.bad_list |= !value.is_array();
+                    // Not a list, or a list with non-string items: either way
+                    // the empty result is a reported mistake, not a spacer.
+                    let given = value.as_array().map_or(usize::MAX, Vec::len);
                     let ids = id_list(&path, value, errors);
+                    line.bad_list |= ids.len() != given;
                     if key == "modules" {
                         line.modules = ids;
                     } else {
@@ -1511,11 +1514,15 @@ mod tests {
         let spacers: Vec<bool> = c.lines.iter().map(|l| l.spacer).collect();
         // A mistyped list is an error and an empty row, never a spacer
         // (whole-stack review: it rendered as a permanent blank rule).
-        let (bad, errs) = parse("[[line]]\nmodules = \"clock\"\n[[line]]\n", &schemas);
-        assert_eq!(errs.len(), 1, "{errs:?}");
+        let (bad, errs) = parse(
+            "[[line]]\nmodules = \"clock\"\n[[line]]\n[[line]]\nmodules = [1, 2]\n",
+            &schemas,
+        );
+        assert_eq!(errs.len(), 3, "{errs:?}");
         assert_eq!(errs[0].path, "line[0].modules");
         assert!(!bad.lines[0].spacer && bad.lines[0].left.is_empty());
         assert!(bad.lines[1].spacer, "a [[line]] with no keys is a spacer");
+        assert!(!bad.lines[2].spacer, "a list of non-ids is a mistake, not a spacer");
         assert_eq!(
             spacers,
             vec![true, false, false],

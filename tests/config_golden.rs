@@ -190,10 +190,15 @@ fn config_goldens_match() {
         .filter_map(|case| {
             let actual = render(case, &cache);
             let golden = golden_dir.join(format!("config--{}--{}.txt", case.name, case.now));
-            if actual.contains("garnish: ") {
+            // Anchored at a row start (`⚠` or the ascii `!`), so a text module
+            // saying "config: x" cannot trip them.
+            if actual.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
+            {
                 return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
             }
-            if actual.contains("config: ") != case.expect_warning {
+            let warns =
+                actual.lines().any(|l| l.starts_with("⚠ config: ") || l.starts_with("! config: "));
+            if warns != case.expect_warning {
                 return Some(format!(
                     "{}: {} a `⚠ config:` row (header says `# expect: {}`):\n{actual}",
                     golden.display(),

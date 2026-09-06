@@ -271,6 +271,22 @@ fn config_show_round_trips_every_fixture_and_preset() {
         assert!(ok && out.contains(": ok"), "{}: show output fails check:\n{out}", file.display());
         let (again, _, _) = run(&["--config", copy.to_str().unwrap(), "config", "show"], home, &[]);
         assert_eq!(shown, again, "{}: show is not a fixed point", file.display());
+        // And the shown config renders the same rows as the original (minus
+        // the original's `⚠ config:` row, which the resolved form has fixed):
+        // a line emptied by a mistake must not come back as a drawn spacer.
+        let payload =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+        let render = |cfg: &std::path::Path| {
+            let args = ["--config", cfg.to_str().unwrap(), "preview", payload, "--width", "120"];
+            let (out, _, ok) = run(&args, home, &[("GARNISH_NO_SPAWN", "1")]);
+            assert!(ok, "{}: preview failed", cfg.display());
+            out.lines()
+                .skip(1)
+                .filter(|l| !l.starts_with("⚠ config: ") && !l.starts_with("! config: "))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(render(&file), render(&copy), "{}: show changes the render", file.display());
     }
 }
 

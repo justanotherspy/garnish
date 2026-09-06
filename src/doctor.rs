@@ -250,9 +250,11 @@ pub fn config_glyph_rows(config: &config::Config) -> Vec<String> {
 /// `glyph_of` returns the glyph and whether it is a person's override. A
 /// built-in glyph that is not a single character of one or two cells (the
 /// spinner's frame string, the effort dots) has no field: it is not a
-/// glyph. An override always keeps its field, so the `config` row can be
-/// compared with the set row above it: one that is not a single glyph
-/// shows as `?` with its cell count (capped at 9), an empty one as `∅ |0`.
+/// glyph. An override always keeps its field, so a row overriding real
+/// glyphs lines up with the set row above it: one that is not a single
+/// glyph shows as `?` with its cell count (capped at 9), an empty one as
+/// `∅ |0`. (An override of a non-glyph icon such as the spinner string has
+/// no set field to line up with; it still shows.)
 fn rows(
     label: &str,
     glyph_of: impl Fn(

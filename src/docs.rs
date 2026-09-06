@@ -159,6 +159,12 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
         "Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.",
     );
     for line in &cfg.lines {
+        // A line left with no ids by a reported mistake renders as an empty
+        // row that `hide_empty_lines` drops; written back as `modules = []`
+        // it would become a spacer that is always drawn, so it is left out.
+        if line.left.is_empty() && line.right.is_empty() && !line.spacer {
+            continue;
+        }
         let _ = writeln!(out, "[[line]]");
         let _ = writeln!(out, "modules = {}", toml_list(&line.left));
         if !line.right.is_empty() {
