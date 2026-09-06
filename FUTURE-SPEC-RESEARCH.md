@@ -23,19 +23,27 @@ Evidence grades used in the tables:
 Five findings alter a tier or a checkbox in § 9, § 24.11 or § 26.1. The
 rest of this file is detail.
 
-1. **`compactions` no longer needs the transcript (C1 splits).** Claude
-   Code fires a `PostCompact` hook with a `manual` / `auto` matcher and a
-   `PreCompact` hook before it [D]. A `garnish hook` entry on `PostCompact`
-   can append to the same event log the companion and the `skill` module
-   use (§ 18.5, § 24.2), so `compactions` becomes a hook-fed module in the
-   B4 family. Only `speed` still needs a transcript read, so C1 shrinks to
-   `speed` and the § 9 "Transcript" decision is about one module.
+1. **`compactions` count and trigger no longer need the transcript (C1
+   splits).** Claude Code fires a `PostCompact` hook with a `manual` /
+   `auto` matcher and a `PreCompact` hook before it; the `PostCompact`
+   input carries `trigger` and `compact_summary`, and no token counts [D].
+   A `garnish hook` entry on `PostCompact` can append to the same event log
+   the companion and the `skill` module use (§ 18.5, § 24.2), so the count
+   and the auto/manual split become a hook-fed module in the B4 family. The
+   "reclaimed tokens" figure in the C1 render still needs the transcript's
+   `compactMetadata.preTokens`/`postTokens`, or an approximation from the
+   payload: the tick already sees `context_window.total_input_tokens`
+   before and after the boundary the hook marks. So C1 shrinks to `speed`
+   plus the exact reclaimed figure, and the § 9 "Transcript" decision is
+   about those two.
 2. **C2 (usage API) is weaker than written, and has two alternatives.**
    Two issues about persistent HTTP 429 from `api.anthropic.com/api/oauth/usage`
-   were closed *not planned*, one labelled `invalid` (#31021, #31637); the
-   request for official quota access (#13585) is still open with 26
-   comments; Claude Code's own `/usage` degrades to "last-known usage within
-   60 minutes" when that endpoint rate-limits [D]. A community comment says
+   were closed *not planned*, one labelled `invalid` (#31021, #31637), with
+   no maintainer comment on either, so the closure and label are the whole
+   signal; the request for official quota access (#13585) is still open
+   with 26 comments; Claude Code's own `/usage` degrades to "last-known
+   usage within 60 minutes" when that endpoint rate-limits [D]. A community
+   comment says
    the limit is per access token (about five requests) and suggests
    refreshing tokens to get a fresh window [C]; garnish must not port that,
    it evades a limit. Alternatives found: (a) `get_usage` is a real control
@@ -66,8 +74,10 @@ rest of this file is detail.
    N1.
 5. **The width rule holds; the truncation history is now dated.** In the
    2.1.261 strings the footer is still a `flexWrap: "wrap"` box with
-   `paddingX: Vne` (2) and `columnGap: Gne` (1), and the `isNarrow`
-   half-width switch that the mascot README documents for 2.1.76 is gone
+   `paddingX: Vne` (2) and `columnGap: Gne` (1), which is the positive
+   evidence for `CLAUDE.md`'s `COLUMNS − 4` rule; the `isNarrow` identifier
+   from the 2.1.76 half-width layout the mascot README documents does not
+   occur in the dump, which is consistent but weaker (minified names move)
    [B]. The multi-line truncation bug behind A1's caution (#28750, `wrap:
    "truncate"` dropping rows) was fixed in 2.1.141 per the changelog [D].
    What remains for Phase 19: outside fullscreen rendering, notifications
@@ -104,8 +114,8 @@ configurators with live preview (claudebar, CCometixLine, best-claude-hud)
 | 5 B2 | git counts, stash, conflicts | **confirmed approach**: `GIT_OPTIONAL_LOCKS=0` documented (equivalent to `--no-optional-locks`); coralline does one `git status --porcelain=v2 --branch` per render; claude-hud adds opt-in Jujutsu (`jj`) support | P, C |
 | 5 B3 | PR/CI | **note**: the harness's own footer shows the PR / `MR !N` badge (2.1.234); `pr.kind` distinguishes GitLab | D |
 | 5 B4 | `skill` via hooks | **confirmed**: `PreToolUse` matcher `Skill`; `UserPromptSubmit` has no matcher; hooks merge across settings levels; command hooks block by default and take `async: true`; `PostToolUse` also fires inside subagents with `agent_id`/`agent_type` | D |
-| 5 C1 | `compactions`, `speed` from the transcript | **re-tier** `compactions` (see § 1.1); `speed` stays | D |
-| 5 C2 | usage API | **weakened**; see § 1.2 | M, C, D, B |
+| 5 C1 | `compactions`, `speed` from the transcript | **re-tier** the count and trigger of `compactions` (see § 1.1); `speed` and the exact reclaimed figure stay | D |
+| 5 C2 | usage API | **weakened**; see § 1.2 (the issue evidence is closure state and labels, not a maintainer statement) | C, D, B |
 | 5 C3 | service status | **confirmed**: `status.claude.com/api/v2/status.json` and `incidents.json` return Statuspage JSON (`status.indicator`, `incidents[]`); `status.anthropic.com` serves the same page id | P |
 | 6 | lessons | unchanged | — |
 | 7 | installer | **extended**: `/statusline` auto-configures from the shell prompt; `statusLine` runs only after workspace trust is accepted (`claude --debug` logs `Status line command skipped: workspace trust not accepted`); `disableAllHooks` outside managed settings disables it; `allowManagedHooksOnly` hides it silently; `CLAUDE_CODE_DEBUG_LOG_LEVEL=verbose` logs full status line output | D, B |
@@ -115,14 +125,14 @@ configurators with live preview (claudebar, CCometixLine, best-claude-hud)
 | 13 | OKLab | **confirmed**: Ottosson's matrices reproduced in Appendix A; the xterm-256 mapping is the standard 6×6×6 cube plus 24-step gray ramp | P |
 | 14–17 | formats, hide states, options, lifecycle tricks | no external check needed | — |
 | 18.1 | git cache | see B2 | P |
-| 18.3 | usage flow | the endpoint is undocumented and community-discovered (ohugonnot README says so plainly); see § 1.2 | C, M |
-| 18.4 | transcript rows | `compact_boundary` / `compactMetadata` confirmed by community tooling and by a collaborator comment that documented subagent compaction (#16944) | C, M |
+| 18.3 | usage flow | the endpoint is undocumented and community-discovered (ohugonnot README says so plainly); see § 1.2 | C |
+| 18.4 | transcript rows | `compact_boundary` / `compactMetadata` row shape confirmed by community tooling only; a collaborator comment on #16944 confirms that subagent compaction exists and follows the main mechanism, not the row shape | C (shape), M (mechanism) |
 | 18.5 | hook payloads | **refined**: `PostToolUseFailure` carries `error`, `is_interrupt`, `duration_ms`; for Bash the error starts with `Exit code N`; it does **not** fire for validation or permission rejections (`PermissionDenied` does); `tool_response` is an object whose shape depends on the tool (Bash: `stdout`, `stderr`, `interrupted`, `isImage`) | D |
 | 18.6 | settings layers | **corrected order**: official precedence is managed > `--settings` > project local > shared project > user; ccstatusline reads only the four files, in that order, so the design is right for files; `CLAUDE_CONFIG_DIR` confirmed | D |
 | 18.8 | status endpoint | confirmed (C3) | P |
 | 20 | TUI crates | versions in § 7 | P |
 | 23.2 | codachi's `PostToolExecution` hook | **confirmed absent** from the 32 documented events; the design's `PostToolUse` + `PostToolUseFailure` is right | D |
-| 24.2 | companion event sources | **extend**: `Notification` types `idle_prompt` (about 60 s idle), `permission_prompt` (after about 6 s), `quota_auto_resume_*`; `StopFailure` matchers `rate_limit`, `overloaded`, `authentication_failed`, `billing_error`…; `PostCompact`, `SubagentStart`/`SubagentStop`, `PostToolBatch`, `PostModelSwitch`; give the garnish hook `async: true` so it can never delay a tool | D |
+| 24.2 | companion event sources | **extend**: `Notification` types `idle_prompt` (about 60 s idle), `permission_prompt` (after about 6 s), `quota_auto_resume_*`; `StopFailure` matchers `rate_limit`, `overloaded`, `authentication_failed`, `billing_error`…; `PostCompact`, `SubagentStart`/`SubagentStop`, `PostToolBatch`, `PostModelSwitch`; give the garnish hook `async: true` so it can never delay a tool, and keep it silent (exit 0, empty stdout): an async hook's output is delivered into the conversation on the next turn | D |
 | 24.4 | animation | **extend**: `prefersReducedMotion` (settings, `/config` → Reduce motion) should default `animate` to off | D, B |
 | 24.8 | tips | **alternative**: garnish's catalog could also be exported as a `spinnerTipsOverride.tipsFile` so the harness rotates it in its own spinner | D |
 | 24.9 | spinner verbs | confirmed; tweakcc goes further by patching the binary (verbs, spinner styles, themes) — Tier D for garnish | D, C |
@@ -137,8 +147,8 @@ configurators with live preview (claudebar, CCometixLine, best-claude-hud)
   `get_usage` over stream-json in a worker before considering the OAuth
   endpoint; option (b) `stats-cache.json` needs no network at all and gives
   a `today` view (§ 4, N2). C3 stays as written (endpoint confirmed).
-- **Transcript.** Now only `speed` needs it. `compactions` moves to the hook
-  family.
+- **Transcript.** Now only `speed` and the exact reclaimed-tokens figure
+  need it; the compaction count and trigger move to the hook family.
 - **Installer form.** 7.3a is the market floor and the harness has a
   built-in competitor (`/statusline`). 7.3c has three Rust precedents. No
   change to the choice, better information for it.
@@ -195,7 +205,7 @@ configurators with live preview (claudebar, CCometixLine, best-claude-hud)
 | N1 | `garnish subagents` for `subagentStatusLine` | B | One process per refresh reads `{…base hook fields, columns, tasks[]}` and prints one `{"id","content"}` line per task. Reuse the module renderer: `name`, `model`, `effort`, a context gauge from `tokenCount / contextWindowSize` (2.1.205+), elapsed from `startTime`, `status` coloring; `columns` replaces `COLUMNS`. Plugin `settings.json` may ship it as a default. Trust-gated like `statusLine`. |
 | N2 | `today` module from `~/.claude/stats-cache.json` | B | Worker reads the file (harness-maintained, no credentials, no transcript), caches `dailyModelTokens` for today; render tokens by model or a total. Cost needs a pricing table, which garnish does not have; show tokens only unless the payload cost route (N3) is chosen. Verify first how often the harness rewrites the file. |
 | N3 | `today` spend from payload cost, ledger per `session_id` | B | claude-hud's approach: fold `cost.total_cost_usd` into `<cache>/daily-cost.json` keyed by `session_id` (baseline on first sight, midnight reset, drop entries unseen for 24 h). Needs a tick-side write, which SPEC forbids today; the same decision as the companion memory (§ 24.11). |
-| N4 | `compactions` via `PostCompact` | B | Hook entry `{"PostCompact": [{"matcher": "auto|manual", "hooks": [{"type": "command", "command": "garnish hook", "async": true}]}]}` appends to the session event log; module renders count and split. Replaces the C1 transcript design for this module. |
+| N4 | `compactions` via `PostCompact` | B | Hook entry `{"PostCompact": [{"matcher": "auto|manual", "hooks": [{"type": "command", "command": "garnish hook", "async": true}]}]}` appends `{ts, trigger}` to the session event log; the hook must exit 0 with empty stdout (async output is delivered into the conversation on the next turn). Module renders count and auto/manual split from the log. Reclaimed tokens: either the transcript (C1) or the payload approximation in § 1.1. |
 | N5 | installer / `doctor` checks | A | Report workspace trust, `disableAllHooks`, `allowManagedHooksOnly`; set `hideVimModeIndicator: true` when the `vim` module is on; suggest `refreshInterval` when `clock`, `limit*` countdowns or animation are configured (docs recommend it for time-based segments); detect harness runs by `CLAUDE_CODE_CHILD_SESSION=1` / `CLAUDECODE=1` so `preview` can tell a manual run from a harness run. |
 | N6 | `prefersReducedMotion` | A | When the settings read (already cached for the autocompact override) finds it `true`, treat `animate` as off unless the garnish config sets it explicitly. |
 | N7 | tips as `spinnerTipsOverride.tipsFile` | A | `garnish tips export` writes the catalog as tip objects with ids and cooldowns; the user points `tipsFile` at it (absolute or `~/` path; ignored from remote managed settings). Complements, not replaces, the `tip` module. |
@@ -346,7 +356,7 @@ and SPEC § 2:
 | multi-line output no longer drops rows when a line is over-wide (fix) | 2.1.141 |
 | `workspace.repo` and `pr` | 2.1.145 |
 | `COLUMNS` and `LINES` in the environment | 2.1.153 |
-| footer hints restored for custom status line users (fix) | 2.1.169 |
+| footer hints restored for custom status line users (fix); the current docs say a custom status line hides most hints again, so the behaviour changed after this release | 2.1.169 |
 | `footerLinksRegexes` | 2.1.176 |
 | `subagentStatusLine` per-task `model` and `contextWindowSize` | 2.1.205 |
 | `subagentStatusLine` per-task `effort` | 2.1.214 |
