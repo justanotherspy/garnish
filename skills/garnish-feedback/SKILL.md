@@ -52,6 +52,15 @@ usage line in COSMIC`). Body (Markdown, in this order):
 Labels: `feedback`, plus `alignment` when the report is about widths,
 glyphs or the right edge.
 
+## 3. Show it, ask, then post
+
+The issue is public. Before anything leaves the machine, redact: replace
+the home directory in every path with `~` (doctor and `config show` print
+absolute paths, which carry the username), and keep only the `GARNISH_*`
+lines of the doctor's `environment` section. Then print the **whole body**
+so the person can read it, and ask (AskUserQuestion when available):
+"post this to justanotherspy/garnish as a public issue?". Only a yes runs:
+
 ```sh
 gh issue create --repo justanotherspy/garnish --title "$TITLE" --body-file "$BODY" \
   --label feedback [--label alignment]

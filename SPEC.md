@@ -711,3 +711,9 @@ them needs network access from garnish itself, they drive `gh` and the
   `config check`, and opens a GitHub issue labelled `preset` containing the
   file with its § 12 header and the sample, asking for a screenshot. A
   maintainer turns accepted issues into `presets/<name>.toml` PRs.
+- **Both reporting skills post to a public repository**, so each one first
+  replaces the home directory in every path with `~` (doctor and `config
+  show` print absolute paths), keeps only `GARNISH_*` lines of the doctor's
+  environment section, prints the whole issue body, and asks the person
+  explicitly before `gh issue create`. Nothing leaves the machine on an
+  unanswered or negative question.
