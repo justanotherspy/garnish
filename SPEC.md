@@ -67,6 +67,11 @@ is cut with `…` on the right. garnish renders to exactly that width: the
 `2 × statusLine.padding` when that setting is non-zero (verified in the
 2.1.261 binary: footer `paddingX: 2`, status box `paddingX: padding`).
 
+**Whitespace-only rows are dropped.** The harness trims the script's stdout
+and removes every row that is empty after trimming (2.1.261:
+`stdout.trim().split("\n").flatMap(l => l.trim() || [])`), so a row garnish
+prints as spaces alone never reaches the screen; `preview` shows it.
+
 ### 2.2 Payload (stdin JSON)
 
 | field | type | notes |
@@ -271,6 +276,8 @@ stale_style = "dim"       # dim | hide | plain: how overdue cached values are sh
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
 padding = 0               # extra cells subtracted from the width, on top of the harness's 4; set 2 × statusLine.padding
 align = false             # pad each module column to the widest module in it across lines, so separators line up
+right_justify = "end"     # end | start: where a padded right-group module's text sits (§ 4.1)
+hide_empty_lines = true   # drop a line whose modules all rendered nothing; `modules = []` spacers stay (§ 4.1)
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
@@ -375,9 +382,14 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   `hide_empty_lines = true` (default); the frame's first/last caps follow the
   surviving lines. A line configured with `modules = []` and no `right` is an
   *intentional* spacer and is always kept, drawn as an empty framed row
-  (`├─ ────…────┤`, or a blank row with `style = "none"`). Setting
+  (`├─ ────…────┤`). With `style = "none"` (or a custom frame with empty
+  caps) a spacer is whitespace only, and Claude Code strips whitespace-only
+  rows from the script's output (§ 2.1), so it shows in `preview` but not in
+  the status line; a spacer needs a visible frame. Setting
   `hide_empty_lines = false` restores today's behaviour for the accidental
-  case too.
+  case too. With `stale_style = "hide"` a line of only cached modules can
+  come and go as its values fall overdue and refresh; `hide_when_empty =
+  false` on one of them pins the row.
 - **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
   not cut with `…`; instead the line shows a window onto the group that
   advances `ticker_step` cells to the left on every tick and wraps around,

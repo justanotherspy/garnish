@@ -305,6 +305,12 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   variables for the session's Bash commands, and their plain-text stdout is
   added to Claude's context (this is how `SESSION_HOST` and `SPRITE.md` are
   loaded).
+- The harness trims the status line script's stdout and drops every row
+  that is whitespace after trimming (2.1.261: `v.stdout.trim().split("\n")
+  .flatMap(N => N.trim() || []).join("\n")`, found by grepping the binary
+  for `status_line_command");let D=`). A row garnish prints as spaces alone
+  (an unframed spacer) shows in `preview` but never on screen; `preview`
+  and the harness differ there and nowhere else known.
 
 ## Cache and worker invariants (learned the hard way)
 

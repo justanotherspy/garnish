@@ -52,6 +52,9 @@ pub struct LineCfg {
     pub right: Vec<String>,
     /// Separator override for this line.
     pub separator: Option<String>,
+    /// Configured with `modules = []` and no `right`: an intentional blank
+    /// row that `hide_empty_lines` never drops (SPEC § 4.1).
+    pub spacer: bool,
 }
 
 /// Stale-value styling.
@@ -173,6 +176,8 @@ pub struct Config {
     pub align: bool,
     /// Which side of a padded right-group module the text sits on.
     pub right_justify: RightJustify,
+    /// Drop a line whose modules all rendered nothing (spacers are kept).
+    pub hide_empty_lines: bool,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
     /// Frame.
@@ -227,6 +232,7 @@ struct RawConfig {
     padding: Option<u16>,
     align: Option<bool>,
     right_justify: Option<RightJustify>,
+    hide_empty_lines: Option<bool>,
     durations: Option<DurationStyle>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
@@ -234,7 +240,7 @@ struct RawConfig {
     modules: BTreeMap<String, toml::Table>,
 }
 
-const TOP_KEYS: [&str; 15] = [
+const TOP_KEYS: [&str; 16] = [
     "preset",
     "icons",
     "theme",
@@ -245,6 +251,7 @@ const TOP_KEYS: [&str; 15] = [
     "padding",
     "align",
     "right_justify",
+    "hide_empty_lines",
     "durations",
     "colors",
     "frame",
@@ -278,6 +285,7 @@ impl RawConfig {
                 "right_justify" => {
                     raw.right_justify = enum_field(&key, value, RIGHT_JUSTIFIES, errors);
                 }
+                "hide_empty_lines" => raw.hide_empty_lines = field(&key, value, errors),
                 "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
                 "colors" => match value {
                     toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
@@ -694,6 +702,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
                 left: l.modules.clone(),
                 right: l.right.clone(),
                 separator: l.separator.clone(),
+                spacer: l.modules.is_empty() && l.right.is_empty(),
             })
             .collect()
     };
@@ -749,6 +758,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         padding: usize::from(raw.padding.unwrap_or(0)),
         align: raw.align.unwrap_or(false),
         right_justify: raw.right_justify.unwrap_or_default(),
+        hide_empty_lines: raw.hide_empty_lines.unwrap_or(true),
         durations: raw.durations.unwrap_or_default(),
         frame,
         lines,
@@ -1075,6 +1085,20 @@ mod tests {
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert!(errs[0].message.ends_with("expected one of end, start"), "{}", errs[0].message);
         assert_eq!(c.right_justify, RightJustify::End);
+        assert!(c.hide_empty_lines, "empty lines are hidden by default");
+        let (c, errs) = parse(
+            "hide_empty_lines = false\n[[line]]\nmodules = []\n[[line]]\nright = [\"clock\"]\n[[line]]\nmodules = [\"path\"]\n",
+            &schemas,
+        );
+        assert_eq!(errs, Vec::new());
+        assert!(!c.hide_empty_lines);
+        let spacers: Vec<bool> = c.lines.iter().map(|l| l.spacer).collect();
+        assert_eq!(
+            spacers,
+            vec![true, false, false],
+            "only `modules = []` with no `right` is a spacer"
+        );
+        assert!(Config::defaults(&schemas).lines.iter().all(|l| !l.spacer));
     }
 
     #[test]
@@ -1255,7 +1279,7 @@ x = 1
     /// against drifting from the match arms).
     #[test]
     fn every_listed_key_is_accepted() {
-        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
     }

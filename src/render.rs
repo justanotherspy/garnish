@@ -168,7 +168,6 @@ pub fn render_lines_at(
         truncate: config.truncate,
         ellipsis: if config.icons == IconSet::Ascii { "..".into() } else { "…".into() },
     };
-    let count = config.lines.len();
     // Every line renders before any is composed: aligned columns need the
     // widths of all lines.
     let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
@@ -208,12 +207,24 @@ pub fn render_lines_at(
             }
         }
     }
-    config
+    // A line whose modules all rendered nothing is dropped unless it is an
+    // intentional spacer or `hide_empty_lines = false`; the caps follow the
+    // survivors (SPEC § 4.1).
+    let kept: Vec<_> = config
         .lines
         .iter()
         .zip(lefts.iter().zip(rights.iter()))
+        .map(|(line, (left, right))| (line, left, right))
+        .filter(|(line, left, right)| {
+            let empty = left.is_empty() && right.is_empty();
+            let hidden = config.hide_empty_lines && !line.spacer && empty;
+            !hidden
+        })
+        .collect();
+    let count = kept.len();
+    kept.into_iter()
         .enumerate()
-        .map(|(i, (line, (left, right)))| {
+        .map(|(i, (line, left, right))| {
             let sep = config.separator(line);
             let left = join_modules(left, sep, &config.theme);
             let right = join_modules(right, sep, &config.theme);
@@ -366,6 +377,66 @@ mod tests {
             Some(80),
         );
         assert!(out.lines().last().unwrap().starts_with("! config:"), "{out}");
+    }
+
+    /// SPEC § 4.1 Empty lines: outside a repository the repo modules render
+    /// nothing, so a line made only of them is dropped and the caps follow
+    /// the survivors; `modules = []` is a spacer that always stays;
+    /// `hide_empty_lines = false` keeps the accidental empty row too.
+    #[test]
+    fn empty_lines_are_dropped_unless_spacer_or_kept_by_config() {
+        let payload = fixture("pr-absent");
+        let plain = |text: &str| {
+            let (config, errs) = config::parse(&format!("icons = \"unicode\"\n{text}"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(60), &Clock::fixed()))
+        };
+        let lines = "[[line]]\nmodules = [\"branch\", \"sync\", \"pr\"]\n[[line]]\nmodules = [\"model\"]\nright = [\"clock\"]\n";
+        let out = plain(lines);
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(
+            out.starts_with("── ❖ Opus ") && out.ends_with("⠋ 16:00:00 ──"),
+            "single caps: {out}"
+        );
+        let out = plain(&format!("hide_empty_lines = false\n{lines}"));
+        let rows: Vec<&str> = out.lines().collect();
+        assert_eq!(rows.len(), 2, "{out}");
+        assert!(rows[0].starts_with("╭─") && rows[0].ends_with("─╮"), "{}", rows[0]);
+        assert_eq!(display_width(rows[0]), 56);
+        assert_eq!(rows[0].trim_matches(|c| c == '╭' || c == '╮' || c == '─' || c == ' '), "");
+        let out = plain(
+            "[[line]]\nmodules = [\"model\"]\n[[line]]\nmodules = []\n[[line]]\nmodules = [\"session\"]\n",
+        );
+        let rows: Vec<&str> = out.lines().collect();
+        assert_eq!(rows.len(), 3, "spacer kept: {out}");
+        assert!(rows[1].starts_with("├─") && rows[1].ends_with("┤"), "{}", rows[1]);
+        assert_eq!(display_width(rows[1]), 56);
+    }
+
+    /// A spacer takes whatever cap its position calls for: first, last or,
+    /// alone, the single-line caps.
+    #[test]
+    fn spacer_caps_follow_its_position() {
+        let payload = fixture("subscription-full");
+        let plain = |text: &str| {
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(40), &Clock::fixed()))
+        };
+        let first = plain("[[line]]\nmodules = []\n[[line]]\nmodules = [\"model\"]\n");
+        let rows: Vec<&str> = first.lines().collect();
+        assert!(rows[0].starts_with("╭─") && rows[0].ends_with("╮"), "{first}");
+        let last = plain("[[line]]\nmodules = [\"model\"]\n[[line]]\nmodules = []\n");
+        let rows: Vec<&str> = last.lines().collect();
+        assert!(rows[1].starts_with("╰─") && rows[1].ends_with("╯"), "{last}");
+        let only = plain("[[line]]\nmodules = []\n");
+        assert_eq!(only.lines().count(), 1, "{only}");
+        assert!(only.starts_with("──") && only.ends_with("──"), "{only}");
+        assert_eq!(display_width(&only), 36);
+        // Unframed, a spacer is whitespace only: shown by preview, dropped by
+        // Claude Code (SPEC § 2.1), which is why the docs ask for a frame.
+        let none = plain("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n");
+        assert_eq!(none.trim(), "", "{none:?}");
     }
 
     #[test]

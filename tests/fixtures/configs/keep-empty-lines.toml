@@ -1,0 +1,15 @@
+# fixture: pr-absent
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# `hide_empty_lines = false` restores the old behaviour: the repo-only line
+# is emitted as an empty framed row.
+
+hide_empty_lines = false
+
+[[line]]
+modules = ["branch", "sync", "pr"]
+
+[[line]]
+modules = ["model", "context"]
+right   = ["clock"]
