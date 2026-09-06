@@ -657,11 +657,18 @@ pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
 
 /// The default location a new config should be written to.
 #[must_use]
-pub fn default_path() -> PathBuf {
+pub fn default_path() -> Option<PathBuf> {
+    // Without a home there is no default: guessing `.` would write into
+    // whatever directory garnish happens to run from (a repository, say).
     let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-    base.unwrap_or_else(|| PathBuf::from(".")).join("garnish").join("garnish.toml")
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|v| !v.is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
+    Some(base.join("garnish").join("garnish.toml"))
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported
@@ -1216,7 +1223,9 @@ fn parse_overrides(
 /// loop on every tick.
 fn bounded(key: &str, value: Value) -> Result<Value, String> {
     match (key, &value) {
-        ("width" | "pad", Value::Int(n)) if usize::try_from(*n).is_ok_and(|n| n > MAX_CELLS) => {
+        ("width" | "pad" | "bar_width", Value::Int(n))
+            if usize::try_from(*n).is_ok_and(|n| n > MAX_CELLS) =>
+        {
             Err(format!("must be at most {MAX_CELLS} cells"))
         }
         ("text" | "gap", Value::Str(s)) if s.chars().count() > MAX_TEXT_CHARS => {
@@ -1873,7 +1882,7 @@ x = 1
         assert_eq!(c.frame.chars.pad, " ");
         assert_eq!(c.frame.chars.separator, " | ");
         assert_eq!(c.frame.chars.right_last, ">");
-        assert_eq!(c.lines[0].separator.as_deref(), Some(" dcs +"));
+        assert_eq!(c.lines[0].separator.as_deref(), Some("+"), "a DCS loses its payload too");
         let model = c.modules.get("model").unwrap();
         assert_eq!(model.label, "M");
         assert_eq!(model.prefix, "(");
@@ -1888,12 +1897,17 @@ x = 1
     fn sizes_and_text_lengths_are_bounded_at_config_time() {
         // A cell count or a string a row can never show would only size an
         // allocation or a loop on every tick; it is reported and defaulted.
-        let big = "[modules.context]\nwidth = 99999999999\n[modules.text.a]\ntext = \"hi\"\nwidth = 1025\npad = 4000000000\n";
+        let big = "[modules.context]\nwidth = 99999999999\n[modules.text.a]\ntext = \"hi\"\nwidth = 1025\npad = 4000000000\n[modules.limit5h]\nbar_width = 1025\n";
         let (c, errs) = parse(big, &crate::modules::SCHEMAS);
         let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(
             paths,
-            ["modules.context.width", "modules.text.a.pad", "modules.text.a.width"],
+            [
+                "modules.context.width",
+                "modules.limit5h.bar_width",
+                "modules.text.a.pad",
+                "modules.text.a.width"
+            ],
             "{errs:?}"
         );
         assert!(errs.iter().all(|e| e.message == "must be at most 1024 cells"), "{errs:?}");

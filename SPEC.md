@@ -519,9 +519,11 @@ without an error report.
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
 - **Nothing but text reaches a row.** Every string that becomes part of a
-  row is reduced to plain text: escape sequences (CSI, OSC, DCS), control
-  characters and invisible format characters (bidi overrides, zero-width
-  spaces, the BOM; ZWJ and the emoji variation selector stay) are removed.
+  row is reduced to plain text: escape sequences (CSI, OSC, and the string
+  sequences DCS/SOS/PM/APC with their payloads), control characters and the
+  bidi and zero-width format characters (bidi marks, embeddings and
+  isolates, zero-width space and non-joiner, word joiner, the BOM; ZWJ and
+  the emoji variation selector stay) are removed.
   The config's own strings (`label`, `prefix`, `suffix`, icon overrides,
   frame glyphs, separators, `text`, `gap`, `ticker_gap`) are reduced at
   config time, so width arithmetic sees the real cells; everything else (the
@@ -531,11 +533,14 @@ without an error report.
   an `http(s)://` URL of printable ASCII. (Whole-stack review, 2026-09-06:
   a `\n` in a session name added a row, an escape passed `--color never`,
   and a cut could split the sequence.)
-- **Sizes are bounded.** A module cell count (`width`, `pad`) above 1024 or
+- **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`) above 1024 or
   a row string (`text`, `gap`, `ticker_gap`) above 4096 characters is
   reported like any bad value and the default stands in; the renderers clamp
   again, and the effective width never exceeds 4096 cells whatever `COLUMNS`
-  says. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
+  says. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
+  is no default config or settings location: `install`, `config init`,
+  `config path` and `skills install` refuse with a one-line note naming the
+  flag to pass, rather than writing into the current directory. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
   above, `now × step` saturates to a constant frame. `frame.fill_char` must
   be exactly one cell, else it is reported and the style's glyph stays.
   (Same review: `width = 9223372036854775807` aborted the tick with an

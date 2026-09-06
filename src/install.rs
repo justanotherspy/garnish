@@ -24,11 +24,11 @@ pub struct Plan {
 
 /// The default Claude Code user settings file.
 #[must_use]
-pub fn default_settings_path() -> PathBuf {
+pub fn default_settings_path() -> Option<PathBuf> {
+    // No HOME, no default: never guess the current directory.
     std::env::var_os("HOME")
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
-        .join(".claude")
-        .join("settings.json")
+        .filter(|v| !v.is_empty())
+        .map(|h| PathBuf::from(h).join(".claude").join("settings.json"))
 }
 
 /// Whether an executable named `name` is on `PATH`.

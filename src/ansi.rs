@@ -514,7 +514,7 @@ pub fn plain_text(s: &str) -> String {
 /// [`plain_text`] without an allocation when the text is already plain,
 /// which on a warm tick is every string.
 fn clean(s: String) -> String {
-    if s.chars().any(|c| c == '\x1b' || c.is_control() || is_format_char(c)) {
+    if s.chars().any(|c| c.is_control() || is_format_char(c)) {
         strip_ansi(&s).chars().filter(|&c| !c.is_control() && !is_format_char(c)).collect()
     } else {
         s
@@ -558,6 +558,17 @@ pub fn strip_ansi(s: &str) -> String {
                 let mut prev_esc = false;
                 for n in chars.by_ref() {
                     if n == '\u{7}' || (prev_esc && n == '\\') {
+                        break;
+                    }
+                    prev_esc = n == '\x1b';
+                }
+            }
+            Some('P' | 'X' | '^' | '_') => {
+                // DCS, SOS, PM, APC (sixel, kitty graphics, …): a string
+                // sequence terminated by ST (ESC \) alone, never by BEL.
+                let mut prev_esc = false;
+                for n in chars.by_ref() {
+                    if prev_esc && n == '\\' {
                         break;
                     }
                     prev_esc = n == '\x1b';
@@ -703,6 +714,10 @@ mod tests {
         assert_eq!(plain_text("\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\"), "link");
         assert_eq!(plain_text("a\tb\nc\u{7}d"), "abcd");
         assert_eq!(plain_text("\x1b"), "", "a bare ESC never reaches the row");
+        // String sequences (DCS/SOS/PM/APC) lose their payload too: a sixel
+        // or kitty graphics blob is not text, and only ST ends them.
+        assert_eq!(plain_text("a\x1bPq#0;2;0;0;0~~\x07still\x1b\\b"), "ab");
+        assert_eq!(plain_text("a\x1b_Gf=100;AAAA\x1b\\b\x1bXsos\x1b\\c\x1b^pm\x1b\\d"), "abcd");
         assert_eq!(
             plain_text("🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}"),
             "🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}",

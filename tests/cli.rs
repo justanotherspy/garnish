@@ -246,6 +246,30 @@ fn writing_commands_refuse_to_guess_a_home_directory() {
         assert!(err.contains("HOME") && !err.contains("Location:"), "{args:?}: {err}");
     }
     assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "nothing written");
+    // Neither does an explicit settings file make `install` guess the config
+    // location, nor does GARNISH_CONFIG make `config init` guess it: the
+    // config goes where GARNISH_CONFIG says.
+    let settings = dir.path().join("settings.json");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.args(["install", "--settings", settings.to_str().unwrap()])
+        .current_dir(dir.path())
+        .env_remove("HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("GARNISH_CONFIG");
+    let out = cmd.output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("HOME"), "{err}");
+    assert!(!dir.path().join("garnish").exists(), "no ./garnish/ in the cwd");
+    let via_env = dir.path().join("env.toml");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.args(["config", "init"])
+        .current_dir(dir.path())
+        .env_remove("HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("GARNISH_CONFIG", &via_env);
+    assert!(cmd.output().unwrap().status.success());
+    assert!(via_env.exists() && !dir.path().join("garnish").exists());
+    std::fs::remove_file(&via_env).unwrap();
     // An explicit path needs no HOME.
     let target = dir.path().join("g.toml");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
