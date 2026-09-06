@@ -138,14 +138,13 @@ fn cases() -> Vec<Case> {
 }
 
 fn render(case: &Case, cache: &Path) -> String {
+    // Paths are passed relative to the repository root so a `⚠ config: <path>`
+    // line in a golden reads the same on every machine.
+    let rel = |p: &Path| p.strip_prefix(root()).unwrap().to_str().unwrap().to_owned();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
-    cmd.args([
-        "--config",
-        case.config.to_str().unwrap(),
-        "preview",
-        case.fixture.to_str().unwrap(),
-    ])
-    .args(["--color", "never", "--width", &case.columns]);
+    cmd.current_dir(root())
+        .args(["--config", &rel(&case.config), "preview", &rel(&case.fixture)])
+        .args(["--color", "never", "--width", &case.columns]);
     if let Some(icons) = &case.icons {
         cmd.args(["--icons", icons]);
     }

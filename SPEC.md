@@ -472,8 +472,9 @@ without an error report.
   `⚠ config: <path>:<line> <msg>`; only a TOML syntax error falls back to
   the built-in defaults wholesale. (Decided 2026-09-05: one bad colour used
   to discard the whole file, frame and lines included, which made a typo
-  look like a different program. Until PLAN Phase 14 lands, any error still
-  falls back wholesale.)
+  look like a different program. Implemented in PLAN Phase 14: the file is
+  read as a plain TOML table and each key is converted on its own; value
+  errors carry the TOML path, syntax errors the line.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
 

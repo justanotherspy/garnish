@@ -365,6 +365,18 @@ mod tests {
         assert!(out.lines().last().unwrap().starts_with("! config:"), "{out}");
     }
 
+    #[test]
+    fn config_warning_names_the_first_problem_and_counts_the_rest() {
+        let out = render_plain(
+            &fixture("api-key"),
+            &loaded("theme = \"nope\"\ndurations = \"loose\"\nmystery = 1"),
+            Some(160),
+        );
+        let last = out.lines().last().unwrap();
+        assert!(last.starts_with("⚠ config: config durations: unknown value \"loose\""), "{last}");
+        assert!(last.ends_with("(+2 more)"), "{last}");
+    }
+
     /// Cell at which `needle` starts in `line`.
     fn column_of(line: &str, needle: &str) -> usize {
         let at = line.find(needle).unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));

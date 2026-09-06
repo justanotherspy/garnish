@@ -161,9 +161,9 @@ README/guide, adversarial review, tests for every bug found.
 
 ## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
 
-- [ ] Per-key fallback (bug 8): `parse_with` returns the resolved config with defaults substituted only for the bad values; wholesale fallback only on TOML syntax errors; the `⚠ config:` line unchanged; test: bad colour + custom frame keeps the frame, syntax error still falls back
-- [ ] `config check` exits 1 quietly on problems (bug 7): a `ConfigInvalid` error mapped to an `ExitCode` in `main`, no color-eyre report; same for `config init` refusing to overwrite; `tests/cli.rs` asserts stderr has no "Location:"
-- [ ] Per-key errors lose their line number (every `resolve()` error already has `line: None`); syntax errors keep theirs. `Loaded.errors` doc, doctor's `INVALID (defaults in effect)` wording, SPEC § 5 "until Phase 14 lands" sentence and the README/guide troubleshooting updated to match
+- [x] Per-key fallback (bug 8): the file is read as a `toml::Table` and `RawConfig::from_table` converts each top-level, `[frame]` and `[[line]]` key on its own (`field()` reports a bad value under its TOML path and leaves the default); wholesale fallback only on a TOML syntax error; the `⚠ config:` line unchanged. Tests: bad theme + bad colour + unknown keys keep the custom frame, the lines and the module overrides; a syntax error still yields the defaults with a line; config golden `bad-colour-custom-frame`
+- [x] `config check` exits 1 quietly on problems (bug 7): done in Phase 12 (`cli::Quiet`)
+- [x] Per-key errors lose their line number (every value error has `line: None`; `toml::Value` carries no span); syntax errors keep theirs. `Loaded.errors` doc, doctor's wording (`has N problem(s); the built-in default stands in for each bad key`), SPEC § 5, README and guide updated to match
 
 ## Phase 15 — Clock-driven scrolling: line ticker and text modules (SPEC § 3.7, § 4.1 ticker)
 
@@ -385,3 +385,17 @@ and user feedback. Pick from here when no phase is in progress.
   (`compose_line` parameter), a space in the fetch-age hint. Layer
   `phase-12/cli-exit`: `cli::Quiet` → `ExitCode::FAILURE` without a report.
   Bugs 3, 8 and 11 moved to the phases that own their config keys.
+- **2026-09-05 (Phase 14, one layer)** — Per-key config fallback (bug 8).
+  The serde-derived `RawConfig` with `deny_unknown_fields` rejected the
+  whole file on the first bad key; it is now built by walking a
+  `toml::Table` (taken by value: cloning every value cost a fifth of the
+  parse on the full annotated file) and converting each top-level,
+  `[frame]` and `[[line]]` key on its own, module lists item by item, enum
+  keys with a message that names the choices. A syntax error is the only
+  wholesale fallback and the only error with a line; value errors carry the
+  TOML path. Review found that a bad list item blanked its whole row and
+  that `try_into`'s messages for enum keys given a table were misleading;
+  both fixed with tests, plus a doctor sentence for the syntax-error case
+  and the stale "renders the defaults" sentence in `docs/config.md`. Config
+  golden `bad-colour-custom-frame` at 160 columns shows the heavy frame,
+  both lines and the `⚠ config: … (+3 more)` note.

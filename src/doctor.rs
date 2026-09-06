@@ -84,7 +84,22 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
             let _ = writeln!(o, "config   {} ok", p.display());
         }
         (Some(p), false) => {
-            let _ = writeln!(o, "config   {} INVALID (defaults in effect)", p.display());
+            // A syntax error is the one problem with a line and no path.
+            let syntax = loaded.errors.iter().any(|e| e.path.is_empty() && e.line.is_some());
+            if syntax {
+                let _ = writeln!(
+                    o,
+                    "config   {} does not parse; the built-in defaults are in effect",
+                    p.display()
+                );
+            } else {
+                let _ = writeln!(
+                    o,
+                    "config   {} has {} problem(s); the built-in default stands in for each bad key",
+                    p.display(),
+                    loaded.errors.len()
+                );
+            }
             for e in &loaded.errors {
                 let _ = writeln!(o, "         {e}");
             }

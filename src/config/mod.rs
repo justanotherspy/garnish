@@ -175,16 +175,23 @@ pub struct Overlay {
 /// The result of loading a config file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
-    /// The config in effect (defaults when the file was invalid).
+    /// The config in effect: the file with the built-in default standing in
+    /// for each bad key, or the defaults when the file does not parse.
     pub config: Config,
     /// The file that was read, if any.
     pub path: Option<PathBuf>,
-    /// Validation errors; non-empty means `config` is the built-in default.
+    /// Validation problems. The built-in default stands in for each bad key;
+    /// only a file that does not parse as TOML is replaced wholesale (SPEC § 5).
     pub errors: Vec<ConfigError>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields, default)]
+/// The file as written, before presets and defaults are applied.
+///
+/// Every field is optional so a bad value can be reported and defaulted on
+/// its own (SPEC § 5): the file is read as a plain TOML table and each known
+/// key is converted separately, instead of through one `serde` model that
+/// would reject the whole file on the first bad key.
+#[derive(Debug, Default)]
 struct RawConfig {
     preset: Option<TopPreset>,
     icons: Option<IconSet>,
@@ -202,8 +209,95 @@ struct RawConfig {
     modules: BTreeMap<String, toml::Table>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields, default)]
+const TOP_KEYS: [&str; 14] = [
+    "preset",
+    "icons",
+    "theme",
+    "color",
+    "truncate",
+    "stale_style",
+    "stale_after",
+    "padding",
+    "align",
+    "durations",
+    "colors",
+    "frame",
+    "line",
+    "modules",
+];
+
+const COLOR_CHOICES: &str = "auto, always, never, 256, truecolor";
+const STALE_STYLES: &str = "dim, hide, plain";
+const DURATION_STYLES: &str = "compact, fixed";
+
+impl RawConfig {
+    // The table is taken by value so every field moves into place: cloning
+    // each value cost a fifth of the parse on the full annotated file.
+    fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+        let mut raw = Self::default();
+        let presets = TopPreset::ALL.iter().map(|p| p.name()).collect::<Vec<_>>().join(", ");
+        let icon_sets = IconSet::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
+        for (key, value) in table {
+            match key.as_str() {
+                "preset" => raw.preset = enum_field(&key, value, &presets, errors),
+                "icons" => raw.icons = enum_field(&key, value, &icon_sets, errors),
+                "theme" => raw.theme = field(&key, value, errors),
+                "color" => raw.color = enum_field(&key, value, COLOR_CHOICES, errors),
+                "truncate" => raw.truncate = field(&key, value, errors),
+                "stale_style" => raw.stale_style = enum_field(&key, value, STALE_STYLES, errors),
+                "stale_after" => raw.stale_after = field(&key, value, errors),
+                "padding" => raw.padding = field(&key, value, errors),
+                "align" => raw.align = field(&key, value, errors),
+                "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
+                "colors" => match value {
+                    toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
+                    _ => errors.push(problem("colors", "expected a table of role = color")),
+                },
+                "frame" => match value {
+                    toml::Value::Table(t) => raw.frame = Some(RawFrame::from_table(t, errors)),
+                    _ => errors.push(problem("frame", "expected a [frame] table")),
+                },
+                "line" => match value {
+                    toml::Value::Array(items) => {
+                        for (i, item) in items.into_iter().enumerate() {
+                            let path = format!("line[{i}]");
+                            match item {
+                                toml::Value::Table(t) => {
+                                    raw.line.push(RawLine::from_table(&path, t, errors));
+                                }
+                                _ => errors.push(problem(&path, "expected a [[line]] table")),
+                            }
+                        }
+                    }
+                    _ => errors.push(problem("line", "expected [[line]] tables")),
+                },
+                "modules" => match value {
+                    toml::Value::Table(t) => {
+                        for (id, module) in t {
+                            match module {
+                                toml::Value::Table(m) => {
+                                    raw.modules.insert(id, m);
+                                }
+                                _ => errors.push(problem(
+                                    &format!("modules.{id}"),
+                                    "expected a [modules.<id>] table",
+                                )),
+                            }
+                        }
+                    }
+                    _ => errors.push(problem("modules", "expected [modules.<id>] tables")),
+                },
+                other => errors.push(problem(
+                    other,
+                    &format!("unknown key; expected one of {}", TOP_KEYS.join(", ")),
+                )),
+            }
+        }
+        raw
+    }
+}
+
+#[derive(Debug, Default)]
 struct RawFrame {
     style: Option<FrameStyle>,
     fill: Option<bool>,
@@ -211,7 +305,6 @@ struct RawFrame {
     middle: Option<String>,
     last: Option<String>,
     single: Option<String>,
-    #[serde(rename = "fill_char")]
     fill_char: Option<String>,
     right_first: Option<String>,
     right_middle: Option<String>,
@@ -221,12 +314,160 @@ struct RawFrame {
     separator: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields, default)]
+const FRAME_KEYS: [&str; 13] = [
+    "style",
+    "fill",
+    "first",
+    "middle",
+    "last",
+    "single",
+    "fill_char",
+    "right_first",
+    "right_middle",
+    "right_last",
+    "right_single",
+    "pad",
+    "separator",
+];
+
+impl RawFrame {
+    fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+        let mut f = Self::default();
+        let styles = FrameStyle::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
+        for (key, value) in table {
+            let path = format!("frame.{key}");
+            let text_slot = match key.as_str() {
+                "first" => Some(&mut f.first),
+                "middle" => Some(&mut f.middle),
+                "last" => Some(&mut f.last),
+                "single" => Some(&mut f.single),
+                "fill_char" => Some(&mut f.fill_char),
+                "right_first" => Some(&mut f.right_first),
+                "right_middle" => Some(&mut f.right_middle),
+                "right_last" => Some(&mut f.right_last),
+                "right_single" => Some(&mut f.right_single),
+                "pad" => Some(&mut f.pad),
+                "separator" => Some(&mut f.separator),
+                _ => None,
+            };
+            if let Some(slot) = text_slot {
+                *slot = field(&path, value, errors);
+                continue;
+            }
+            match key.as_str() {
+                "style" => f.style = enum_field(&path, value, &styles, errors),
+                "fill" => f.fill = field(&path, value, errors),
+                _ => errors.push(problem(
+                    &path,
+                    &format!("unknown key; expected one of {}", FRAME_KEYS.join(", ")),
+                )),
+            }
+        }
+        f
+    }
+}
+
+#[derive(Debug, Default)]
 struct RawLine {
     modules: Vec<String>,
     right: Vec<String>,
     separator: Option<String>,
+}
+
+impl RawLine {
+    fn from_table(path: &str, table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+        let mut line = Self::default();
+        for (key, value) in table {
+            let path = format!("{path}.{key}");
+            match key.as_str() {
+                "modules" => line.modules = id_list(&path, value, errors),
+                "right" => line.right = id_list(&path, value, errors),
+                "separator" => line.separator = field(&path, value, errors),
+                _ => errors
+                    .push(problem(&path, "unknown key; expected one of modules, right, separator")),
+            }
+        }
+        line
+    }
+}
+
+/// Convert one TOML value to its typed field, reporting a bad one under
+/// `path` and leaving the field unset so its default applies.
+fn field<T: serde::de::DeserializeOwned>(
+    path: &str,
+    value: toml::Value,
+    errors: &mut Vec<ConfigError>,
+) -> Option<T> {
+    match value.try_into::<T>() {
+        Ok(v) => Some(v),
+        Err(e) => {
+            errors.push(problem(path, e.message()));
+            None
+        }
+    }
+}
+
+/// [`field`] for a key with a fixed vocabulary, naming the choices in the
+/// message: `try_into` alone says "invalid type: unit variant" for a
+/// non-string and reads a table's keys as if they were the value.
+fn enum_field<T: serde::de::DeserializeOwned>(
+    path: &str,
+    value: toml::Value,
+    options: &str,
+    errors: &mut Vec<ConfigError>,
+) -> Option<T> {
+    let Some(text) = value.as_str().map(str::to_owned) else {
+        errors.push(problem(path, &format!("expected a string, one of {options}")));
+        return None;
+    };
+    value.try_into::<T>().ok().or_else(|| {
+        errors.push(problem(path, &format!("unknown value {text:?}; expected one of {options}")));
+        None
+    })
+}
+
+/// A `[[line]]` module list kept item by item: a non-string item is reported
+/// under its index and skipped, the rest of the line stays (one typo must not
+/// blank a whole row, SPEC § 5).
+fn id_list(path: &str, value: toml::Value, errors: &mut Vec<ConfigError>) -> Vec<String> {
+    let toml::Value::Array(items) = value else {
+        errors.push(problem(path, "expected a list of module ids"));
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(j, item)| {
+            if let toml::Value::String(s) = item {
+                Some(s)
+            } else {
+                errors.push(problem(&format!("{path}[{j}]"), "expected a module id string"));
+                None
+            }
+        })
+        .collect()
+}
+
+/// A table of string values, skipping (and reporting) entries of another type.
+fn string_table(
+    path: &str,
+    table: toml::Table,
+    errors: &mut Vec<ConfigError>,
+) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for (k, v) in table {
+        match v {
+            toml::Value::String(s) => {
+                out.insert(k, s);
+            }
+            _ => errors.push(problem(&format!("{path}.{k}"), "expected a string")),
+        }
+    }
+    out
+}
+
+fn problem(path: &str, message: &str) -> ConfigError {
+    ConfigError { path: path.to_owned(), message: message.to_owned(), line: None }
 }
 
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
@@ -258,8 +499,9 @@ pub fn default_path() -> PathBuf {
     base.unwrap_or_else(|| PathBuf::from(".")).join("garnish").join("garnish.toml")
 }
 
-/// Load and resolve the configuration. Never fails: an invalid file yields
-/// the built-in defaults plus the list of errors.
+/// Load and resolve the configuration. Never fails: a bad key is reported
+/// and defaulted on its own; only an unreadable or non-TOML file yields the
+/// built-in defaults wholesale, plus the error.
 #[must_use]
 pub fn load(explicit: Option<&Path>, schemas: &[ModuleSchema]) -> Loaded {
     load_with(explicit, schemas, &Overlay::default())
@@ -290,7 +532,11 @@ pub fn load_with(explicit: Option<&Path>, schemas: &[ModuleSchema], overlay: &Ov
     }
 }
 
-/// Parse and resolve TOML text. Returns defaults plus errors when invalid.
+/// Parse and resolve TOML text.
+///
+/// Every valid key takes effect; each invalid one is reported and its
+/// built-in default used instead. Only text that is not TOML yields the
+/// defaults wholesale, with the line of the syntax error (SPEC § 5).
 #[must_use]
 pub fn parse(text: &str, schemas: &[ModuleSchema]) -> (Config, Vec<ConfigError>) {
     parse_with(text, schemas, &Overlay::default())
@@ -303,8 +549,8 @@ pub fn parse_with(
     schemas: &[ModuleSchema],
     overlay: &Overlay,
 ) -> (Config, Vec<ConfigError>) {
-    let mut raw: RawConfig = match toml::from_str(text) {
-        Ok(r) => r,
+    let table: toml::Table = match toml::from_str(text) {
+        Ok(t) => t,
         Err(e) => {
             let line = e.span().map(|s| line_of(text, s.start));
             let message = e.message().to_owned();
@@ -314,22 +560,19 @@ pub fn parse_with(
             );
         }
     };
+    let mut errors = Vec::new();
+    let mut raw = RawConfig::from_table(table, &mut errors);
     if overlay.preset.is_some() {
+        // The preset's lines replace the file's, so their problems are moot.
         raw.preset = overlay.preset;
         raw.line.clear();
+        errors.retain(|e| !e.path.starts_with("line["));
     }
     raw.icons = overlay.icons.or(raw.icons);
     raw.theme = overlay.theme.clone().or(raw.theme);
     raw.color = overlay.color.or(raw.color);
-    let mut errors = Vec::new();
     let config = resolve(&raw, schemas, &mut errors);
-    if errors.is_empty() {
-        return (config, errors);
-    }
-    // Fall back to the defaults, keeping the icon set (a validated enum) so
-    // the warning line and glyphs still match what the user asked for.
-    let fallback = RawConfig { icons: raw.icons, ..RawConfig::default() };
-    (resolve(&fallback, schemas, &mut Vec::new()), errors)
+    (config, errors)
 }
 
 fn line_of(text: &str, byte: usize) -> usize {
@@ -788,9 +1031,11 @@ mod tests {
         assert_eq!(errs, Vec::new());
         assert!(c.align);
         assert_eq!(c.durations, DurationStyle::Fixed);
-        let (c, errs) = parse("durations = \"loose\"", &schemas);
-        assert!(!errs.is_empty(), "unknown duration style must be reported");
+        let (c, errs) = parse("align = true\ndurations = \"loose\"", &schemas);
+        assert_eq!(errs.len(), 1, "unknown duration style must be reported: {errs:?}");
+        assert_eq!(errs[0].path, "durations");
         assert_eq!(c.durations, DurationStyle::Compact, "and fall back to the default");
+        assert!(c.align, "while the valid key next to it stays in effect");
     }
 
     #[test]
@@ -858,15 +1103,26 @@ format = "12h"
         assert_eq!(c.width(Some(100)), 94);
     }
 
+    /// SPEC § 5: every bad key is reported under its TOML path and falls back
+    /// to its default on its own; everything valid around it stays in effect
+    /// (walkthrough bug 8: one bad colour used to discard the whole file).
     #[test]
-    fn errors_have_paths_and_fall_back_to_defaults() {
+    fn errors_have_paths_and_only_the_bad_keys_fall_back() {
         let text = r#"
 theme = "solarized"
+durations = "loose"
+padding = 70000
+mystery = 1
 [colors]
 accent = "bogus"
 nope = "red"
+[frame]
+style = "heavy"
+separator = " ┃ "
+bogus_key = 1
 [[line]]
 modules = ["path", "ghost"]
+right = 3
 [modules.path]
 depth = -1
 wat = 1
@@ -879,15 +1135,38 @@ x = 1
 "#;
         let (c, errs) = parse(text, &schemas());
         let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
-        assert!(paths.contains(&"theme"), "{paths:?}");
-        assert!(paths.contains(&"colors.accent"));
-        assert!(paths.contains(&"colors.nope"));
-        assert!(paths.contains(&"line[0].modules[1]"));
-        assert!(paths.contains(&"modules.path.depth"));
-        assert!(paths.contains(&"modules.path.wat"));
-        assert!(paths.contains(&"modules.path.icons.nope"));
-        assert!(paths.contains(&"modules.clock.format"));
-        assert!(paths.contains(&"modules.ghost"));
+        for expected in [
+            "theme",
+            "durations",
+            "padding",
+            "mystery",
+            "colors.accent",
+            "colors.nope",
+            "frame.bogus_key",
+            "line[0].modules[1]",
+            "line[0].right",
+            "modules.path.depth",
+            "modules.path.wat",
+            "modules.path.icons.nope",
+            "modules.clock.format",
+            "modules.ghost",
+        ] {
+            assert!(paths.contains(&expected), "{expected} missing from {paths:?}");
+        }
+        assert!(errs.iter().all(|e| e.line.is_none()), "value errors carry a path, not a line");
+        // The valid keys are in effect…
+        assert_eq!(c.frame.style, FrameStyle::Heavy);
+        assert_eq!(c.frame.chars.separator, " ┃ ");
+        assert_eq!(c.lines.len(), 1);
+        assert_eq!(c.lines[0].left, vec!["path", "ghost"]);
+        assert_eq!(c.modules.get("clock").map(|m| m.str("format")), Some("24h"));
+        // …and each bad one fell back to its own default.
+        let defaults = Config::defaults(&schemas());
+        assert_eq!(c.theme, defaults.theme, "unknown theme and bad colour → default palette");
+        assert_eq!(c.durations, DurationStyle::Compact);
+        assert_eq!(c.padding, 0);
+        assert_eq!(c.lines[0].right, Vec::<String>::new(), "bad right list → no right group");
+        assert_eq!(c.modules.get("path").map(|m| m.int("depth")), Some(2));
         let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &schemas());
         assert!(errs.is_empty(), "payload-only modules may run every tick: {errs:?}");
         let mut cached = schemas();
@@ -895,18 +1174,73 @@ x = 1
         let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &cached);
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].path, "modules.path.refresh");
-        // defaults in effect
-        assert_eq!(c, Config::defaults(&schemas()));
     }
 
     #[test]
-    fn syntax_errors_carry_a_line() {
-        let (_, errs) = parse("preset = \"default\"\n[frame\nstyle = 1", &schemas());
+    fn a_bad_list_item_or_table_shape_reports_itself_and_keeps_the_rest() {
+        let (c, errs) = parse("[[line]]\nmodules = [\"clock\", 3]\nright = \"x\"\n", &schemas());
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["line[0].modules[1]", "line[0].right"]);
+        assert_eq!(c.lines[0].left, vec!["clock"], "the good item stays");
+        for (text, path) in [
+            ("line = \"x\"", "line"),
+            ("modules = 1", "modules"),
+            ("colors = 1", "colors"),
+            ("frame = \"x\"", "frame"),
+            ("[[frame]]\nstyle = \"heavy\"", "frame"),
+            ("[modules]\nclock = 1", "modules.clock"),
+        ] {
+            let (c, errs) = parse(text, &schemas());
+            assert_eq!(errs.len(), 1, "{text}: {errs:?}");
+            assert_eq!(errs[0].path, path, "{text}");
+            assert_eq!(c.lines.len(), 4, "{text}: the default lines stand in");
+        }
+    }
+
+    #[test]
+    fn enum_keys_name_their_choices() {
+        let text = "color = 1\npreset = { a = 1 }\ndurations = \"loose\"\n[frame]\nstyle = 7\n";
+        let (_, errs) = parse(text, &schemas());
+        let msgs: Vec<String> = errs.iter().map(|e| format!("{}: {}", e.path, e.message)).collect();
+        for expected in [
+            "color: expected a string, one of auto, always, never, 256, truecolor",
+            "preset: expected a string, one of default, minimal, full, compact",
+            "durations: unknown value \"loose\"; expected one of compact, fixed",
+            "frame.style: expected a string, one of none, rounded, square, double, heavy, powerline, custom",
+        ] {
+            assert!(msgs.iter().any(|m| m == expected), "{expected}\n{msgs:?}");
+        }
+    }
+
+    /// Every key the walk lists as valid is accepted (guards the key tables
+    /// against drifting from the match arms).
+    #[test]
+    fn every_listed_key_is_accepted() {
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let (_, errs) = parse(text, &schemas());
+        assert_eq!(errs, Vec::new());
+    }
+
+    #[test]
+    fn preset_overlay_drops_line_errors_with_the_lines() {
+        let overlay = Overlay { preset: Some(TopPreset::Minimal), ..Default::default() };
+        let (c, errs) = parse_with("[[line]]\nmodules = [3]\n", &schemas(), &overlay);
+        assert_eq!(errs, Vec::new(), "the overlay replaces the lines, so their problems are moot");
+        assert_eq!(c.lines.len(), 1);
+    }
+
+    #[test]
+    fn syntax_errors_carry_a_line_and_fall_back_wholesale() {
+        let (c, errs) = parse("preset = \"minimal\"\n[frame\nstyle = 1", &schemas());
         assert_eq!(errs.len(), 1);
         assert_eq!(errs[0].line, Some(2));
         assert!(errs[0].to_string().starts_with("line 2: "));
-        let (_, errs) = parse("unknown_top = 1", &schemas());
-        assert!(errs[0].message.contains("unknown field"));
+        assert_eq!(c, Config::defaults(&schemas()), "not TOML: nothing can be trusted");
+        let (c, errs) = parse("unknown_top = 1\npreset = \"minimal\"", &schemas());
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "unknown_top");
+        assert!(errs[0].message.contains("unknown key"), "{}", errs[0].message);
+        assert_eq!(c.preset, TopPreset::Minimal, "the valid key next to it still counts");
     }
 
     #[test]
