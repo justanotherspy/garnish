@@ -14,6 +14,11 @@
 //! | `now` | comma-separated `GARNISH_NOW` instants, one golden each | `1738425600` |
 //! | `icons` | icon set override (`--icons`) | none |
 //! | `env` | `KEY=VALUE` added to the environment; repeatable | none |
+//! | `expect` | `config-warning` when the render is meant to end in a `⚠ config:` row | none |
+//!
+//! A render that carries `⚠ garnish:` (an internal error), or a `⚠ config:`
+//! row the header did not ask for, fails in both modes: `UPDATE_GOLDEN=1`
+//! must never bake a broken render into a golden.
 
 // Integration tests are not `#[cfg(test)]` modules, so the clippy.toml test
 // allowances do not apply; panicking on setup failure is the right behaviour here.
@@ -28,7 +33,7 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-const HEADER_KEYS: [&str; 5] = ["fixture", "columns", "now", "icons", "env"];
+const HEADER_KEYS: [&str; 6] = ["fixture", "columns", "now", "icons", "env", "expect"];
 
 /// The header lines of one fixture, validated: a comment that names a header
 /// key must be exactly `# key: value` with a non-empty value (a typo would
@@ -79,6 +84,8 @@ struct Case {
     icons: Option<String>,
     now: String,
     env: Vec<(String, String)>,
+    /// `# expect: config-warning`: the render ends in a `⚠ config:` row.
+    expect_warning: bool,
 }
 
 fn cases() -> Vec<Case> {
@@ -131,6 +138,7 @@ fn cases() -> Vec<Case> {
                 icons: icons.clone(),
                 now: now.to_owned(),
                 env: env.clone(),
+                expect_warning: header.get("expect") == Some("config-warning"),
             });
         }
     }
@@ -182,6 +190,17 @@ fn config_goldens_match() {
         .filter_map(|case| {
             let actual = render(case, &cache);
             let golden = golden_dir.join(format!("config--{}--{}.txt", case.name, case.now));
+            if actual.contains("garnish: ") {
+                return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
+            }
+            if actual.contains("config: ") != case.expect_warning {
+                return Some(format!(
+                    "{}: {} a `⚠ config:` row (header says `# expect: {}`):\n{actual}",
+                    golden.display(),
+                    if case.expect_warning { "missing" } else { "unexpected" },
+                    if case.expect_warning { "config-warning" } else { "<nothing>" }
+                ));
+            }
             if update {
                 std::fs::write(&golden, &actual).unwrap();
                 return None;

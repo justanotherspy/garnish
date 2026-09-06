@@ -229,6 +229,52 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
 }
 
 #[test]
+fn preview_typos_are_one_line_not_a_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    for (flag, value, expected) in [
+        ("--preset", "fulll", "default, minimal, full or compact"),
+        ("--icons", "nerdy", "nerd, unicode, emoji or ascii"),
+        ("--color", "sometimes", "auto, always, never, 256 or truecolor"),
+    ] {
+        let (out, err, ok) = run(&["preview", payload, flag, value], dir.path(), &[]);
+        assert!(!ok && out.is_empty(), "{flag} {value}: {out}");
+        assert!(err.contains(value) && err.contains(expected), "{flag}: {err}");
+        assert!(!err.contains("Location:") && !err.contains("Error:"), "{flag}: {err}");
+    }
+}
+
+#[test]
+fn config_show_round_trips_every_fixture_and_preset() {
+    // `show` prints the resolved config: what it prints must pass `check`
+    // and print the same again (whole-stack review: an unknown theme name
+    // and unknown line ids used to be echoed back).
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files: Vec<std::path::PathBuf> = ["tests/fixtures/configs", "presets"]
+        .iter()
+        .flat_map(|d| std::fs::read_dir(root.join(d)).unwrap().flatten().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+        .collect();
+    files.push(root.join("examples/garnish.toml"));
+    files.sort();
+    assert!(files.len() > 30, "{}", files.len());
+    for file in files {
+        let (shown, _, ok) =
+            run(&["--config", file.to_str().unwrap(), "config", "show"], home, &[]);
+        assert!(ok, "{}: show failed", file.display());
+        let copy = home.join("shown.toml");
+        std::fs::write(&copy, &shown).unwrap();
+        let (out, _, ok) = run(&["--config", copy.to_str().unwrap(), "config", "check"], home, &[]);
+        assert!(ok && out.contains(": ok"), "{}: show output fails check:\n{out}", file.display());
+        let (again, _, _) = run(&["--config", copy.to_str().unwrap(), "config", "show"], home, &[]);
+        assert_eq!(shown, again, "{}: show is not a fixed point", file.display());
+    }
+}
+
+#[test]
 fn writing_commands_refuse_to_guess_a_home_directory() {
     // With HOME unset the defaults fell back to the current directory, so
     // `install` dropped .claude/ and garnish/ into whatever repo it ran from.

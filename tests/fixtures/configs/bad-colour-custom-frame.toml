@@ -2,6 +2,7 @@
 # columns: 160
 # now: 1738425600
 # icons: unicode
+# expect: config-warning
 # Three bad values and an unknown key must not discard the rest (SPEC § 5,
 # walkthrough bug 8): the heavy frame with its own separator and both lines
 # stay, `theme`, `durations` and `colors.accent` fall back to their defaults,

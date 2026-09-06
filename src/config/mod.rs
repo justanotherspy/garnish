@@ -534,6 +534,9 @@ struct RawLine {
     modules: Vec<String>,
     right: Vec<String>,
     separator: Option<String>,
+    /// `modules` or `right` was not a list at all (reported), so the empty
+    /// list that stands in must not read as an intentional spacer.
+    bad_list: bool,
 }
 
 impl RawLine {
@@ -542,8 +545,15 @@ impl RawLine {
         for (key, value) in table {
             let path = format!("{path}.{key}");
             match key.as_str() {
-                "modules" => line.modules = id_list(&path, value, errors),
-                "right" => line.right = id_list(&path, value, errors),
+                "modules" | "right" => {
+                    line.bad_list |= !value.is_array();
+                    let ids = id_list(&path, value, errors);
+                    if key == "modules" {
+                        line.modules = ids;
+                    } else {
+                        line.right = ids;
+                    }
+                }
                 "separator" => {
                     line.separator =
                         field::<String>(&path, value, errors).map(|s| crate::ansi::plain_text(&s));
@@ -566,7 +576,14 @@ fn field<T: serde::de::DeserializeOwned>(
     match value.try_into::<T>() {
         Ok(v) => Some(v),
         Err(e) => {
-            errors.push(problem(path, e.message()));
+            // serde names Rust types; say what a person can type instead.
+            let message = e
+                .message()
+                .replace("expected u16", "expected an integer 0–65535")
+                .replace("expected u32", "expected a non-negative integer")
+                .replace("expected u64", "expected a non-negative integer")
+                .replace("expected f64", "expected a number");
+            errors.push(problem(path, &message));
             None
         }
     }
@@ -824,23 +841,25 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let preset = raw.preset.unwrap_or_default();
     let icons = raw.icons.unwrap_or_default();
 
-    let theme_name = raw.theme.clone().unwrap_or_else(|| "garnish".to_owned());
-    let pal = palette(&theme_name).unwrap_or_else(|| {
+    let requested = raw.theme.clone().unwrap_or_else(|| "garnish".to_owned());
+    let pal = palette(&requested).unwrap_or_else(|| {
         errors.push(ConfigError {
             path: "theme".into(),
             message: format!(
-                "unknown theme {theme_name:?}; expected one of {}",
+                "unknown theme {requested:?}; expected one of {}",
                 PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")
             ),
             line: None,
         });
         &PALETTES[0]
     });
+    // The name of the palette in effect, so `config show` round-trips.
+    let theme_name = pal.name.to_owned();
     let overrides = resolve_colors(&raw.colors, errors);
     let theme = Theme::from_palette(pal, &overrides);
 
     let frame = resolve_frame(raw.frame.as_ref(), preset, errors);
-    let lines: Vec<LineCfg> = if raw.line.is_empty() {
+    let mut lines: Vec<LineCfg> = if raw.line.is_empty() {
         preset.lines()
     } else {
         raw.line
@@ -849,7 +868,10 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
                 left: l.modules.clone(),
                 right: l.right.clone(),
                 separator: l.separator.clone(),
-                spacer: l.modules.is_empty() && l.right.is_empty(),
+                // Only a line written empty is a spacer; a mistyped
+                // `modules` is an error and an empty row, which
+                // `hide_empty_lines` then drops like any other.
+                spacer: l.modules.is_empty() && l.right.is_empty() && !l.bad_list,
             })
             .collect()
     };
@@ -877,7 +899,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     }
     // Preset lines are valid by construction; only explicit lines need checking.
     if !raw.line.is_empty() {
-        check_line_ids(&lines, schemas, &texts, errors);
+        check_line_ids(&mut lines, schemas, &texts, errors);
     }
 
     let stale_after = resolve_stale_after(raw.stale_after, errors);
@@ -919,34 +941,43 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     }
 }
 
-/// Every id on a `[[line]]` is a registered module or a defined `text.<name>`.
+/// Every id on a `[[line]]` is a registered module or a defined `text.<name>`;
+/// an unknown one is reported and removed, so the resolved config (and
+/// `config show`) carries only ids that render.
 fn check_line_ids(
-    lines: &[LineCfg],
+    lines: &mut [LineCfg],
     schemas: &[ModuleSchema],
     texts: &BTreeMap<String, ModuleCfg>,
     errors: &mut Vec<ConfigError>,
 ) {
-    for (i, line) in lines.iter().enumerate() {
-        for (field, ids) in [("modules", &line.left), ("right", &line.right)] {
-            for (j, id) in ids.iter().enumerate() {
+    for (i, line) in lines.iter_mut().enumerate() {
+        for (field, ids) in [("modules", &mut line.left), ("right", &mut line.right)] {
+            let mut j = 0_usize;
+            ids.retain(|id| {
                 let path = format!("line[{i}].{field}[{j}]");
-                if let Some(name) = id.strip_prefix(crate::modules::text::PREFIX) {
-                    if !texts.contains_key(name) {
-                        errors.push(problem(
-                            &path,
-                            &format!("unknown text module {name:?}; define [modules.text.{name}]"),
-                        ));
-                    }
-                } else if !schemas.iter().any(|s| s.id == id) {
-                    errors.push(problem(
-                        &path,
-                        &format!(
-                            "unknown module {id:?}; expected one of {}, or text.<name>",
-                            schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
-                        ),
-                    ));
+                j = j.saturating_add(1);
+                let (known, message) = id.strip_prefix(crate::modules::text::PREFIX).map_or_else(
+                    || {
+                        (
+                            schemas.iter().any(|s| s.id == id),
+                            format!(
+                                "unknown module {id:?}; expected one of {}, or text.<name>",
+                                schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
+                            ),
+                        )
+                    },
+                    |name| {
+                        (
+                            texts.contains_key(name),
+                            format!("unknown text module {name:?}; define [modules.text.{name}]"),
+                        )
+                    },
+                );
+                if !known {
+                    errors.push(problem(&path, &message));
                 }
-            }
+                known
+            });
         }
     }
 }
@@ -1478,6 +1509,13 @@ mod tests {
         assert_eq!(errs, Vec::new());
         assert!(!c.hide_empty_lines);
         let spacers: Vec<bool> = c.lines.iter().map(|l| l.spacer).collect();
+        // A mistyped list is an error and an empty row, never a spacer
+        // (whole-stack review: it rendered as a permanent blank rule).
+        let (bad, errs) = parse("[[line]]\nmodules = \"clock\"\n[[line]]\n", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "line[0].modules");
+        assert!(!bad.lines[0].spacer && bad.lines[0].left.is_empty());
+        assert!(bad.lines[1].spacer, "a [[line]] with no keys is a spacer");
         assert_eq!(
             spacers,
             vec![true, false, false],
@@ -1606,7 +1644,7 @@ x = 1
         assert_eq!(c.frame.style, FrameStyle::Heavy);
         assert_eq!(c.frame.chars.separator, " ┃ ");
         assert_eq!(c.lines.len(), 1);
-        assert_eq!(c.lines[0].left, vec!["path", "ghost"]);
+        assert_eq!(c.lines[0].left, vec!["path"], "the unknown id is reported and removed");
         assert_eq!(c.modules.get("clock").map(|m| m.str("format")), Some("24h"));
         // …and each bad one fell back to its own default.
         let defaults = Config::defaults(&schemas());
@@ -1716,7 +1754,7 @@ x = 1
         assert!((motd.float("step") - 1.0).abs() < f64::EPSILON, "bad step → default");
         assert_eq!(motd.str("justify"), "left", "bad justify → default");
         assert_eq!(motd.refresh, 0);
-        assert_eq!(c.lines[0].left, vec!["text.ghost"], "the id stays; the render skips it");
+        assert_eq!(c.lines[0].left, Vec::<String>::new(), "the unknown id is removed");
 
         // An explicit colors.text wins over the shorthand; text and gap are plain.
         let text = "[modules.text.x]\ntext = \"\\u001b[31mred\\u001b[0m\\tnote\"\ngap = \" \\u001b[5m·\\u001b[0m \"\ncolor = \"muted\"\n[modules.text.x.colors]\ntext = \"red\"\n";
@@ -1927,6 +1965,24 @@ x = 1
         assert_eq!(errs[0].path, "modules.text.a.text");
         assert!(errs[0].message.contains("at most 4096 characters"), "{errs:?}");
         assert_eq!(c.texts.get("a").unwrap().str("gap").chars().count(), MAX_TEXT_CHARS);
+    }
+
+    #[test]
+    fn the_resolved_config_carries_only_what_is_in_effect() {
+        // `config show` writes the resolved config; an unknown theme name or
+        // an unknown line id echoed back made its output fail `config check`
+        // (whole-stack review).
+        let text = "theme = \"solarized\"\n[[line]]\nmodules = [\"text.motd\", \"clock\", \"nope\"]\nright = [\"path\"]\n";
+        let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["theme", "line[0].modules[0]", "line[0].modules[2]"], "{errs:?}");
+        assert_eq!(c.theme_name, "garnish", "the palette in effect, not the typo");
+        assert_eq!(c.lines[0].left, ["clock"]);
+        assert_eq!(c.lines[0].right, ["path"]);
+        let shown = crate::docs::config_toml(&c, false);
+        let (again, errs) = parse(&shown, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new(), "{shown}");
+        assert_eq!(crate::docs::config_toml(&again, false), shown);
     }
 
     #[test]

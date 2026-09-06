@@ -3,10 +3,6 @@
 # columns: 130
 # needs: emoji
 
-# Known caveat (PLAN Phase 12, bug 10): some terminals draw emoji that need a
-# variation selector one cell wide; until the emoji set is cleaned up the
-# right edge can drift on those terminals.
-
 preset = "default"
 icons  = "emoji"
 theme  = "garnish"
