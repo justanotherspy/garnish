@@ -378,6 +378,7 @@ ticker_gap = "   "        # text inserted between the end and the wrapped-around
 
 [[line]]
 modules = []              # an intentionally empty line: a blank framed row (spacer)
+blank = false             # true keeps an unframed spacer on screen with one invisible cell (§ 4.1)
 ```
 
 - **`right_justify`.** With `align = true` a right-group module is padded to
@@ -396,7 +397,13 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   (`├─ ────…────┤`). With `style = "none"` (or a custom frame with empty
   caps) a spacer is whitespace only, and Claude Code strips whitespace-only
   rows from the script's output (§ 2.1), so it shows in `preview` but not in
-  the status line; a spacer needs a visible frame. Setting
+  the status line. `blank = true` on the spacer (decided 2026-09-06; off by
+  default so the harness's own rule stands until the user opts in) keeps it
+  on screen: a row that would be spaces only gets one invisible cell, the
+  braille blank U+2800, which is not whitespace to the harness's `trim` and
+  which any font with the clock spinner's braille draws empty. The width is
+  unchanged, a framed spacer needs no cell and gets none, and `blank` on a
+  line with modules is reported. Setting
   `hide_empty_lines = false` restores today's behaviour for the accidental
   case too. A `[[line]]` with no keys is a spacer as well; a `modules` that
   is not a list (`modules = "clock"`) is reported and the row is an

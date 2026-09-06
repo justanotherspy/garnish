@@ -313,7 +313,9 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   .flatMap(N => N.trim() || []).join("\n")`, found by grepping the binary
   for `status_line_command");let D=`). A row garnish prints as spaces alone
   (an unframed spacer) shows in `preview` but never on screen; `preview`
-  and the harness differ there and nowhere else known.
+  and the harness differ there and nowhere else known. `blank = true` on a
+  spacer puts a braille blank (U+2800, not whitespace to JavaScript's
+  `trim`) in the row so the harness keeps it (SPEC § 4.1).
 
 ## Cache and worker invariants (learned the hard way)
 

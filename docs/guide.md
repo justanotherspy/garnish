@@ -133,9 +133,10 @@ subscription, `cost` only with an API key, `pr` only while a pull request is
 open, `vim` only with vim mode on. A line whose modules all have nothing to
 show is dropped too (outside a repository, a line of `branch sync pr` would
 otherwise be an empty framed row); set `hide_empty_lines = false` to keep
-such rows, or write `modules = []` for a spacer row that always stays. A
-spacer needs a visible frame: Claude Code drops whitespace-only rows from
-the script's output, so with `style = "none"` it shows in `preview` only.
+such rows, or write `modules = []` for a spacer row that always stays.
+Claude Code drops whitespace-only rows from the script's output, so with
+`style = "none"` a spacer shows in `preview` only; add `blank = true` to
+that line to keep it on screen (the row then carries one invisible cell).
 With `stale_style = "hide"`, a line made only of cached modules can vanish
 while its values are overdue; `hide_when_empty = false` on one of them pins
 the row.

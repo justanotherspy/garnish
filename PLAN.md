@@ -157,6 +157,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `hide_empty_lines = true` (bug 11): a line whose modules all rendered nothing is dropped after rendering and alignment; first/last caps follow the surviving lines; unit test and config goldens `hide-empty-lines` / `keep-empty-lines` with `pr-absent`
 - [x] Intentional empty lines: `LineCfg.spacer` is set for `modules = []` with no `right`; a spacer is an empty framed row that `hide_empty_lines` never drops; config golden `spacer-line`, `[[line]]` section of docs/config.md
 - [x] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); `ModuleCfg::resolve` applies it to the `fill`/`empty` icons so the resolved config is what renders and what `config show` prints; an explicit `icons.fill`/`icons.empty` override still wins; unit test, config golden `bar-line`, guide and README troubleshooting entries
+- [x] `blank = true` on a spacer (decided with Daniel 2026-09-06, layer `phase-13/blank-spacers`): an unframed spacer would be spaces only and Claude Code drops such rows; opted in, the row's first cell becomes the braille blank U+2800 (`render::keep_blank`, `BLANK_CELL`), width unchanged, framed spacers untouched, `blank` on a line with modules reported; default off so the harness's own rule stands; config golden `spacer-blank`, unit tests in `config` and `render`, `config show` writes it, SPEC § 4.1 and § 4 listing, guide, CLAUDE.md fact
 - [x] Goldens for each key (`right-justify-start`, `hide-empty-lines`, `keep-empty-lines`, `spacer-line`, `bar-line`); README layout paragraph, guide § 5 and § 7, SPEC § 4 config block. Review: an unframed spacer is whitespace only and Claude Code drops whitespace-only rows (SPEC § 2.1, CLAUDE.md fact), `stale_style = "hide"` can make a line come and go (documented), the ascii set keeps `=`/`-` under `bar = "line"`, tests for `right_justify` under `fill = false`, spacer caps, `spend` and the `config show` round trip
 
 ## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
@@ -578,3 +579,10 @@ and user feedback. Pick from here when no phase is in progress.
   the three binary test harnesses clear `GARNISH_ANIMATE`; SPEC notes that
   a frozen ticker line still prints fixed timers (the default follows the
   key, not the motion).
+- **2026-09-06 (blank spacers, one layer)** — Daniel's answer to the third
+  open question: an unframed spacer may opt in to staying on screen.
+  `phase-13/blank-spacers` (top of the stack): `blank = true` on a
+  `[[line]]` spacer gives a spaces-only row one braille blank (U+2800),
+  which Claude Code's `trim` does not strip; off by default so the harness
+  rule stands until the user asks; reported on a line with modules. Golden
+  `spacer-blank`; `config show` round-trips the key.

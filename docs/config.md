@@ -138,7 +138,7 @@ With `align = true` every module column is padded to the widest module in it, so
 
 ## `[[line]]`
 
-Each entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. A spacer needs a visible frame: with `style = "none"` it is whitespace only, and Claude Code drops whitespace-only rows from the script's output (`preview` still shows it).
+Each entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = "none"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output (`preview` still shows it); `blank = true` on the spacer keeps it on screen by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and any font with the clock spinner's braille draws empty). It is off by default, so the harness's own rule stands unless you opt in; on a line with modules it is reported.
 
 ```toml
 [[line]]

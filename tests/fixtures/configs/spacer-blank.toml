@@ -1,0 +1,17 @@
+# fixture: subscription-full
+# columns: 40
+# now: 1738425600
+# icons: unicode
+# Without a frame a spacer is spaces only and Claude Code drops the row;
+# `blank = true` gives it one invisible cell (the braille blank U+2800) so
+# the row stays. The second spacer keeps the default and stays whitespace
+# (SPEC § 4.1, decided 2026-09-06).
+[frame]
+style = "none"
+[[line]]
+modules = []
+blank = true
+[[line]]
+modules = ["model", "context"]
+[[line]]
+modules = []
