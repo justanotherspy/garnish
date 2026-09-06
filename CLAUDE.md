@@ -13,6 +13,7 @@ where things stand.
 | `CLAUDE.md` | how Claude builds this project: protocol, toolchain, style, invariants |
 | `SPEC.md` | what the tool does: the target design and the Claude Code contract; changes here first, with the reason |
 | `PLAN.md` | what is done, what is open, and a dated session log about the codebase |
+| `GARLIC-INTEGRATION.md` | a proposal (not spec) for garnish as garlic's per-second sensor and a status line module for garlic's day; moves into `SPEC.md` if adopted |
 | `SPRITE.md` | working notes for a Sprite VM; loaded into context only when the session runs on one |
 | `README.md` | what a user needs: install, configure, try, troubleshoot |
 | `docs/` | reference generated from the module schemas by `garnish docs`; `docs/guide.md` is the one hand-written page |
