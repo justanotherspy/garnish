@@ -13,6 +13,7 @@ where things stand.
 | `CLAUDE.md` | how Claude builds this project: protocol, toolchain, style, invariants |
 | `SPEC.md` | what the tool does: the target design and the Claude Code contract; changes here first, with the reason |
 | `PLAN.md` | what is done, what is open, and a dated session log about the codebase |
+| `CHANGELOG.md` | user-visible changes per release; a release's section is its tag message |
 | `SPRITE.md` | working notes for a Sprite VM; loaded into context only when the session runs on one |
 | `README.md` | what a user needs: install, configure, try, troubleshoot |
 | `docs/` | reference generated from the module schemas by `garnish docs`; `docs/guide.md` is the one hand-written page |

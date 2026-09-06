@@ -199,7 +199,8 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `skills/garnish-feedback/SKILL.md`: `gh issue create` with terminal app + version, font, OS, `garnish --version`, `config show`, `doctor` (glyph grid kept whole), the plain render, and a screenshot request; labels `feedback` (+ `alignment`)
 - [x] `skills/garnish-submit-preset/SKILL.md`: asks name/summary/columns/needs/author, builds the § 12 header, validates and renders at the declared width (no `…`, rows inside the box), opens a `preset` issue asking for a screenshot; README "Skills" section and guide § 9
 - [x] `garnish skills install [--dir D] | list` (`src/skills.rs`, the three files embedded with `include_str!`, written to `~/.claude/skills/<name>/SKILL.md` next to the settings file, only garnish's own files ever touched); `garnish install` writes them unless `--no-skills` (`--dry-run` says so); README/guide section; unit test plus `tests/cli.rs` end to end (dry run, install, list, `--dir`)
-- [ ] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`) and the `feedback`, `alignment`, `preset` labels
+- [x] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`, same sections and commands as the skills, labels in the frontmatter); the `feedback`, `alignment`, `preset` labels are repository state and are created by Daniel (`gh label create …`, listed in the PR)
+- [x] Release chores: `Cargo.toml`/`Cargo.lock` at `0.2.0`, `CHANGELOG.md` (new; the `v0.2.0` tag message is its section), tagged by Daniel once the whole stack has merged
 
 ## Backlog (open after v0.1.0)
 
@@ -474,3 +475,15 @@ and user feedback. Pick from here when no phase is in progress.
   name>` (built-in names keep the annotated default file; an unknown name
   lists both kinds), end-to-end test; `Cargo.toml repository` points at
   GitHub. The website stays a backlog pointer.
+- **2026-09-06 (Phase 18, three layers)** — Bundled skills of SPEC § 13.
+  `phase-18/skills-files`: the three `skills/<name>/SKILL.md` (config
+  builder with an embedded sample payload, feedback issue, preset
+  submission), README "Skills" section, guide § 9. `phase-18/skills-install`:
+  `src/skills.rs` embeds them, `garnish skills list | install [--dir D]`,
+  `garnish install` writes them next to the settings file unless
+  `--no-skills` (`--dry-run` says so; only garnish's own files are ever
+  written), unit and end-to-end tests. `phase-18/issue-templates`:
+  `.github/ISSUE_TEMPLATE/{feedback,preset}.md` mirror the skills' issue
+  bodies; labels are created by hand. Top of the stack: version `0.2.0`,
+  `CHANGELOG.md` introduced (its section is the tag message), every
+  Phase 12–18 box ticked. The `v0.2.0` tag follows the last merge.
