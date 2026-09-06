@@ -188,9 +188,9 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `presets/` seeded with the walkthrough configs (files with the `# name/summary/columns/needs` header), plus `motd-ticker` and `animated-dots` from Phases 15–16
 - [x] `tests/presets.rs`: every file validates, renders without `…` and inside the box at its declared width (animated presets must move between two ticks), name matches filename and is unique
 - [x] `src/gallery.rs`: the files embedded with `include_str!` (`gallery::PRESETS`, `find`, `header`, `body` strips the tooling lines), a unit test that the table lists exactly `presets/*.toml` and that every body validates
-- [ ] `garnish docs` renders `docs/presets.md` (name, summary, needs, sample at the declared width, collapsed file contents); `docs_sync` covers it
+- [x] `garnish docs` renders `docs/presets.md` (`docs::presets_page`: a table, then per preset the sample at the declared width from `subscription-full` at frame 0 and the file in a collapsed block); `docs_sync` covers it, the index and README link to it
 - [ ] `garnish presets` lists names + summaries; `garnish config init --preset <gallery name>` writes the file (tooling header lines stripped)
-- [ ] `presets/screenshots/<name>.png` convention and a README note on contributing one
+- [x] `presets/screenshots/<name>.png` convention, named in README, `presets/README.md` and the gallery page intro (the `garnish-submit-preset` skill of Phase 18 asks for one)
 - [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary)
 
 ## Phase 18 — Bundled skills (SPEC § 13)
