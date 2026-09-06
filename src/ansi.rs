@@ -315,6 +315,115 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
     out
 }
 
+/// One terminal cluster of a segment, with the style it came from.
+struct Cell<'a> {
+    text: String,
+    width: usize,
+    style: Style,
+    link: Option<&'a str>,
+}
+
+fn cells(segments: &[Segment]) -> Vec<Cell<'_>> {
+    segments
+        .iter()
+        .flat_map(|seg| {
+            clusters(&seg.text).into_iter().map(move |text| Cell {
+                width: display_width(&text),
+                text,
+                style: seg.style,
+                link: seg.link.as_deref(),
+            })
+        })
+        .collect()
+}
+
+/// A `width`-cell window onto `segments` starting `offset` cells in: the
+/// scroller behind text modules and the line ticker (SPEC § 3.7, § 4.1).
+///
+/// With `wrap`, the text is followed by `gap` and then itself again, so the
+/// window flows continuously and the offset is taken modulo the width of
+/// text plus gap. Without `wrap`, the window slides over the text once; the
+/// offset is taken modulo the text width, so once the end has scrolled past
+/// the view restarts at the beginning, and cells past the end are blank.
+/// Text no wider than the window is returned as is, padded on the right.
+/// The result is always exactly `width` cells: a wide cluster cut by either
+/// edge becomes spaces for its visible part. Styles and links follow their
+/// clusters; the gap and padding are plain.
+#[must_use]
+pub fn scroll(
+    segments: &[Segment],
+    width: usize,
+    offset: usize,
+    gap: &str,
+    wrap: bool,
+) -> Vec<Segment> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let text_w = segments_width(segments);
+    if !wrap && text_w <= width {
+        let mut out = segments.to_vec();
+        let pad = width.saturating_sub(text_w);
+        if pad > 0 {
+            out.push(Segment::plain(" ".repeat(pad)));
+        }
+        return out;
+    }
+    let gap_segment = [Segment::plain(gap)];
+    let mut sequence = cells(segments);
+    if wrap {
+        sequence.extend(cells(&gap_segment));
+    }
+    let period: usize = sequence.iter().map(|c| c.width).sum();
+    if period == 0 {
+        return vec![Segment::plain(" ".repeat(width))];
+    }
+    let offset = offset.checked_rem(period).unwrap_or(0);
+    let end = offset.saturating_add(width);
+
+    let mut out: Vec<Segment> = Vec::new();
+    let mut push = |text: &str, style: Style, link: Option<&str>| match out.last_mut() {
+        Some(last) if last.style == style && last.link.as_deref() == link => {
+            last.text.push_str(text);
+        }
+        _ => out.push(Segment { text: text.to_owned(), style, link: link.map(str::to_owned) }),
+    };
+    let mut start = 0_usize;
+    let mut rounds = 0_usize;
+    let mut emitted = 0_usize;
+    // At most two passes over the sequence are ever needed: the window is
+    // narrower than one period plus itself.
+    'outer: while rounds < 2 || (wrap && start < end) {
+        for cell in &sequence {
+            let stop = start.saturating_add(cell.width);
+            if start >= end {
+                break 'outer;
+            }
+            if stop > offset {
+                let visible_from = start.max(offset);
+                let visible_to = stop.min(end);
+                if visible_from == start && visible_to == stop {
+                    push(&cell.text, cell.style, cell.link);
+                    emitted = emitted.saturating_add(cell.width);
+                } else {
+                    let cut = visible_to.saturating_sub(visible_from);
+                    push(&" ".repeat(cut), Style::PLAIN, None);
+                    emitted = emitted.saturating_add(cut);
+                }
+            }
+            start = stop;
+        }
+        rounds = rounds.saturating_add(1);
+        if !wrap {
+            break;
+        }
+    }
+    if emitted < width {
+        push(&" ".repeat(width.saturating_sub(emitted)), Style::PLAIN, None);
+    }
+    out
+}
+
 /// Turns segments into a string with escape sequences.
 #[derive(Debug, Clone, Copy)]
 pub struct Painter {
@@ -448,6 +557,72 @@ mod tests {
         assert_eq!(truncate(&segs, 11, "…"), segs);
         // width zero yields nothing
         assert_eq!(Painter::PLAIN.paint(&truncate(&segs, 0, "…")), "");
+    }
+
+    fn plain(segs: &[Segment]) -> String {
+        Painter::PLAIN.paint(segs)
+    }
+
+    #[test]
+    fn scroll_windows_are_exactly_the_requested_width() {
+        // Mixed one- and two-cell clusters, several styles, a link.
+        let segs = vec![
+            Segment::styled("ab", Style::fg(Color::Ansi(1))),
+            Segment::plain("🌿"),
+            Segment::styled("cd", Style::fg(Color::Ansi(2))).with_link("https://x"),
+            Segment::plain("e⏱\u{fe0f}f"),
+        ];
+        let text_w = segments_width(&segs);
+        assert_eq!(text_w, 10);
+        for wrap in [false, true] {
+            for width in 1..=14 {
+                for offset in 0..30 {
+                    let out = scroll(&segs, width, offset, " · ", wrap);
+                    assert_eq!(
+                        segments_width(&out),
+                        width,
+                        "wrap={wrap} width={width} offset={offset}: {:?}",
+                        plain(&out)
+                    );
+                }
+            }
+        }
+        assert_eq!(scroll(&segs, 0, 3, "", true), Vec::new());
+        assert_eq!(plain(&scroll(&[], 4, 7, "", true)), "    ");
+    }
+
+    #[test]
+    fn scroll_slides_restarts_wraps_and_keeps_styles() {
+        let segs = vec![
+            Segment::styled("abc", Style::fg(Color::Ansi(1))),
+            Segment::plain("🌿"),
+            Segment::styled("d", Style::fg(Color::Ansi(2))).with_link("https://x"),
+        ];
+        // width 6, text 6: fits without wrap → unchanged (padded when wider).
+        assert_eq!(scroll(&segs, 6, 3, "", false), segs);
+        assert_eq!(plain(&scroll(&segs, 8, 3, "", false)), "abc🌿d  ");
+        // Sliding window without wrap: cells past the end are blank, and the
+        // offset restarts after the whole text (period 6) has gone by.
+        assert_eq!(plain(&scroll(&segs, 4, 0, "", false)), "abc ");
+        assert_eq!(plain(&scroll(&segs, 4, 1, "", false)), "bc🌿");
+        assert_eq!(plain(&scroll(&segs, 4, 2, "", false)), "c🌿d");
+        assert_eq!(plain(&scroll(&segs, 4, 3, "", false)), "🌿d ");
+        assert_eq!(plain(&scroll(&segs, 4, 4, "", false)), " d  ", "the leaf is cut: blank");
+        assert_eq!(plain(&scroll(&segs, 4, 5, "", false)), "d   ");
+        assert_eq!(plain(&scroll(&segs, 4, 6, "", false)), "abc ", "restart");
+        // The ticker: text, gap, text again, flowing round (period 6 + 3).
+        assert_eq!(plain(&scroll(&segs, 4, 0, " · ", true)), "abc ");
+        assert_eq!(plain(&scroll(&segs, 4, 5, " · ", true)), "d · ");
+        assert_eq!(plain(&scroll(&segs, 4, 7, " · ", true)), "· ab");
+        assert_eq!(plain(&scroll(&segs, 4, 9, " · ", true)), "abc ", "one period later");
+        assert_eq!(plain(&scroll(&segs, 12, 0, " · ", true)), "abc🌿d · abc");
+        // Styles and the link travel with their clusters; the gap is plain.
+        let out = scroll(&segs, 4, 2, " · ", true);
+        assert_eq!(out[0].style.fg, Color::Ansi(1), "{out:?}");
+        assert_eq!(out[1].text, "🌿");
+        assert_eq!(out[2].link.as_deref(), Some("https://x"));
+        let out = scroll(&segs, 4, 5, " · ", true);
+        assert_eq!(out[1].style, Style::PLAIN, "gap is plain: {out:?}");
     }
 
     #[test]
