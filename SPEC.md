@@ -570,6 +570,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
+| `garnish presets` | list the gallery presets (§ 12): name, summary, declared width, requirement |
 | `garnish gc` | sweep stale cache dirs |
 
 ## 8. Performance budget

@@ -88,6 +88,8 @@ pub enum Command {
     },
     /// List the built-in modules.
     Modules,
+    /// List the gallery presets: complete example configs for `config init --preset`.
+    Presets,
     /// Background worker: recompute one module's cache entry (or all cached modules).
     #[command(hide = true)]
     Refresh {
@@ -161,8 +163,9 @@ pub enum ConfigAction {
         /// Overwrite an existing file.
         #[arg(long)]
         force: bool,
-        /// Top-level preset to start from.
-        #[arg(long, default_value = "default")]
+        /// A built-in preset (default | minimal | full | compact) or a gallery
+        /// preset name (`garnish presets`), whose file is written as is.
+        #[arg(long, default_value = "default", value_name = "NAME")]
         preset: String,
     },
 }
@@ -240,6 +243,14 @@ fn run_command() -> Result<()> {
             }
             let text = &*crate::modules::text::SCHEMA;
             writeln!(stdout, "{:<13} {}", "text.<name>", text.summary)?;
+            Ok(())
+        }
+        Command::Presets => {
+            let mut stdout = std::io::stdout().lock();
+            for p in crate::gallery::PRESETS.iter() {
+                let needs = p.needs.as_deref().map_or(String::new(), |n| format!(" [{n}]"));
+                writeln!(stdout, "{:<24} {} ({} cols){needs}", p.name, p.summary, p.columns)?;
+            }
             Ok(())
         }
         Command::Config { action } => config_cmd(&action, config_path),
@@ -454,7 +465,32 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             stdout.write_all(crate::docs::config_toml(&loaded.config, false).as_bytes())?;
         }
         ConfigAction::Init { force, preset } => {
-            let top = TopPreset::parse(preset).ok_or_else(|| eyre!("unknown preset {preset:?}"))?;
+            // A built-in name gets the annotated default file for that preset;
+            // a gallery name gets the preset's file without its tooling header.
+            let text = if let Some(top) = TopPreset::parse(preset) {
+                let (cfg, _) = config::parse_with(
+                    "",
+                    &SCHEMAS,
+                    &Overlay { preset: Some(top), ..Default::default() },
+                );
+                crate::docs::config_toml(&cfg, true)
+            } else {
+                {
+                    let Some(p) = crate::gallery::find(preset) else {
+                        // A typo, not a fault: one line, no report (bug 7).
+                        eprintln!(
+                            "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
+                            crate::gallery::PRESETS
+                                .iter()
+                                .map(|p| p.name)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        );
+                        return Err(Quiet.into());
+                    };
+                    crate::gallery::body(p.source)
+                }
+            };
             let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
             if target.exists() && !force {
                 eprintln!("{} exists; pass --force to overwrite", target.display());
@@ -464,12 +500,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
                 std::fs::create_dir_all(dir)
                     .with_context(|| format!("creating {}", dir.display()))?;
             }
-            let (cfg, _) = config::parse_with(
-                "",
-                &SCHEMAS,
-                &Overlay { preset: Some(top), ..Default::default() },
-            );
-            std::fs::write(&target, crate::docs::config_toml(&cfg, true))
+            std::fs::write(&target, text)
                 .with_context(|| format!("writing {}", target.display()))?;
             writeln!(stdout, "wrote {}", target.display())?;
         }
