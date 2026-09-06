@@ -203,7 +203,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `skills/garnish-submit-preset/SKILL.md`: asks name/summary/columns/needs/author, builds the § 12 header, validates and renders at the declared width (no `…`, rows inside the box), opens a `preset` issue asking for a screenshot; README "Skills" section and guide § 9
 - [x] `garnish skills install [--dir D] | list` (`src/skills.rs`, the three files embedded with `include_str!`, written to `~/.claude/skills/<name>/SKILL.md` next to the settings file, only garnish's own files ever touched); `garnish install` writes them unless `--no-skills` (`--dry-run` says so); README/guide section; unit test plus `tests/cli.rs` end to end (dry run, install, list, `--dir`)
 - [x] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`, same sections and commands as the skills, labels in the frontmatter); the `feedback`, `alignment`, `preset` labels are repository state and are created by Daniel (`gh label create …`, listed in the PR)
-- [x] Release chores: `Cargo.toml`/`Cargo.lock` at `0.2.0`, `CHANGELOG.md` (new; the `v0.2.0` tag message is its section), tagged by Daniel once the whole stack has merged
+- [x] Release chores: `Cargo.toml`/`Cargo.lock` at `0.2.0`, `CHANGELOG.md` (new; the `v0.2.0` tag message is its section); the stack merged 2026-09-06 and `v0.2.0` was tagged the same day from `main` after the heading was dated in one small PR
 
 ## Backlog (open after v0.1.0)
 
@@ -594,3 +594,11 @@ and user feedback. Pick from here when no phase is in progress.
   own predicate (`is_whitespace`, so a no-break-space rule counts), keeps
   the width by replacing a one-cell character, and makes an empty row
   (`fill = false`, no frame) the one cell instead of a silent no-op.
+- **2026-09-06 (release 0.2.0)** — Daniel merged the whole stack (#13–#42)
+  bottom-up; the three layers opened outside `gh stack` (#39, #41, #42)
+  were rebased onto `main` with plain `git rebase --onto` after each squash
+  merge. `main` green, `scripts/ci.sh` and `bench/run.sh` green locally
+  (warm default 0.87 ms). This PR dates the CHANGELOG heading and ignores
+  `.claude/worktrees/`; `v0.2.0` is a signed tag on `main` whose message is
+  the CHANGELOG section. Open drafts #27 (FUTURE-SPEC) and #40
+  (GARLIC-INTEGRATION) and the website pointer are parked by Daniel.

@@ -3,7 +3,7 @@
 User-visible changes per release. The tag message for a release is this
 file's section for it. `PLAN.md` holds the session-by-session detail.
 
-## 0.2.0 — unreleased (PLAN Phases 12–18)
+## 0.2.0 — 2026-09-06 (PLAN Phases 12–18)
 
 **Fixes**
 

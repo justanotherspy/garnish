@@ -5,3 +5,5 @@
 .DS_Store
 # Per-machine Claude Code settings never belong in the repo (CLAUDE.md § Hosts).
 /.claude/settings.local.json
+# Claude Code worktrees live inside the checkout.
+/.claude/worktrees/
