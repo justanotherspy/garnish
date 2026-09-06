@@ -290,6 +290,12 @@ fn render_group(
 ) -> Vec<Vec<Segment>> {
     ids.iter()
         .filter_map(|id| {
+            // `text.<name>` comes from the config, not the fixed registry (SPEC § 3.7).
+            if let Some(name) = id.strip_prefix(modules::text::PREFIX) {
+                let cfg = config.texts.get(name).filter(|c| c.enabled)?;
+                let rendered = modules::text::render(ctx, cfg);
+                return Some(decorate(rendered, cfg, &config.theme, stale));
+            }
             let entry = modules::entry(id)?;
             let cfg = config.modules.get(entry.schema.id)?;
             if !cfg.enabled {
@@ -425,6 +431,48 @@ mod tests {
         assert_eq!(rows.len(), 3, "spacer kept: {out}");
         assert!(rows[1].starts_with("├─") && rows[1].ends_with("┤"), "{}", rows[1]);
         assert_eq!(display_width(rows[1]), 56);
+    }
+
+    /// SPEC § 3.7: a text module is a fixed-width box; short text is
+    /// justified, long text clipped or scrolled by the clock, the scroller
+    /// frozen at frame 0 without animation, and the common decorations apply.
+    #[test]
+    fn text_modules_render_as_fixed_width_boxes() {
+        let payload = fixture("subscription-full");
+        let base = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\", \"text.b\", \"text.c\", \"text.d\"]\n";
+        let texts = "[modules.text.a]\ntext = \"a rather long note\"\nwidth = 8\noverflow = \"clip\"\n[modules.text.b]\ntext = \"v0.2\"\nwidth = 8\njustify = \"right\"\nlabel = \"tag\"\n[modules.text.c]\ntext = \"hi\"\nwidth = 6\npad = 1\njustify = \"center\"\nprefix = \"[\"\nsuffix = \"]\"\n[modules.text.d]\ntext = \"\\u001b[31mred\\u001b[0m scroll me please\"\nwidth = 10\noverflow = \"scroll\"\n";
+        let (config, errs) = config::parse(&format!("{base}{texts}"), &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let at = |secs: i64, animate: bool| Clock {
+            now: jiff::Timestamp::from_second(secs).unwrap(),
+            animate,
+            ..Clock::fixed()
+        };
+        let frozen = strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()));
+        // clip: 8 cells with the ellipsis; right: label then the text hugging
+        // the box's right edge; center: pad, box, pad inside prefix/suffix;
+        // scroll at offset 0: the first 10 cells, escapes stripped.
+        assert_eq!(frozen.trim_end(), "a rathe…  tag     v0.2  [   hi   ]  red scroll");
+        let moving =
+            strip_ansi(&render_plain_at(&payload, &config, Some(80), &at(1_738_425_601, true)));
+        // text.d is 20 cells: offset 1738425601 % 20 = 1 (the window keeps
+        // its trailing cell, so no trimming here).
+        assert!(moving.ends_with("ed scroll "), "{moving:?}");
+        let later =
+            strip_ansi(&render_plain_at(&payload, &config, Some(80), &at(1_738_425_605, true)));
+        assert!(later.ends_with("croll me p"), "{later:?}");
+        // Every render is the same width: the boxes never move.
+        for out in [&frozen, &moving, &later] {
+            assert_eq!(display_width(out), display_width(&frozen), "{out:?}");
+        }
+        // An empty text hides the module; a missing table skips the id.
+        let (config, errs) = config::parse(
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"text.e\", \"model\"]\n[modules.text.e]\ntext = \"\"\n",
+            &SCHEMAS,
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        let out = strip_ansi(&render_plain_at(&payload, &config, Some(40), &Clock::fixed()));
+        assert!(out.starts_with("❖ Opus"), "{out}");
     }
 
     /// A spacer takes whatever cap its position calls for: first, last or,

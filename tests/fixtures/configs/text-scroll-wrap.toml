@@ -1,0 +1,18 @@
+# fixture: subscription-full
+# columns: 70
+# now: 1738425600, 1738425601, 1738425603
+# icons: unicode
+# The ticker form: the text is followed by ` · ` and itself, so the 12-cell
+# window flows continuously (SPEC § 3.7 `scroll-wrap`); `step = 2` moves two
+# cells per second.
+
+[[line]]
+modules = ["model", "text.motd"]
+right   = ["clock"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 12
+overflow = "scroll-wrap"
+gap      = " · "
+step     = 2

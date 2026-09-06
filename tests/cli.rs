@@ -127,8 +127,9 @@ fn config_subcommands_and_doctor_work_end_to_end() {
 
     let (out, _, ok) = run(&["modules"], home, &[]);
     assert!(ok);
-    assert_eq!(out.lines().count(), 21, "{out}");
+    assert_eq!(out.lines().count(), 22, "21 modules plus the text family:\n{out}");
     assert!(out.lines().any(|l| l.starts_with("context ")));
+    assert!(out.lines().last().unwrap().starts_with("text.<name>  "), "{out}");
 
     let (out, _, ok) = run(&["doctor"], home, &[]);
     assert!(ok, "{out}");

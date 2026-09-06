@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 70
+# now: 1738425600, 1738425601, 1738425603
+# icons: unicode
+# A text module wider than its 12-cell box slides one cell per second and,
+# once the end has passed, restarts from the beginning (SPEC § 3.7 `scroll`).
+# `text.tag` is a fixed-width slot that never moves.
+
+[[line]]
+modules = ["model", "text.motd"]
+right   = ["text.tag", "clock"]
+
+[modules.text.motd]
+text     = "ship it before lunch, then write the docs"
+width    = 12
+overflow = "scroll"
+
+[modules.text.tag]
+text  = "v0.2"
+color = "muted"

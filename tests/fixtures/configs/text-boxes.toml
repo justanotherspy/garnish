@@ -1,0 +1,35 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# Boxes that never move: `clip` cuts long text with an ellipsis, `justify`
+# places short text in a wider box, `pad` adds blank cells on both sides,
+# `width = 0` hugs the text, and the common `label`/`prefix`/`suffix` apply
+# (SPEC § 3.7).
+
+[[line]]
+modules = ["text.clip", "text.right", "text.center", "text.hug"]
+right   = ["clock"]
+
+[modules.text.clip]
+text     = "a rather long note"
+width    = 8
+overflow = "clip"
+
+[modules.text.right]
+text    = "v0.2"
+width   = 8
+justify = "right"
+label   = "tag"
+
+[modules.text.center]
+text    = "hi"
+width   = 6
+pad     = 1
+justify = "center"
+prefix  = "["
+suffix  = "]"
+
+[modules.text.hug]
+text  = "★ hug"
+color = "warn"

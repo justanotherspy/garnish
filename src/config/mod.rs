@@ -215,6 +215,9 @@ pub struct Config {
     pub lines: Vec<LineCfg>,
     /// Resolved module configs, keyed by id, for every registered module.
     pub modules: BTreeMap<&'static str, ModuleCfg>,
+    /// The user-defined text modules (`[modules.text.<name>]`), keyed by name
+    /// and placed on a line as `text.<name>` (SPEC § 3.7).
+    pub texts: BTreeMap<String, ModuleCfg>,
 }
 
 /// Command-line overrides applied on top of the file.
@@ -747,41 +750,50 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             })
             .collect()
     };
-    // Preset lines are valid by construction; only explicit lines need checking.
-    for (i, line) in lines.iter().enumerate().filter(|_| !raw.line.is_empty()) {
-        for (field, ids) in [("modules", &line.left), ("right", &line.right)] {
-            for (j, id) in ids.iter().enumerate() {
-                if !schemas.iter().any(|s| s.id == id) {
-                    errors.push(ConfigError {
-                        path: format!("line[{i}].{field}[{j}]"),
-                        message: format!(
-                            "unknown module {id:?}; expected one of {}",
-                            schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
-                        ),
-                        line: None,
-                    });
-                }
-            }
-        }
-    }
-
     let mut modules: BTreeMap<&'static str, ModuleCfg> = BTreeMap::new();
     for schema in schemas {
+        let base = format!("modules.{}", schema.id);
         let table = raw.modules.get(schema.id);
-        let ov = table.map_or_else(Overrides::default, |t| parse_overrides(schema, t, errors));
+        let ov =
+            table.map_or_else(Overrides::default, |t| parse_overrides(schema, &base, t, errors));
         let module_preset = ov.preset.unwrap_or_else(|| preset.module_preset());
         modules.insert(schema.id, ModuleCfg::resolve(schema, module_preset, icons, &theme, &ov));
     }
+    let texts = resolve_texts(raw.modules.get("text"), icons, &theme, errors);
     for id in raw.modules.keys() {
-        if !schemas.iter().any(|s| s.id == id) {
+        if id != "text" && !schemas.iter().any(|s| s.id == id) {
             errors.push(ConfigError {
                 path: format!("modules.{id}"),
                 message: format!(
-                    "unknown module; expected one of {}",
+                    "unknown module; expected one of {}, or text.<name>",
                     schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
                 ),
                 line: None,
             });
+        }
+    }
+    // Preset lines are valid by construction; only explicit lines need checking.
+    for (i, line) in lines.iter().enumerate().filter(|_| !raw.line.is_empty()) {
+        for (field, ids) in [("modules", &line.left), ("right", &line.right)] {
+            for (j, id) in ids.iter().enumerate() {
+                let path = format!("line[{i}].{field}[{j}]");
+                if let Some(name) = id.strip_prefix(crate::modules::text::PREFIX) {
+                    if !texts.contains_key(name) {
+                        errors.push(problem(
+                            &path,
+                            &format!("unknown text module {name:?}; define [modules.text.{name}]"),
+                        ));
+                    }
+                } else if !schemas.iter().any(|s| s.id == id) {
+                    errors.push(problem(
+                        &path,
+                        &format!(
+                            "unknown module {id:?}; expected one of {}, or text.<name>",
+                            schemas.iter().map(|s| s.id).collect::<Vec<_>>().join(", ")
+                        ),
+                    ));
+                }
+            }
         }
     }
 
@@ -810,7 +822,83 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         frame,
         lines,
         modules,
+        texts,
     }
+}
+
+/// A text module name is a bare TOML key, so `text.<name>` is unambiguous on
+/// a line and `config show` can write `[modules.text.<name>]` back verbatim.
+fn is_bare_key(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// The `[modules.text.<name>]` tables (SPEC § 3.7): each is validated against
+/// the text schema under its own path. `refresh`, `preset` and `icons` do not
+/// apply to text modules, `step` must be positive, `color` is the shorthand
+/// for `colors.text` (an explicit `colors.text` wins), and `text` and `gap`
+/// are reduced to plain text so a scrolled window can never cut an escape
+/// sequence.
+fn resolve_texts(
+    family: Option<&toml::Table>,
+    icons: IconSet,
+    theme: &Theme,
+    errors: &mut Vec<ConfigError>,
+) -> BTreeMap<String, ModuleCfg> {
+    let schema = &*crate::modules::text::SCHEMA;
+    let mut texts = BTreeMap::new();
+    for (name, value) in family.into_iter().flatten() {
+        let base = format!("modules.text.{name}");
+        if !is_bare_key(name) {
+            errors.push(problem(
+                &base,
+                "a text module name is letters, digits, `_` and `-` only (it becomes the id text.<name>)",
+            ));
+            continue;
+        }
+        let Some(table) = value.as_table() else {
+            errors.push(problem(&base, "expected a [modules.text.<name>] table"));
+            continue;
+        };
+        let mut table = table.clone();
+        let color = table.remove("color");
+        for (key, why) in [
+            ("refresh", "text modules render every tick; remove this key"),
+            ("preset", "text modules have no presets; remove this key"),
+            ("icons", "text modules have no icons; remove this table"),
+        ] {
+            if table.remove(key).is_some() {
+                errors.push(problem(&format!("{base}.{key}"), why));
+            }
+        }
+        let mut ov = parse_overrides(schema, &base, &table, errors);
+        if let Some(color) = color {
+            match color.as_str() {
+                Some(s) if Role::parse(s).is_some() || Color::parse(s).is_some() => {
+                    ov.colors.entry("text".to_owned()).or_insert_with(|| s.to_owned());
+                }
+                _ => errors.push(problem(
+                    &format!("{base}.color"),
+                    "expected a role name, a color name, 0-255, or #rrggbb",
+                )),
+            }
+        }
+        if let Some(Value::Float(step)) = ov.opts.get("step")
+            && !(step.is_finite() && *step > 0.0)
+        {
+            errors.push(problem(
+                &format!("{base}.step"),
+                "must be a positive number: cells per tick (0.5 = every second tick)",
+            ));
+            ov.opts.remove("step");
+        }
+        for key in ["text", "gap"] {
+            if let Some(Value::Str(s)) = ov.opts.get_mut(key) {
+                *s = crate::ansi::plain_text(s);
+            }
+        }
+        texts.insert(name.clone(), ModuleCfg::resolve(schema, Preset::Default, icons, theme, &ov));
+    }
+    texts
 }
 
 /// A `*_step` key: cells (or frames) an animation advances per tick. Must be
@@ -877,11 +965,11 @@ fn resolve_frame(raw: Option<&RawFrame>, preset: TopPreset) -> FrameCfg {
 
 fn parse_overrides(
     schema: &ModuleSchema,
+    base: &str,
     table: &toml::Table,
     errors: &mut Vec<ConfigError>,
 ) -> Overrides {
     let mut ov = Overrides::default();
-    let base = format!("modules.{}", schema.id);
     let mut err = |key: &str, msg: String| {
         errors.push(ConfigError { path: format!("{base}.{key}"), message: msg, line: None });
     };
@@ -1346,6 +1434,65 @@ x = 1
         let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
+    }
+
+    /// SPEC § 3.7: `[modules.text.<name>]` tables are validated against the
+    /// text schema under their own path; `text.<name>` is a valid line id
+    /// only with a table; `refresh`, `preset` and a non-positive `step` are
+    /// rejected; a non-table entry is reported.
+    #[test]
+    fn text_modules_are_defined_by_the_config() {
+        let schemas = schemas();
+        let text = "[[line]]\nmodules = [\"path\", \"text.motd\"]\nright = [\"text.tag\"]\n[modules.text.motd]\ntext = \"hello\"\nwidth = 12\noverflow = \"scroll-wrap\"\nstep = 0.5\n[modules.text.tag]\ntext = \"v0.2\"\ncolor = \"muted\"\njustify = \"right\"\n";
+        let (c, errs) = parse(text, &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.texts.len(), 2);
+        let motd = c.texts.get("motd").unwrap();
+        assert_eq!(motd.str("text"), "hello");
+        assert_eq!(motd.size("width"), 12);
+        assert_eq!(motd.str("overflow"), "scroll-wrap");
+        assert!((motd.float("step") - 0.5).abs() < f64::EPSILON);
+        let tag = c.texts.get("tag").unwrap();
+        assert_eq!(tag.str("justify"), "right");
+        assert_eq!(tag.color("text"), c.theme.role(Role::Muted), "`color` shorthand");
+        assert!(!c.modules.contains_key("text"), "the family is not a registry module");
+
+        let bad = "[[line]]\nmodules = [\"text.ghost\"]\n[modules.text.motd]\ntext = \"x\"\nrefresh = 5\npreset = \"bogus\"\nstep = 0\njustify = \"middle\"\ncolor = \"bogus\"\nwat = 1\n[modules.text.motd.icons]\nfoo = \"x\"\n[modules.text.\"sp ace\"]\ntext = \"y\"\n[modules.text]\nplain = 3\n";
+        let (c, errs) = parse(bad, &schemas);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        for expected in [
+            "line[0].modules[0]",
+            "modules.text.motd.refresh",
+            "modules.text.motd.preset",
+            "modules.text.motd.step",
+            "modules.text.motd.justify",
+            "modules.text.motd.color",
+            "modules.text.motd.wat",
+            "modules.text.motd.icons",
+            "modules.text.sp ace",
+            "modules.text.plain",
+        ] {
+            assert!(paths.contains(&expected), "{expected} missing from {paths:?}");
+        }
+        // One error per bad key, not one from the generic walk plus one from the family.
+        assert_eq!(paths.iter().filter(|p| **p == "modules.text.motd.preset").count(), 1);
+        assert_eq!(paths.iter().filter(|p| **p == "modules.text.motd.refresh").count(), 1);
+        assert!(!c.texts.contains_key("sp ace"), "a non-bare name is rejected");
+        assert!(errs.iter().any(|e| e.message.contains("define [modules.text.ghost]")), "{errs:?}");
+        let motd = c.texts.get("motd").unwrap();
+        assert!((motd.float("step") - 1.0).abs() < f64::EPSILON, "bad step → default");
+        assert_eq!(motd.str("justify"), "left", "bad justify → default");
+        assert_eq!(motd.refresh, 0);
+        assert_eq!(c.lines[0].left, vec!["text.ghost"], "the id stays; the render skips it");
+
+        // An explicit colors.text wins over the shorthand; text and gap are plain.
+        let text = "[modules.text.x]\ntext = \"\\u001b[31mred\\u001b[0m\\tnote\"\ngap = \" \\u001b[5m·\\u001b[0m \"\ncolor = \"muted\"\n[modules.text.x.colors]\ntext = \"red\"\n";
+        let (c, errs) = parse(text, &schemas);
+        assert_eq!(errs, Vec::new());
+        let x = c.texts.get("x").unwrap();
+        assert_eq!(x.color("text"), Color::Ansi(1), "explicit colors.text wins");
+        assert_eq!(x.str("text"), "rednote");
+        assert_eq!(x.str("gap"), " · ");
     }
 
     #[test]

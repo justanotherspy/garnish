@@ -238,6 +238,8 @@ fn run_command() -> Result<()> {
             for s in SCHEMAS.iter() {
                 writeln!(stdout, "{:<13} {}", s.id, s.summary)?;
             }
+            let text = &*crate::modules::text::SCHEMA;
+            writeln!(stdout, "{:<13} {}", "text.<name>", text.summary)?;
             Ok(())
         }
         Command::Config { action } => config_cmd(&action, config_path),
