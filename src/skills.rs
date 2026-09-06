@@ -108,20 +108,35 @@ pub fn install(dir: &Path) -> std::io::Result<Report> {
             statuses.push((name, Status::Skipped));
             continue;
         }
-        std::fs::create_dir_all(&target)?;
+        std::fs::create_dir_all(&target).map_err(|e| at(&target, &e))?;
         let status = match std::fs::read_to_string(&file) {
             Ok(existing) if existing == text => Status::Unchanged,
             Ok(_) => Status::Updated,
             Err(_) => Status::Written,
         };
         if status != Status::Unchanged {
-            let tmp = target.join("SKILL.md.tmp");
-            std::fs::write(&tmp, text)?;
-            std::fs::rename(&tmp, &file)?;
+            // A fresh, pid-named temp file (`create_new`, so a planted symlink
+            // of that name is an error, never followed), then an atomic rename.
+            let tmp = target.join(format!("SKILL.md.{}.tmp", std::process::id()));
+            let write = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
+                .and_then(|()| std::fs::rename(&tmp, &file));
+            if let Err(e) = write {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(at(&file, &e));
+            }
         }
         statuses.push((name, status));
     }
     Ok(Report { dir: dir.to_path_buf(), statuses })
+}
+
+/// An I/O error that names the path it happened at.
+fn at(path: &Path, e: &std::io::Error) -> std::io::Error {
+    std::io::Error::new(e.kind(), format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -232,5 +247,40 @@ mod tests {
             "{}",
             report.summary()
         );
+
+        // A planted temp-file symlink is never followed: create_new refuses it
+        // and the error names the skill file; the victim is untouched.
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "precious").unwrap();
+        let preset = root.join("garnish-submit-preset");
+        std::fs::write(preset.join("SKILL.md"), "stale").unwrap();
+        let tmp = preset.join(format!("SKILL.md.{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+        let err = install(&root).unwrap_err().to_string();
+        assert!(err.contains("garnish-submit-preset/SKILL.md"), "{err}");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "precious");
+        assert_eq!(std::fs::read_to_string(preset.join("SKILL.md")).unwrap(), "stale");
+    }
+
+    #[test]
+    fn install_error_names_the_path_in_the_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("skills");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("garnish-feedback"), "a file, not a directory").unwrap();
+        let err = install(&root).unwrap_err().to_string();
+        assert!(err.contains("garnish-feedback"), "{err}");
+    }
+
+    #[test]
+    fn reporting_skills_ask_before_posting_publicly() {
+        // SPEC § 13: the body is shown and the person asked before
+        // `gh issue create`; the ask must come first in the text.
+        for (name, text) in SKILLS.iter().skip(1) {
+            let ask = text.find("post this to justanotherspy/garnish as a public issue?");
+            let post = text.find("gh issue create");
+            assert!(ask.is_some_and(|a| post.is_some_and(|p| a < p)), "{name}: {ask:?} {post:?}");
+            assert!(text.contains("with `~`"), "{name}: home directory redaction");
+        }
     }
 }
