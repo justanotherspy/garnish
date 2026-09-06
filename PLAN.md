@@ -216,6 +216,8 @@ and user feedback. Pick from here when no phase is in progress.
 - [ ] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fix the wording in `docs.rs` and regenerate
 - [x] `Cargo.toml` said `repository = "local"`; it points at the GitHub URL (Phase 17, 2026-09-06)
 - [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened
+- [ ] `Segment.text` is `pub`, so the plain-text invariant (SPEC § 5) holds by convention; a private field with an accessor would let the compiler hold it (whole-stack review, 2026-09-06)
+- [ ] A schema-level `max` on `OptSpec` would replace the key-name match in `config::bounded` and make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md` (whole-stack review, 2026-09-06)
 
 ## Session log
 

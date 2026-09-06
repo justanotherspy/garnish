@@ -32,14 +32,16 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   in a session name no longer adds a row, and `--color never` is plain.
 - OSC 8 links are emitted only for `http(s)://` URLs of printable ASCII.
 - A config integer can no longer size an allocation or a loop on every
-  tick: `width`/`pad` above 1024 cells, `text`/`gap`/`ticker_gap` above
+  tick: `width`/`pad`/`bar_width` above 1024 cells, `text`/`gap`/`ticker_gap` above
   4096 characters, a `*_step` outside `0.001..=1000` and a `fill_char` that
   is not one cell are reported and defaulted; the renderers clamp again.
 - A TOML syntax error keeps the command-line overrides (`preview --color
   never --icons ascii` of a broken file renders plain ascii), like an
   unreadable file already did.
-- `install` and `config init` refuse to guess a home directory when `HOME`
-  is unset instead of writing into the current directory.
+- `install`, `config init`, `config path` and `skills install` refuse to
+  guess a home directory when `HOME` is unset instead of writing into the
+  current directory; `config init` and `config path` honour `--config` and
+  `GARNISH_CONFIG` first.
 - A one-cell ascii box still shows its clip mark (`.`).
 
 **Layout** (SPEC § 4.1)
