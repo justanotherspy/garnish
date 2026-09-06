@@ -23,6 +23,11 @@ align = false
 right_justify = "end"
 # Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).
 hide_empty_lines = true
+# A left group wider than its budget: truncate (cut with …) | ticker (scroll it)
+overflow = "truncate"
+# Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start
+ticker_step = 1
+ticker_gap = "   "
 # Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)
 durations = "compact"
 

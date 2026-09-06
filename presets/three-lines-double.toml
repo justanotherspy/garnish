@@ -1,6 +1,6 @@
 # name: three-lines-double
 # summary: repo / model / timers in a double frame
-# columns: 110
+# columns: 130
 # needs: nerd-font
 
 preset = "default"

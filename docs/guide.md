@@ -177,6 +177,11 @@ accent = "bright-blue"   # restyle every module that uses the role
   narrower than the terminal, plus 2 cells per unit of `statusLine.padding`.
   garnish subtracts the 4 on its own; if `statusLine.padding` is set in
   `settings.json`, set `padding` in the config to twice that value.
+- **Too much for one row** → `overflow = "ticker"` scrolls a left group that
+  is wider than the box, one cell per tick (`ticker_step`), wrapping around
+  after `ticker_gap`; the right group stays put. It moves as often as Claude
+  Code ticks (`refreshInterval`, at least 1 s), and `GARNISH_ANIMATE=0`
+  freezes it.
 - **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`
   (the lines come out 96 cells wide: what fits in Claude Code's box at that
   terminal width).

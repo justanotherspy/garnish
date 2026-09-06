@@ -23,6 +23,7 @@ fn every_preset_has_a_header_validates_and_renders() {
     let dir = root().join("presets");
     let mut names = BTreeSet::new();
     let mut count = 0;
+    let mut failures: Vec<String> = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap().flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|e| e != "toml") {
@@ -51,30 +52,67 @@ fn every_preset_has_a_header_validates_and_renders() {
         );
 
         let tmp = tempfile::tempdir().unwrap();
-        let render = Command::new(env!("CARGO_BIN_EXE_garnish"))
-            .args([
-                "--config",
-                path.to_str().unwrap(),
-                "preview",
-                root().join("tests/fixtures/payloads/subscription-full.json").to_str().unwrap(),
-                "--color",
-                "never",
-                "--width",
-                &columns.to_string(),
-            ])
-            .env("GARNISH_NOW", "1738425600")
-            .env("GARNISH_CACHE_DIR", tmp.path().join("cache"))
-            .env("GARNISH_NO_SPAWN", "1")
-            .env("HOME", "/home/dev")
-            .env_remove("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
-            .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
-            .env_remove("DISABLE_AUTO_COMPACT")
-            .env_remove("DISABLE_COMPACT")
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&render.stdout);
-        assert!(render.status.success(), "{stem}: preview failed:\n{out}");
-        assert!(out.lines().count() >= 2, "{stem}: preview printed nothing:\n{out}");
+        let render_at = |now: &str| {
+            let render = Command::new(env!("CARGO_BIN_EXE_garnish"))
+                .args([
+                    "--config",
+                    path.to_str().unwrap(),
+                    "preview",
+                    root().join("tests/fixtures/payloads/subscription-full.json").to_str().unwrap(),
+                    "--color",
+                    "never",
+                    "--width",
+                    &columns.to_string(),
+                ])
+                .env("GARNISH_NOW", now)
+                .env("GARNISH_CACHE_DIR", tmp.path().join("cache"))
+                .env("GARNISH_NO_SPAWN", "1")
+                .env("HOME", "/home/dev")
+                .env_remove("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
+                .env_remove("DISABLE_AUTO_COMPACT")
+                .env_remove("DISABLE_COMPACT")
+                .output()
+                .unwrap();
+            let out = String::from_utf8_lossy(&render.stdout).into_owned();
+            assert!(render.status.success(), "{stem}: preview failed:\n{out}");
+            // The first line is preview's `── name` header; the rest is the render.
+            out.lines().skip(1).map(str::to_owned).collect::<Vec<String>>()
+        };
+        let rows = render_at("1738425600");
+        assert!(!rows.is_empty(), "{stem}: preview printed nothing");
+        // At the declared width the render must fit Claude Code's box uncut
+        // (SPEC § 12). A ticker preset never shows `…`, so for it the promise
+        // is different: its row is exactly the box and it moves between ticks.
+        let ticker = text
+            .lines()
+            .any(|l| l.trim_start().starts_with("overflow") && l.contains("\"ticker\""));
+        for row in &rows {
+            if row.contains('…') {
+                failures.push(format!("{stem}: cut at its declared width {columns}:\n{row}"));
+            }
+            let width = garnish::ansi::display_width(row);
+            if width > columns - 4 {
+                failures.push(format!(
+                    "{stem}: {width} cells, wider than the {}-cell box at {columns} columns:\n{row}",
+                    columns - 4
+                ));
+            }
+        }
+        if ticker {
+            let later = render_at("1738425601");
+            if later == rows {
+                failures.push(format!(
+                    "{stem}: declares overflow = \"ticker\" but nothing scrolls at {columns} columns"
+                ));
+            }
+        }
     }
     assert!(count >= 10, "expected the seed presets, found {count}");
+    assert!(
+        failures.is_empty(),
+        "{} preset(s) do not fit:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }

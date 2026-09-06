@@ -52,6 +52,18 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     let _ = writeln!(out, "right_justify = {}", toml_string(cfg.right_justify.name()));
     c(out, "Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).");
     let _ = writeln!(out, "hide_empty_lines = {}", cfg.hide_empty_lines);
+    c(out, "A left group wider than its budget: truncate (cut with …) | ticker (scroll it)");
+    let _ = writeln!(out, "overflow = {}", toml_string(cfg.overflow.name()));
+    c(
+        out,
+        "Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start",
+    );
+    let _ = writeln!(
+        out,
+        "ticker_step = {}",
+        crate::config::schema::Value::Float(cfg.ticker_step).to_toml()
+    );
+    let _ = writeln!(out, "ticker_gap = {}", toml_string(&cfg.ticker_gap));
     c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
     let _ = writeln!(out, "durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
@@ -513,7 +525,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |"
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick (must be > 0; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |"
     );
     let _ = writeln!(
         o,

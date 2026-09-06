@@ -278,6 +278,9 @@ padding = 0               # extra cells subtracted from the width, on top of the
 align = false             # pad each module column to the widest module in it across lines, so separators line up
 right_justify = "end"     # end | start: where a padded right-group module's text sits (§ 4.1)
 hide_empty_lines = true   # drop a line whose modules all rendered nothing; `modules = []` spacers stay (§ 4.1)
+overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider than the box (§ 4.1)
+ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
+ticker_gap = "   "        # text between the end and the wrapped-around start
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
@@ -394,10 +397,12 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   not cut with `…`; instead the line shows a window onto the group that
   advances `ticker_step` cells to the left on every tick and wraps around,
   with `ticker_gap` between the end and the start (a news ticker). The
-  offset is derived from the tick's clock (`now` modulo the group width plus
-  gap, times the step), so it is stateless, deterministic under
-  `GARNISH_NOW`, and survives the harness cancelling a tick. The right group
-  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour.
+  offset is the § 4.2 rule, `floor(now_secs × ticker_step) mod (group width
+  + gap width)`, so it is stateless, deterministic under `GARNISH_NOW`, and
+  survives the harness cancelling a tick. `ticker_gap` is plain text
+  (escapes and control characters stripped at config time). The right group
+  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
+  `truncate = false` hands the whole row over, ticker or not.
   A ticker only moves as often as the harness ticks (`refreshInterval`,
   minimum 1 s), which is the documented limit of the effect.
 - **Bars.** `util::bar` uses the fractional-eighth block glyphs only when

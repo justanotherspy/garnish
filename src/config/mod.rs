@@ -92,6 +92,29 @@ impl RightJustify {
     }
 }
 
+/// What happens to a left group wider than its budget (`overflow`, SPEC § 4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Overflow {
+    /// Cut it with the ellipsis.
+    #[default]
+    Truncate,
+    /// Scroll it: a window that advances `ticker_step` cells per tick and
+    /// wraps around with `ticker_gap` between the end and the start.
+    Ticker,
+}
+
+impl Overflow {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Truncate => "truncate",
+            Self::Ticker => "ticker",
+        }
+    }
+}
+
 /// Color emission choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -178,6 +201,12 @@ pub struct Config {
     pub right_justify: RightJustify,
     /// Drop a line whose modules all rendered nothing (spacers are kept).
     pub hide_empty_lines: bool,
+    /// Truncate or scroll a left group wider than its budget.
+    pub overflow: Overflow,
+    /// Cells the ticker advances per tick (`> 0`; 0.5 = every second tick).
+    pub ticker_step: f64,
+    /// Text between the end of a scrolled group and its wrapped-around start.
+    pub ticker_gap: String,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
     /// Frame.
@@ -233,6 +262,9 @@ struct RawConfig {
     align: Option<bool>,
     right_justify: Option<RightJustify>,
     hide_empty_lines: Option<bool>,
+    overflow: Option<Overflow>,
+    ticker_step: Option<f64>,
+    ticker_gap: Option<String>,
     durations: Option<DurationStyle>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
@@ -240,7 +272,7 @@ struct RawConfig {
     modules: BTreeMap<String, toml::Table>,
 }
 
-const TOP_KEYS: [&str; 16] = [
+const TOP_KEYS: [&str; 19] = [
     "preset",
     "icons",
     "theme",
@@ -252,6 +284,9 @@ const TOP_KEYS: [&str; 16] = [
     "align",
     "right_justify",
     "hide_empty_lines",
+    "overflow",
+    "ticker_step",
+    "ticker_gap",
     "durations",
     "colors",
     "frame",
@@ -263,6 +298,9 @@ const COLOR_CHOICES: &str = "auto, always, never, 256, truecolor";
 const STALE_STYLES: &str = "dim, hide, plain";
 const DURATION_STYLES: &str = "compact, fixed";
 const RIGHT_JUSTIFIES: &str = "end, start";
+const OVERFLOWS: &str = "truncate, ticker";
+/// Default `ticker_gap`: three blanks between the end of a scrolled group and its start.
+pub const DEFAULT_TICKER_GAP: &str = "   ";
 
 impl RawConfig {
     // The table is taken by value so every field moves into place: cloning
@@ -286,6 +324,9 @@ impl RawConfig {
                     raw.right_justify = enum_field(&key, value, RIGHT_JUSTIFIES, errors);
                 }
                 "hide_empty_lines" => raw.hide_empty_lines = field(&key, value, errors),
+                "overflow" => raw.overflow = enum_field(&key, value, OVERFLOWS, errors),
+                "ticker_step" => raw.ticker_step = field(&key, value, errors),
+                "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
                 "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
                 "colors" => match value {
                     toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
@@ -759,10 +800,33 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         align: raw.align.unwrap_or(false),
         right_justify: raw.right_justify.unwrap_or_default(),
         hide_empty_lines: raw.hide_empty_lines.unwrap_or(true),
+        overflow: raw.overflow.unwrap_or_default(),
+        ticker_step: resolve_step("ticker_step", raw.ticker_step, errors),
+        // Plain text only: an escape sequence in the gap would be cut by the window.
+        ticker_gap: crate::ansi::plain_text(
+            raw.ticker_gap.as_deref().unwrap_or(DEFAULT_TICKER_GAP),
+        ),
         durations: raw.durations.unwrap_or_default(),
         frame,
         lines,
         modules,
+    }
+}
+
+/// A `*_step` key: cells (or frames) an animation advances per tick. Must be
+/// a positive finite number (0.5 = every second tick); anything else is
+/// reported and replaced by 1.
+fn resolve_step(path: &str, raw: Option<f64>, errors: &mut Vec<ConfigError>) -> f64 {
+    match raw {
+        None => 1.0,
+        Some(step) if step.is_finite() && step > 0.0 => step,
+        Some(_) => {
+            errors.push(problem(
+                path,
+                "must be a positive number: cells per tick (0.5 = every second tick)",
+            ));
+            1.0
+        }
     }
 }
 
@@ -1279,9 +1343,36 @@ x = 1
     /// against drifting from the match arms).
     #[test]
     fn every_listed_key_is_accepted() {
-        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
+    }
+
+    #[test]
+    fn ticker_keys_parse_and_a_bad_step_falls_back() {
+        let schemas = schemas();
+        let (c, errs) = parse("", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.overflow, Overflow::Truncate);
+        assert!((c.ticker_step - 1.0).abs() < f64::EPSILON);
+        assert_eq!(c.ticker_gap, DEFAULT_TICKER_GAP);
+        let (c, errs) =
+            parse("overflow = \"ticker\"\nticker_step = 2\nticker_gap = \" · \"", &schemas);
+        assert_eq!(errs, Vec::new(), "an integer step is a number too");
+        assert_eq!(c.overflow, Overflow::Ticker);
+        assert!((c.ticker_step - 2.0).abs() < f64::EPSILON);
+        assert_eq!(c.ticker_gap, " · ");
+        let (c, errs) = parse("ticker_gap = \"\\u001b[31m G \\u001b[0m\\n\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.ticker_gap, " G ", "escapes and controls never reach the row");
+        for bad in ["ticker_step = 0", "ticker_step = -0.5", "ticker_step = \"fast\""] {
+            let (c, errs) = parse(bad, &schemas);
+            assert_eq!(errs.len(), 1, "{bad}: {errs:?}");
+            assert_eq!(errs[0].path, "ticker_step", "{bad}");
+            assert!((c.ticker_step - 1.0).abs() < f64::EPSILON, "{bad}: back to 1");
+        }
+        let (_, errs) = parse("overflow = \"marquee\"", &schemas);
+        assert!(errs[0].message.ends_with("expected one of truncate, ticker"), "{errs:?}");
     }
 
     #[test]

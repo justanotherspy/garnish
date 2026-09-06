@@ -1,0 +1,14 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425601, 1738425603
+# icons: unicode
+# env: GARNISH_ANIMATE=0
+# The same ticker with animations frozen: the window stays at offset 0 at
+# both instants (SPEC § 4.2 accessibility switch).
+
+overflow   = "ticker"
+ticker_gap = " · "
+
+[[line]]
+modules = ["model", "effort", "context", "session", "api", "cache"]
+right   = ["clock"]

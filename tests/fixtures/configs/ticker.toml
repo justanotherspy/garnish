@@ -1,0 +1,15 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601, 1738425603
+# icons: unicode
+# The left group is far wider than the 56-cell box, so with
+# `overflow = "ticker"` a window onto it scrolls one cell per second and
+# wraps around after ` · `; the right group (`clock`) is never touched
+# (SPEC § 4.1). Three instants show the window moving.
+
+overflow   = "ticker"
+ticker_gap = " · "
+
+[[line]]
+modules = ["model", "effort", "context", "session", "api", "cache"]
+right   = ["clock"]
