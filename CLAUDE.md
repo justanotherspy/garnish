@@ -14,6 +14,7 @@ where things stand.
 | `SPEC.md` | what the tool does: the target design and the Claude Code contract; changes here first, with the reason |
 | `PLAN.md` | what is done, what is open, and a dated session log about the codebase |
 | `FUTURE-SPEC.md` | proposals not yet in the target design, mined from ccstatusline; tiered by cost, each moves into `SPEC.md` when a phase adopts it |
+| `FUTURE-SPEC-RESEARCH.md` | online validation of `FUTURE-SPEC.md` against the official docs, the binary and the wider ecosystem; verdicts per section, decision impacts, verify-first list |
 | `SPRITE.md` | working notes for a Sprite VM; loaded into context only when the session runs on one |
 | `README.md` | what a user needs: install, configure, try, troubleshoot |
 | `docs/` | reference generated from the module schemas by `garnish docs`; `docs/guide.md` is the one hand-written page |
