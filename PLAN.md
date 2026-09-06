@@ -548,6 +548,15 @@ and user feedback. Pick from here when no phase is in progress.
   the scrolled group holds its width). `config show` prints the implied
   `fixed`. Only the `ticker` golden's first instant changed (the group is
   wider, so the offset lands elsewhere); config golden
-  `ticker-module-compact` pins the override. Release: Daniel chose to date
-  the CHANGELOG heading in one small PR after the stack merges and tag that
-  commit (option A).
+  `ticker-module-compact` pins the override. Review of the layer: the
+  golden pinned `api`/`limit5h`, whose values read the same in both styles
+  (hollow; now `cache`/`limit7d`, `47m` vs `47m00s` and `3d4h` vs `3d04h`);
+  `config init` wrote a live `durations = "compact"`, which would have
+  defeated the default for anyone starting from `init` and later switching
+  the ticker on (now a comment in the annotated file, as `separator` is);
+  `time::countdown` was the last public compact-only formatter (removed,
+  `countdown_at` is test-only); `single-line-full` drops its now redundant
+  `durations = "fixed"`; a bad `durations` value under a ticker falls back
+  to the implied `fixed` (asserted); the CHANGELOG bullet moved next to the
+  ticker's. Release: Daniel chose to date the CHANGELOG heading in one small
+  PR after the stack merges and tag that commit (option A).

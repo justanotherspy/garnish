@@ -30,8 +30,8 @@ ticker_step = 1
 ticker_gap = "   "
 # Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.
 animate = true
-# Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)
-durations = "compact"
+# Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m); unset, it is fixed under overflow = "ticker" and compact otherwise, and each timer module can pin its own
+# durations = "compact"
 
 # Role color overrides; every module color defaults to one of these roles.
 [colors]

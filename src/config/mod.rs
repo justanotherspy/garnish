@@ -1870,6 +1870,9 @@ x = 1
         let (c, errs) = parse("overflow = \"truncate\"", &schemas);
         assert_eq!(errs, Vec::new());
         assert_eq!(c.durations, DurationStyle::Compact, "no ticker, no switch");
+        let (c, errs) = parse("overflow = \"ticker\"\ndurations = \"loose\"", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(c.durations, DurationStyle::Fixed, "a bad value falls back to the implied one");
         let all = &crate::modules::SCHEMAS;
         let (c, errs) = parse(
             "overflow = \"ticker\"\n[modules.api]\ndurations = \"compact\"\n[modules.sync]\ndurations = \"fixed\"\n[modules.clock]\ndurations = \"fixed\"",

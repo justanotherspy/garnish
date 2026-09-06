@@ -188,16 +188,11 @@ impl DurationStyle {
     }
 }
 
-/// Countdown from [`now`] to an epoch-seconds instant, or `None` once passed.
-#[must_use]
-pub fn countdown(until_epoch_secs: i64) -> Option<String> {
-    countdown_at(until_epoch_secs, now_secs())
-}
-
 /// Compact countdown from an explicit instant; see
-/// [`DurationStyle::countdown_at`].
-#[must_use]
-pub fn countdown_at(until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
+/// [`DurationStyle::countdown_at`]. Renders go through
+/// `Ctx::countdown`, which picks the module's style, so this is test-only.
+#[cfg(test)]
+fn countdown_at(until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
     DurationStyle::Compact.countdown_at(until_epoch_secs, now_epoch_secs)
 }
 

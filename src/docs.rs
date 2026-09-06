@@ -69,8 +69,14 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         "Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.",
     );
     let _ = writeln!(out, "animate = {}", cfg.animate);
-    c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
-    let _ = writeln!(out, "durations = {}", toml_string(cfg.durations.name()));
+    c(
+        out,
+        "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m); unset, it is fixed under overflow = \"ticker\" and compact otherwise, and each timer module can pin its own",
+    );
+    // Left as a comment in an annotated file so the ticker rule keeps
+    // working after `config init`; `show` prints the value in effect.
+    let prefix = if annotated { "# " } else { "" };
+    let _ = writeln!(out, "{prefix}durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
 }
 
