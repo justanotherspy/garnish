@@ -69,8 +69,13 @@ is cut with `…` on the right. garnish renders to exactly that width: the
 
 **Whitespace-only rows are dropped.** The harness trims the script's stdout
 and removes every row that is empty after trimming (2.1.261:
-`stdout.trim().split("\n").flatMap(l => l.trim() || [])`), so a row garnish
-prints as spaces alone never reaches the screen; `preview` shows it.
+`stdout.trim().split("\n").flatMap(l => l.trim() || [])`). The trim runs on
+the raw bytes, escape sequences included, so a row is lost only when it is
+whitespace *after painting*: an unframed spacer with colour off
+(`color = "never"`, `NO_COLOR`) vanishes, while with colour on the rule's
+colour codes around the spaces keep it (verified in the 2.1.263 binary:
+no ANSI strip before the trim). `preview --color never` shows the row the
+screen drops; § 4.1 `blank = true` keeps it in both cases.
 
 ### 2.2 Payload (stdin JSON)
 
@@ -378,6 +383,7 @@ ticker_gap = "   "        # text inserted between the end and the wrapped-around
 
 [[line]]
 modules = []              # an intentionally empty line: a blank framed row (spacer)
+blank = false             # true keeps an unframed spacer on screen with one invisible cell (§ 4.1)
 ```
 
 - **`right_justify`.** With `align = true` a right-group module is padded to
@@ -394,9 +400,17 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   surviving lines. A line configured with `modules = []` and no `right` is an
   *intentional* spacer and is always kept, drawn as an empty framed row
   (`├─ ────…────┤`). With `style = "none"` (or a custom frame with empty
-  caps) a spacer is whitespace only, and Claude Code strips whitespace-only
-  rows from the script's output (§ 2.1), so it shows in `preview` but not in
-  the status line; a spacer needs a visible frame. Setting
+  caps) a spacer is whitespace only; with colour off (`color = "never"`,
+  `NO_COLOR`) Claude Code strips it (§ 2.1), so it shows in `preview` but
+  not in the status line, while with colour on the rule's colour codes keep
+  it. `blank = true` on the spacer (decided 2026-09-06; off by default so
+  the harness's own rule stands until the user opts in) keeps it on screen
+  either way: a row that would be whitespace only gets one invisible cell,
+  the braille blank U+2800, which is not whitespace to the harness's `trim`
+  and which a font with the clock spinner's braille should draw empty. The
+  width is unchanged (an empty row, `fill = false` with no frame, becomes
+  that one cell), a framed spacer needs no cell and gets none, and `blank`
+  on a line with modules is reported. Setting
   `hide_empty_lines = false` restores today's behaviour for the accidental
   case too. A `[[line]]` with no keys is a spacer as well; a `modules` that
   is not a list (`modules = "clock"`) is reported and the row is an

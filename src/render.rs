@@ -253,9 +253,59 @@ pub fn render_lines_at(
             let sep = config.separator_at(line, separator_frame);
             let left = join_modules(left, sep, &config.theme);
             let right = join_modules(right, sep, &config.theme);
-            compose_line(&layout, &config.theme, i, count, &left, &right, sep)
+            let row = compose_line(&layout, &config.theme, i, count, &left, &right, sep);
+            if line.blank { keep_blank(row) } else { row }
         })
         .collect()
+}
+
+/// The one cell that keeps an unframed spacer on screen (SPEC § 4.1).
+///
+/// A braille blank: Claude Code's `trim` does not count it as whitespace
+/// (SPEC § 2.1), and a font with the clock spinner's braille should draw
+/// it empty.
+pub const BLANK_CELL: char = '\u{2800}';
+
+/// A `blank = true` spacer (SPEC § 4.1).
+///
+/// When the composed row is whitespace only, its first one-cell whitespace
+/// character becomes [`BLANK_CELL`] so the harness keeps the row (an empty
+/// row, `fill = false` with no frame, becomes that one cell); a row with a
+/// visible frame is returned as is. The width never changes: a whitespace
+/// character two cells wide is left alone.
+fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
+    // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
+    // which `plain_text` has already dropped): the same set as
+    // `char::is_whitespace`, so this is the harness's own test.
+    if row.iter().any(|s| s.text.chars().any(|c| !c.is_whitespace())) {
+        return row;
+    }
+    let one_cell = |c: char| crate::ansi::display_width(&c.to_string()) == 1;
+    let slot = row.iter().position(|s| s.text.chars().any(one_cell));
+    match slot.and_then(|i| row.get_mut(i)) {
+        Some(seg) => {
+            let mut done = false;
+            let text: String = seg
+                .text
+                .chars()
+                .map(|c| {
+                    if !done && one_cell(c) {
+                        done = true;
+                        BLANK_CELL
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            *seg = Segment { text, ..seg.clone() };
+        }
+        None => {
+            if row.iter().all(|s| s.text.is_empty()) {
+                row.push(Segment::plain(BLANK_CELL));
+            }
+        }
+    }
+    row
 }
 
 /// The rule pattern at this tick, if the frame has one (SPEC § 4.2): the
@@ -684,6 +734,61 @@ mod tests {
         // Claude Code (SPEC § 2.1), which is why the docs ask for a frame.
         let none = plain("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n");
         assert_eq!(none.trim(), "", "{none:?}");
+    }
+
+    /// SPEC § 4.1 `blank = true`: an unframed spacer carries one braille
+    /// blank so Claude Code's trim keeps the row; the width is unchanged, a
+    /// framed spacer is untouched, and the default stays whitespace only.
+    #[test]
+    fn a_blank_spacer_keeps_one_invisible_cell_without_a_frame() {
+        let payload = fixture("subscription-full");
+        let plain = |text: &str| {
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(40), &Clock::fixed()))
+        };
+        let kept = plain("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\nblank = true\n");
+        let row = kept.lines().next().unwrap();
+        assert_eq!(display_width(row), 36, "{row:?}");
+        assert_eq!(row.chars().next(), Some(BLANK_CELL), "{row:?}");
+        assert!(row.chars().skip(1).all(|c| c == ' '), "{row:?}");
+        assert!(!row.trim().is_empty(), "the harness keeps it: {row:?}");
+        // JavaScript's trim strips the Unicode White_Space set plus U+FEFF;
+        // the braille blank (category So) is in neither.
+        assert!(!BLANK_CELL.is_whitespace() && BLANK_CELL != '\u{feff}');
+        let framed = plain("[[line]]\nmodules = []\nblank = true\n");
+        assert!(!framed.contains(BLANK_CELL), "a visible frame needs no cell: {framed:?}");
+        assert_eq!(display_width(framed.lines().next().unwrap()), 36);
+        // `fill = false` and no frame: the row is empty, so the cell is the row.
+        let bare = plain(
+            "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = []\nblank = true\n",
+        );
+        assert_eq!(bare.lines().next().unwrap(), BLANK_CELL.to_string(), "{bare:?}");
+        // A rule of no-break spaces is whitespace to the harness too.
+        let nbsp = plain(
+            "[frame]\nstyle = \"custom\"\nfill_char = \"\\u00a0\"\n[[line]]\nmodules = []\nblank = true\n",
+        );
+        let row = nbsp.lines().next().unwrap();
+        assert_eq!(row.chars().next(), Some(BLANK_CELL), "{row:?}");
+        assert!(row.chars().skip(1).all(|c| c == '\u{a0}'), "{row:?}");
+        assert_eq!(display_width(row), 36);
+        // With colour on, the frame's colour codes already keep the default
+        // spacer: the harness trims raw bytes, escapes included (SPEC § 2.1).
+        let (config, _) =
+            config::parse("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n", &SCHEMAS);
+        let rows = render_lines_at(&payload, &config, Some(40), &Clock::fixed());
+        let painter =
+            crate::ansi::Painter { mode: crate::ansi::ColorMode::TrueColor, links: false };
+        let bytes = painter.paint(rows.first().unwrap());
+        assert!(bytes.contains('\u{1b}') && !bytes.trim().is_empty(), "{bytes:?}");
+        // Two blank spacers around a module row: only the spacers change.
+        let three = plain(
+            "[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\nblank = true\n[[line]]\nmodules = [\"model\"]\n[[line]]\nmodules = []\nblank = true\n",
+        );
+        let rows: Vec<&str> = three.lines().collect();
+        assert_eq!(rows.len(), 3, "{three:?}");
+        assert!(rows[0].starts_with(BLANK_CELL) && rows[2].starts_with(BLANK_CELL), "{three:?}");
+        assert!(rows[1].contains("Opus") && !rows[1].contains(BLANK_CELL), "{three:?}");
     }
 
     #[test]

@@ -63,6 +63,7 @@ impl TopPreset {
             right: right.iter().map(|s| (*s).to_owned()).collect(),
             separator: None,
             spacer: false,
+            blank: false,
         };
         match self {
             Self::Default | Self::Full => vec![

@@ -311,9 +311,14 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - The harness trims the status line script's stdout and drops every row
   that is whitespace after trimming (2.1.261: `v.stdout.trim().split("\n")
   .flatMap(N => N.trim() || []).join("\n")`, found by grepping the binary
-  for `status_line_command");let D=`). A row garnish prints as spaces alone
-  (an unframed spacer) shows in `preview` but never on screen; `preview`
-  and the harness differ there and nowhere else known.
+  for `status_line_command");let D=`). The trim sees the raw bytes, escape
+  sequences included (2.1.263: no ANSI strip before it), so an unframed
+  spacer is lost only with colour off; with colour on the rule's colour
+  codes keep it. `preview --color never` shows a row the screen drops;
+  `preview` and the harness differ there and nowhere else known.
+  `blank = true` on a spacer puts a braille blank (U+2800, not whitespace
+  to JavaScript's `trim`) in the row so the harness keeps it either way
+  (SPEC § 4.1).
 
 ## Cache and worker invariants (learned the hard way)
 

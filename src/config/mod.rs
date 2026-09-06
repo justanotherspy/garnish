@@ -55,6 +55,10 @@ pub struct LineCfg {
     /// Configured with `modules = []` and no `right`: an intentional blank
     /// row that `hide_empty_lines` never drops (SPEC § 4.1).
     pub spacer: bool,
+    /// `blank = true` on a spacer: when the row would be whitespace only
+    /// (no visible frame) it carries one invisible cell so Claude Code keeps
+    /// it (SPEC § 4.1). Off by default, so the harness's own rule stands.
+    pub blank: bool,
 }
 
 /// Stale-value styling.
@@ -538,6 +542,7 @@ struct RawLine {
     /// `modules` or `right` was not a list at all (reported), so the empty
     /// list that stands in must not read as an intentional spacer.
     bad_list: bool,
+    blank: bool,
 }
 
 impl RawLine {
@@ -562,8 +567,11 @@ impl RawLine {
                     line.separator =
                         field::<String>(&path, value, errors).map(|s| crate::ansi::plain_text(&s));
                 }
-                _ => errors
-                    .push(problem(&path, "unknown key; expected one of modules, right, separator")),
+                "blank" => line.blank = field::<bool>(&path, value, errors).unwrap_or(false),
+                _ => errors.push(problem(
+                    &path,
+                    "unknown key; expected one of modules, right, separator, blank",
+                )),
             }
         }
         line
@@ -841,6 +849,33 @@ fn resolve_colors(
     overrides
 }
 
+/// The `[[line]]` tables as configured (SPEC § 4.1): which are spacers, and
+/// which spacers opted in to `blank`.
+fn resolve_lines(raw: &[RawLine], errors: &mut Vec<ConfigError>) -> Vec<LineCfg> {
+    raw.iter()
+        .enumerate()
+        .map(|(i, l)| {
+            // Only a line written empty is a spacer; a mistyped `modules` is
+            // an error and an empty row, which `hide_empty_lines` then drops
+            // like any other.
+            let spacer = l.modules.is_empty() && l.right.is_empty() && !l.bad_list;
+            if l.blank && !spacer {
+                errors.push(problem(
+                    &format!("line[{i}].blank"),
+                    "only a spacer (modules = [] with no right) can be marked blank",
+                ));
+            }
+            LineCfg {
+                left: l.modules.clone(),
+                right: l.right.clone(),
+                separator: l.separator.clone(),
+                spacer,
+                blank: l.blank && spacer,
+            }
+        })
+        .collect()
+}
+
 fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigError>) -> Config {
     let preset = raw.preset.unwrap_or_default();
     let icons = raw.icons.unwrap_or_default();
@@ -863,22 +898,8 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let theme = Theme::from_palette(pal, &overrides);
 
     let frame = resolve_frame(raw.frame.as_ref(), preset, errors);
-    let mut lines: Vec<LineCfg> = if raw.line.is_empty() {
-        preset.lines()
-    } else {
-        raw.line
-            .iter()
-            .map(|l| LineCfg {
-                left: l.modules.clone(),
-                right: l.right.clone(),
-                separator: l.separator.clone(),
-                // Only a line written empty is a spacer; a mistyped
-                // `modules` is an error and an empty row, which
-                // `hide_empty_lines` then drops like any other.
-                spacer: l.modules.is_empty() && l.right.is_empty() && !l.bad_list,
-            })
-            .collect()
-    };
+    let mut lines: Vec<LineCfg> =
+        if raw.line.is_empty() { preset.lines() } else { resolve_lines(&raw.line, errors) };
     let mut modules: BTreeMap<&'static str, ModuleCfg> = BTreeMap::new();
     for schema in schemas {
         let base = format!("modules.{}", schema.id);
@@ -1535,7 +1556,20 @@ mod tests {
             vec![true, false, false],
             "only `modules = []` with no `right` is a spacer"
         );
-        assert!(Config::defaults(&schemas).lines.iter().all(|l| !l.spacer));
+        assert!(Config::defaults(&schemas).lines.iter().all(|l| !l.spacer && !l.blank));
+        // `blank = true` is an opt-in for spacers only (SPEC § 4.1): on a
+        // line with modules it is reported and ignored; a wrong type too.
+        let (c, errs) = parse(
+            "[[line]]\nmodules = []\nblank = true\n[[line]]\nmodules = [\"path\"]\nblank = true\n[[line]]\nmodules = []\nblank = \"yes\"\n[[line]]\nmodules = []\n",
+            &schemas,
+        );
+        assert_eq!(errs.len(), 2, "{errs:?}");
+        let misuse = errs.iter().find(|e| e.path == "line[1].blank").expect("misuse reported");
+        assert!(misuse.message.contains("only a spacer"), "{}", misuse.message);
+        assert!(errs.iter().any(|e| e.path == "line[2].blank"), "wrong type reported: {errs:?}");
+        let blanks: Vec<bool> = c.lines.iter().map(|l| l.blank).collect();
+        assert_eq!(blanks, vec![true, false, false, false]);
+        assert!(c.lines.iter().all(|l| l.blank || l.spacer || !l.left.is_empty()));
     }
 
     #[test]
