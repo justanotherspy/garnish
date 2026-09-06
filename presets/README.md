@@ -9,7 +9,7 @@ terminal width it is designed for) and optionally `# needs:` (`nerd-font` or
 
 The seed set is the configurations walked through live on 2026-09-05. Renders
 at each preset's declared width will be generated into `docs/presets.md` once
-PLAN Phase 14 lands; until then, try one with:
+PLAN Phase 17 lands; until then, try one with:
 
 ```sh
 garnish preview tests/fixtures/payloads/subscription-full.json --width 120 \

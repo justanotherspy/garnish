@@ -55,6 +55,15 @@ What goes where:
    commits, CI must pass. Work on a branch (`review/<date>`,
    `phase-N/<topic>`, `docs/<topic>`), push it, open a PR against `main`.
    Merge only when the user asks. `origin` is `github.com/justanotherspy/garnish`.
+   Multi-part work (the Phases 12–18 roadmap) is one **`gh stack`** chain: one
+   layer per concern, named `phase-N/<concern>`, added as the work reaches it
+   (`gh stack add`), submitted as drafts (`gh stack submit --auto`), flipped
+   to ready once CI is green and the phase's adversarial review is done; the
+   user merges. Edit a concern in the layer that owns it, then
+   `gh stack rebase --upstack`. Conflicts in generated files (`docs/`,
+   `examples/`, `tests/golden/`) are resolved by regenerating (`UPDATE_DOCS=1`,
+   `UPDATE_GOLDEN=1`), never by hand. Drive `gh stack` non-interactively only
+   (`--json`, `--auto`, `--yes`; never bare `view`, `submit`, `add`, `modify`).
 6. **Signed commits.** Every commit and tag is signed; the host is already
    configured for that. If signing fails, stop and report it. Never commit
    with `--no-gpg-sign`.
@@ -244,7 +253,11 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `GARNISH_NOW`, `GARNISH_CACHE_DIR`, `GARNISH_CONFIG`, `GARNISH_NO_SPAWN`,
   `GARNISH_COLUMNS`, `GARNISH_DEBUG`.
 - Fixtures: `tests/fixtures/payloads/*.json`, `tests/fixtures/configs/*.toml`;
-  golden renders in `tests/golden/`. Tests that touch the cache dir or PATH
+  golden renders in `tests/golden/`. Payload goldens (`tests/golden.rs`) vary
+  fixture × preset × icon set; config goldens (`tests/config_golden.rs`) render
+  one config file per `# fixture/columns/now/icons/env` header, one golden per
+  `# now:` instant, so a clock-driven key is pinned at two instants and a
+  test hook can be set per file. Tests that touch the cache dir or PATH
   shims are named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
   serially (`.config/nextest.toml`).
 - macOS differs on purpose: `/var` is a symlink to `/private/var`, so tests

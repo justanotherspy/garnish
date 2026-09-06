@@ -14,7 +14,7 @@ test-group = 'serial'
 # The two render matrices (400+ renders each) took over 60 s on a loaded
 # macOS runner; give them room before nextest terminates them.
 [[profile.default.overrides]]
-filter = 'test(golden_renders_match) | test(every_fixture_renders_every_preset_without_panicking)'
+filter = 'test(golden_renders_match) | test(config_goldens_match) | test(every_fixture_renders_every_preset_without_panicking)'
 slow-timeout = { period = "60s", terminate-after = 3 }
 
 [profile.ci]
