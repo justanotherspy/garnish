@@ -66,7 +66,7 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     let _ = writeln!(out, "ticker_gap = {}", toml_string(&cfg.ticker_gap));
     c(
         out,
-        "Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.",
+        "Master switch for every animation (spinner, scrolling text, rule pattern, separator and icon frames); false freezes them at frame 0 and cuts a ticker line with …",
     );
     let _ = writeln!(out, "animate = {}", cfg.animate);
     c(

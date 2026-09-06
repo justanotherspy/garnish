@@ -38,6 +38,7 @@ fn render(fixture: &Path, preset: &str, icons: &str) -> String {
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
+        .env_remove("GARNISH_ANIMATE")
         .env("TZ", "UTC")
         .stdin(Stdio::null())
         .output()

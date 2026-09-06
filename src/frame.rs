@@ -173,7 +173,9 @@ impl FrameChars {
 /// The line ticker (SPEC § 4.1): an over-budget left group scrolls instead of being cut.
 ///
 /// The offset is a pure function of the tick's clock ([`crate::time::frame`]),
-/// so a cancelled tick loses nothing and `GARNISH_NOW` pins the window.
+/// so a cancelled tick loses nothing and `GARNISH_NOW` pins the window. A
+/// layout carries a ticker only while animations run; with them off the
+/// group is truncated like any other (SPEC § 4.2).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ticker {
     /// Cells the window advances per tick (0.5 = every second tick).
@@ -182,8 +184,6 @@ pub struct Ticker {
     pub gap: String,
     /// The tick's clock.
     pub now: jiff::Timestamp,
-    /// Whether animations run; off pins the window at offset 0.
-    pub animate: bool,
 }
 
 /// An animated rule (SPEC § 4.2): one-cell glyphs repeated across the rule,
@@ -237,10 +237,11 @@ pub struct Layout {
 ///
 /// Rules: prefix + pad + left + pad + rule + pad + right + pad + cap. On
 /// overflow the rule collapses to a single fill cell, then the left group is
-/// truncated, or scrolled when the layout has a [`Ticker`] and animations
-/// run (a frozen ticker truncates too); the right group is never truncated.
-/// With `truncate = false` the whole row is handed to the harness as is,
-/// ticker or not.
+/// truncated, or scrolled when the layout has a [`Ticker`] (it has none
+/// while animations are off, so a frozen ticker line is cut with the
+/// ellipsis: SPEC § 4.2); the right group is never truncated. With
+/// `truncate = false` the whole row is handed to the harness as is, ticker
+/// or not.
 #[must_use]
 pub fn compose_line(
     layout: &Layout,
@@ -282,11 +283,8 @@ pub fn compose_line(
         .saturating_sub(right_block_w)
         .saturating_sub(cap_w)
         .saturating_sub(join_w);
-    // A frozen ticker truncates rather than sitting at offset 0: a silent
-    // cut would hide what is missing from the readers `animate = false`
-    // exists for (SPEC § 4.2).
     let left_segs: Vec<Segment> = if layout.truncate && segments_width(left) > left_budget {
-        layout.ticker.as_ref().filter(|t| t.animate).map_or_else(
+        layout.ticker.as_ref().map_or_else(
             || truncate(left, left_budget, &layout.ellipsis),
             |ticker| {
                 let period = segments_width(left).saturating_add(display_width(&ticker.gap));
@@ -442,8 +440,9 @@ mod tests {
 
     /// SPEC § 4.1 Ticker: an over-budget left group scrolls one step per
     /// tick and wraps around after the gap; the right group and the frame
-    /// are untouched, the row keeps its width, `animate = false` pins the
-    /// window, and `truncate = false` hands the row over whole.
+    /// are untouched, the row keeps its width, a layout without a ticker
+    /// (animations off) cuts the row like `truncate`, and `truncate = false`
+    /// hands the row over whole.
     #[test]
     fn ticker_scrolls_the_left_group_and_leaves_the_right_alone() {
         let theme = Theme::default();
@@ -454,32 +453,27 @@ mod tests {
         // Budget: 24 − "╭─ " (3) − " R ─╮" (5) − rule + pad (2) = 14 cells.
         let cut = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(cut, "── abcdefghijklm… ─ R ──");
-        let ticker = |secs: i64, animate: bool| Ticker {
-            step: 1.0,
-            gap: " · ".into(),
-            now: at(secs),
-            animate,
-        };
+        let ticker = |secs: i64| Ticker { step: 1.0, gap: " · ".into(), now: at(secs) };
         // period = 16 + 3 = 19; 1738425600 % 19 = 4 → the window starts at "e"
         // and, 14 cells later, shows the first two cells of the gap.
-        l.ticker = Some(ticker(1_738_425_600, true));
+        l.ticker = Some(ticker(1_738_425_600));
         let s0 = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(s0, "── efghijklmnop · ─ R ──");
         assert_eq!(display_width(&s0), 24);
-        l.ticker = Some(ticker(1_738_425_601, true));
+        l.ticker = Some(ticker(1_738_425_601));
         let s1 = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(s1, "── fghijklmnop ·  ─ R ──", "one cell further: the whole gap shows");
-        l.ticker = Some(ticker(1_738_425_611, true));
+        l.ticker = Some(ticker(1_738_425_611));
         let wrapped = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(wrapped, "── p · abcdefghij ─ R ──", "offset 15: end, gap, start");
-        // Frozen: cut with the ellipsis like `truncate`, whatever the clock
-        // says, so the cut is visible to the readers the switch is for.
-        l.ticker = Some(ticker(1_738_425_601, false));
+        // Animations off: the layout carries no ticker and the row is the
+        // `…` cut, so the cut is visible to the readers the switch is for.
+        l.ticker = None;
         let frozen = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(frozen, cut);
         // A group that fits is never scrolled.
         let short = [Segment::plain("abc")];
-        l.ticker = Some(ticker(1_738_425_601, true));
+        l.ticker = Some(ticker(1_738_425_601));
         assert_eq!(
             text(&compose_line(&l, &theme, 0, 1, &short, &right, " │ ")),
             format!("── abc {} R ──", "─".repeat(12))

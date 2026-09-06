@@ -102,7 +102,8 @@ pub struct Clock {
     /// Whether repository discovery is allowed.
     pub git: bool,
     /// Whether animations advance with the clock; off freezes every frame
-    /// index and scroll offset at 0 (`GARNISH_ANIMATE=0`, SPEC § 4.2).
+    /// index and text-module offset at 0 and cuts a ticker line with the
+    /// ellipsis (`GARNISH_ANIMATE=0`, SPEC § 4.2).
     pub animate: bool,
 }
 
@@ -181,11 +182,12 @@ pub fn render_lines_at(
         width,
         truncate: config.truncate,
         ellipsis: if config.icons == IconSet::Ascii { "..".into() } else { "…".into() },
-        ticker: (config.overflow == config::Overflow::Ticker).then(|| Ticker {
+        // The effective animation switch is decided once, on `ctx`; with it
+        // off there is no ticker and an over-wide line is cut (SPEC § 4.2).
+        ticker: (config.overflow == config::Overflow::Ticker && ctx.animate).then(|| Ticker {
             step: config.ticker_step,
             gap: config.ticker_gap.clone(),
             now: clock.now,
-            animate: clock.animate && config.animate,
         }),
         rule: rule_pattern(config, &ctx),
     };

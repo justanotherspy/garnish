@@ -4,16 +4,19 @@
 # icons: unicode
 # `animate = false` in the config freezes every animation at frame 0 with the
 # environment untouched: the spinner stays on `⠋`, the scrolling text module
-# stays at offset 0 inside its box, the ticker line is cut with `…` instead
-# of frozen mid-scroll, while the clock keeps ticking (SPEC § 4.2 master
-# switch).
+# on its own line stays at offset 0 inside its box, the over-wide first line
+# is cut with `…` instead of frozen mid-scroll, while the clock keeps
+# ticking (SPEC § 4.2 master switch).
 
 animate  = false
 overflow = "ticker"
 
 [[line]]
-modules = ["model", "effort", "context", "session", "api", "cache", "text.motd"]
+modules = ["model", "effort", "context", "session", "api", "cache"]
 right   = ["clock"]
+
+[[line]]
+modules = ["text.motd"]
 
 [modules.text.motd]
 text     = "ship it before lunch, then write the docs"

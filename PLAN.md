@@ -568,3 +568,13 @@ and user feedback. Pick from here when no phase is in progress.
   that animates; text modules still sit at offset 0 in their box (a chosen
   width, unlike the cut). Goldens `ticker-frozen` and `animate-config-off`
   re-pinned; the presets page's ticker sample now shows the cut form.
+  Review of the layer: the rule is now structural (`Layout.ticker` is
+  `None` while animations are off; `Ticker.animate` is gone, the switch is
+  decided once on `Ctx`); the `animate-config-off` golden never reached its
+  text module (now on its own line, so "offset 0 in the box" is pinned next
+  to the cut); stale "frame 0" wording in code docs, `config init`'s
+  comment, SPEC's config listing and hooks table, and the statusline skill
+  (which claimed `preview` shows frame 0: it runs with the live clock);
+  the three binary test harnesses clear `GARNISH_ANIMATE`; SPEC notes that
+  a frozen ticker line still prints fixed timers (the default follows the
+  key, not the motion).
