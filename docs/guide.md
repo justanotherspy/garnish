@@ -164,6 +164,11 @@ accent = "bright-blue"   # restyle every module that uses the role
   garnish uses, in fixed four-cell fields, so the `|` of a glyph your
   terminal draws differently is pushed out of its column. Override that glyph
   and paste the grid into an issue.
+- **Hairline gaps between the blocks of a bar** → the font draws `█` a
+  shade narrower than a cell. Set `bar = "line"` on `context`, `limit5h`,
+  `limit7d` or `spend` for a `━`/`─` bar with whole cells (no fractional
+  block either), or pick your own glyphs under `[modules.<id>.icons]`
+  (`fill`, `empty`).
 - **`⟳` next to a value** → the cached value has not been refreshed for
   `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
   refresh failed. `garnish doctor` shows the error.

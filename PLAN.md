@@ -156,8 +156,8 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output (goldens untouched); `align_columns` takes the pad side; only the filled-rule path is affected (with `fill = false` the line is one left-aligned sequence); unit test on the two-line alignment config, config golden `right-justify-start`
 - [x] `hide_empty_lines = true` (bug 11): a line whose modules all rendered nothing is dropped after rendering and alignment; first/last caps follow the surviving lines; unit test and config goldens `hide-empty-lines` / `keep-empty-lines` with `pr-absent`
 - [x] Intentional empty lines: `LineCfg.spacer` is set for `modules = []` with no `right`; a spacer is an empty framed row that `hide_empty_lines` never drops; config golden `spacer-line`, `[[line]]` section of docs/config.md
-- [ ] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); an explicit `icons.fill`/`icons.empty` override still wins; guide troubleshooting entry
-- [ ] Goldens for each key; README and guide paragraphs
+- [x] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); `ModuleCfg::resolve` applies it to the `fill`/`empty` icons so the resolved config is what renders and what `config show` prints; an explicit `icons.fill`/`icons.empty` override still wins; unit test, config golden `bar-line`, guide and README troubleshooting entries
+- [x] Goldens for each key (`right-justify-start`, `hide-empty-lines`, `keep-empty-lines`, `spacer-line`, `bar-line`); README layout paragraph, guide § 5 and § 7, SPEC § 4 config block. Review: an unframed spacer is whitespace only and Claude Code drops whitespace-only rows (SPEC § 2.1, CLAUDE.md fact), `stale_style = "hide"` can make a line come and go (documented), the ascii set keeps `=`/`-` under `bar = "line"`, tests for `right_justify` under `fill = false`, spacer caps, `spend` and the `config show` round trip
 
 ## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
 
@@ -399,3 +399,22 @@ and user feedback. Pick from here when no phase is in progress.
   and the stale "renders the defaults" sentence in `docs/config.md`. Config
   golden `bad-colour-custom-frame` at 160 columns shows the heavy frame,
   both lines and the `⚠ config: … (+3 more)` note.
+- **2026-09-05 (Phase 13, three layers)** — Layout keys of SPEC § 4.1.
+  `phase-13/right-justify`: `align_columns` takes the pad side; `start`
+  pads a right-group module on the right so its text follows the separator.
+  `phase-13/empty-lines`: lines are filtered after rendering and alignment
+  (`hide_empty_lines`, default true), the caps follow the survivors,
+  `LineCfg.spacer` marks `modules = []` rows that always stay; no payload
+  golden changed because every preset line keeps at least one module.
+  `phase-13/bar-shorthand`: `bar = "line"` on the four bar modules; the
+  first cut resolved it at render time with an "overridden icons" set on
+  `ModuleCfg`, which broke the `config show` round trip (every printed icon
+  read back as an override) and would have printed `fill = "█"` while
+  rendering `━`; it is now applied once in `ModuleCfg::resolve`, so the
+  resolved icons are what renders and what `show` prints. Each key has a
+  config golden, a key row in `docs/config.md` and a `config init` line.
+  Review of the phase: nothing blocking; it found that Claude Code drops
+  whitespace-only rows from the script output (so a `style = "none"` spacer
+  is invisible; documented in SPEC § 2.1/§ 4.1 and CLAUDE.md rather than
+  worked around, glyph choice left to Daniel), the `stale_style = "hide"`
+  height change, and that the ascii set got `━`/`─` (now `=`/`-`).

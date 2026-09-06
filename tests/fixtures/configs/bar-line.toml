@@ -1,0 +1,26 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# `bar = "line"` draws the context and limit bars with `━`/`─` and whole cells
+# (no fractional block, no hairline gaps); on `limit7d` an explicit
+# `icons.fill` override still wins over the shorthand (SPEC § 4.1, bug 3).
+
+[[line]]
+modules = ["context"]
+
+[[line]]
+modules = ["limit5h", "limit7d"]
+
+[modules.context]
+bar = "line"
+
+[modules.limit5h]
+preset = "full"
+bar    = "line"
+
+[modules.limit7d]
+preset = "full"
+bar    = "line"
+[modules.limit7d.icons]
+fill = "▰"

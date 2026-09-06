@@ -75,6 +75,14 @@ pub fn bar(
     segs
 }
 
+/// The `bar` option's choices: block glyphs with fractional cells, or a line.
+///
+/// `line` draws `━`/`─` with whole cells only, so no hairline gaps appear in
+/// fonts that draw `█` a shade narrower than a cell (SPEC § 4.1).
+/// `ModuleCfg::resolve` applies the shorthand to the `fill`/`empty` icons; an
+/// explicit override still wins.
+pub const BAR_STYLES: &[&str] = &["blocks", "line"];
+
 /// Format a percentage with no decimals, e.g. `42%`.
 #[must_use]
 pub fn percent(p: f64) -> String {
@@ -173,6 +181,56 @@ mod tests {
         let out = text(&bar(6, 50.0, "🟩", "..", c, c, Some((90.0, "|>", c))));
         assert_eq!(crate::ansi::display_width(&out), 6, "{out}");
         assert_eq!(out, "███░░|");
+    }
+
+    #[test]
+    fn bar_shorthand_yields_line_glyphs_unless_an_icon_is_explicit() {
+        use crate::config::schema::{ModuleCfg, Overrides, Preset, Value};
+        use crate::icons::IconSet;
+        use crate::modules::Module;
+        use crate::theme::Theme;
+        let schema = crate::modules::context::ContextModule.schema();
+        let theme = Theme::default();
+        let resolve = |ov: &Overrides| {
+            ModuleCfg::resolve(&schema, Preset::Default, IconSet::Nerd, &theme, ov)
+        };
+        assert_eq!(icon_pair(&resolve(&Overrides::default())), ("█", "░"));
+        let mut line = Overrides::default();
+        line.opts.insert("bar".into(), Value::Str("line".into()));
+        assert_eq!(icon_pair(&resolve(&line)), ("━", "─"));
+        // A line bar has no fractional cell, so the hairline gap cannot appear.
+        let c = Color::Default;
+        assert_eq!(text(&bar(8, 55.0, "━", "─", c, c, None)), "━━━━────");
+        line.icons.insert("fill".into(), "▰".into());
+        assert_eq!(
+            icon_pair(&resolve(&line)),
+            ("▰", "─"),
+            "explicit fill wins, empty follows the shorthand"
+        );
+    }
+
+    /// The shorthand is resolved, not rendered: `spend` gets it through the
+    /// shared limit schema, the ascii set stays ascii, and `config show`
+    /// prints the resolved glyphs so its output parses back identically.
+    #[test]
+    fn bar_shorthand_covers_spend_ascii_and_the_show_round_trip() {
+        use crate::modules::SCHEMAS;
+        let text = "icons = \"ascii\"\n[modules.spend]\nbar = \"line\"\n[modules.context]\nbar = \"line\"\n";
+        let (cfg, errs) = crate::config::parse(text, &SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(icon_pair(cfg.modules.get("spend").unwrap()), ("=", "-"));
+        assert_eq!(icon_pair(cfg.modules.get("context").unwrap()), ("=", "-"));
+        let (unicode, _) = crate::config::parse("[modules.spend]\nbar = \"line\"\n", &SCHEMAS);
+        assert_eq!(icon_pair(unicode.modules.get("spend").unwrap()), ("━", "─"));
+        let shown = crate::docs::config_toml(&unicode, false);
+        assert!(shown.contains("fill = \"━\""), "{shown}");
+        let (again, errs) = crate::config::parse(&shown, &SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(again, unicode);
+    }
+
+    fn icon_pair(cfg: &crate::config::schema::ModuleCfg) -> (&str, &str) {
+        (cfg.icon("fill"), cfg.icon("empty"))
     }
 
     #[test]
