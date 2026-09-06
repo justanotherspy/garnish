@@ -185,8 +185,9 @@ README/guide, adversarial review, tests for every bug found.
 
 ## Phase 17 — Presets gallery (SPEC § 12)
 
-- [ ] `presets/` seeded with the walkthrough configs (in this PR: files with the `# name/summary/columns/needs` header)
-- [ ] `tests/presets.rs`: every file validates, renders without `…` at its declared width, name matches filename and is unique (in this PR: validation only)
+- [x] `presets/` seeded with the walkthrough configs (files with the `# name/summary/columns/needs` header), plus `motd-ticker` and `animated-dots` from Phases 15–16
+- [x] `tests/presets.rs`: every file validates, renders without `…` and inside the box at its declared width (animated presets must move between two ticks), name matches filename and is unique
+- [x] `src/gallery.rs`: the files embedded with `include_str!` (`gallery::PRESETS`, `find`, `header`, `body` strips the tooling lines), a unit test that the table lists exactly `presets/*.toml` and that every body validates
 - [ ] `garnish docs` renders `docs/presets.md` (name, summary, needs, sample at the declared width, collapsed file contents); `docs_sync` covers it
 - [ ] `garnish presets` lists names + summaries; `garnish config init --preset <gallery name>` writes the file (tooling header lines stripped)
 - [ ] `presets/screenshots/<name>.png` convention and a README note on contributing one

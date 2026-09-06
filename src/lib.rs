@@ -12,6 +12,7 @@ pub mod debug;
 pub mod docs;
 pub mod doctor;
 pub mod frame;
+pub mod gallery;
 pub mod git;
 pub mod icons;
 pub mod install;
