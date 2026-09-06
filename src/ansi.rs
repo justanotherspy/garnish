@@ -217,16 +217,19 @@ pub struct Segment {
 }
 
 impl Segment {
-    /// Unstyled text.
+    /// Unstyled text. The text is reduced to plain text ([`plain_text`]): a
+    /// segment is the one way onto a row, so nothing a payload, a git
+    /// command or a config contributes can carry an escape sequence, a
+    /// control character or a bidi override past this point.
     #[must_use]
     pub fn plain(text: impl Into<String>) -> Self {
-        Self { text: text.into(), style: Style::PLAIN, link: None }
+        Self { text: clean(text.into()), style: Style::PLAIN, link: None }
     }
 
-    /// Styled text.
+    /// Styled text, sanitised like [`Segment::plain`].
     #[must_use]
     pub fn styled(text: impl Into<String>, style: Style) -> Self {
-        Self { text: text.into(), style, link: None }
+        Self { text: clean(text.into()), style, link: None }
     }
 
     /// Attach a hyperlink.
@@ -289,6 +292,9 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
     if segments_width(segments) <= max_width {
         return segments.to_vec();
     }
+    // A box narrower than the ellipsis still gets a mark: as much of the
+    // ellipsis as fits (`..` becomes `.` in a one-cell ascii box).
+    let ellipsis = fit(ellipsis, max_width);
     let ell_width = display_width(ellipsis);
     let budget = max_width.saturating_sub(ell_width);
     let mut out: Vec<Segment> = Vec::new();
@@ -313,6 +319,20 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
         out.push(Segment::styled(ellipsis, style));
     }
     out
+}
+
+/// The longest prefix of `s` that is at most `width` cells.
+fn fit(s: &str, width: usize) -> &str {
+    let mut used = 0_usize;
+    let mut end = 0_usize;
+    for (i, c) in s.char_indices() {
+        used = used.saturating_add(char_width(c));
+        if used > width {
+            break;
+        }
+        end = i.saturating_add(c.len_utf8());
+    }
+    s.get(..end).unwrap_or("")
 }
 
 /// One terminal cluster of a segment, with the style it came from.
@@ -450,7 +470,7 @@ impl Painter {
                 continue;
             }
             let sgr = seg.style.sgr(self.mode);
-            let link = seg.link.as_deref().filter(|_| self.links);
+            let link = seg.link.as_deref().filter(|u| self.links && safe_link(u));
             if let Some(url) = link {
                 let _ = write!(out, "\x1b]8;;{url}\x1b\\");
             }
@@ -467,15 +487,51 @@ impl Painter {
     }
 }
 
-/// Plain text only: escape sequences and control characters removed.
+/// An OSC 8 target garnish is willing to emit: `http(s)://` and printable
+/// ASCII only, so a URL can never close the sequence early (`ESC \`, BEL)
+/// or name a scheme a terminal might act on.
+#[must_use]
+pub fn safe_link(url: &str) -> bool {
+    (url.starts_with("https://") || url.starts_with("http://"))
+        && url.bytes().all(|b| (0x21..=0x7e).contains(&b))
+}
+
+/// Plain text only: escape sequences, control characters and invisible
+/// format characters removed.
 ///
-/// Every string a config may contribute to a row (a text module's `text`
-/// and `gap`, `ticker_gap`) goes through here at config time, so a cut
-/// window can never split an escape sequence and leak colour or a bare ESC
-/// into the row, and a newline can never add a row (SPEC § 3.7).
+/// Every string that reaches a row goes through here, at config time for
+/// the config's own strings and in [`Segment::plain`]/[`Segment::styled`]
+/// for everything else, so a cut window can never split an escape sequence
+/// and leak colour or a bare ESC into the row, a newline can never add a
+/// row, and a bidi override can never make `main` read as something else
+/// (SPEC § 3.7). Zero-width joiner and the emoji variation selector stay:
+/// they are part of how glyphs are spelled.
 #[must_use]
 pub fn plain_text(s: &str) -> String {
-    strip_ansi(s).chars().filter(|c| !c.is_control()).collect()
+    clean(s.to_owned())
+}
+
+/// [`plain_text`] without an allocation when the text is already plain,
+/// which on a warm tick is every string.
+fn clean(s: String) -> String {
+    if s.chars().any(|c| c == '\x1b' || c.is_control() || is_format_char(c)) {
+        strip_ansi(&s).chars().filter(|&c| !c.is_control() && !is_format_char(c)).collect()
+    } else {
+        s
+    }
+}
+
+/// Unicode `Cf` characters that change layout or reading order without
+/// occupying a cell: zero-width space/non-joiner, the bidi marks and
+/// embeddings/isolates, word joiner and friends, the byte order mark.
+const fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200b}' | '\u{200c}' | '\u{200e}' | '\u{200f}' | '\u{061c}' | '\u{180e}' | '\u{feff}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+    )
 }
 
 /// Remove ANSI CSI and OSC sequences from a string (used by docs and tests).
@@ -648,10 +704,27 @@ mod tests {
         assert_eq!(plain_text("a\tb\nc\u{7}d"), "abcd");
         assert_eq!(plain_text("\x1b"), "", "a bare ESC never reaches the row");
         assert_eq!(
-            plain_text("🌿 e\u{301} 👨\u{200d}💻"),
-            "🌿 e\u{301} 👨\u{200d}💻",
-            "marks and ZWJ stay"
+            plain_text("🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}"),
+            "🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}",
+            "marks, ZWJ and VS16 stay"
         );
+        // Bidi overrides, zero-width spaces and the BOM are dropped: a branch
+        // called `niam\u{202e}` must not read as `main`.
+        assert_eq!(plain_text("\u{feff}ni\u{200b}am\u{202e} \u{2066}x\u{2069}"), "niam x");
+        assert_eq!(plain_text("\u{200e}\u{200f}\u{061c}\u{2060}\u{180e}"), "");
+    }
+
+    #[test]
+    fn segments_are_plain_text_by_construction() {
+        // Every string reaches a row through these constructors, so payload
+        // and git strings cannot inject escapes, controls or a second row.
+        assert_eq!(Segment::plain("\x1b[31mred\x1b[0m\nrow2").text, "redrow2");
+        assert_eq!(Segment::styled("a\u{7}\x1b]0;title\x1b\\b", Style::PLAIN).text, "ab");
+        assert_eq!(Segment::plain("\x1b]52;c;aGVsbG8=\x07x").text, "x", "OSC 52 clipboard");
+        assert_eq!(Segment::plain("plain 🌿").text, "plain 🌿");
+        // A cut can no longer land inside an escape sequence: there is none.
+        let cut = truncate(&[Segment::plain("abc\x1b[31mdefghij")], 5, "…");
+        assert_eq!(Painter::PLAIN.paint(&cut), "abcd…");
     }
 
     #[test]
@@ -665,6 +738,43 @@ mod tests {
         let p256 = Painter { mode: ColorMode::Ansi256, links: false };
         assert_eq!(p256.paint(&[seg]), "\x1b[1;38;5;16mPR\x1b[0m");
         assert_eq!(Painter::PLAIN.paint(&[Segment::styled("x", Style::PLAIN.dimmed())]), "x");
+    }
+
+    #[test]
+    fn painter_drops_unsafe_links() {
+        let painter = Painter { mode: ColorMode::Never, links: true };
+        let paint = |url: &str| painter.paint(&[Segment::plain("#42").with_link(url)]);
+        assert_eq!(
+            paint("https://github.com/o/r/pull/42"),
+            "\x1b]8;;https://github.com/o/r/pull/42\x1b\\#42\x1b]8;;\x1b\\"
+        );
+        assert!(paint("http://gitlab.local/o/r/-/merge_requests/7").contains("]8;;http://"));
+        for bad in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "https://x\x1b\\\x1b[31mINJECT",
+            "https://x\u{7}y",
+            "https://ex ample.com",
+            "https://ünïcode.example",
+            "ftp://x",
+            "",
+        ] {
+            assert_eq!(paint(bad), "#42", "{bad:?} must not become a link");
+            assert!(!safe_link(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn truncation_marks_a_box_narrower_than_the_ellipsis() {
+        let seg = [Segment::plain("abcdef")];
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg, 1, "..")), ".");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg, 2, "..")), "..");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg, 3, "..")), "a..");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg, 1, "…")), "…");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg, 0, "…")), "");
+        assert_eq!(fit("..", 1), ".");
+        assert_eq!(fit("🌿x", 1), "");
+        assert_eq!(fit("🌿x", 2), "🌿");
     }
 
     #[test]

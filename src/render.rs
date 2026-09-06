@@ -460,6 +460,77 @@ mod tests {
     /// justified, long text clipped or scrolled by the clock, the scroller
     /// frozen at frame 0 without animation, and the common decorations apply.
     #[test]
+    fn hostile_payload_strings_never_add_a_row_or_an_escape() {
+        // Whole-stack review: the payload's own strings (session name,
+        // model, agent, output style, directories, PR URL) reached the row
+        // raw. A `\n` split the frame, an escape passed `--color never`, a
+        // cut could split the sequence. Segments are plain by construction.
+        // Built with serde so the escapes arrive as JSON escapes, the way
+        // any serializer emits them (a raw ESC byte is not valid JSON).
+        let dir = "/home/dev/pro\x1b[2Jjects/de\u{202e}mo";
+        let json = serde_json::json!({
+            "session_id": "s",
+            "session_name": "s\x1b]8;;http://evil\x1b\\link\nX",
+            "cwd": dir,
+            "model": {"id": "m", "display_name": "\x1b[31mEvil\x1b[0m\nrow"},
+            "output_style": {"name": "style"},
+            "agent": {"name": "ag\nent"},
+            "workspace": {"current_dir": dir, "project_dir": dir},
+            "cost": {"total_cost_usd": 1.0, "total_duration_ms": 1000, "total_api_duration_ms": 100,
+                     "total_lines_added": 1, "total_lines_removed": 0},
+            "context_window": {"context_window_size": 200_000, "used_percentage": 10,
+                               "remaining_percentage": 90, "total_input_tokens": 1, "total_output_tokens": 1},
+            "pr": {"number": 7, "url": "javascript:alert(1)\x1b\\\x1b[31mINJECT", "review_state": "weird"}
+        })
+        .to_string();
+        assert!(!json.contains('\x1b'), "escaped on the wire");
+        let payload = Payload::parse(&json).unwrap();
+        let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
+        let out = render_loaded(&payload, &loaded, Some(160), false);
+        let plain = render_plain(&payload, &loaded, Some(160));
+        assert_eq!(plain.lines().count(), loaded.config.lines.len(), "{plain}");
+        assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
+        assert!(plain.contains("projects/demo") && plain.contains("agent"), "{plain}");
+        // The only escapes are the painter's own SGR: no OSC 8 for a bad
+        // URL, no OSC/CSI/DCS/BEL from the payload, no bidi override.
+        assert!(
+            !out.contains("\x1b]") && !out.contains('\u{7}') && !out.contains("\x1bP"),
+            "{out:?}"
+        );
+        assert!(!out.contains("[2J") && !out.contains('\u{202e}'), "{out:?}");
+        for seq in out.split('\x1b').skip(1) {
+            assert!(seq.starts_with('[') && seq.contains('m'), "{seq:?} is not SGR");
+        }
+    }
+
+    #[test]
+    fn pathological_sizes_render_inside_the_box() {
+        // Whole-stack review: `width = i64::MAX` aborted the tick with an
+        // allocation failure and a giant bar spun forever. Sizes are capped
+        // at config time (reported) and clamped again when rendering.
+        let payload = fixture("subscription-full");
+        let cfg = "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"text.a\", \"context\"]\n[modules.text.a]\ntext = \"hi\"\nwidth = 9223372036854775807\npad = 4000000000\n[modules.context]\nwidth = 99999999999\n";
+        let (config, errs) = config::parse(cfg, &SCHEMAS);
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        let out = render_plain_at(&payload, &config, Some(80), &Clock::fixed());
+        assert!(out.lines().all(|row| display_width(row) <= 76), "{out}");
+        assert_eq!(config::Config::defaults(&SCHEMAS).width(Some(usize::MAX)), config::MAX_WIDTH);
+        assert_eq!(config::Config::defaults(&SCHEMAS).width(Some(4100)), config::MAX_WIDTH);
+    }
+
+    #[test]
+    fn a_one_cell_ascii_box_still_shows_its_clip_mark() {
+        // `..` did not fit a one-cell box, so the module vanished and the
+        // "always pad + box + pad cells" promise broke (whole-stack review).
+        let payload = fixture("subscription-full");
+        let cfg = "icons = \"ascii\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\", \"text.b\", \"clock\"]\n[modules.text.a]\ntext = \"hello\"\nwidth = 1\noverflow = \"clip\"\n[modules.text.b]\ntext = \"hello\"\nwidth = 2\noverflow = \"clip\"\n";
+        let (config, errs) = config::parse(cfg, &SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        let out = render_plain_at(&payload, &config, Some(80), &Clock::fixed());
+        assert!(out.starts_with(".  ..  "), "{out:?}");
+    }
+
+    #[test]
     fn text_modules_render_as_fixed_width_boxes() {
         let payload = fixture("subscription-full");
         let base = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\", \"text.b\", \"text.c\", \"text.d\"]\n";

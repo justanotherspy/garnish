@@ -27,6 +27,9 @@ pub fn bar(
     if width == 0 {
         return Vec::new();
     }
+    // A bar wider than any row is a bad number, not a wide bar: cap it so a
+    // config integer can never size the loop (`config::MAX_CELLS`).
+    let width = width.min(crate::config::MAX_CELLS);
     // Glyphs that are not exactly one cell wide would break the width
     // accounting of the whole line; fall back to safe defaults.
     let fill = if crate::ansi::display_width(fill) == 1 { fill } else { "█" };
@@ -181,6 +184,18 @@ mod tests {
         let out = text(&bar(6, 50.0, "🟩", "..", c, c, Some((90.0, "|>", c))));
         assert_eq!(crate::ansi::display_width(&out), 6, "{out}");
         assert_eq!(out, "███░░|");
+    }
+
+    #[test]
+    fn bar_width_is_capped_below_the_parser() {
+        // A resolved size that slipped past config validation (a future
+        // caller) still cannot spin the loop: MAX_CELLS is the ceiling.
+        let cells: usize = bar(usize::MAX, 50.0, "█", "░", Color::Default, Color::Default, None)
+            .iter()
+            .map(Segment::width)
+            .sum();
+        assert_eq!(cells, crate::config::MAX_CELLS);
+        assert_eq!(bar(0, 50.0, "█", "░", Color::Default, Color::Default, None), Vec::new());
     }
 
     #[test]

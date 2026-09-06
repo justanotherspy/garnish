@@ -410,6 +410,12 @@ fn install(
     } else {
         "garnish".to_owned()
     };
+    // Without HOME the defaults would land in the current directory (a
+    // repository, when run from one); refuse rather than guess.
+    if settings.is_none() && !env_set("HOME") {
+        eprintln!("HOME is not set; pass --settings <FILE> to say where settings.json is");
+        return Err(Quiet.into());
+    }
     let plan = Plan {
         settings: settings.unwrap_or_else(inst::default_settings_path),
         command,
@@ -491,6 +497,11 @@ fn install_default_config(
         writeln!(stdout, "wrote default config to {}{seeded}", target.display())?;
     }
     Ok(())
+}
+
+/// Whether an environment variable is set to something non-empty.
+fn env_set(key: &str) -> bool {
+    std::env::var_os(key).is_some_and(|v| !v.is_empty())
 }
 
 /// `COLUMNS`, then `GARNISH_COLUMNS`.
@@ -587,6 +598,14 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
                     crate::gallery::body(p.source)
                 }
             };
+            if config_path.is_none()
+                && !env_set("HOME")
+                && !env_set("XDG_CONFIG_HOME")
+                && !env_set("GARNISH_CONFIG")
+            {
+                eprintln!("HOME is not set; pass --config <FILE> to say where the config goes");
+                return Err(Quiet.into());
+            }
             let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
             if target.exists() && !force {
                 eprintln!("{} exists; pass --force to overwrite", target.display());

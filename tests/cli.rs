@@ -200,26 +200,58 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
     let missing = home.join("nope.toml");
+    let broken = home.join("broken.toml");
+    std::fs::write(&broken, "preset = \"full\"\n[frame\n").unwrap();
     let payload =
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    for (file, problem) in [(&missing, "cannot read"), (&broken, "broken.toml:2 ")] {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+        cmd.args(["--config", file.to_str().unwrap(), "preview", payload])
+            .args(["--color", "never", "--icons", "ascii", "--width", "120"])
+            .env("HOME", home)
+            .env("GARNISH_CACHE_DIR", home.join("cache"))
+            .env("GARNISH_NOW", "1738425600")
+            .env("GARNISH_NO_SPAWN", "1")
+            .env("CLICOLOR_FORCE", "1")
+            .env_remove("NO_COLOR")
+            .env_remove("GARNISH_CONFIG");
+        let out = cmd.output().unwrap();
+        let out = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert!(out.contains(problem), "{out}");
+        // The header is the one dim escape preview prints itself; the rows
+        // are plain (`--color never`) with the ascii bars (`--icons ascii`;
+        // the frame glyphs come from the config, not the icon set).
+        let rows: Vec<_> = out.lines().skip(1).collect();
+        assert!(rows.len() > 1, "{out}");
+        assert!(rows.iter().all(|l| !l.contains('\x1b')), "{out:?}");
+        assert!(out.contains("ctx: ####") && !out.contains('█'), "{out}");
+    }
+}
+
+#[test]
+fn writing_commands_refuse_to_guess_a_home_directory() {
+    // With HOME unset the defaults fell back to the current directory, so
+    // `install` dropped .claude/ and garnish/ into whatever repo it ran from.
+    let dir = tempfile::tempdir().unwrap();
+    for args in [&["install", "--dry-run"][..], &["config", "init"]] {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+        cmd.args(args)
+            .current_dir(dir.path())
+            .env_remove("HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("GARNISH_CONFIG");
+        let out = cmd.output().unwrap();
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?}: {err}");
+        assert!(err.contains("HOME") && !err.contains("Location:"), "{args:?}: {err}");
+    }
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "nothing written");
+    // An explicit path needs no HOME.
+    let target = dir.path().join("g.toml");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
-    cmd.args(["--config", missing.to_str().unwrap(), "preview", payload])
-        .args(["--color", "never", "--icons", "ascii", "--width", "120"])
-        .env("HOME", home)
-        .env("GARNISH_CACHE_DIR", home.join("cache"))
-        .env("GARNISH_NOW", "1738425600")
-        .env("GARNISH_NO_SPAWN", "1")
-        .env("CLICOLOR_FORCE", "1")
-        .env_remove("NO_COLOR")
-        .env_remove("GARNISH_CONFIG");
-    let out = cmd.output().unwrap();
-    let out = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(out.contains("cannot read"), "{out}");
-    // The header is the one dim escape preview prints itself; the rows are
-    // plain (`--color never`) with the ascii bars (`--icons ascii`; the frame
-    // glyphs come from the config, not the icon set).
-    let rows: Vec<_> = out.lines().skip(1).collect();
-    assert!(rows.len() > 1, "{out}");
-    assert!(rows.iter().all(|l| !l.contains('\x1b')), "{out:?}");
-    assert!(out.contains("ctx: ####") && !out.contains('█'), "{out}");
+    cmd.args(["--config", target.to_str().unwrap(), "config", "init"])
+        .env_remove("HOME")
+        .env_remove("XDG_CONFIG_HOME");
+    assert!(cmd.output().unwrap().status.success());
+    assert!(target.exists());
 }

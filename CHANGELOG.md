@@ -19,6 +19,24 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   consistent; `config init` and `config check` exit quietly on a
   user error instead of printing a report.
 
+**Hardening** (whole-stack review, SPEC § 5)
+
+- Nothing but text reaches a row: escape sequences, control characters and
+  bidi/format characters in the payload's names and paths, in git output,
+  or in any config string are stripped before a cell is counted. A newline
+  in a session name no longer adds a row, and `--color never` is plain.
+- OSC 8 links are emitted only for `http(s)://` URLs of printable ASCII.
+- A config integer can no longer size an allocation or a loop on every
+  tick: `width`/`pad` above 1024 cells, `text`/`gap`/`ticker_gap` above
+  4096 characters, a `*_step` outside `0.001..=1000` and a `fill_char` that
+  is not one cell are reported and defaulted; the renderers clamp again.
+- A TOML syntax error keeps the command-line overrides (`preview --color
+  never --icons ascii` of a broken file renders plain ascii), like an
+  unreadable file already did.
+- `install` and `config init` refuse to guess a home directory when `HOME`
+  is unset instead of writing into the current directory.
+- A one-cell ascii box still shows its clip mark (`.`).
+
 **Layout** (SPEC § 4.1)
 
 - `right_justify = "end" | "start"`, `hide_empty_lines`, `[[line]]

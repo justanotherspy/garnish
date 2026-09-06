@@ -18,6 +18,62 @@ fn header(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|l| l.strip_prefix(&prefix).map(str::to_owned))
 }
 
+/// At its declared width a preset fits Claude Code's box uncut (SPEC § 12):
+/// no `…`, no row wider than `columns − 4`.
+fn fit_failures(label: &str, columns: usize, rows: &[String]) -> Vec<String> {
+    let box_width = columns.saturating_sub(4);
+    let mut failures = Vec::new();
+    for row in rows {
+        if row.contains('…') {
+            failures.push(format!("{label}: cut at its declared width {columns}:\n{row}"));
+        }
+        let width = garnish::ansi::display_width(row);
+        if width > box_width {
+            failures.push(format!(
+                "{label}: {width} cells, wider than the {box_width}-cell box at {columns} columns:\n{row}"
+            ));
+        }
+    }
+    failures
+}
+
+/// A line ticker slides exactly `ticker_step` cells per tick: after the
+/// frame's fixed prefix, the 601 window is the 600 window shifted by that
+/// many cells (whole-stack review: with `compact` durations the period
+/// changes between ticks and the window jumps; the presets use `fixed`).
+fn ticker_advance_failures(
+    stem: &str,
+    text: &str,
+    rows: &[String],
+    later: &[String],
+) -> Vec<String> {
+    // Not a `#[test]` fn, so the crate's panic-path lints apply here.
+    let cells: usize = text
+        .lines()
+        .find_map(|l| l.trim_start().strip_prefix("ticker_step"))
+        .and_then(|rest| rest.trim_start_matches([' ', '=']).trim().parse().ok())
+        .unwrap_or(1);
+    let mut failures = Vec::new();
+    for (before, after) in rows.iter().zip(later) {
+        let a: Vec<char> = before.chars().collect();
+        let b: Vec<char> = after.chars().collect();
+        if a == b {
+            continue; // a line that fits does not scroll
+        }
+        let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+        let shifted = prefix.saturating_add(cells);
+        let window = 20.min(a.len().saturating_sub(shifted).saturating_sub(1));
+        let moved = a.get(shifted..shifted.saturating_add(window));
+        let stayed = b.get(prefix..prefix.saturating_add(window));
+        if window < 5 || moved != stayed {
+            failures.push(format!(
+                "{stem}: the ticker did not advance exactly {cells} cell(s) between two ticks:\n{before}\n{after}"
+            ));
+        }
+    }
+    failures
+}
+
 #[test]
 fn every_preset_has_a_header_validates_and_renders() {
     let dir = root().join("presets");
@@ -93,24 +149,21 @@ fn every_preset_has_a_header_validates_and_renders() {
                 || l.starts_with("separator_frames")
                 || (l.contains("_frames") && !l.starts_with('#'))
         });
-        for row in &rows {
-            if row.contains('…') {
-                failures.push(format!("{stem}: cut at its declared width {columns}:\n{row}"));
-            }
-            let width = garnish::ansi::display_width(row);
-            if width > columns - 4 {
-                failures.push(format!(
-                    "{stem}: {width} cells, wider than the {}-cell box at {columns} columns:\n{row}",
-                    columns - 4
-                ));
-            }
+        // The fit promise holds at every instant, not only the first: a
+        // compact duration changes width between ticks (whole-stack review).
+        let later = render_at("1738425601");
+        let much_later = render_at("1738425605");
+        for (when, rows) in [("600", &rows), ("601", &later), ("605", &much_later)] {
+            failures.extend(fit_failures(&format!("{stem}@{when}"), columns, rows));
         }
         if ticker {
-            let later = render_at("1738425601");
             if later == rows {
                 failures.push(format!(
                     "{stem}: promises an animation but nothing moves between two ticks at {columns} columns"
                 ));
+            }
+            if text.lines().any(|l| l.trim_start().starts_with("overflow")) {
+                failures.extend(ticker_advance_failures(&stem, &text, &rows, &later));
             }
         }
     }
