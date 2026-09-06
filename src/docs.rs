@@ -159,6 +159,12 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
         "Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.",
     );
     for line in &cfg.lines {
+        // A line left with no ids by a reported mistake renders as an empty
+        // row that `hide_empty_lines` drops; written back as `modules = []`
+        // it would become a spacer that is always drawn, so it is left out.
+        if line.left.is_empty() && line.right.is_empty() && !line.spacer {
+            continue;
+        }
         let _ = writeln!(out, "[[line]]");
         let _ = writeln!(out, "modules = {}", toml_list(&line.left));
         if !line.right.is_empty() {
@@ -853,7 +859,7 @@ pub fn presets_page() -> String {
     let mut o = String::new();
     let _ = writeln!(
         o,
-        "# Presets gallery\n\nComplete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows the start of its scrolling window, not a cut); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.\n"
+        "# Presets gallery\n\nComplete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows the start of its scrolling window, not a cut); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. The fit holds for the icon set the preset declares (`# needs:`); with `--icons emoji` some glyphs are two cells and a tight layout may need a wider terminal. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.\n"
     );
     let _ = writeln!(o, "| name | summary | columns | needs |\n|---|---|---|---|");
     for p in crate::gallery::PRESETS.iter() {

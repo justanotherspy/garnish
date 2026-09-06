@@ -78,6 +78,11 @@ fn golden_renders_match() {
             let name = fixture.file_stem().unwrap().to_str().unwrap();
             let actual = render(fixture, preset, icons);
             let golden = golden_dir.join(format!("{name}--{preset}--{icons}.txt"));
+            // An internal error row would otherwise be baked in by UPDATE_GOLDEN.
+            if actual.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
+            {
+                return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
+            }
             if update {
                 std::fs::write(&golden, &actual).unwrap();
                 return None;

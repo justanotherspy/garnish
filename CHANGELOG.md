@@ -12,12 +12,17 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   (SPEC § 2.1). `garnish install --padding` seeds the matching `padding`.
 - Every built-in glyph is one cell in every terminal: East Asian Ambiguous
   and emoji-presentation characters left the unicode and emoji sets, and
-  `garnish doctor` prints a glyph grid to check your font (SPEC § 3.6).
+  `garnish doctor` prints a glyph grid to check your font (SPEC § 4.1).
 - A bad value in the config no longer discards the whole file: each key
   falls back on its own and `config check` lists every problem (SPEC § 5).
-- Powerline frames pad their segments; the spacer in `packed` lines is
-  consistent; `config init` and `config check` exit quietly on a
-  user error instead of printing a report.
+- Powerline frames pad their segments; the unfilled join of a `packed`
+  line uses the frame separator; `config init`, `config check` and
+  `preview` exit quietly on a user error instead of printing a report.
+- `config show` prints only what is in effect (the theme actually in use,
+  line ids that render), so its output always passes `config check`.
+- `garnish doctor` collapses the home directory to `~` in every path it
+  prints, and its `config` glyph rows keep every field so an override that
+  is not one glyph shows as `?` with its cell count.
 
 **Hardening** (whole-stack review, SPEC § 5)
 
@@ -27,21 +32,23 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   in a session name no longer adds a row, and `--color never` is plain.
 - OSC 8 links are emitted only for `http(s)://` URLs of printable ASCII.
 - A config integer can no longer size an allocation or a loop on every
-  tick: `width`/`pad` above 1024 cells, `text`/`gap`/`ticker_gap` above
+  tick: `width`/`pad`/`bar_width` above 1024 cells, `text`/`gap`/`ticker_gap` above
   4096 characters, a `*_step` outside `0.001..=1000` and a `fill_char` that
   is not one cell are reported and defaulted; the renderers clamp again.
 - A TOML syntax error keeps the command-line overrides (`preview --color
   never --icons ascii` of a broken file renders plain ascii), like an
   unreadable file already did.
-- `install` and `config init` refuse to guess a home directory when `HOME`
-  is unset instead of writing into the current directory.
+- `install`, `config init`, `config path` and `skills install` refuse to
+  guess a home directory when `HOME` is unset instead of writing into the
+  current directory; `config init` and `config path` honour `--config` and
+  `GARNISH_CONFIG` first.
 - A one-cell ascii box still shows its clip mark (`.`).
 
 **Layout** (SPEC § 4.1)
 
-- `right_justify = "end" | "start"`, `hide_empty_lines`, `[[line]]
-  spacer` and `style = "none"` spacers, `bar = "blocks" | "line"` on
-  the bar modules.
+- `right_justify = "end" | "start"`, `hide_empty_lines`, spacer lines
+  (`modules = []`, kept as an empty framed row), `bar = "blocks" | "line"`
+  on the bar modules.
 
 **Text and motion** (SPEC § 3.7, 4.2)
 

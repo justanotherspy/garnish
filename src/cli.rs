@@ -46,16 +46,28 @@ pub struct RenderArgs {
 }
 
 impl RenderArgs {
+    /// The overrides as a config overlay. A typo is a one-line note on
+    /// stderr and a [`Quiet`] failure, not an error report (bug 7).
     fn overlay(&self) -> Result<Overlay> {
+        let typo = |what: &str, value: &str, expected: &str| {
+            eprintln!("unknown {what} {value:?}; expected {expected}");
+            color_eyre::Report::from(Quiet)
+        };
         let preset = self
             .preset
             .as_deref()
-            .map(|p| TopPreset::parse(p).ok_or_else(|| eyre!("unknown preset {p:?}")))
+            .map(|p| {
+                TopPreset::parse(p)
+                    .ok_or_else(|| typo("preset", p, "default, minimal, full or compact"))
+            })
             .transpose()?;
         let icons = self
             .icons
             .as_deref()
-            .map(|i| IconSet::parse(i).ok_or_else(|| eyre!("unknown icon set {i:?}")))
+            .map(|i| {
+                IconSet::parse(i)
+                    .ok_or_else(|| typo("icon set", i, "nerd, unicode, emoji or ascii"))
+            })
             .transpose()?;
         let color = self
             .color
@@ -66,7 +78,7 @@ impl RenderArgs {
                 "never" => Ok(ColorChoice::Never),
                 "256" => Ok(ColorChoice::Ansi256),
                 "truecolor" => Ok(ColorChoice::TrueColor),
-                other => Err(eyre!("unknown color mode {other:?}")),
+                other => Err(typo("color mode", other, "auto, always, never, 256 or truecolor")),
             })
             .transpose()?;
         Ok(Overlay { preset, icons, theme: self.theme.clone(), color })

@@ -24,7 +24,7 @@ pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: Option<&
     let _ = writeln!(
         o,
         "binary   {}",
-        std::env::current_exe().map_or_else(|_| "?".into(), |p| p.display().to_string())
+        std::env::current_exe().map_or_else(|_| "?".into(), |p| tilde(&p))
     );
     let on_path = crate::install::on_path("garnish", std::env::var_os("PATH").as_deref());
     let _ = writeln!(
@@ -48,7 +48,7 @@ fn settings_section(o: &mut String, settings: Option<&Path>) {
         let _ = writeln!(o, "claude settings  unknown: HOME is not set\n");
         return;
     };
-    let _ = writeln!(o, "claude settings  {}", settings.display());
+    let _ = writeln!(o, "claude settings  {}", tilde(settings));
     match std::fs::read_to_string(settings) {
         Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
             Ok(v) => match v.get("statusLine") {
@@ -56,7 +56,7 @@ fn settings_section(o: &mut String, settings: Option<&Path>) {
                     let _ = writeln!(
                         o,
                         "statusLine       command={} refreshInterval={}",
-                        sl.get("command").and_then(|c| c.as_str()).unwrap_or("?"),
+                        tilde(Path::new(sl.get("command").and_then(|c| c.as_str()).unwrap_or("?"))),
                         sl.get("refreshInterval")
                             .map_or_else(|| "unset".to_owned(), ToString::to_string)
                     );
@@ -82,14 +82,12 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
             let _ = writeln!(
                 o,
                 "config   none (built-in defaults); `garnish config init` writes one to {}",
-                config::default_path().map_or_else(
-                    || "… nowhere: HOME is not set".to_owned(),
-                    |p| p.display().to_string()
-                )
+                config::default_path()
+                    .map_or_else(|| "… nowhere: HOME is not set".to_owned(), |p| tilde(&p))
             );
         }
         (Some(p), true) => {
-            let _ = writeln!(o, "config   {} ok", p.display());
+            let _ = writeln!(o, "config   {} ok", tilde(p));
         }
         (Some(p), false) => {
             // A syntax error is the one problem with a line and no path.
@@ -98,13 +96,13 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
                 let _ = writeln!(
                     o,
                     "config   {} does not parse; the built-in defaults are in effect",
-                    p.display()
+                    tilde(p)
                 );
             } else {
                 let _ = writeln!(
                     o,
                     "config   {} has {} problem(s); the built-in default stands in for each bad key",
-                    p.display(),
+                    tilde(p),
                     loaded.errors.len()
                 );
             }
@@ -134,7 +132,7 @@ fn cache_section(o: &mut String, cache: &Cache) {
     let _ = writeln!(
         o,
         "cache    {} ({})",
-        root.display(),
+        tilde(root),
         if writable { "writable" } else { "NOT writable" }
     );
     let sessions = count_dirs(&root.join("sessions"));
@@ -190,6 +188,12 @@ fn environment_section(o: &mut String) {
         "DISABLE_COMPACT",
     ] {
         if let Ok(v) = std::env::var(key) {
+            // The two path-valued hooks may carry the home directory.
+            let v = if key.ends_with("_CONFIG") || key.ends_with("_DIR") {
+                tilde(Path::new(&v))
+            } else {
+                v
+            };
             let _ = writeln!(o, "         {key}={v}");
         }
     }
@@ -225,7 +229,7 @@ fn glyph_section(o: &mut String, config: &config::Config) {
 /// not single cells and are left out.
 #[must_use]
 pub fn glyph_rows(set: IconSet) -> Vec<String> {
-    rows(set.name(), |_, icon| icon.glyph.get(set).to_owned())
+    rows(set.name(), |_, icon| (icon.glyph.get(set).to_owned(), false))
 }
 
 /// The glyph-test rows for the icons a loaded config resolves to (icon set,
@@ -233,13 +237,30 @@ pub fn glyph_rows(set: IconSet) -> Vec<String> {
 #[must_use]
 pub fn config_glyph_rows(config: &config::Config) -> Vec<String> {
     rows("config", |schema, icon| {
-        config.modules.get(schema.id).map_or_else(String::new, |m| m.icon(icon.key).to_owned())
+        let glyph =
+            config.modules.get(schema.id).map_or_else(String::new, |m| m.icon(icon.key).to_owned());
+        let overridden = glyph != icon.glyph.get(config.icons);
+        (glyph, overridden)
     })
 }
 
+/// One row per module: `<label> <module> <field> <field> …`, each field a
+/// glyph padded to two cells, `|`, and the cell count garnish uses.
+///
+/// `glyph_of` returns the glyph and whether it is a person's override. A
+/// built-in glyph that is not a single character of one or two cells (the
+/// spinner's frame string, the effort dots) has no field: it is not a
+/// glyph. An override always keeps its field, so a row overriding real
+/// glyphs lines up with the set row above it: one that is not a single
+/// glyph shows as `?` with its cell count (capped at 9), an empty one as
+/// `∅ |0`. (An override of a non-glyph icon such as the spinner string has
+/// no set field to line up with; it still shows.)
 fn rows(
     label: &str,
-    glyph_of: impl Fn(&crate::config::schema::ModuleSchema, &crate::config::schema::IconSpec) -> String,
+    glyph_of: impl Fn(
+        &crate::config::schema::ModuleSchema,
+        &crate::config::schema::IconSpec,
+    ) -> (String, bool),
 ) -> Vec<String> {
     SCHEMAS
         .iter()
@@ -248,18 +269,31 @@ fn rows(
                 .icons
                 .iter()
                 .filter_map(|icon| {
-                    let g = glyph_of(schema, icon);
+                    let (g, overridden) = glyph_of(schema, icon);
                     let cells = display_width(&g);
                     let single = g.chars().filter(|c| *c != '\u{fe0f}').count() == 1;
-                    (single && (1..=2).contains(&cells)).then(|| {
-                        format!("{g}{}|{cells}", " ".repeat(2_usize.saturating_sub(cells)))
-                    })
+                    if single && (1..=2).contains(&cells) {
+                        Some(format!("{g}{}|{cells}", " ".repeat(2_usize.saturating_sub(cells))))
+                    } else if overridden && g.is_empty() {
+                        Some("∅ |0".to_owned())
+                    } else if overridden {
+                        Some(format!("? |{}", cells.min(9)))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             (!fields.is_empty())
                 .then(|| format!("  {label:<8} {:<13} {}", schema.id, fields.join(" ")))
         })
         .collect()
+}
+
+/// A path for a report that may be pasted into a public issue: the home
+/// directory (which carries the username) collapsed to `~`.
+fn tilde(path: &Path) -> String {
+    let home = std::env::var("HOME").ok();
+    crate::modules::repo::tildify(&path.display().to_string(), home.as_deref())
 }
 
 fn git_version() -> String {
@@ -358,6 +392,49 @@ mod tests {
         let branch = rows.iter().find(|r| r.contains(" branch ")).unwrap();
         assert!(branch.contains("B |1"), "override shows in the config row: {branch}");
         assert!(branch.contains("✱ |1"), "the rest follows the unicode set: {branch}");
+        // An override that is not one glyph keeps its field (`?` and the
+        // cell count), an empty one shows `∅ |0`, so the config row has as
+        // many fields as the set row above it (whole-stack review).
+        let (odd, _) = config::parse(
+            "[modules.model.icons]\nmodel = \"ab\"\n[modules.branch.icons]\nbranch = \"\"\n",
+            &SCHEMAS,
+        );
+        let rows = config_glyph_rows(&odd);
+        let model = rows.iter().find(|r| r.contains(" model ")).unwrap();
+        assert!(model.contains("? |2"), "{model}");
+        let branch = rows.iter().find(|r| r.contains(" branch ")).unwrap();
+        assert!(branch.contains("∅ |0"), "{branch}");
+        let set_fields = |rows: &[String], id: &str| {
+            rows.iter()
+                .find(|r| r.contains(&format!(" {id} ")))
+                .unwrap()
+                .split_at(25)
+                .1
+                .split(' ')
+                .count()
+        };
+        assert_eq!(set_fields(&rows, "model"), set_fields(&glyph_rows(IconSet::Nerd), "model"));
+        assert_eq!(set_fields(&rows, "branch"), set_fields(&glyph_rows(IconSet::Nerd), "branch"));
+    }
+
+    #[test]
+    fn report_paths_collapse_the_home_directory() {
+        // Doctor output is pasted into public issues by the feedback skill.
+        let home = std::env::var("HOME").unwrap_or_default();
+        if home.is_empty() {
+            return;
+        }
+        assert_eq!(
+            tilde(Path::new(&format!("{home}/.claude/settings.json"))),
+            "~/.claude/settings.json"
+        );
+        assert_eq!(tilde(Path::new(&home)), "~");
+        assert_eq!(tilde(Path::new("/usr/bin/garnish")), "/usr/bin/garnish");
+        assert_eq!(
+            tilde(Path::new(&format!("{home}2/x"))),
+            format!("{home}2/x"),
+            "prefix, not string"
+        );
     }
 
     #[test]

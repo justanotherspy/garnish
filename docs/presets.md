@@ -1,6 +1,6 @@
 # Presets gallery
 
-Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows the start of its scrolling window, not a cut); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.
+Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows the start of its scrolling window, not a cut); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. The fit holds for the icon set the preset declares (`# needs:`); with `--icons emoji` some glyphs are two cells and a tight layout may need a wider terminal. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.
 
 | name | summary | columns | needs |
 |---|---|---|---|
@@ -239,10 +239,6 @@ At 130 columns, needs emoji:
 # summary: emoji icons with per-module glyph overrides and name limits
 # columns: 130
 # needs: emoji
-
-# Known caveat (PLAN Phase 12, bug 10): some terminals draw emoji that need a
-# variation selector one cell wide; until the emoji set is cleaned up the
-# right edge can drift on those terminals.
 
 preset = "default"
 icons  = "emoji"

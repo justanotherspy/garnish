@@ -216,6 +216,8 @@ and user feedback. Pick from here when no phase is in progress.
 - [ ] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fix the wording in `docs.rs` and regenerate
 - [x] `Cargo.toml` said `repository = "local"`; it points at the GitHub URL (Phase 17, 2026-09-06)
 - [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened
+- [ ] `Segment.text` is `pub`, so the plain-text invariant (SPEC § 5) holds by convention; a private field with an accessor would let the compiler hold it (whole-stack review, 2026-09-06)
+- [ ] A schema-level `max` on `OptSpec` would replace the key-name match in `config::bounded` and make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md` (whole-stack review, 2026-09-06)
 
 ## Session log
 
@@ -486,4 +488,52 @@ and user feedback. Pick from here when no phase is in progress.
   `.github/ISSUE_TEMPLATE/{feedback,preset}.md` mirror the skills' issue
   bodies; labels are created by hand. Top of the stack: version `0.2.0`,
   `CHANGELOG.md` introduced (its section is the tag message), every
-  Phase 12–18 box ticked. The `v0.2.0` tag follows the last merge.
+  Phase 12–18 box ticked. The `v0.2.0` tag follows the last merge. Review
+  of the phase: the submit-preset skill's frontmatter was not valid YAML
+  (quoted now, with a shape test), the statusline skill wrote before
+  previewing (drafts through `--config` now), widths came from `COLUMNS`/
+  `tput` which a shell without a tty does not know (asked for instead),
+  the sample payload hid five modules (it is `subscription-full.json`
+  verbatim, tested equal), `skills::install` rewrote identical files and
+  followed symlinks (compares, skips links, pid-named `create_new` temp),
+  the skills were written before the config (after now), and an unreadable
+  config dropped the command-line overlay.
+- **2026-09-06 (whole-stack review, two layers)** — Three reviewers over
+  `main...phase-18/issue-templates`: rendering and motion, config/gallery/
+  CLI/docs, security. `review/2026-09-06-row-hardening`: `Segment::plain`/
+  `styled` reduce every string to plain text (payload names and paths, git
+  output, the `⚠` line) and `plain_text` drops bidi/format characters; the
+  config's own strings are reduced at parse time (label/prefix/suffix, icon
+  overrides, frame glyphs, per-line separator), `fill_char` width is
+  reported; OSC 8 only for `http(s)://` printable ASCII; sizes bounded
+  (`MAX_CELLS`, `MAX_TEXT_CHARS`, `MAX_WIDTH`, `STEP_RANGE`) after
+  `width = i64::MAX` aborted a tick and a giant bar spun forever with
+  `config check` saying ok; a syntax error keeps the overlay; `install`/
+  `config init` refuse an unset `HOME`; a one-cell ascii box shows `.`;
+  SPEC § 4.1 documents the ticker's period following a compact duration
+  (pair with `durations = "fixed"`) and `align` pads travelling with the
+  window; `tests/presets.rs` checks three instants and the exact ticker
+  advance; config golden `hostile-strings`. `review/2026-09-06-config-cli-
+  polish`: `config show` round-trips (theme in effect, unknown ids
+  removed; a test over every fixture and preset), a mistyped `modules` is
+  not a spacer, doctor collapses `$HOME` to `~` and keeps every config
+  glyph field, `preview` typos are quiet one-liners, serde type names in
+  messages become plain words, the `⚠ config:` line drops the `config`
+  placeholder when there is no file, a gallery name may not shadow a
+  built-in (test), the gallery header ends at the first blank line under
+  CRLF too, both golden suites refuse to bake in `⚠ garnish:` (and config
+  goldens declare `# expect: config-warning`), the stale bug-10 caveat left
+  `emoji-overrides`, CHANGELOG/SPEC wording. Bench unchanged (warm 1.07 ms).
+  A focused review of the two layers then found: the HOME guard still let
+  `install --settings` and `config init` under `GARNISH_CONFIG` write
+  `./garnish/garnish.toml` (root fix: `default_path`/`default_settings_path`
+  return `None` without a home, `config init` resolves `--config` →
+  `GARNISH_CONFIG` → default), `modules = [1, 2]` was still a spacer
+  (length compare), `config show` wrote an emptied line as `modules = []`
+  and so turned a hidden row into a drawn spacer (skipped; the round-trip
+  test now compares renders), `bar_width` escaped the cap, DCS/SOS/PM/APC
+  payloads showed as text (consumed to ST), and the golden guards are
+  anchored at a row start. Open from that review: `Segment.text` is `pub`
+  (the plain-text invariant is by convention; a private field with an
+  accessor would let the compiler hold it) and a schema-level `max` on
+  `OptSpec` (backlog).

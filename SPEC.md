@@ -398,7 +398,11 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   rows from the script's output (§ 2.1), so it shows in `preview` but not in
   the status line; a spacer needs a visible frame. Setting
   `hide_empty_lines = false` restores today's behaviour for the accidental
-  case too. With `stale_style = "hide"` a line of only cached modules can
+  case too. A `[[line]]` with no keys is a spacer as well; a `modules` that
+  is not a list (`modules = "clock"`) is reported and the row is an
+  ordinary empty line, dropped like any other, never a spacer. An unknown
+  id on a line is reported and removed, so `config show` writes only ids
+  that render. With `stale_style = "hide"` a line of only cached modules can
   come and go as its values fall overdue and refresh; `hide_when_empty =
   false` on one of them pins the row.
 - **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
@@ -704,7 +708,8 @@ binary. Everything else is a **gallery preset**: a complete config file under
   at its declared width, and has a unique name matching its filename.
 - **Choosing one.** `garnish config init --preset <gallery name>` writes the
   file (with the header stripped of tooling lines); `garnish presets`
-  lists names and summaries. The three built-in names keep working.
+  lists names and summaries. The four built-in names keep working (and a
+  gallery preset may not reuse one; a unit test guards it).
 - **Screenshots and website.** `presets/screenshots/<name>.png` are optional
   real-terminal captures contributed with a preset (the submit-preset skill
   in § 13 tells people how). A later static site is built from `docs/presets.md`

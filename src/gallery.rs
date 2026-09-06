@@ -79,7 +79,16 @@ pub fn find(name: &str) -> Option<&'static Preset> {
 /// § 12, "each file starts with a comment header"). A `# needs: …` remark
 /// further down is an ordinary comment.
 fn header_block(text: &str) -> &str {
-    text.split("\n\n").next().unwrap_or(text)
+    // Up to the first blank line, whatever the line ending (a CRLF checkout
+    // would otherwise make the whole file the header).
+    let mut end = 0_usize;
+    for line in text.split_inclusive('\n') {
+        if line.trim().is_empty() {
+            break;
+        }
+        end = end.saturating_add(line.len());
+    }
+    text.get(..end).unwrap_or(text)
 }
 
 fn is_tooling_line(line: &str) -> bool {
@@ -136,8 +145,20 @@ mod tests {
             embedded, on_disk,
             "src/gallery.rs FILES must list every presets/*.toml, alphabetically"
         );
+        // The header block ends at the first blank line whatever the line
+        // ending; `body` strips the tooling lines from it and nothing else.
+        let crlf = "# name: x\r\n# summary: s\r\n# columns: 90\r\n\r\npreset = \"full\"\r\n# needs: not a header\r\n";
+        assert_eq!(header(crlf, "columns"), Some("90"));
+        assert_eq!(body(crlf), "preset = \"full\"\n# needs: not a header\n");
         for preset in PRESETS.iter() {
             assert_eq!(header(preset.source, "name"), Some(preset.name), "{}", preset.name);
+            // `config init --preset` tries the built-in names first, so a
+            // gallery preset called `full` would be listed but unreachable.
+            assert!(
+                crate::config::presets::TopPreset::parse(preset.name).is_none(),
+                "{}: shadows a built-in preset name",
+                preset.name
+            );
             assert!(!preset.summary.is_empty(), "{}: no summary", preset.name);
             let declared: Option<usize> =
                 header(preset.source, "columns").and_then(|c| c.parse().ok());

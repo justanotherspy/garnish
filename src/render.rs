@@ -64,10 +64,16 @@ pub fn render_loaded(
 /// The trailing `⚠ config: <path>:<line> <message>` line, truncated to the width.
 fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
     let config = &loaded.config;
-    let path =
-        loaded.path.as_ref().map_or_else(|| "config".to_owned(), |p| p.display().to_string());
     let first = loaded.errors.first();
-    let location = first.and_then(|e| e.line).map_or(String::new(), |l| format!(":{l}"));
+    let line = first.and_then(|e| e.line);
+    // `<path>:<line> `; with no file (a bad `--theme`, say) there is no path
+    // to name, and a line alone reads `line N: `.
+    let origin = match (&loaded.path, line) {
+        (Some(p), Some(l)) => format!("{}:{l} ", p.display()),
+        (Some(p), None) => format!("{} ", p.display()),
+        (None, Some(l)) => format!("line {l}: "),
+        (None, None) => String::new(),
+    };
     let message = first.map_or_else(String::new, |e| {
         if e.path.is_empty() { e.message.clone() } else { format!("{}: {}", e.path, e.message) }
     });
@@ -75,7 +81,7 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
     let suffix = if extra > 0 { format!(" (+{extra} more)") } else { String::new() };
     let glyph = if config.icons == IconSet::Ascii { "!" } else { "⚠" };
     let line = vec![Segment::styled(
-        format!("{glyph} config: {path}{location} {message}{suffix}"),
+        format!("{glyph} config: {origin}{message}{suffix}"),
         Style::fg(config.theme.role(Role::Warn)).dimmed(),
     )];
     let ellipsis = if config.icons == IconSet::Ascii { ".." } else { "…" };
@@ -402,16 +408,13 @@ mod tests {
             "⚠ garnish: bad payload\n"
         );
         let out = render_plain(&fixture("api-key"), &loaded("theme = \"nope\""), Some(80));
-        assert!(
-            out.lines().last().unwrap().starts_with("⚠ config: config theme: unknown theme"),
-            "{out}"
-        );
+        assert!(out.lines().last().unwrap().starts_with("⚠ config: theme: unknown theme"), "{out}");
         assert!(out.lines().count() >= 2);
         // syntax errors carry the line number and the warning never overflows the width
         let out =
             render_plain(&fixture("api-key"), &loaded("preset = \"default\"\n[frame\nx"), Some(40));
         let last = out.lines().last().unwrap();
-        assert!(last.starts_with("⚠ config: config:2 "), "{last}");
+        assert!(last.starts_with("⚠ config: line 2: "), "{last}");
         assert!(display_width(last) <= 36, "COLUMNS=40 leaves 36 cells: {last}");
         assert!(last.ends_with('…'), "{last}");
         let out = render_plain(
@@ -689,7 +692,7 @@ mod tests {
             Some(160),
         );
         let last = out.lines().last().unwrap();
-        assert!(last.starts_with("⚠ config: config durations: unknown value \"loose\""), "{last}");
+        assert!(last.starts_with("⚠ config: durations: unknown value \"loose\""), "{last}");
         assert!(last.ends_with("(+2 more)"), "{last}");
     }
 
