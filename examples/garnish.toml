@@ -175,6 +175,8 @@ hide_when_empty = true
 # fetch_stale_minutes = 30
 # fetch_interval (integer) — Run `git fetch` in the background every N seconds (0 = never). [minimal=0 default=0 full=0]
 # fetch_interval = 0
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 [modules.sync.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # ahead — Ahead glyph.
@@ -461,6 +463,8 @@ hide_when_empty = true
 # bar = "blocks"
 # thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.limit5h.icons]
@@ -503,6 +507,8 @@ hide_when_empty = true
 # bar = "blocks"
 # thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.limit7d.icons]
@@ -545,6 +551,8 @@ hide_when_empty = true
 # bar = "blocks"
 # thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.spend.icons]
@@ -619,6 +627,8 @@ hide_when_empty = true
 # show_icon = true
 # show_start (bool) — Append the start time (HH:MM). [minimal=false default=false full=true]
 # show_start = false
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 [modules.session.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # session — Session icon.
@@ -647,6 +657,8 @@ hide_when_empty = true
 # show_icon = true
 # show_share (bool) — Append the share of the session. [minimal=false default=false full=true]
 # show_share = false
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 [modules.api.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # api — API icon.
@@ -681,6 +693,8 @@ hide_when_empty = true
 # show_misses = false
 # show_writes (bool) — Show tokens written to the cache. [minimal=false default=false full=true]
 # show_writes = false
+# durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
+# durations = "inherit"
 [modules.cache.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # cache — Cache icon.

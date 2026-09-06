@@ -828,6 +828,31 @@ mod tests {
     }
 
     #[test]
+    fn a_ticker_pins_timers_fixed_and_a_module_can_opt_out() {
+        // SPEC § 4.1: under `overflow = "ticker"` the timers print fixed so
+        // the window slides; one module's own `durations` wins over that.
+        let wide = |cfg: &str| {
+            strip_ansi(&render_plain_at(
+                &fixture("subscription-full"),
+                &config::parse(cfg, &SCHEMAS).0,
+                Some(400),
+                &Clock::fixed(),
+            ))
+        };
+        // `3d04h`/`47m00s` are the fixed forms of the limit and cache
+        // countdowns, `3d4h`/`47m` the compact ones (`1h12m` reads the same
+        // in both styles, so it tells nothing).
+        let out = wide("overflow = \"ticker\"");
+        assert!(out.contains("3d04h") && out.contains("47m00s"), "{out}");
+        let out = wide("overflow = \"ticker\"\n[modules.limit7d]\ndurations = \"compact\"");
+        assert!(out.contains("3d4h") && out.contains("47m00s"), "{out}");
+        let out = wide("overflow = \"ticker\"\ndurations = \"compact\"");
+        assert!(out.contains("3d4h") && !out.contains("47m00s"), "the opt-in wins: {out}");
+        let out = wide("[modules.cache]\ndurations = \"fixed\"");
+        assert!(out.contains("47m00s") && out.contains("3d4h"), "pinned the other way: {out}");
+    }
+
+    #[test]
     fn minimal_preset_is_one_unframed_line() {
         let out = render_plain(&fixture("api-key"), &loaded("preset = \"minimal\""), Some(80));
         assert_eq!(out.lines().count(), 1, "{out}");

@@ -23,7 +23,7 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 | `ticker_step` | number | `1` | Cells the ticker advances per tick (must be > 0; `0.5` = every second tick). |
 | `ticker_gap` | string | `"   "` | Text between the end of a scrolled group and its wrapped-around start. |
 | `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0. `GARNISH_ANIMATE=0` does the same for one session; recommended for screen readers and recordings. |
-| `durations` | `compact` \| `fixed` | `compact` | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. |
+| `durations` | `compact` \| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = "ticker"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \| `compact` \| `fixed`) to pin one module. |
 
 ## `[colors]` — theme roles
 

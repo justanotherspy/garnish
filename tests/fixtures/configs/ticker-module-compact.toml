@@ -1,0 +1,18 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601
+# icons: unicode
+# With `overflow = "ticker"` the timers default to `durations = "fixed"`
+# (`session`, `api`, the `cache` countdown print two units); one module
+# pins itself back to compact with its own `durations`, and the right-hand
+# `limit5h` countdown, which never scrolls, is pinned compact too
+# (SPEC § 4.1).
+overflow   = "ticker"
+ticker_gap = " · "
+[[line]]
+modules = ["model", "session", "api", "cache"]
+right   = ["limit5h"]
+[modules.api]
+durations = "compact"
+[modules.limit5h]
+durations = "compact"

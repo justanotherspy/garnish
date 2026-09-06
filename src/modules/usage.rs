@@ -98,6 +98,7 @@ impl Module for LimitModule {
                     "Ascending percentages where the color changes.",
                     Value::NumList(vec![50.0, 75.0, 90.0]),
                 ),
+                super::durations_opt(),
                 OptSpec::new(
                     "band_colors",
                     Kind::ColorList,
@@ -158,7 +159,7 @@ impl Module for LimitModule {
         let text = if self.0 == Window::Spend { percent_unclamped(used) } else { percent(used) };
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
         if cfg.bool("show_reset")
-            && let Some(cd) = w.resets_at.and_then(|t| ctx.countdown(t))
+            && let Some(cd) = w.resets_at.and_then(|t| ctx.countdown(cfg, t))
         {
             let g = cfg.icon("reset");
             let glyph_txt = if g.is_empty() { String::new() } else { format!("{g} ") };

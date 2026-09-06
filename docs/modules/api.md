@@ -39,6 +39,7 @@ Time spent waiting for API responses.
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
 | `show_icon` | bool | `false` | `true` | `true` | Show the icon. |
 | `show_share` | bool | `false` | `false` | `true` | Append the share of the session. |
+| `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
 
 ## Icons
 

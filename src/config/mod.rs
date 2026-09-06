@@ -936,7 +936,13 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             None => DEFAULT_TICKER_GAP,
         }),
         animate: raw.animate.unwrap_or(true),
-        durations: raw.durations.unwrap_or_default(),
+        // A ticker's period follows the scrolled group's width, so timers
+        // that change width would make the window jump (SPEC § 4.1): the
+        // smooth style is the default there, compact an explicit opt-in.
+        durations: raw.durations.unwrap_or(match raw.overflow {
+            Some(Overflow::Ticker) => DurationStyle::Fixed,
+            _ => DurationStyle::Compact,
+        }),
         frame,
         lines,
         modules,
@@ -1847,6 +1853,39 @@ x = 1
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].path, "frame.fill_pattern");
         assert_eq!(c.frame.fill_pattern, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_ticker_defaults_durations_to_fixed_unless_set() {
+        // SPEC § 4.1: a timer changing width inside the scrolled group makes
+        // the window jump, so the smooth style is the default under a ticker
+        // and compact an explicit opt-in; every timer module can pin itself.
+        let schemas = schemas();
+        let (c, errs) = parse("overflow = \"ticker\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.durations, DurationStyle::Fixed);
+        let (c, errs) = parse("overflow = \"ticker\"\ndurations = \"compact\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.durations, DurationStyle::Compact, "an explicit value wins");
+        let (c, errs) = parse("overflow = \"truncate\"", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.durations, DurationStyle::Compact, "no ticker, no switch");
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse(
+            "overflow = \"ticker\"\n[modules.api]\ndurations = \"compact\"\n[modules.sync]\ndurations = \"fixed\"\n[modules.clock]\ndurations = \"fixed\"",
+            all,
+        );
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs.first().is_some_and(|e| e.path == "modules.clock.durations"), "{errs:?}");
+        assert_eq!(c.modules.get("api").map(|m| m.str("durations")), Some("compact"));
+        assert_eq!(c.modules.get("sync").map(|m| m.str("durations")), Some("fixed"));
+        assert_eq!(c.modules.get("session").map(|m| m.str("durations")), Some("inherit"));
+        let (_, errs) = parse("[modules.session]\ndurations = \"loose\"", all);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(
+            errs.first().is_some_and(|e| e.message.contains("\"inherit\", \"compact\", \"fixed\"")),
+            "{errs:?}"
+        );
     }
 
     #[test]

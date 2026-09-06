@@ -32,6 +32,7 @@ impl Module for SessionModule {
                     Value::Bool(false),
                 )
                 .full(Value::Bool(true)),
+                super::durations_opt(),
             ],
             icons: vec![IconSpec {
                 key: "session",
@@ -55,7 +56,7 @@ impl Module for SessionModule {
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "session", "icon"));
         }
-        segs.push(seg(cfg, ctx.duration(elapsed), "value"));
+        segs.push(seg(cfg, ctx.duration(cfg, elapsed), "value"));
         if cfg.bool("show_start")
             && let Ok(started) = ctx
                 .now
@@ -89,6 +90,7 @@ impl Module for ApiModule {
                     Value::Bool(false),
                 )
                 .full(Value::Bool(true)),
+                super::durations_opt(),
             ],
             icons: vec![IconSpec {
                 key: "api",
@@ -110,7 +112,7 @@ impl Module for ApiModule {
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "api", "icon"));
         }
-        segs.push(seg(cfg, ctx.duration(api_ms / 1000), "value"));
+        segs.push(seg(cfg, ctx.duration(cfg, api_ms / 1000), "value"));
         if cfg.bool("show_share")
             && let Some(total) = cost.total_duration_ms.filter(|t| *t > 0)
         {
@@ -152,6 +154,7 @@ impl Module for CacheModule {
                     Value::Bool(false),
                 )
                 .full(Value::Bool(true)),
+                super::durations_opt(),
             ],
             icons: vec![
                 IconSpec {
@@ -205,7 +208,7 @@ impl Module for CacheModule {
         }
         if cfg.bool("show_countdown") {
             let warm = pc.warm.unwrap_or(false);
-            let cd = pc.expires_at.and_then(|t| ctx.countdown(t));
+            let cd = pc.expires_at.and_then(|t| ctx.countdown(cfg, t));
             match (warm, cd) {
                 (true, Some(cd)) => {
                     segs.push(seg(cfg, format!(" {} {cd}", cfg.icon("warm")), "warm"));

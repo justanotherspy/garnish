@@ -42,6 +42,7 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 | `fetch_age` | bool | `false` | `true` | `true` | Hint when the last fetch is older than `fetch_stale_minutes`. |
 | `fetch_stale_minutes` | integer | `30` | `30` | `30` | Age after which the fetch hint appears. |
 | `fetch_interval` | integer | `0` | `0` | `0` | Run `git fetch` in the background every N seconds (0 = never). |
+| `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
 
 ## Icons
 

@@ -49,6 +49,11 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 - `right_justify = "end" | "start"`, `hide_empty_lines`, spacer lines
   (`modules = []`, kept as an empty framed row), `bar = "blocks" | "line"`
   on the bar modules.
+- With `overflow = "ticker"` the timers default to `durations = "fixed"`,
+  so the window slides instead of jumping when a `compact` duration changes
+  width; `durations = "compact"` at the top level opts back in, and every
+  timer module (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`,
+  `sync`) has its own `durations` to pin one.
 
 **Text and motion** (SPEC § 3.7, 4.2)
 

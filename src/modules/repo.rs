@@ -524,6 +524,7 @@ impl Module for SyncModule {
                     "Run `git fetch` in the background every N seconds (0 = never).",
                     Value::Int(0),
                 ),
+                super::durations_opt(),
             ],
             icons: vec![
                 IconSpec {
@@ -581,7 +582,7 @@ impl Module for SyncModule {
             && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
             && !cfg.icon("stale").is_empty()
         {
-            let hint = fetch_age_hint(cfg.icon("stale"), &ctx.duration(age), !segs.is_empty());
+            let hint = fetch_age_hint(cfg.icon("stale"), &ctx.duration(cfg, age), !segs.is_empty());
             segs.push(seg(cfg, hint, "stale"));
         }
         let _ = remote;
