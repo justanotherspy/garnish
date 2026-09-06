@@ -183,8 +183,9 @@ pub fn render_lines_at(
         .unzip();
     if config.align {
         if config.frame.fill {
-            align_columns(&mut lefts, false);
-            align_columns(&mut rights, true);
+            align_columns(&mut lefts, false, false);
+            let pad_left = config.right_justify == config::RightJustify::End;
+            align_columns(&mut rights, true, pad_left);
         } else {
             // Left-packed, the right group follows the left one after a
             // separator, so the line is one sequence of columns (SPEC § 4).
@@ -198,7 +199,7 @@ pub fn render_lines_at(
                     row
                 })
                 .collect();
-            align_columns(&mut rows, false);
+            align_columns(&mut rows, false, false);
             for ((mut row, n), (l, r)) in
                 rows.into_iter().zip(split).zip(lefts.iter_mut().zip(rights.iter_mut()))
             {
@@ -223,10 +224,12 @@ pub fn render_lines_at(
 
 /// Pad module `k` of every group to the widest module `k` among the groups
 /// that have a module after it, so the separators after it fall on the
-/// same cell in every line (SPEC § 4). Left groups count from the left and
-/// pad on the right; right groups (`from_right`) count from the right end
-/// and pad on the left. A group's last module is never padded.
-fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool) {
+/// same cell in every line (SPEC § 4). Left groups count from the left;
+/// right groups (`from_right`) count from the right end. A group's last
+/// module is never padded. `pad_left` puts the pad before the text (right
+/// groups with `right_justify = "end"`, so the text hugs the cap); otherwise
+/// it goes after (left groups, and right groups with `start`).
+fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool, pad_left: bool) {
     let columns = groups.iter().map(Vec::len).max().unwrap_or(0);
     for k in 0..columns {
         let padded = |g: &Vec<Vec<Segment>>| g.len() > k.saturating_add(1);
@@ -245,7 +248,7 @@ fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool) {
                 continue;
             }
             let pad = Segment::plain(" ".repeat(gap));
-            if from_right {
+            if pad_left {
                 module.insert(0, pad);
             } else {
                 module.push(pad);
@@ -432,6 +435,16 @@ mod tests {
         for l in &aligned {
             assert_eq!(display_width(l), 76, "{l}");
         }
+        // `right_justify = "start"`: the right group pads on the right, so the
+        // text follows the separator and the gap sits before the cap; the
+        // bars still stack (SPEC § 4.1).
+        let start: Vec<String> = plain(&format!("align = true\nright_justify = \"start\"\n{base}"))
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(last_bar(&start[0]), last_bar(&start[1]), "{start:?}");
+        assert!(start[0].ends_with("│ ⇄ 8m20s    ─╮"), "{}", start[0]);
+        assert!(start[1].ends_with("│ Δ +156 −23 ─╯"), "{}", start[1]);
         // Left-packed lines anchor the right group on its left, so it pads
         // on the right and the bars still stack.
         let packed: Vec<String> = plain(&format!("align = true\n[frame]\nfill = false\n{base}"))
@@ -440,6 +453,15 @@ mod tests {
             .collect();
         assert_eq!(last_bar(&packed[0]), last_bar(&packed[1]), "{packed:?}");
         assert!(packed[0].ends_with("⇄ 8m20s"), "no trailing pad: {}", packed[0]);
+        // Left-packed, the right group is already one sequence with the left
+        // one, so `right_justify` has nothing to decide.
+        assert_eq!(
+            plain(&format!(
+                "align = true\nright_justify = \"start\"\n[frame]\nfill = false\n{base}"
+            )),
+            packed.join("\n"),
+            "right_justify is a no-op with fill = false"
+        );
         // The default (align = false) render is untouched.
         assert_eq!(plain(base), plain(&format!("align = false\n{base}")));
     }

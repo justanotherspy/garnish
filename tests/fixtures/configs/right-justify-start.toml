@@ -1,0 +1,18 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# The aligned two-line layout with `right_justify = "start"`: a padded
+# right-group module keeps its text next to the separator and the gap sits
+# before the cap (compare `aligned-two-lines`, where the text hugs the cap).
+
+align         = true
+right_justify = "start"
+
+[[line]]
+modules = ["model", "session"]
+right   = ["session", "api"]
+
+[[line]]
+modules = ["session", "clock"]
+right   = ["model", "lines"]

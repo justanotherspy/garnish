@@ -120,7 +120,9 @@ not change as they tick. Both are shown in
 whatever it shows, so a `–` placeholder sitting under a 24-cell context bar
 gets a 24-cell blank column. Alignment ignores separators, so the remedy is
 to put modules of similar width in the same column, or to move the odd
-module to a line of its own.
+module to a line of its own. On the right side the pad goes before the text
+by default so it hugs the cap; `right_justify = "start"` puts it after, so
+the text stays next to the separator.
 
 ## 6. Presets, icons, colors
 
