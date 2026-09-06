@@ -41,6 +41,10 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     assert!(out.contains("would write"), "{out}");
     assert!(out.contains("\"hideVimModeIndicator\": true"), "{out}");
     assert!(out.contains("would write a default config"), "{out}");
+    assert!(out.contains("would write 3 skill(s)"), "{out}");
+    assert!(!home.join(".claude/skills").exists(), "dry run writes nothing");
+    let (out, _, ok) = run(&["install", "--dry-run", "--absolute", "--no-skills"], home, &[]);
+    assert!(ok && !out.contains("skill"), "{out}");
     let (out, _, ok) = run(&["install", "--dry-run", "--absolute", "--padding", "1"], home, &[]);
     assert!(
         ok && out.contains("would write a default config") && out.contains("(padding = 2)"),
@@ -69,6 +73,13 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     assert_eq!(backups.len(), 1);
     let cfg = home.join(".config/garnish/garnish.toml");
     assert!(cfg.exists());
+    // The skills land next to settings.json (SPEC § 13), after the config.
+    assert!(out.contains("skills in ") && out.contains(": wrote 3"), "{out}");
+    assert!(out.find("wrote default config").unwrap() < out.find("skills in ").unwrap(), "{out}");
+    for name in ["garnish-statusline", "garnish-feedback", "garnish-submit-preset"] {
+        let skill = home.join(".claude/skills").join(name).join("SKILL.md");
+        assert!(std::fs::read_to_string(&skill).unwrap().starts_with("---\nname: "), "{name}");
+    }
     let cfg_text = std::fs::read_to_string(&cfg).unwrap();
     assert!(cfg_text.contains("[modules.context]"));
     // statusLine.padding = 1 pads both sides, so the config mirrors it doubled.
@@ -77,8 +88,16 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     let (out, err, ok) =
         run(&["install", "--absolute", "--refresh-interval", "2", "--padding", "1"], home, &[]);
     assert!(ok && out.contains("already up to date"), "{out}");
+    assert!(out.contains(": 3 up to date"), "unchanged skills are not rewritten: {out}");
     assert!(err.contains("set `padding = 2`"), "existing config gets the hint on stderr: {err}");
     assert!(!out.contains("padding"), "{out}");
+
+    // --no-skills for real: settings and config written, no skills directory.
+    let other = tempfile::tempdir().unwrap();
+    let (out, _, ok) = run(&["install", "--absolute", "--no-skills"], other.path(), &[]);
+    assert!(ok && out.contains("wrote default config") && !out.contains("skill"), "{out}");
+    assert!(!other.path().join(".claude/skills").exists());
+    assert!(other.path().join(".claude/settings.json").exists());
     // The config key is a u16; a value that would not round-trip is refused up front.
     let (_, err, ok) = run(&["install", "--dry-run", "--padding", "40000"], home, &[]);
     assert!(!ok && err.contains("40000"), "{err}");
@@ -155,4 +174,52 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     let (_, err, ok) = run(&["config", "init", "--force", "--preset", "nope"], home, &[]);
     assert!(!ok && err.contains("gallery name") && err.contains("minimal-clean"), "{err}");
     assert!(!err.contains("Location:"), "a typo is one line, not a report: {err}");
+
+    // Skills: listed with descriptions (name column, no quotes), written to a
+    // chosen directory or, by default, next to the settings file.
+    let (out, _, ok) = run(&["skills", "list"], home, &[]);
+    assert!(ok && out.lines().count() == 3, "{out}");
+    for line in out.lines() {
+        let (name, desc) = line.split_at(25);
+        assert!(name.starts_with("garnish-") && name.ends_with(' '), "{line}");
+        assert!(desc.len() > 40 && !desc.contains('"') && desc.ends_with('.'), "{line}");
+    }
+    let dir = home.join("my-skills");
+    let (out, _, ok) = run(&["skills", "install", "--dir", dir.to_str().unwrap()], home, &[]);
+    assert!(ok && out.contains("my-skills: wrote 3"), "{out}");
+    assert!(dir.join("garnish-feedback/SKILL.md").exists());
+    let (out, _, ok) = run(&["skills", "install"], home, &[]);
+    assert!(ok && out.contains(".claude/skills: wrote 3"), "{out}");
+    assert!(home.join(".claude/skills/garnish-statusline/SKILL.md").exists());
+}
+
+#[test]
+fn preview_of_an_unreadable_config_keeps_the_overrides() {
+    // The feedback skill renders with `--color never` for people whose config
+    // may be broken; the overlay used to be dropped on the cannot-read path.
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let missing = home.join("nope.toml");
+    let payload =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.args(["--config", missing.to_str().unwrap(), "preview", payload])
+        .args(["--color", "never", "--icons", "ascii", "--width", "120"])
+        .env("HOME", home)
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NOW", "1738425600")
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("CLICOLOR_FORCE", "1")
+        .env_remove("NO_COLOR")
+        .env_remove("GARNISH_CONFIG");
+    let out = cmd.output().unwrap();
+    let out = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.contains("cannot read"), "{out}");
+    // The header is the one dim escape preview prints itself; the rows are
+    // plain (`--color never`) with the ascii bars (`--icons ascii`; the frame
+    // glyphs come from the config, not the icon set).
+    let rows: Vec<_> = out.lines().skip(1).collect();
+    assert!(rows.len() > 1, "{out}");
+    assert!(rows.iter().all(|l| !l.contains('\x1b')), "{out:?}");
+    assert!(out.contains("ctx: ####") && !out.contains('█'), "{out}");
 }

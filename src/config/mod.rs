@@ -663,15 +663,17 @@ pub fn load_with(explicit: Option<&Path>, schemas: &[ModuleSchema], overlay: &Ov
             let (config, errors) = parse_with(&text, schemas, overlay);
             Loaded { config, path, errors }
         }
-        Err(e) => Loaded {
-            config: Config::defaults(schemas),
-            path,
-            errors: vec![ConfigError {
+        Err(e) => {
+            // The defaults, but still under the command-line overlay: a
+            // `--color never` render of an unreadable config must stay plain.
+            let (config, mut errors) = parse_with("", schemas, overlay);
+            errors.push(ConfigError {
                 path: String::new(),
                 message: format!("cannot read: {e}"),
                 line: None,
-            }],
-        },
+            });
+            Loaded { config, path, errors }
+        }
     }
 }
 

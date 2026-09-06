@@ -135,9 +135,18 @@ pub enum Command {
         /// Do not write a default config file when none exists.
         #[arg(long)]
         no_config: bool,
+        /// Do not write the bundled skills to `~/.claude/skills`.
+        #[arg(long)]
+        no_skills: bool,
         /// Print what would change without writing anything.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// The bundled Claude Code skills: list them or write them to `~/.claude/skills`.
+    Skills {
+        /// What to do.
+        #[command(subcommand)]
+        action: SkillsAction,
     },
     /// Print a diagnostic report: versions, settings, config, cache, environment, glyphs.
     Doctor,
@@ -147,6 +156,19 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+}
+
+/// `garnish skills …`.
+#[derive(Debug, Subcommand)]
+pub enum SkillsAction {
+    /// Write the skills to `<dir>/<name>/SKILL.md` (default `~/.claude/skills`).
+    Install {
+        /// Target directory.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// List the bundled skills with their descriptions.
+    List,
 }
 
 /// `garnish config …`.
@@ -263,9 +285,24 @@ fn run_command() -> Result<()> {
             writeln!(std::io::stdout().lock(), "wrote {written} file(s) under {}", out.display())?;
             Ok(())
         }
-        Command::Install { settings, refresh_interval, padding, absolute, no_config, dry_run } => {
-            install(settings, refresh_interval, padding, absolute, no_config, dry_run, config_path)
-        }
+        Command::Install {
+            settings,
+            refresh_interval,
+            padding,
+            absolute,
+            no_config,
+            no_skills,
+            dry_run,
+        } => install(
+            settings,
+            refresh_interval,
+            padding,
+            InstallSkip { config: no_config, skills: no_skills },
+            absolute,
+            dry_run,
+            config_path,
+        ),
+        Command::Skills { action } => skills(action),
         Command::Doctor => {
             std::io::stdout().lock().write_all(crate::doctor::report(config_path).as_bytes())?;
             Ok(())
@@ -327,12 +364,42 @@ fn refresh(
     results.into_iter().collect::<Result<Vec<()>>>().map(|_| ())
 }
 
+/// `garnish skills list | install [--dir D]` (SPEC § 13).
+fn skills(action: SkillsAction) -> Result<()> {
+    let mut stdout = std::io::stdout().lock();
+    match action {
+        SkillsAction::List => {
+            for (name, text) in crate::skills::SKILLS {
+                writeln!(stdout, "{name:<24} {}", crate::skills::description(text))?;
+            }
+        }
+        SkillsAction::Install { dir } => {
+            let dir = dir.unwrap_or_else(|| {
+                crate::skills::default_dir(&crate::install::default_settings_path())
+            });
+            let report = crate::skills::install(&dir)
+                .with_context(|| format!("writing skills to {}", dir.display()))?;
+            writeln!(stdout, "{}", report.summary())?;
+        }
+    }
+    Ok(())
+}
+
+/// The parts of `garnish install` a flag can switch off.
+#[derive(Debug, Clone, Copy)]
+struct InstallSkip {
+    /// `--no-config`: leave the default config file alone.
+    config: bool,
+    /// `--no-skills`: leave `~/.claude/skills` alone.
+    skills: bool,
+}
+
 fn install(
     settings: Option<PathBuf>,
     refresh_interval: u64,
     padding: Option<u64>,
+    skip: InstallSkip,
     absolute: bool,
-    no_config: bool,
     dry_run: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
@@ -367,9 +434,38 @@ fn install(
             (true, None) => writeln!(stdout, "wrote {}", plan.settings.display())?,
         }
     }
-    if no_config {
-        return Ok(());
+    if !skip.config {
+        install_default_config(&mut stdout, config_path, padding, dry_run)?;
     }
+    // The skills (SPEC § 13) go next to the settings file, in ~/.claude/skills.
+    // They come last: they are the optional part, so a problem with them
+    // never leaves the settings updated and the config unwritten.
+    if !skip.skills {
+        let dir = crate::skills::default_dir(&plan.settings);
+        if dry_run {
+            writeln!(
+                stdout,
+                "would write {} skill(s) to {}",
+                crate::skills::SKILLS.len(),
+                dir.display()
+            )?;
+        } else {
+            let report = crate::skills::install(&dir)
+                .with_context(|| format!("writing skills to {}", dir.display()))?;
+            writeln!(stdout, "{}", report.summary())?;
+        }
+    }
+    Ok(())
+}
+
+/// The config half of `garnish install`: write the annotated default file
+/// when none exists, seeded with `padding` when `--padding` was given.
+fn install_default_config(
+    stdout: &mut impl Write,
+    config_path: Option<&Path>,
+    padding: Option<u64>,
+    dry_run: bool,
+) -> Result<()> {
     let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
     // The harness pads both sides, so the config mirrors statusLine.padding doubled (SPEC § 2.1).
     let config_padding = padding.map(|p| p.saturating_mul(2));
