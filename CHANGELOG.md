@@ -63,7 +63,8 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 - Animation: `animate` (and `GARNISH_ANIMATE=0`), frame rule
   `fill_pattern`/`fill_step`/`fill_direction`, `separator_frames`/
   `separator_step`, `<icon>_frames` on any icon (`spinner_frames`,
-  `model_frames`, …). Everything sits on frame 0 when animation is off.
+  `model_frames`, …). Everything sits on frame 0 when animation is off,
+  and a ticker line is then cut with `…` rather than frozen mid-scroll.
 
 **Presets gallery** (SPEC § 12)
 

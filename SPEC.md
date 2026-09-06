@@ -414,7 +414,10 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   survives the harness cancelling a tick. `ticker_gap` is plain text
   (escapes and control characters stripped at config time). The right group
   is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
-  `truncate = false` hands the whole row over, ticker or not.
+  `truncate = false` hands the whole row over, ticker or not. With
+  animations off (`animate = false`, `GARNISH_ANIMATE=0`) a ticker line is
+  cut with `…` like `truncate`, not frozen at offset 0 (decided 2026-09-06:
+  a silent cut hides what is missing from the readers the switch is for).
   A ticker only moves as often as the harness ticks (`refreshInterval`,
   minimum 1 s), which is the documented limit of the effect. Two
   consequences of the stateless rule (whole-stack review, 2026-09-06): the
@@ -500,15 +503,17 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   cycled the same way; `spinner_frames` is the general form and takes frames
   of any one width.
 - **Scrollers.** The line ticker (§ 4.1) and text modules (§ 3.7) use the
-  same clock rule with a cell offset instead of a frame index.
+  same clock rule with a cell offset instead of a frame index. Off, a text
+  module sits at offset 0 inside its declared box, while a ticker line is
+  cut with `…` (§ 4.1): the box is a chosen width, the cut is not.
 - **Cost.** Animation adds no I/O; the pattern and separator frames are a
   lookup, and a module with icon frames costs one clone of its resolved
   config per tick (about half a microsecond; nothing when no module has
   frames). The tick budget (§ 8) is unchanged. Docs render with
   `Clock::fixed()`, so the generated samples show frame 0.
 - **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
-  session) freezes everything at frame 0; the guide recommends it for
-  screen readers and for recordings.
+  session) freezes everything at frame 0 and cuts a ticker line with `…`;
+  the guide recommends it for screen readers and for recordings.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all

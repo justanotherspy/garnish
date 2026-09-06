@@ -1,6 +1,6 @@
 # Presets gallery
 
-Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows the start of its scrolling window, not a cut); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. The fit holds for the icon set the preset declares (`# needs:`); with `--icons emoji` some glyphs are two cells and a tight layout may need a wider terminal. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.
+Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/garnish.toml`, point `GARNISH_CONFIG` at it, or write it with `garnish config init --preset <name>`; `garnish presets` lists them. Each sample is rendered at the preset's declared terminal width from the `subscription-full` payload with animations frozen at frame 0 (a ticker preset therefore shows its row cut with `…`, as it looks with animations off; in a live session it scrolls); presets that need a Nerd Font show their glyphs as boxes here unless your browser has one. The fit holds for the icon set the preset declares (`# needs:`); with `--icons emoji` some glyphs are two cells and a tight layout may need a wider terminal. A real-terminal capture may accompany a preset as `presets/screenshots/<name>.png`.
 
 | name | summary | columns | needs |
 |---|---|---|---|
@@ -605,7 +605,7 @@ everything on one row, always scrolling as a ticker (200 columns is a comfortabl
 At 200 columns, needs nerd-font:
 
 ```text
-──  ~/projects/garnish │  #42  pending │  Opus  claude-opus-5 │  ▁▃▅▇█ high │  ████████████▌░░░░░░░░░░░░░░░░▏  ─  garnish-dev sess-000 │  +156 −23 (+133) │ ⠋ 16:00:00 Sat 01 Feb +00:00 ──
+──  ~/projects/garnish │  #42  pending │  Opus  claude-opus-5 │  ▁▃▅▇█ high │  ████████████▌░░░░░░░░░░░░░░░░▏… ─  garnish-dev sess-000 │  +156 −23 (+133) │ ⠋ 16:00:00 Sat 01 Feb +00:00 ──
 ```
 
 <details><summary><code>presets/single-line-full.toml</code></summary>

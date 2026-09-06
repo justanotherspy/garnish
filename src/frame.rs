@@ -237,9 +237,10 @@ pub struct Layout {
 ///
 /// Rules: prefix + pad + left + pad + rule + pad + right + pad + cap. On
 /// overflow the rule collapses to a single fill cell, then the left group is
-/// truncated, or scrolled when the layout has a [`Ticker`]; the right group
-/// is never truncated. With `truncate = false` the whole row is handed to
-/// the harness as is, ticker or not.
+/// truncated, or scrolled when the layout has a [`Ticker`] and animations
+/// run (a frozen ticker truncates too); the right group is never truncated.
+/// With `truncate = false` the whole row is handed to the harness as is,
+/// ticker or not.
 #[must_use]
 pub fn compose_line(
     layout: &Layout,
@@ -281,16 +282,15 @@ pub fn compose_line(
         .saturating_sub(right_block_w)
         .saturating_sub(cap_w)
         .saturating_sub(join_w);
+    // A frozen ticker truncates rather than sitting at offset 0: a silent
+    // cut would hide what is missing from the readers `animate = false`
+    // exists for (SPEC § 4.2).
     let left_segs: Vec<Segment> = if layout.truncate && segments_width(left) > left_budget {
-        layout.ticker.as_ref().map_or_else(
+        layout.ticker.as_ref().filter(|t| t.animate).map_or_else(
             || truncate(left, left_budget, &layout.ellipsis),
             |ticker| {
                 let period = segments_width(left).saturating_add(display_width(&ticker.gap));
-                let offset = if ticker.animate {
-                    crate::time::frame(ticker.now, ticker.step, period)
-                } else {
-                    0
-                };
+                let offset = crate::time::frame(ticker.now, ticker.step, period);
                 scroll(left, left_budget, offset, &ticker.gap, true)
             },
         )
@@ -472,10 +472,11 @@ mod tests {
         l.ticker = Some(ticker(1_738_425_611, true));
         let wrapped = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert_eq!(wrapped, "── p · abcdefghij ─ R ──", "offset 15: end, gap, start");
-        // Frozen: offset 0 whatever the clock says.
+        // Frozen: cut with the ellipsis like `truncate`, whatever the clock
+        // says, so the cut is visible to the readers the switch is for.
         l.ticker = Some(ticker(1_738_425_601, false));
         let frozen = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
-        assert_eq!(frozen, "── abcdefghijklmn ─ R ──");
+        assert_eq!(frozen, cut);
         // A group that fits is never scrolled.
         let short = [Segment::plain("abc")];
         l.ticker = Some(ticker(1_738_425_601, true));

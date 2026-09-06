@@ -181,7 +181,8 @@ ticks, every session on the machine animates in step, and the cadence is
 whatever Claude Code ticks at (`refreshInterval`, at least 1 s); a `step`
 below 1 slows an animation down (0.5 = every second tick). `animate = false`
 in the config, or `GARNISH_ANIMATE=0` in the environment, freezes every
-animation at frame 0; use it for screen readers and recordings.
+animation at frame 0 and cuts a ticker line with `…` instead of leaving it
+frozen mid-scroll; use it for screen readers and recordings.
 
 ## 7. Troubleshooting
 
@@ -212,8 +213,8 @@ animation at frame 0; use it for screen readers and recordings.
 - **Too much for one row** → `overflow = "ticker"` scrolls a left group that
   is wider than the box, one cell per tick (`ticker_step`), wrapping around
   after `ticker_gap`; the right group stays put. It moves as often as Claude
-  Code ticks (`refreshInterval`, at least 1 s), and `GARNISH_ANIMATE=0`
-  freezes it. Timers switch to `durations = "fixed"` on their own while the
+  Code ticks (`refreshInterval`, at least 1 s); with animations off the
+  line is cut with `…` instead. Timers switch to `durations = "fixed"` on their own while the
   ticker is on, because a `compact` duration that changes width between
   ticks (`1h` → `59m59s`) changes the scroll period and the window jumps
   instead of sliding; `durations = "compact"` at the top level opts back in,
