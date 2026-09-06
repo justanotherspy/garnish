@@ -65,6 +65,8 @@ What goes where:
    `examples/`, `tests/golden/`) are resolved by regenerating (`UPDATE_DOCS=1`,
    `UPDATE_GOLDEN=1`), never by hand. Drive `gh stack` non-interactively only
    (`--json`, `--auto`, `--yes`; never bare `view`, `submit`, `add`, `modify`).
+   Fixes from a review of the whole stack that belong to no single phase go
+   in `review/<date>-<concern>` layers above the last phase, one concern each.
 6. **Signed commits.** Every commit and tag is signed; the host is already
    configured for that. If signing fails, stop and report it. Never commit
    with `--no-gpg-sign`.

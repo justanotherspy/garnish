@@ -374,9 +374,11 @@ fn skills(action: SkillsAction) -> Result<()> {
             }
         }
         SkillsAction::Install { dir } => {
-            let dir = dir.unwrap_or_else(|| {
-                crate::skills::default_dir(&crate::install::default_settings_path())
-            });
+            let Some(dir) = dir.or_else(|| {
+                crate::install::default_settings_path().map(|s| crate::skills::default_dir(&s))
+            }) else {
+                return Err(no_home("--dir <DIR>", "the skills go"));
+            };
             let report = crate::skills::install(&dir)
                 .with_context(|| format!("writing skills to {}", dir.display()))?;
             writeln!(stdout, "{}", report.summary())?;
@@ -410,12 +412,10 @@ fn install(
     } else {
         "garnish".to_owned()
     };
-    let plan = Plan {
-        settings: settings.unwrap_or_else(inst::default_settings_path),
-        command,
-        refresh_interval: refresh_interval.max(1),
-        padding,
+    let Some(settings) = settings.or_else(inst::default_settings_path) else {
+        return Err(no_home("--settings <FILE>", "settings.json is"));
     };
+    let plan = Plan { settings, command, refresh_interval: refresh_interval.max(1), padding };
     if !absolute && !inst::on_path("garnish", std::env::var_os("PATH").as_deref()) {
         eprintln!("warning: `garnish` is not on PATH; run `make install` first or use --absolute");
     }
@@ -466,7 +466,9 @@ fn install_default_config(
     padding: Option<u64>,
     dry_run: bool,
 ) -> Result<()> {
-    let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
+    let Some(target) = config_target(config_path) else {
+        return Err(no_home("--config <FILE>", "the config goes"));
+    };
     // The harness pads both sides, so the config mirrors statusLine.padding doubled (SPEC § 2.1).
     let config_padding = padding.map(|p| p.saturating_mul(2));
     let seeded = config_padding.map_or_else(String::new, |p| format!(" (padding = {p})"));
@@ -491,6 +493,24 @@ fn install_default_config(
         writeln!(stdout, "wrote default config to {}{seeded}", target.display())?;
     }
     Ok(())
+}
+
+/// Where a written config goes: `--config`, then `GARNISH_CONFIG`, then the
+/// default location; `None` without a home directory (SPEC § 5: never
+/// guess the current directory).
+fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
+    explicit
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            std::env::var_os(config::CONFIG_ENV).filter(|v| !v.is_empty()).map(PathBuf::from)
+        })
+        .or_else(config::default_path)
+}
+
+/// The one-line refusal for a writing command run without `HOME`.
+fn no_home(flag: &str, what: &str) -> color_eyre::Report {
+    eprintln!("HOME is not set; pass {flag} to say where {what}");
+    Quiet.into()
 }
 
 /// `COLUMNS`, then `GARNISH_COLUMNS`.
@@ -535,7 +555,9 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     match action {
         ConfigAction::Path => {
-            let p = config::locate(config_path).unwrap_or_else(config::default_path);
+            let Some(p) = config::locate(config_path).or_else(|| config_target(config_path)) else {
+                return Err(no_home("--config <FILE>", "the config is"));
+            };
             writeln!(stdout, "{}", p.display())?;
         }
         ConfigAction::Check => {
@@ -587,7 +609,9 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
                     crate::gallery::body(p.source)
                 }
             };
-            let target = config_path.map_or_else(config::default_path, Path::to_path_buf);
+            let Some(target) = config_target(config_path) else {
+                return Err(no_home("--config <FILE>", "the config goes"));
+            };
             if target.exists() && !force {
                 eprintln!("{} exists; pass --force to overwrite", target.display());
                 return Err(Quiet.into());

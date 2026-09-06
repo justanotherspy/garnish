@@ -97,7 +97,9 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
     }
     let text_w = display_width(&text);
     let styled = vec![seg(cfg, text, "text")];
-    let box_w = match cfg.size("width") {
+    // Sizes are capped at config time (`MAX_CELLS`) and again here: a row is
+    // never wider than the box, so a bigger box would only size the padding.
+    let box_w = match cfg.size("width").min(ctx.width) {
         0 => text_w,
         w => w,
     };
@@ -135,7 +137,7 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
             _ => scroll(&styled, box_w, ctx.frame(step, text_w), "", false),
         }
     };
-    let pad = cfg.size("pad");
+    let pad = cfg.size("pad").min(ctx.width);
     if pad == 0 {
         return Rendered::fresh(body);
     }

@@ -1,0 +1,48 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# Every string a config can put on a row carries an escape sequence, a
+# control character or a bidi override here (TOML `\U` escapes): OSC 0
+# (title), OSC 52 (clipboard), CSI (clear screen, colour), DCS, BEL, a
+# newline, U+202E. All of them are reduced to plain text at config time
+# (whole-stack review), so the render is the same as with the plain strings
+# and nothing but the painter's own colour can reach the terminal.
+
+preset = "compact"
+ticker_gap = " \U0000001B[31m~\U0000001B[0m "
+
+[frame]
+style     = "custom"
+first     = "\U0000001B]0;pwned\U00000007╭─"
+middle    = "├─"
+last      = "╰─"
+single    = "\U0000001B[2J──"
+fill_char = "\U0000001B[31m─\U0000001B[0m"
+right_first  = "─\U0000001BP dcs \U0000001B\\╮"
+right_middle = "─┤"
+right_last   = "─╯"
+right_single = "──"
+pad       = "\U0000001B[1m \U0000001B[0m"
+separator = " \U0000001B[2m│\U0000001B[0m "
+
+[[line]]
+modules   = ["model", "text.note", "context"]
+right     = ["clock"]
+separator = " \U0000001B]52;c;aGk=\U00000007· "
+
+[[line]]
+modules = ["path", "limit5h"]
+
+[modules.model]
+label  = "\U0000001B[31mmodel\U0000001B[0m"
+prefix = "[\U0000001B[H"
+suffix = "\U0000200E]\U0000202E"
+
+[modules.model.icons]
+model = "\U0000001B[32m◆\U0000001B[0m"
+
+[modules.text.note]
+text  = "note\nwithcontrols\U0000001B[5m"
+width = 12
+pad   = 1

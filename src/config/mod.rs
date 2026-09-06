@@ -205,6 +205,23 @@ pub const HARNESS_PADDING: usize = 4;
 /// Narrowest width garnish will render to, whatever `COLUMNS` says.
 pub const MIN_WIDTH: usize = 10;
 
+/// Widest width garnish will render to, whatever `COLUMNS` says.
+///
+/// No terminal has this many cells (an 8K display at a 4-pixel glyph is
+/// under 2000), so anything above is a bad number, not a wide screen, and
+/// must not size the buffers of a tick.
+pub const MAX_WIDTH: usize = 4096;
+
+/// Largest cell count a config may ask for in one module (`width`, `pad`, a bar).
+///
+/// More than a whole row cannot be shown and would only size an allocation.
+/// Reported at config time, clamped again at render time.
+pub const MAX_CELLS: usize = 1024;
+
+/// Longest string a config may put on a row (`text`, `gap`, `ticker_gap`),
+/// in characters: a status line, not a document. Reported at config time.
+pub const MAX_TEXT_CHARS: usize = 4096;
+
 /// The fully resolved configuration.
 // Four independent switches that mirror config keys one to one; a bitset
 // would only obscure the mapping.
@@ -488,7 +505,9 @@ impl RawFrame {
                 _ => None,
             };
             if let Some(slot) = text_slot {
-                *slot = field(&path, value, errors);
+                // Frame glyphs enter the width arithmetic directly, so they
+                // are reduced to plain text here, before any cell is counted.
+                *slot = field::<String>(&path, value, errors).map(|s| crate::ansi::plain_text(&s));
                 continue;
             }
             match key.as_str() {
@@ -525,7 +544,10 @@ impl RawLine {
             match key.as_str() {
                 "modules" => line.modules = id_list(&path, value, errors),
                 "right" => line.right = id_list(&path, value, errors),
-                "separator" => line.separator = field(&path, value, errors),
+                "separator" => {
+                    line.separator =
+                        field::<String>(&path, value, errors).map(|s| crate::ansi::plain_text(&s));
+                }
                 _ => errors
                     .push(problem(&path, "unknown key; expected one of modules, right, separator")),
             }
@@ -635,11 +657,18 @@ pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
 
 /// The default location a new config should be written to.
 #[must_use]
-pub fn default_path() -> PathBuf {
+pub fn default_path() -> Option<PathBuf> {
+    // Without a home there is no default: guessing `.` would write into
+    // whatever directory garnish happens to run from (a repository, say).
     let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-    base.unwrap_or_else(|| PathBuf::from(".")).join("garnish").join("garnish.toml")
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|v| !v.is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
+    Some(base.join("garnish").join("garnish.toml"))
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported
@@ -694,19 +723,18 @@ pub fn parse_with(
     schemas: &[ModuleSchema],
     overlay: &Overlay,
 ) -> (Config, Vec<ConfigError>) {
-    let table: toml::Table = match toml::from_str(text) {
-        Ok(t) => t,
+    let mut errors = Vec::new();
+    let mut raw = match toml::from_str::<toml::Table>(text) {
+        Ok(table) => RawConfig::from_table(table, &mut errors),
         Err(e) => {
+            // The whole file falls back to the defaults, under the same
+            // command-line overrides as a good file would be: `preview
+            // --color never` of a broken config must still be plain.
             let line = e.span().map(|s| line_of(text, s.start));
-            let message = e.message().to_owned();
-            return (
-                Config::defaults(schemas),
-                vec![ConfigError { path: String::new(), message, line }],
-            );
+            errors.push(ConfigError { path: String::new(), message: e.message().to_owned(), line });
+            RawConfig::default()
         }
     };
-    let mut errors = Vec::new();
-    let mut raw = RawConfig::from_table(table, &mut errors);
     if overlay.preset.is_some() {
         // The preset's lines replace the file's, so their problems are moot.
         raw.preset = overlay.preset;
@@ -734,11 +762,12 @@ impl Config {
 
     /// Effective width for rendering: `COLUMNS` (or `GARNISH_COLUMNS`,
     /// `--width`, then 120) minus [`HARNESS_PADDING`] minus `padding`,
-    /// never below [`MIN_WIDTH`].
+    /// never below [`MIN_WIDTH`] nor above [`MAX_WIDTH`].
     #[must_use]
     pub fn width(&self, columns: Option<usize>) -> usize {
         columns
             .unwrap_or(120)
+            .min(MAX_WIDTH.saturating_add(HARNESS_PADDING))
             .saturating_sub(HARNESS_PADDING)
             .saturating_sub(self.padding)
             .max(MIN_WIDTH)
@@ -868,10 +897,19 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         hide_empty_lines: raw.hide_empty_lines.unwrap_or(true),
         overflow: raw.overflow.unwrap_or_default(),
         ticker_step: resolve_step("ticker_step", raw.ticker_step, errors),
-        // Plain text only: an escape sequence in the gap would be cut by the window.
-        ticker_gap: crate::ansi::plain_text(
-            raw.ticker_gap.as_deref().unwrap_or(DEFAULT_TICKER_GAP),
-        ),
+        // Plain text only: an escape sequence in the gap would be cut by the
+        // window; and no longer than a row's worth of text.
+        ticker_gap: crate::ansi::plain_text(match raw.ticker_gap.as_deref() {
+            Some(gap) if gap.chars().count() > MAX_TEXT_CHARS => {
+                errors.push(problem(
+                    "ticker_gap",
+                    &format!("must be at most {MAX_TEXT_CHARS} characters"),
+                ));
+                DEFAULT_TICKER_GAP
+            }
+            Some(gap) => gap,
+            None => DEFAULT_TICKER_GAP,
+        }),
         animate: raw.animate.unwrap_or(true),
         durations: raw.durations.unwrap_or_default(),
         frame,
@@ -970,12 +1008,9 @@ fn resolve_texts(
             }
         }
         if let Some(Value::Float(step)) = ov.opts.get("step")
-            && !(step.is_finite() && *step > 0.0)
+            && !STEP_RANGE.contains(step)
         {
-            errors.push(problem(
-                &format!("{base}.step"),
-                "must be a positive number: cells per tick (0.5 = every second tick)",
-            ));
+            errors.push(problem(&format!("{base}.step"), STEP_MESSAGE));
             ov.opts.remove("step");
         }
         for key in ["text", "gap"] {
@@ -988,18 +1023,22 @@ fn resolve_texts(
     texts
 }
 
-/// A `*_step` key: cells (or frames) an animation advances per tick. Must be
-/// a positive finite number (0.5 = every second tick); anything else is
-/// reported and replaced by 1.
+/// The steps an animation may take per tick. Below the range the frame
+/// never changes in a lifetime; above it `now × step` saturates and freezes
+/// (`1e308`), so both ends are rejected rather than silently still.
+const STEP_RANGE: std::ops::RangeInclusive<f64> = 0.001..=1000.0;
+const STEP_MESSAGE: &str =
+    "must be a number between 0.001 and 1000: cells per tick (0.5 = every second tick)";
+
+/// A `*_step` key: cells (or frames) an animation advances per tick, within
+/// [`STEP_RANGE`] (0.5 = every second tick); anything else is reported and
+/// replaced by 1.
 fn resolve_step(path: &str, raw: Option<f64>, errors: &mut Vec<ConfigError>) -> f64 {
     match raw {
         None => 1.0,
-        Some(step) if step.is_finite() && step > 0.0 => step,
+        Some(step) if STEP_RANGE.contains(&step) => step,
         Some(_) => {
-            errors.push(problem(
-                path,
-                "must be a positive number: cells per tick (0.5 = every second tick)",
-            ));
+            errors.push(problem(path, STEP_MESSAGE));
             1.0
         }
     }
@@ -1037,7 +1076,13 @@ fn resolve_frame(
         set(&mut chars.middle, &f.middle);
         set(&mut chars.last, &f.last);
         set(&mut chars.single, &f.single);
-        set(&mut chars.fill, &f.fill_char);
+        // The fill glyph is repeated across the rule, so it has to be one
+        // cell; anything else is reported and the style's own glyph stays.
+        match &f.fill_char {
+            Some(c) if crate::ansi::display_width(c) == 1 => chars.fill.clone_from(c),
+            Some(_) => errors.push(problem("frame.fill_char", "must be exactly one cell wide")),
+            None => {}
+        }
         set(&mut chars.right_first, &f.right_first);
         set(&mut chars.right_middle, &f.right_middle);
         set(&mut chars.right_last, &f.right_last);
@@ -1048,9 +1093,6 @@ fn resolve_frame(
     // Filling is on for every style: with `none` the rule is spaces, which is
     // what right-aligns the `right` group on an unframed line.
     let fill = raw.and_then(|f| f.fill).unwrap_or(true);
-    if crate::ansi::display_width(&chars.fill) != 1 {
-        chars.fill = " ".into();
-    }
     // SPEC § 4.2: a pattern is one-cell glyphs (each lands in exactly one
     // rule cell); separator frames all share one width so columns never
     // jitter. Anything else is reported and the static fallback stays.
@@ -1143,7 +1185,7 @@ fn parse_overrides(
             },
             "label" | "prefix" | "suffix" => match value.as_str() {
                 Some(s) => {
-                    let s = s.to_owned();
+                    let s = crate::ansi::plain_text(s);
                     match key.as_str() {
                         "label" => ov.label = Some(s),
                         "prefix" => ov.prefix = Some(s),
@@ -1161,7 +1203,7 @@ fn parse_overrides(
                 None => err(key, "expected a table of color overrides".into()),
             },
             other => match schema.opt(other) {
-                Some(spec) => match coerce(spec.kind, value) {
+                Some(spec) => match coerce(spec.kind, value).and_then(|v| bounded(other, v)) {
                     Ok(v) => {
                         ov.opts.insert(other.to_owned(), v);
                     }
@@ -1172,6 +1214,25 @@ fn parse_overrides(
         }
     }
     ov
+}
+
+/// The size limits a module option must respect: cell counts (`width`,
+/// `pad`) at most [`MAX_CELLS`], row text (`text`, `gap`) at most
+/// [`MAX_TEXT_CHARS`] characters. A row is a fixed, small thing; a number
+/// beyond these is a mistake, and honouring it would size an allocation or a
+/// loop on every tick.
+fn bounded(key: &str, value: Value) -> Result<Value, String> {
+    match (key, &value) {
+        ("width" | "pad" | "bar_width", Value::Int(n))
+            if usize::try_from(*n).is_ok_and(|n| n > MAX_CELLS) =>
+        {
+            Err(format!("must be at most {MAX_CELLS} cells"))
+        }
+        ("text" | "gap", Value::Str(s)) if s.chars().count() > MAX_TEXT_CHARS => {
+            Err(format!("must be at most {MAX_TEXT_CHARS} characters"))
+        }
+        _ => Ok(value),
+    }
 }
 
 fn unknown_option_message(schema: &ModuleSchema) -> String {
@@ -1222,7 +1283,7 @@ fn parse_icons(
         }
         match (schema.icon(ik), iv.as_str()) {
             (Some(_), Some(s)) => {
-                ov.icons.insert(ik.clone(), s.to_owned());
+                ov.icons.insert(ik.clone(), crate::ansi::plain_text(s));
             }
             (None, _) => err(
                 &format!("icons.{ik}"),
@@ -1760,12 +1821,36 @@ x = 1
         let (c, errs) = parse("ticker_gap = \"\\u001b[31m G \\u001b[0m\\n\"", &schemas);
         assert_eq!(errs, Vec::new());
         assert_eq!(c.ticker_gap, " G ", "escapes and controls never reach the row");
-        for bad in ["ticker_step = 0", "ticker_step = -0.5", "ticker_step = \"fast\""] {
+        // Zero, negative, non-numeric, and the two silent freezes: a step so
+        // small nothing moves in a lifetime, and one so large `now × step`
+        // saturates to a constant frame (whole-stack review).
+        for bad in [
+            "ticker_step = 0",
+            "ticker_step = -0.5",
+            "ticker_step = \"fast\"",
+            "ticker_step = 1e-300",
+            "ticker_step = 1e308",
+            "ticker_step = 1001",
+        ] {
             let (c, errs) = parse(bad, &schemas);
             assert_eq!(errs.len(), 1, "{bad}: {errs:?}");
             assert_eq!(errs[0].path, "ticker_step", "{bad}");
+            if !bad.contains('"') {
+                assert!(errs[0].message.contains("between 0.001 and 1000"), "{bad}: {errs:?}");
+            }
             assert!((c.ticker_step - 1.0).abs() < f64::EPSILON, "{bad}: back to 1");
         }
+        for ok in ["ticker_step = 0.001", "ticker_step = 1000"] {
+            let (_, errs) = parse(ok, &schemas);
+            assert_eq!(errs, Vec::new(), "{ok}");
+        }
+        let (c, errs) = parse(
+            &format!("ticker_gap = \"{}\"", "x".repeat(crate::config::MAX_TEXT_CHARS + 1)),
+            &schemas,
+        );
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].message.contains("at most 4096 characters"), "{errs:?}");
+        assert_eq!(c.ticker_gap, DEFAULT_TICKER_GAP);
         let (_, errs) = parse("overflow = \"marquee\"", &schemas);
         assert!(errs[0].message.ends_with("expected one of truncate, ticker"), "{errs:?}");
     }
@@ -1779,12 +1864,93 @@ x = 1
     }
 
     #[test]
+    fn every_config_string_that_reaches_a_row_is_plain_text() {
+        // Whole-stack review: escapes in a label, prefix, suffix, icon, frame
+        // glyph or per-line separator inflated the width arithmetic (the
+        // printable bytes of `ESC[31m` counted as cells) and a cut could
+        // land inside the sequence. All of them are reduced at parse time.
+        let text = concat!(
+            "[frame]\nstyle = \"custom\"\nfirst = \"\\u001b]0;title\\u0007<\"\npad = \"\\u001b[1m \"\n",
+            "separator = \" \\u001b[2m|\\u001b[0m \"\nright_last = \">\\u001b[H\"\n",
+            "[[line]]\nmodules = [\"model\"]\nseparator = \"\\u001bP dcs \\u001b\\\\+\"\n",
+            "[modules.model]\nlabel = \"\\u001b[31mM\\u001b[0m\"\nprefix = \"\\u001b]52;c;aGk=\\u0007(\"\n",
+            "suffix = \")\\u200e\\u202e\"\n[modules.model.icons]\nmodel = \"\\u001b[32m*\\u001b[0m\"\n",
+        );
+        let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.chars.first, "<");
+        assert_eq!(c.frame.chars.pad, " ");
+        assert_eq!(c.frame.chars.separator, " | ");
+        assert_eq!(c.frame.chars.right_last, ">");
+        assert_eq!(c.lines[0].separator.as_deref(), Some("+"), "a DCS loses its payload too");
+        let model = c.modules.get("model").unwrap();
+        assert_eq!(model.label, "M");
+        assert_eq!(model.prefix, "(");
+        assert_eq!(model.suffix, ")", "bidi marks are dropped too");
+        assert_eq!(model.icon("model"), "*");
+        // Nothing in the resolved config carries a control character.
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(!shown.contains('\u{1b}') && !shown.contains('\u{7}'), "{shown}");
+    }
+
+    #[test]
+    fn sizes_and_text_lengths_are_bounded_at_config_time() {
+        // A cell count or a string a row can never show would only size an
+        // allocation or a loop on every tick; it is reported and defaulted.
+        let big = "[modules.context]\nwidth = 99999999999\n[modules.text.a]\ntext = \"hi\"\nwidth = 1025\npad = 4000000000\n[modules.limit5h]\nbar_width = 1025\n";
+        let (c, errs) = parse(big, &crate::modules::SCHEMAS);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "modules.context.width",
+                "modules.limit5h.bar_width",
+                "modules.text.a.pad",
+                "modules.text.a.width"
+            ],
+            "{errs:?}"
+        );
+        assert!(errs.iter().all(|e| e.message == "must be at most 1024 cells"), "{errs:?}");
+        assert_eq!(c.modules.get("context").unwrap().size("width"), 20, "default stands in");
+        let a = c.texts.get("a").unwrap();
+        assert_eq!((a.size("width"), a.size("pad")), (0, 0));
+        let (ok, errs) = parse("[modules.context]\nwidth = 1024\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(ok.modules.get("context").unwrap().size("width"), 1024);
+        let long = format!(
+            "[modules.text.a]\ntext = \"{}\"\ngap = \"{}\"\n",
+            "x".repeat(MAX_TEXT_CHARS + 1),
+            "y".repeat(MAX_TEXT_CHARS)
+        );
+        let (c, errs) = parse(&long, &crate::modules::SCHEMAS);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "modules.text.a.text");
+        assert!(errs[0].message.contains("at most 4096 characters"), "{errs:?}");
+        assert_eq!(c.texts.get("a").unwrap().str("gap").chars().count(), MAX_TEXT_CHARS);
+    }
+
+    #[test]
     fn syntax_errors_carry_a_line_and_fall_back_wholesale() {
         let (c, errs) = parse("preset = \"minimal\"\n[frame\nstyle = 1", &schemas());
         assert_eq!(errs.len(), 1);
         assert_eq!(errs[0].line, Some(2));
         assert!(errs[0].to_string().starts_with("line 2: "));
         assert_eq!(c, Config::defaults(&schemas()), "not TOML: nothing can be trusted");
+        // ... but the command line still is: `preview --color never --icons
+        // ascii` of a broken file renders plain ascii (whole-stack review).
+        let overlay = Overlay {
+            color: Some(ColorChoice::Never),
+            icons: Some(IconSet::Ascii),
+            preset: Some(TopPreset::Compact),
+            theme: Some("nord".into()),
+        };
+        let (c, errs) = parse_with("[frame\nstyle = 1", &schemas(), &overlay);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].line, Some(1));
+        assert_eq!(c.color, ColorChoice::Never);
+        assert_eq!(c.icons, IconSet::Ascii);
+        assert_eq!(c.preset, TopPreset::Compact);
+        assert_eq!(c.theme_name, "nord");
         let (c, errs) = parse("unknown_top = 1\npreset = \"minimal\"", &schemas());
         assert_eq!(errs.len(), 1);
         assert_eq!(errs[0].path, "unknown_top");
@@ -1798,10 +1964,18 @@ x = 1
         assert_eq!(c.frame.style, FrameStyle::None);
         assert!(c.frame.fill);
         assert_eq!(c.lines.len(), 1);
-        let (wide, _) = parse("[frame]\nfill_char = \"ab\"", &schemas());
-        assert_eq!(wide.frame.chars.fill, " ");
-        let (empty, _) = parse("[frame]\nfill_char = \"\"", &schemas());
-        assert_eq!(empty.frame.chars.fill, " ");
+        // A fill glyph that is not one cell is reported (SPEC § 5) and the
+        // style's own glyph stays, instead of a silent blank rule.
+        let (wide, errs) = parse("[frame]\nfill_char = \"ab\"", &schemas());
+        assert_eq!(wide.frame.chars.fill, "─");
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "frame.fill_char");
+        let (empty, errs) = parse("[frame]\nfill_char = \"\"", &schemas());
+        assert_eq!(empty.frame.chars.fill, "─");
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        let (esc, errs) = parse("[frame]\nfill_char = \"\\u001b[31m-\"", &schemas());
+        assert_eq!(esc.frame.chars.fill, "-", "the escape is stripped before the width check");
+        assert_eq!(errs, Vec::new());
         let (c, _) = parse("preset = \"compact\"", &schemas());
         assert_eq!(c.lines.len(), 2);
         assert_eq!(c.modules.get("path").unwrap().preset, Preset::Default);

@@ -12,12 +12,13 @@ use crate::modules::SCHEMAS;
 /// Build the report from the process environment.
 #[must_use]
 pub fn report(config_path: Option<&Path>) -> String {
-    report_with(config_path, &Cache::from_env(), &crate::install::default_settings_path())
+    report_with(config_path, &Cache::from_env(), crate::install::default_settings_path().as_deref())
 }
 
-/// Build the report against explicit cache and settings locations.
+/// Build the report against explicit cache and settings locations
+/// (`settings` is `None` when there is no home directory to look in).
 #[must_use]
-pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: &Path) -> String {
+pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: Option<&Path>) -> String {
     let mut o = String::new();
     let _ = writeln!(o, "garnish {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(
@@ -42,7 +43,11 @@ pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: &Path) -
     o
 }
 
-fn settings_section(o: &mut String, settings: &Path) {
+fn settings_section(o: &mut String, settings: Option<&Path>) {
+    let Some(settings) = settings else {
+        let _ = writeln!(o, "claude settings  unknown: HOME is not set\n");
+        return;
+    };
     let _ = writeln!(o, "claude settings  {}", settings.display());
     match std::fs::read_to_string(settings) {
         Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
@@ -77,7 +82,10 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
             let _ = writeln!(
                 o,
                 "config   none (built-in defaults); `garnish config init` writes one to {}",
-                config::default_path().display()
+                config::default_path().map_or_else(
+                    || "… nowhere: HOME is not set".to_owned(),
+                    |p| p.display().to_string()
+                )
             );
         }
         (Some(p), true) => {
@@ -359,7 +367,7 @@ mod tests {
         std::fs::create_dir_all(cache.root()).unwrap();
         std::fs::write(cache.root().join("debug.log"), "1 pid=1 spawn sync failed: x\n").unwrap();
         let settings = dir.path().join("settings.json");
-        let r = report_with(Some(&dir.path().join("none.toml")), &cache, &settings);
+        let r = report_with(Some(&dir.path().join("none.toml")), &cache, Some(&settings));
         assert!(r.contains("settings file not found"), "{r}");
         assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");
         assert!(r.contains("(writable)"), "{r}");
