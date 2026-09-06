@@ -152,8 +152,30 @@ impl ColorChoice {
     }
 }
 
+/// Which way an animated rule pattern travels (`[frame] fill_direction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FillDirection {
+    /// Toward the left cap.
+    Left,
+    /// Toward the right cap.
+    #[default]
+    Right,
+}
+
+impl FillDirection {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
 /// Frame configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FrameCfg {
     /// Style.
     pub style: FrameStyle,
@@ -161,6 +183,18 @@ pub struct FrameCfg {
     pub chars: FrameChars,
     /// Fill the rule to the full width.
     pub fill: bool,
+    /// One-cell glyphs repeated across the rule instead of `fill_char`;
+    /// empty means the static rule (SPEC § 4.2).
+    pub fill_pattern: Vec<String>,
+    /// Cells the pattern shifts per tick.
+    pub fill_step: f64,
+    /// Which way the pattern travels.
+    pub fill_direction: FillDirection,
+    /// Separator frames cycled one per tick (all the same width); empty
+    /// means the static `separator`.
+    pub separator_frames: Vec<String>,
+    /// Frames the separator advances per tick.
+    pub separator_step: f64,
 }
 
 /// Cells Claude Code's status line box loses to the harness's own footer
@@ -403,9 +437,14 @@ struct RawFrame {
     right_single: Option<String>,
     pad: Option<String>,
     separator: Option<String>,
+    fill_pattern: Option<String>,
+    fill_step: Option<f64>,
+    fill_direction: Option<FillDirection>,
+    separator_frames: Option<Vec<String>>,
+    separator_step: Option<f64>,
 }
 
-const FRAME_KEYS: [&str; 13] = [
+const FRAME_KEYS: [&str; 18] = [
     "style",
     "fill",
     "first",
@@ -419,7 +458,13 @@ const FRAME_KEYS: [&str; 13] = [
     "right_single",
     "pad",
     "separator",
+    "fill_pattern",
+    "fill_step",
+    "fill_direction",
+    "separator_frames",
+    "separator_step",
 ];
+const FILL_DIRECTIONS: &str = "left, right";
 
 impl RawFrame {
     fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
@@ -439,6 +484,7 @@ impl RawFrame {
                 "right_single" => Some(&mut f.right_single),
                 "pad" => Some(&mut f.pad),
                 "separator" => Some(&mut f.separator),
+                "fill_pattern" => Some(&mut f.fill_pattern),
                 _ => None,
             };
             if let Some(slot) = text_slot {
@@ -448,6 +494,12 @@ impl RawFrame {
             match key.as_str() {
                 "style" => f.style = enum_field(&path, value, &styles, errors),
                 "fill" => f.fill = field(&path, value, errors),
+                "fill_step" => f.fill_step = field(&path, value, errors),
+                "fill_direction" => {
+                    f.fill_direction = enum_field(&path, value, FILL_DIRECTIONS, errors);
+                }
+                "separator_frames" => f.separator_frames = field(&path, value, errors),
+                "separator_step" => f.separator_step = field(&path, value, errors),
                 _ => errors.push(problem(
                     &path,
                     &format!("unknown key; expected one of {}", FRAME_KEYS.join(", ")),
@@ -695,6 +747,17 @@ impl Config {
     pub fn separator<'a>(&'a self, line: &'a LineCfg) -> &'a str {
         line.separator.as_deref().unwrap_or(&self.frame.chars.separator)
     }
+
+    /// Separator for a line at animation frame `frame`: the line's own
+    /// override wins, then `separator_frames[frame]`, then the static
+    /// separator (SPEC § 4.2).
+    #[must_use]
+    pub fn separator_at<'a>(&'a self, line: &'a LineCfg, frame: usize) -> &'a str {
+        line.separator
+            .as_deref()
+            .or_else(|| self.frame.separator_frames.get(frame).map(String::as_str))
+            .unwrap_or(&self.frame.chars.separator)
+    }
 }
 
 /// `[colors]` role overrides; unknown roles and bad colors are reported and skipped.
@@ -745,7 +808,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let overrides = resolve_colors(&raw.colors, errors);
     let theme = Theme::from_palette(pal, &overrides);
 
-    let frame = resolve_frame(raw.frame.as_ref(), preset);
+    let frame = resolve_frame(raw.frame.as_ref(), preset, errors);
     let lines: Vec<LineCfg> = if raw.line.is_empty() {
         preset.lines()
     } else {
@@ -954,7 +1017,11 @@ fn resolve_stale_after(raw: Option<u32>, errors: &mut Vec<ConfigError>) -> u32 {
     stale_after.max(1)
 }
 
-fn resolve_frame(raw: Option<&RawFrame>, preset: TopPreset) -> FrameCfg {
+fn resolve_frame(
+    raw: Option<&RawFrame>,
+    preset: TopPreset,
+    errors: &mut Vec<ConfigError>,
+) -> FrameCfg {
     let fallback = if preset.framed() { FrameStyle::Rounded } else { FrameStyle::None };
     let style = raw.and_then(|f| f.style).unwrap_or(fallback);
     let mut chars = FrameChars::for_style(style);
@@ -982,7 +1049,62 @@ fn resolve_frame(raw: Option<&RawFrame>, preset: TopPreset) -> FrameCfg {
     if crate::ansi::display_width(&chars.fill) != 1 {
         chars.fill = " ".into();
     }
-    FrameCfg { style, chars, fill }
+    // SPEC § 4.2: a pattern is one-cell glyphs (each lands in exactly one
+    // rule cell); separator frames all share one width so columns never
+    // jitter. Anything else is reported and the static fallback stays.
+    let fill_pattern: Vec<String> = raw
+        .and_then(|f| f.fill_pattern.as_deref())
+        .map(crate::ansi::plain_text)
+        .filter(|p| !p.is_empty())
+        .map_or_else(Vec::new, |p| {
+            let cells: Vec<String> = p.chars().map(|c| c.to_string()).collect();
+            if cells.iter().all(|c| crate::ansi::display_width(c) == 1) {
+                cells
+            } else {
+                errors.push(problem(
+                    "frame.fill_pattern",
+                    "every glyph in the pattern must be one cell wide",
+                ));
+                Vec::new()
+            }
+        });
+    let fill_pattern = if !fill && !fill_pattern.is_empty() {
+        errors.push(problem(
+            "frame.fill_pattern",
+            "has no effect with fill = false (there is no rule to paint)",
+        ));
+        Vec::new()
+    } else {
+        fill_pattern
+    };
+    let separator_frames: Vec<String> =
+        raw.and_then(|f| f.separator_frames.as_deref()).map_or_else(Vec::new, |frames| {
+            let frames: Vec<String> = frames.iter().map(|s| crate::ansi::plain_text(s)).collect();
+            let width = frames.first().map_or(0, |f| crate::ansi::display_width(f));
+            if frames.iter().all(|f| crate::ansi::display_width(f) == width) {
+                frames
+            } else {
+                errors.push(problem(
+                    "frame.separator_frames",
+                    "every frame must have the same width, or the columns would jitter",
+                ));
+                Vec::new()
+            }
+        });
+    FrameCfg {
+        style,
+        chars,
+        fill,
+        fill_pattern,
+        fill_step: resolve_step("frame.fill_step", raw.and_then(|f| f.fill_step), errors),
+        fill_direction: raw.and_then(|f| f.fill_direction).unwrap_or_default(),
+        separator_frames,
+        separator_step: resolve_step(
+            "frame.separator_step",
+            raw.and_then(|f| f.separator_step),
+            errors,
+        ),
+    }
 }
 
 fn parse_overrides(
@@ -1453,7 +1575,7 @@ x = 1
     /// against drifting from the match arms).
     #[test]
     fn every_listed_key_is_accepted() {
-        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = false\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
+        let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = true\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\nfill_pattern = \"-=\"\nfill_step = 2\nfill_direction = \"left\"\nseparator_frames = [\" | \", \" : \"]\nseparator_step = 0.5\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
     }
@@ -1515,6 +1637,56 @@ x = 1
         assert_eq!(x.color("text"), Color::Ansi(1), "explicit colors.text wins");
         assert_eq!(x.str("text"), "rednote");
         assert_eq!(x.str("gap"), " · ");
+    }
+
+    /// SPEC § 4.2: a rule pattern is one-cell glyphs, separator frames share
+    /// one width; bad values are reported and the static frame stays.
+    #[test]
+    fn frame_animation_keys_parse_and_validate() {
+        let schemas = schemas();
+        let (c, errs) = parse("", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert!(c.frame.fill_pattern.is_empty() && c.frame.separator_frames.is_empty());
+        assert_eq!(c.frame.fill_direction, FillDirection::Right);
+        let text = "[frame]\nfill_pattern = \"·  \"\nfill_step = 0.5\nfill_direction = \"left\"\nseparator_frames = [\" │ \", \" ┃ \", \" ╎ \"]\nseparator_step = 2\n";
+        let (c, errs) = parse(text, &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.fill_pattern, vec!["·", " ", " "]);
+        assert!((c.frame.fill_step - 0.5).abs() < f64::EPSILON);
+        assert_eq!(c.frame.fill_direction, FillDirection::Left);
+        assert_eq!(c.frame.separator_frames, vec![" │ ", " ┃ ", " ╎ "]);
+        assert_eq!(c.separator_at(&c.lines[0], 1), " ┃ ");
+        assert_eq!(c.separator_at(&c.lines[0], 7), " │ ", "out of range → static");
+        let line = LineCfg { separator: Some("--".into()), ..c.lines[0].clone() };
+        assert_eq!(c.separator_at(&line, 1), "--", "a per-line separator wins");
+        // A two-cell glyph in the pattern, frames of unequal width, a bad
+        // direction and a zero step: each reported under its path, each
+        // falling back to the static frame.
+        let bad = "[frame]\nfill_pattern = \"·🌿\"\nseparator_frames = [\" │ \", \"│\"]\nfill_direction = \"up\"\nfill_step = 0\n";
+        let (c, errs) = parse(bad, &schemas);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "frame.fill_direction",
+                "frame.fill_pattern",
+                "frame.separator_frames",
+                "frame.fill_step"
+            ],
+            "{errs:?}"
+        );
+        assert!(c.frame.fill_pattern.is_empty() && c.frame.separator_frames.is_empty());
+        assert!((c.frame.fill_step - 1.0).abs() < f64::EPSILON);
+        // Escapes in a frame never reach the row.
+        let (c, errs) =
+            parse("[frame]\nseparator_frames = [\"\\u001b[1m|\\u001b[0m\", \":\"]\n", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_frames, vec!["|", ":"]);
+        // A pattern without a rule to paint is a dead key: said, not ignored.
+        let (c, errs) = parse("[frame]\nfill = false\nfill_pattern = \"·  \"\n", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "frame.fill_pattern");
+        assert_eq!(c.frame.fill_pattern, Vec::<String>::new());
     }
 
     #[test]

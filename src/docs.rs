@@ -142,6 +142,16 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
             "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad",
         );
     }
+    c(
+        &mut out,
+        "Animation (see docs/config.md): a one-cell-glyph pattern travelling along the rule,",
+    );
+    c(&mut out, "and separator frames cycled one per tick (all the same width). Empty = static.");
+    let _ = writeln!(out, "fill_pattern = {}", toml_string(&cfg.frame.fill_pattern.concat()));
+    let _ = writeln!(out, "fill_step = {}", Value::Float(cfg.frame.fill_step).to_toml());
+    let _ = writeln!(out, "fill_direction = {}", toml_string(cfg.frame.fill_direction.name()));
+    let _ = writeln!(out, "separator_frames = {}", toml_list(&cfg.frame.separator_frames));
+    let _ = writeln!(out, "separator_step = {}", Value::Float(cfg.frame.separator_step).to_toml());
     let _ = writeln!(out);
 
     c(
@@ -688,6 +698,27 @@ fn frame_section(o: &mut String) {
     );
     let _ =
         writeln!(o, "| `pad` | style-dependent | Text between prefix/content and content/rule. |");
+    let _ = writeln!(
+        o,
+        "| `fill_pattern` | `\"\"` | One-cell glyphs repeated across the rule instead of `fill_char`; each tick the pattern shifts `fill_step` cells in `fill_direction`, so dots appear to travel along the rule. The rule's width never changes, only which glyph lands in each cell. Empty keeps the static rule. |"
+    );
+    let _ = writeln!(
+        o,
+        "| `fill_step` | `1` | Cells the pattern shifts per tick (0.5 = every second tick). |"
+    );
+    let _ = writeln!(
+        o,
+        "| `fill_direction` | `right` | `left` \\| `right`: which way the pattern travels. |"
+    );
+    let _ = writeln!(
+        o,
+        "| `separator_frames` | `[]` | Separator strings cycled one per tick; every frame must have the same width (validation rejects a mismatch so columns cannot jitter). A per-line `separator` wins over the frames. Empty keeps the static `separator`. |"
+    );
+    let _ = writeln!(o, "| `separator_step` | `1` | Frames the separator advances per tick. |");
+    let _ = writeln!(
+        o,
+        "\nAnimations follow the clock rule of [Animation](guide.md#animation): frame = `floor(now × step) mod period`, so `animate = false` or `GARNISH_ANIMATE=0` freezes them at frame 0, which is also what these generated samples show.\n"
+    );
     let _ = writeln!(o, "\n### Frame styles\n");
     for style in FrameStyle::ALL {
         if style == FrameStyle::Custom {

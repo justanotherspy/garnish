@@ -1,0 +1,15 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601
+# icons: unicode
+# The same pattern travelling toward the left cap, half a cell per second
+# (`fill_step = 0.5`, so it moves every second tick); compare `frame-pattern`.
+
+[frame]
+fill_pattern   = "·  "
+fill_direction = "left"
+fill_step      = 0.5
+
+[[line]]
+modules = ["model", "session"]
+right   = ["clock"]

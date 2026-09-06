@@ -186,6 +186,30 @@ pub struct Ticker {
     pub animate: bool,
 }
 
+/// An animated rule (SPEC § 4.2): one-cell glyphs repeated across the rule,
+/// starting at `offset` so the pattern appears to travel one step per tick.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rule {
+    /// The pattern, one cell per entry (validated by the config).
+    pub cells: Vec<String>,
+    /// Index of the pattern cell drawn in the rule's first cell.
+    pub offset: usize,
+}
+
+impl Rule {
+    /// The rule text for `width` cells.
+    #[must_use]
+    pub fn paint(&self, width: usize) -> String {
+        let n = self.cells.len();
+        (0..width)
+            .filter_map(|i| {
+                let at = i.saturating_add(self.offset).checked_rem(n)?;
+                self.cells.get(at).map(String::as_str)
+            })
+            .collect()
+    }
+}
+
 /// Layout parameters for one render.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -201,6 +225,8 @@ pub struct Layout {
     pub ellipsis: String,
     /// Scroll an overflowing left group instead of truncating it.
     pub ticker: Option<Ticker>,
+    /// Paint the rule from a moving pattern instead of `fill_char`.
+    pub rule: Option<Rule>,
 }
 
 /// Compose one line.
@@ -292,9 +318,21 @@ pub fn compose_line(
         if left_pad_w > 0 {
             out.push(Segment::plain(pad));
         }
-        let reps = rule_cells.checked_div(fill_w).unwrap_or(0);
-        if reps > 0 {
-            out.push(Segment::styled(layout.chars.fill.repeat(reps), frame_style));
+        // The rule's width never changes with the pattern, only which glyph
+        // lands in each cell (SPEC § 4.2).
+        match &layout.rule {
+            // A rule shorter than one period would show a lone pattern cell
+            // that is blank on most ticks (a collapsed rule after an overflow,
+            // or a narrow box): such a rule keeps the static fill.
+            Some(rule) if !rule.cells.is_empty() && rule_cells >= rule.cells.len() => {
+                out.push(Segment::styled(rule.paint(rule_cells), frame_style));
+            }
+            _ => {
+                let reps = rule_cells.checked_div(fill_w).unwrap_or(0);
+                if reps > 0 {
+                    out.push(Segment::styled(layout.chars.fill.repeat(reps), frame_style));
+                }
+            }
         }
         if !right.is_empty() {
             out.push(Segment::plain(pad));
@@ -345,6 +383,7 @@ mod tests {
             truncate: true,
             ellipsis: "…".into(),
             ticker: None,
+            rule: None,
         }
     }
 
@@ -448,6 +487,51 @@ mod tests {
         l.truncate = false;
         let whole = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
         assert!(whole.contains("abcdefghijklmnop"), "{whole}");
+    }
+
+    /// SPEC § 4.2 Animated rule: the pattern fills the rule cell by cell from
+    /// `offset`, the rule keeps its width, and the caps and groups are as
+    /// with a plain fill.
+    #[test]
+    fn patterned_rule_keeps_its_width_and_shifts_with_the_offset() {
+        let theme = Theme::default();
+        let mut l = layout(FrameStyle::Rounded, true, 20);
+        let (left, right) = ([Segment::plain("L")], [Segment::plain("R")]);
+        let plain = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
+        // "── L " (5) + rule (10) + " R ──" (5)
+        assert_eq!(plain, format!("── L {} R ──", "─".repeat(10)));
+        let cells =
+            |offset| Some(Rule { cells: vec!["·".into(), " ".into(), " ".into()], offset });
+        l.rule = cells(0);
+        let s0 = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
+        assert_eq!(s0, "── L ·  ·  ·  · R ──");
+        assert_eq!(display_width(&s0), 20);
+        let expected = |offset: usize| {
+            let pattern = ["·", " ", " "];
+            let rule: String = (0..10).map(|i| pattern[(i + offset) % 3]).collect();
+            format!("── L {rule} R ──")
+        };
+        for offset in 1..=4 {
+            l.rule = cells(offset);
+            let s = text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ "));
+            assert_eq!(s, expected(offset), "offset {offset}");
+            assert_eq!(display_width(&s), 20);
+        }
+        // A rule shorter than the pattern's period keeps the static fill: the
+        // collapsed one-cell join after an overflow must not blink.
+        let mut narrow = layout(FrameStyle::Rounded, true, 12);
+        narrow.rule = cells(1);
+        let wide_left = [Segment::plain("abcdefgh")];
+        let s = text(&compose_line(&narrow, &theme, 0, 1, &wide_left, &right, " │ "));
+        assert_eq!(s, "── a… ─ R ──", "collapsed rule: static fill, not a blinking dot");
+        let short = [Segment::plain("ab")];
+        let s = text(&compose_line(&narrow, &theme, 0, 1, &short, &right, " │ "));
+        assert_eq!(s, "── ab ─ R ──", "one rule cell, period three: static fill");
+        assert_eq!(Rule { cells: vec!["ab".into()], offset: 5 }.paint(3), "ababab", "offset wraps");
+        assert_eq!(Rule { cells: Vec::new(), offset: 0 }.paint(3), "", "no pattern, no rule text");
+        // An empty pattern falls back to the fill character.
+        l.rule = Some(Rule { cells: Vec::new(), offset: 0 });
+        assert_eq!(text(&compose_line(&l, &theme, 0, 1, &left, &right, " │ ")), plain);
     }
 
     #[test]

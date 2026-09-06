@@ -67,6 +67,14 @@ Every module color defaults to a role; override a role here to restyle every mod
 | `right_first` `right_middle` `right_last` `right_single` | style-dependent | Right caps. |
 | `fill_char` | style-dependent | The rule character (must be one cell wide). |
 | `pad` | style-dependent | Text between prefix/content and content/rule. |
+| `fill_pattern` | `""` | One-cell glyphs repeated across the rule instead of `fill_char`; each tick the pattern shifts `fill_step` cells in `fill_direction`, so dots appear to travel along the rule. The rule's width never changes, only which glyph lands in each cell. Empty keeps the static rule. |
+| `fill_step` | `1` | Cells the pattern shifts per tick (0.5 = every second tick). |
+| `fill_direction` | `right` | `left` \| `right`: which way the pattern travels. |
+| `separator_frames` | `[]` | Separator strings cycled one per tick; every frame must have the same width (validation rejects a mismatch so columns cannot jitter). A per-line `separator` wins over the frames. Empty keeps the static `separator`. |
+| `separator_step` | `1` | Frames the separator advances per tick. |
+
+Animations follow the clock rule of [Animation](guide.md#animation): frame = `floor(now × step) mod period`, so `animate = false` or `GARNISH_ANIMATE=0` freezes them at frame 0, which is also what these generated samples show.
+
 
 ### Frame styles
 

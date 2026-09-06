@@ -57,6 +57,13 @@ fill = true
 # Default separator between modules on a line (style-dependent when unset).
 # separator = " │ "
 # For style = "custom": first middle last single fill_char right_first right_middle right_last right_single pad
+# Animation (see docs/config.md): a one-cell-glyph pattern travelling along the rule,
+# and separator frames cycled one per tick (all the same width). Empty = static.
+fill_pattern = ""
+fill_step = 1
+fill_direction = "right"
+separator_frames = []
+separator_step = 1
 
 # Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.
 [[line]]

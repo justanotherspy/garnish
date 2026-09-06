@@ -297,7 +297,8 @@ accent = "#89b4fa"
 style = "rounded"         # none | rounded | square | double | heavy | powerline | custom
 fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
-# custom: first middle last single fill right_first right_middle right_last separator pad
+# custom: first middle last single fill_char right_first right_middle right_last right_single separator pad
+# animation (§ 4.2): fill_pattern fill_step fill_direction separator_frames separator_step
 
 [[line]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
@@ -462,21 +463,26 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames; the key itself is
   rule. The rule's *width* never changes (it is computed from the groups
   as today), only which glyph lands in each cell; with `align` on, the
   rule still starts at a fixed column. `fill_char` remains the static
-  single-glyph case and is what the pattern falls back to when `animate`
-  is off.
+  single-glyph case, used when no pattern is set and for a rule shorter than
+  one period (a lone pattern cell would blink); with `animate` off the
+  pattern sits on frame 0. `fill_pattern` with `fill = false` is reported as
+  a dead key.
 - **Animated separators.** `separator_frames` cycles the separator
   string one frame per tick; every frame must have the same cell width
   (validation rejects mismatched widths so columns cannot jitter), and
-  `separator` stays the static fallback and frame 0. Per-line `separator`
-  overrides win over the frames.
+  `separator` stays the static case used when no frames are set; with
+  `animate` off the frames sit on frame 0. Per-line `separator` overrides
+  win over the frames.
 - **Animated glyphs.** Any icon key in `[modules.<id>.icons]` accepts a
   `<key>_frames` list; frames must all have the icon's cell width. The
   spinner in `clock` becomes an instance of this rule rather than a special
   case.
 - **Scrollers.** The line ticker (§ 4.1) and text modules (§ 3.7) use the
   same clock rule with a cell offset instead of a frame index.
-- **Cost.** Animation adds no I/O and no allocation beyond the frame
-  lookup; the tick budget (§ 8) is unchanged. Docs render with
+- **Cost.** Animation adds no I/O; the pattern and separator frames are a
+  lookup, and a module with icon frames costs one clone of its resolved
+  config per tick (about half a microsecond; nothing when no module has
+  frames). The tick budget (§ 8) is unchanged. Docs render with
   `Clock::fixed()`, so the generated samples show frame 0.
 - **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
   session) freezes everything at frame 0; the guide recommends it for
