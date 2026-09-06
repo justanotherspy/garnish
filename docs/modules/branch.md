@@ -50,7 +50,7 @@ The current branch read from the repository without spawning git; a detached HEA
 |---|---|---|---|---|---|
 | `branch` | `U+E725` | `⎇` | `🌿` | `on` | Branch icon. |
 | `detached` | `U+F0C1` | `➦` | `📌` | `@` | Detached HEAD icon. |
-| `dirty` | `●` | `●` | `✏️` | `*` | Dirty marker. |
+| `dirty` | `U+F111` | `✱` | `✨` | `*` | Dirty marker. |
 
 ## Colors
 

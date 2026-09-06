@@ -7,10 +7,10 @@
 </p>
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────── ♯ garnish-dev ─╮
-├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
-├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────── Δ +156 −23 ─┤
-╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────── ⠋ 16:00:00 ─╯
+╭─ ❒ ~/projects/garnish │ ⇄ #42 ❍ ───────────────────────── ❯ garnish-dev ─╮
+├─ ❖ Opus │ ⚙ ▁▃▅▇█ │ ⊞ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
+├─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d4h ───────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ✦ 47m ──────────────────────── ⠋ 16:00:00 ─╯
 ```
 
 <sub>The default preset with unicode icons in an 80-column terminal, rendered from a saved payload (inside a repository the first line also carries the branch, ahead/behind and worktree). The other presets are below; every frame style is rendered in [docs/config.md](docs/config.md).</sub>
@@ -32,17 +32,17 @@ terminal width where nothing is cut.
 `default`, four lines, at 80 columns:
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ───────────────────────── ♯ garnish-dev ─╮
-├─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
-├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d4h ────────────────────────────── Δ +156 −23 ─┤
-╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m ──────────────────────── ⠋ 16:00:00 ─╯
+╭─ ❒ ~/projects/garnish │ ⇄ #42 ❍ ───────────────────────── ❯ garnish-dev ─╮
+├─ ❖ Opus │ ⚙ ▁▃▅▇█ │ ⊞ ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
+├─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d4h ───────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m │ ⇄ 8m20s │ ⛁ 91% 1h ✦ 47m ──────────────────────── ⠋ 16:00:00 ─╯
 ```
 
 `compact`, two lines, at 90 columns:
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ ────────────────────────────────────── ⠋ 16:00:00 ─╮
-╰─ ◆ Opus │ ◔ ▁▃▅▇█ │ ◫ ████████▍░░░░░░░░░░▏ 42% │ ⧗ 24% ⏱ 2h13m ─── ⛁ 91% 1h ● 47m ─╯
+╭─ ❒ ~/projects/garnish │ ⇄ #42 ❍ ────────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─ ❖ Opus │ ⚙ ▁▃▅▇█ │ ⊞ ████████▍░░░░░░░░░░▏ 42% │ ⏳ 24% ⏱ 2h13m ── ⛁ 91% 1h ✦ 47m ─╯
 ```
 
 `minimal`, one line and no frame, at 80 columns:
@@ -55,10 +55,10 @@ terminal width where nothing is cut.
 columns (this block is the one that may scroll on a narrow screen):
 
 ```text
-╭─ ▣ ~/projects/garnish │ ⇄ #42 ○ pending ──────────────────────────────────────────────── ♯ garnish-dev sess-000 ─╮
-├─ ◆ Opus ⋯ claude-opus-5 │ ◔ ▁▃▅▇█ high │ ◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼ │ ✎ default ───────────┤
-├─ ⧗ █▉░░░░░░ 24% ⏱ 2h13m │ ▦ ███▎░░░░ 41% ⏱ 3d4h ───────────────────────────────────────────── Δ +156 −23 (+133) ─┤
-╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ● 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
+╭─ ❒ ~/projects/garnish │ ⇄ #42 ❍ pending ──────────────────────────────────────────────── ❯ garnish-dev sess-000 ─╮
+├─ ❖ Opus ⋯ claude-opus-5 │ ⚙ ▁▃▅▇█ high │ ⊞ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼ │ ✎ default ───────────┤
+├─ ⏳ █▉░░░░░░ 24% ⏱ 2h13m │ ≣ ███▎░░░░ 41% ⏱ 3d4h ──────────────────────────────────────────── Δ +156 −23 (+133) ─┤
+╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ✦ 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
 A config written by `garnish config init` (or `garnish install`) spells out
@@ -133,9 +133,9 @@ vertically instead of drifting with each line's content, and
 `1h5m`, so they keep their width as they tick.
 
 ```text
-╭─ ◆ Opus        │ ◫ ████████▍░░░░░░░░░░▏ 42% ──────────────── ⠋ 16:00:00 ─╮
-├─ ⧗ 24% ⏱ 2h13m │ ▦ 41% ⏱ 3d04h ───────────────────────────── Δ +156 −23 ─┤
-╰─ ⏱ 1h12m       │ ⇄ 8m20s │ ⛁ 91% 1h ● 47m00s ────────────────────────────╯
+╭─ ❖ Opus         │ ⊞ ████████▍░░░░░░░░░░▏ 42% ─────────────── ⠋ 16:00:00 ─╮
+├─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d04h ──────────────────────────── Δ +156 −23 ─┤
+╰─ ⏱ 1h12m        │ ⇄ 8m20s │ ⛁ 91% 1h ✦ 47m00s ───────────────────────────╯
 ```
 
 | group | modules |
@@ -163,6 +163,11 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
 
 - **Boxes instead of icons**: your font lacks Nerd Font glyphs; set
   `icons = "unicode"`.
+- **The right edge wanders by a cell on some lines**: your terminal draws a
+  glyph wider (or narrower) than garnish counts. `garnish doctor` ends with a
+  glyph grid in which every `|` should line up; the one pushed out of its
+  column names the glyph. Override it under `[modules.<id>.icons]`, and paste
+  the grid into an issue so the built-in set can be fixed.
 - **A value with `⟳` or `✗` after it**: the background refresh is overdue or
   failed; `garnish doctor` shows the last error.
 - **Nothing changes after editing the config**: `garnish config path` shows

@@ -13,15 +13,15 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | preset | render |
 |---|---|
 | `minimal` | `42%` |
-| `default` | `◫ ████████▍░░░░░░░░░░▏ 42%` |
-| `full` | `◫ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼` |
+| `default` | `⊞ ████████▍░░░░░░░░░░▏ 42%` |
+| `full` | `⊞ ████████████▌░░░░░░░░░░░░░░░░▏ 42% ⤓99% 1.0M ‼` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` ████████▍░░░░░░░░░░▏ 42%` |
-| `unicode` | `◫ ████████▍░░░░░░░░░░▏ 42%` |
+| `unicode` | `⊞ ████████▍░░░░░░░░░░▏ 42%` |
 | `emoji` | `🧠 ████████▍░░░░░░░░░░▏ 42%` |
 | `ascii` | `ctx: ########-----------\| 42%` |
 
@@ -55,7 +55,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `context` | `U+F2DB` | `◫` | `🧠` | `ctx:` | Context icon. |
+| `context` | `U+F2DB` | `⊞` | `🧠` | `ctx:` | Context icon. |
 | `fill` | `█` | `█` | `█` | `#` | Filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Empty cell. |
 | `marker` | `▏` | `▏` | `▏` | `|` | Compaction marker. |

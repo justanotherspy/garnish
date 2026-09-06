@@ -122,7 +122,7 @@ branch = ""
 # detached — Detached HEAD icon.
 detached = ""
 # dirty — Dirty marker.
-dirty = "●"
+dirty = ""
 [modules.branch.colors]
 # icon — Icon.
 icon = "accent"
@@ -194,7 +194,7 @@ hide_when_empty = true
 # worktree — Worktree icon.
 worktree = ""
 # arrow — Original → branch arrow.
-arrow = "→"
+arrow = ""
 [modules.worktree.colors]
 # icon — Icon.
 icon = "accent2"
@@ -231,11 +231,11 @@ mr = ""
 # approved — Approved.
 approved = "✓"
 # pending — Pending review.
-pending = "○"
+pending = ""
 # changes_requested — Changes requested.
 changes_requested = "✗"
 # draft — Draft.
-draft = "◌"
+draft = ""
 [modules.pr.colors]
 # icon — Icon.
 icon = "accent"

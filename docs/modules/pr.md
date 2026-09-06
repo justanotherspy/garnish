@@ -51,9 +51,9 @@ The open PR (or GitLab MR) Claude Code found for the current branch, as a clicka
 | `pr` | `U+F407` | `⇄` | `🔀` | `PR` | Pull request icon. |
 | `mr` | `U+F407` | `⇄` | `🔀` | `MR` | Merge request icon. |
 | `approved` | `✓` | `✓` | `✅` | `ok` | Approved. |
-| `pending` | `○` | `○` | `🕓` | `..` | Pending review. |
+| `pending` | `U+F10C` | `❍` | `🕓` | `..` | Pending review. |
 | `changes_requested` | `✗` | `✗` | `❌` | `xx` | Changes requested. |
-| `draft` | `◌` | `◌` | `📝` | `wip` | Draft. |
+| `draft` | `U+F192` | `❏` | `🚧` | `wip` | Draft. |
 
 ## Colors
 

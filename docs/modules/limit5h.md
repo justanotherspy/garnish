@@ -13,16 +13,16 @@ Percentage of the rolling five-hour window consumed and a countdown to `resets_a
 | preset | render |
 |---|---|
 | `minimal` | `24%` |
-| `default` | `⧗ 24% ⏱ 2h13m` |
-| `full` | `⧗ █▉░░░░░░ 24% ⏱ 2h13m` |
+| `default` | `⏳ 24% ⏱ 2h13m` |
+| `full` | `⏳ █▉░░░░░░ 24% ⏱ 2h13m` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` 24%  2h13m` |
-| `unicode` | `⧗ 24% ⏱ 2h13m` |
-| `emoji` | `⏳ 24% ⏱️ 2h13m` |
+| `unicode` | `⏳ 24% ⏱ 2h13m` |
+| `emoji` | `⏳ 24% ⏰ 2h13m` |
 | `ascii` | `5h 24% reset 2h13m` |
 
 ## Options
@@ -49,8 +49,8 @@ Percentage of the rolling five-hour window consumed and a countdown to `resets_a
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `window` | `U+F252` | `⧗` | `⏳` | `5h` | Window icon. |
-| `reset` | `U+F017` | `⏱` | `⏱️` | `reset` | Countdown glyph. |
+| `window` | `U+F252` | `⏳` | `⏳` | `5h` | Window icon. |
+| `reset` | `U+F017` | `⏱` | `⏰` | `reset` | Countdown glyph. |
 | `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |
 

@@ -391,3 +391,79 @@ pub fn decorate(
 pub fn colored(text: impl Into<String>, color: Color) -> Segment {
     Segment::styled(text, Style::fg(color))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use unicode_width::UnicodeWidthStr;
+
+    /// Why a glyph is unsafe for a built-in icon set, if it is.
+    fn glyph_problem(g: &str) -> Option<&'static str> {
+        // Box Drawing and Block Elements are East Asian Ambiguous by table,
+        // but every terminal font draws them one cell wide (the bars and
+        // frames depend on it), so they are exempt from the width rule.
+        let drawing = |c: char| ('\u{2500}'..='\u{259f}').contains(&c);
+        // Geometric Shapes: COSMIC Terminal drew `◔` and `◫` two cells wide
+        // although no table says so (walkthrough bug 1); fonts in this block
+        // are unreliable, so none of it is allowed.
+        let geometric = |c: char| ('\u{25a0}'..='\u{25ff}').contains(&c);
+        // The Misc Math hourglasses `⧖ ⧗` were drawn wide in the same terminal.
+        let hourglass = |c: char| matches!(c, '\u{29d6}' | '\u{29d7}');
+        if g.contains('\u{fe0f}') {
+            Some("variation selector")
+        } else if g.chars().any(geometric) {
+            Some("Geometric Shapes block")
+        } else if g.chars().any(hourglass) {
+            Some("drawn two cells wide in COSMIC Terminal")
+        } else if !g.chars().all(drawing) && g.width() != g.width_cjk() {
+            Some("East Asian Ambiguous width")
+        } else {
+            None
+        }
+    }
+
+    /// SPEC § 4.1 Glyph sets: every glyph in the built-in `unicode` and
+    /// `emoji` sets must be one cell wide in the common terminals or two cells
+    /// by every table. Terminals disagree on East Asian Ambiguous characters
+    /// (`unicode-width` counts them 1 under `width`, 2 under `width_cjk`), on
+    /// the Geometric Shapes block, and on emoji that need a variation
+    /// selector (`U+FE0F`; COSMIC drew `⏱️ 🗄️` one cell wide while garnish
+    /// counted two, walkthrough bug 10). A Nerd Font's private-use glyphs
+    /// (U+E000–F8FF) are designed for one cell, so the `nerd` set is checked
+    /// only where it borrows a glyph from outside that range.
+    #[test]
+    fn built_in_glyphs_have_one_width_in_every_terminal() {
+        let private_use = |g: &str| g.chars().all(|c| ('\u{e000}'..='\u{f8ff}').contains(&c));
+        let mut offenders = Vec::new();
+        for schema in SCHEMAS.iter() {
+            for icon in &schema.icons {
+                for set in [IconSet::Nerd, IconSet::Unicode, IconSet::Emoji] {
+                    let g = icon.glyph.get(set);
+                    if set == IconSet::Nerd && private_use(g) {
+                        continue;
+                    }
+                    if let Some(problem) = glyph_problem(g) {
+                        let points: Vec<String> =
+                            g.chars().map(|c| format!("U+{:04X}", u32::from(c))).collect();
+                        offenders.push(format!(
+                            "{}.{} {}: {g:?} [{}] {problem}",
+                            schema.id,
+                            icon.key,
+                            set.name(),
+                            points.join(" "),
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "glyphs terminals disagree on:\n{}", offenders.join("\n"));
+        // The rules themselves: the walkthrough offenders fail, the bars pass.
+        for bad in ["◆", "◔", "◫", "⧗", "▦", "●", "→", "¤", "⏱\u{fe0f}"] {
+            assert!(glyph_problem(bad).is_some(), "{bad:?} must be rejected");
+        }
+        for good in ["█", "░", "▏", "▁▃▅▇█", "─", "╭", "⏱", "⚡", "🌿", "❖", "✓", "↻", "≣"]
+        {
+            assert_eq!(glyph_problem(good), None, "{good:?} must be accepted");
+        }
+    }
+}

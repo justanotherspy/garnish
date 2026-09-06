@@ -13,16 +13,16 @@ Percentage of the applicable spend limit consumed (can exceed 100%) and a countd
 | preset | render |
 |---|---|
 | `minimal` | `112%` |
-| `default` | `¤ 112% ⏱ 27d8h` |
-| `full` | `¤ ████████ 112% ⏱ 27d8h` |
+| `default` | `$ 112% ⏱ 27d8h` |
+| `full` | `$ ████████ 112% ⏱ 27d8h` |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
 | `nerd` | ` 112%  27d8h` |
-| `unicode` | `¤ 112% ⏱ 27d8h` |
-| `emoji` | `💳 112% ⏱️ 27d8h` |
+| `unicode` | `$ 112% ⏱ 27d8h` |
+| `emoji` | `💳 112% ⏰ 27d8h` |
 | `ascii` | `spend 112% reset 27d8h` |
 
 ## Options
@@ -49,8 +49,8 @@ Percentage of the applicable spend limit consumed (can exceed 100%) and a countd
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `window` | `U+F0D6` | `¤` | `💳` | `spend` | Window icon. |
-| `reset` | `U+F017` | `⏱` | `⏱️` | `reset` | Countdown glyph. |
+| `window` | `U+F0D6` | `$` | `💳` | `spend` | Window icon. |
+| `reset` | `U+F017` | `⏱` | `⏰` | `reset` | Countdown glyph. |
 | `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |
 

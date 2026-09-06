@@ -296,19 +296,6 @@ fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
     }
 }
 
-/// One unframed line exercising the icon set, for `garnish doctor`.
-#[must_use]
-pub fn glyph_test_line(icons: IconSet) -> String {
-    let text = format!(
-        "icons = {}\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"path\", \"branch\", \"pr\", \"model\", \"effort\", \"context\", \"limit5h\", \"cache\", \"clock\"]\n",
-        toml_string(icons.name())
-    );
-    let (cfg, _) = config::parse(&text, &SCHEMAS);
-    render_plain_at(&fixture("worktree-session"), &cfg, Some(200), &Clock::fixed())
-        .trim_end()
-        .to_owned()
-}
-
 /// Render a small two-line status line with a frame style.
 fn frame_sample(style: FrameStyle) -> String {
     let text = format!(
