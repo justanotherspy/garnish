@@ -42,6 +42,7 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 | `show_countdown` | bool | `false` | `true` | `true` | Show the warm countdown / cold state. |
 | `show_misses` | bool | `false` | `false` | `true` | Show the miss count. |
 | `show_writes` | bool | `false` | `false` | `true` | Show tokens written to the cache. |
+| `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
 
 ## Icons
 

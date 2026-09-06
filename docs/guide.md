@@ -213,9 +213,12 @@ animation at frame 0; use it for screen readers and recordings.
   is wider than the box, one cell per tick (`ticker_step`), wrapping around
   after `ticker_gap`; the right group stays put. It moves as often as Claude
   Code ticks (`refreshInterval`, at least 1 s), and `GARNISH_ANIMATE=0`
-  freezes it. Pair it with `durations = "fixed"`: a `compact` duration that
-  changes width between ticks (`1h` → `59m59s`) changes the scroll period
-  and the window jumps instead of sliding.
+  freezes it. Timers switch to `durations = "fixed"` on their own while the
+  ticker is on, because a `compact` duration that changes width between
+  ticks (`1h` → `59m59s`) changes the scroll period and the window jumps
+  instead of sliding; `durations = "compact"` at the top level opts back in,
+  and `durations = "compact"` under one `[modules.<id>]` pins just that
+  module (a right-hand module never scrolls, so it can stay compact).
 - **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`
   (the lines come out 96 cells wide: what fits in Claude Code's box at that
   terminal width).

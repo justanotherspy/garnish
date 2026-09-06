@@ -7,14 +7,14 @@
 # instead of a cut the left group scrolls one cell per second and wraps around
 # (SPEC § 4.1 `overflow = "ticker"`); the clock and the other right-hand
 # modules stay put. The declared width is the window the sample is shown in,
-# not a width at which the row fits.
+# not a width at which the row fits. The ticker makes `durations` default to
+# `fixed`, so the timers hold their width and the window slides.
 
 preset = "full"
 icons  = "nerd"
 theme  = "garnish"
 color  = "auto"
 align  = true
-durations = "fixed"
 overflow  = "ticker"
 
 [frame]

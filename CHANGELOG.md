@@ -55,7 +55,11 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 - `text.<name>` modules: static text with `width`, `pad`, `justify`,
   `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, `color`.
 - Line ticker: `overflow = "ticker"` scrolls a line that does not fit,
-  `ticker_step`, `ticker_gap`.
+  `ticker_step`, `ticker_gap`. Under a ticker the timers default to
+  `durations = "fixed"`, so the window slides instead of jumping when a
+  `compact` duration changes width; `durations = "compact"` at the top
+  level opts back in, and every timer module (`session`, `api`, `cache`,
+  `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` to pin one.
 - Animation: `animate` (and `GARNISH_ANIMATE=0`), frame rule
   `fill_pattern`/`fill_step`/`fill_direction`, `separator_frames`/
   `separator_step`, `<icon>_frames` on any icon (`spinner_frames`,

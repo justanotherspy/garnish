@@ -229,6 +229,27 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
 }
 
 #[test]
+fn config_show_prints_the_durations_a_ticker_implies() {
+    // The shown config is what is in effect (SPEC § 4.1): a ticker with no
+    // `durations` runs fixed, and `show` says so rather than echoing the
+    // compact default back.
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("ticker.toml");
+    std::fs::write(&cfg, "overflow = \"ticker\"\n[modules.api]\ndurations = \"compact\"\n")
+        .unwrap();
+    let (shown, _, ok) =
+        run(&["--config", cfg.to_str().unwrap(), "config", "show"], dir.path(), &[]);
+    assert!(ok, "{shown}");
+    assert!(shown.contains("\ndurations = \"fixed\"\n"), "{shown}");
+    let api = shown.split("[modules.api]").nth(1).unwrap();
+    let api = api.split("\n[").next().unwrap();
+    assert!(api.contains("durations = \"compact\""), "{api}");
+    let session = shown.split("[modules.session]").nth(1).unwrap();
+    let session = session.split("\n[").next().unwrap();
+    assert!(session.contains("durations = \"inherit\""), "{session}");
+}
+
+#[test]
 fn preview_typos_are_one_line_not_a_report() {
     let dir = tempfile::tempdir().unwrap();
     let payload =

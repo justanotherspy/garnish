@@ -288,7 +288,7 @@ overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider 
 ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
 ticker_gap = "   "        # text between the end and the wrapped-around start
 animate = true            # master switch for every animation; false freezes them at frame 0 (§ 4.2)
-durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print
+durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print; fixed by default with overflow = "ticker", and each timer module has its own (§ 4.1)
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
@@ -420,8 +420,15 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   consequences of the stateless rule (whole-stack review, 2026-09-06): the
   period is the group's *current* width, so a value in the scrolled group
   that changes width between ticks (a `compact` duration passing from `1h`
-  to `59m59s`) makes the window jump instead of slide; `durations = "fixed"`
-  keeps it smooth. And `align` pads are inserted before the window is cut,
+  to `59m59s`) makes the window jump instead of slide. So with
+  `overflow = "ticker"` the top-level `durations` defaults to `fixed`
+  (decided 2026-09-06: the smooth case is the default and the jumpy one an
+  opt-in); an explicit `durations = "compact"` still wins, and every module
+  that prints a timer or countdown (`session`, `api`, `cache`, `limit5h`,
+  `limit7d`, `spend`, `sync`) has its own `durations = "inherit" |
+  "compact" | "fixed"` to pin one module while the rest follow the
+  top-level key (a right-group module is never scrolled, so it may stay
+  compact). And `align` pads are inserted before the window is cut,
   so on a scrolling line they travel with the text and that line's columns
   do not stack with the others.
 - **Bars.** `util::bar` uses the fractional-eighth block glyphs only when

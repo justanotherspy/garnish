@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::ansi::{Color, Segment, Style};
 use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
-use crate::config::schema::{ModuleCfg, ModuleSchema};
+use crate::config::schema::{Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
 use crate::payload::Payload;
 use crate::theme::Theme;
@@ -22,6 +22,23 @@ pub mod session;
 pub mod text;
 pub mod usage;
 pub mod util;
+
+/// Choices for a module's `durations` option; `inherit` follows the
+/// top-level key (SPEC § 4.1).
+pub const DURATION_CHOICES: &[&str] = &["inherit", "compact", "fixed"];
+
+/// The `durations` option carried by every module that prints a timer or a
+/// countdown, so one module can be pinned while the rest follow the
+/// top-level `durations` (which is `fixed` by default under a ticker).
+#[must_use]
+pub fn durations_opt() -> OptSpec {
+    OptSpec::new(
+        "durations",
+        Kind::Enum(DURATION_CHOICES),
+        "How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module.",
+        Value::Str("inherit".into()),
+    )
+}
 
 /// How fresh a module's data is.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -107,17 +124,28 @@ impl Ctx<'_> {
         self.payload.session_id.as_deref().filter(|s| !s.is_empty()).unwrap_or("no-session")
     }
 
-    /// A duration in the configured style: `9m` (compact) or `9m00s` (fixed).
+    /// The duration style for a module: its own `durations` option unless
+    /// that is `inherit`, then the top-level key (SPEC § 4.1).
     #[must_use]
-    pub fn duration(&self, total_secs: u64) -> String {
-        self.durations.format(total_secs)
+    pub fn durations_for(&self, cfg: &ModuleCfg) -> crate::time::DurationStyle {
+        match cfg.str("durations") {
+            "compact" => crate::time::DurationStyle::Compact,
+            "fixed" => crate::time::DurationStyle::Fixed,
+            _ => self.durations,
+        }
+    }
+
+    /// A duration in the module's style: `9m` (compact) or `9m00s` (fixed).
+    #[must_use]
+    pub fn duration(&self, cfg: &ModuleCfg, total_secs: u64) -> String {
+        self.durations_for(cfg).format(total_secs)
     }
 
     /// Countdown from this tick's clock to an epoch-seconds instant in the
-    /// configured style, or `None` once passed.
+    /// module's style, or `None` once passed.
     #[must_use]
-    pub fn countdown(&self, until_epoch_secs: i64) -> Option<String> {
-        self.durations.countdown_at(until_epoch_secs, self.now.as_second())
+    pub fn countdown(&self, cfg: &ModuleCfg, until_epoch_secs: i64) -> Option<String> {
+        self.durations_for(cfg).countdown_at(until_epoch_secs, self.now.as_second())
     }
 
     /// The animation frame (or scroll offset) at this tick: [`crate::time::frame`]

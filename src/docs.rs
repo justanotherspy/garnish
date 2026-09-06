@@ -69,8 +69,14 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         "Master switch for every animation (spinner, scrolling text, ticker, rule pattern, separator and icon frames); false freezes them at frame 0.",
     );
     let _ = writeln!(out, "animate = {}", cfg.animate);
-    c(out, "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m)");
-    let _ = writeln!(out, "durations = {}", toml_string(cfg.durations.name()));
+    c(
+        out,
+        "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m); unset, it is fixed under overflow = \"ticker\" and compact otherwise, and each timer module can pin its own",
+    );
+    // Left as a comment in an annotated file so the ticker rule keeps
+    // working after `config init`; `show` prints the value in effect.
+    let prefix = if annotated { "# " } else { "" };
+    let _ = writeln!(out, "{prefix}durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
 }
 
@@ -668,7 +674,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `durations` | `compact` \\| `fixed` | `compact` | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. |"
+        "| `durations` | `compact` \\| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = \"ticker\"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \\| `compact` \\| `fixed`) to pin one module. |"
     );
 
     let _ = writeln!(

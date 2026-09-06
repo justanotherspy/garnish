@@ -1,0 +1,19 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600, 1738425601
+# icons: unicode
+# With `overflow = "ticker"` the timers default to `durations = "fixed"`
+# (`session` and `api` print two units); one scrolled module pins itself
+# back to compact with its own `durations` (the cache countdown reads `47m`,
+# not `47m00s`), and so does the right-hand `limit7d`, which never scrolls
+# (`3d4h`, not `3d04h`). Both forms differ in this payload, so the golden
+# fails if the module option is ignored (SPEC § 4.1).
+overflow   = "ticker"
+ticker_gap = " · "
+[[line]]
+modules = ["model", "session", "api", "cache"]
+right   = ["limit7d"]
+[modules.cache]
+durations = "compact"
+[modules.limit7d]
+durations = "compact"

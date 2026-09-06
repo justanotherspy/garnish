@@ -172,6 +172,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `overflow = "truncate" | "ticker"` with `ticker_step` (> 0, shared `resolve_step`) and `ticker_gap`: `Layout.ticker` carries step, gap, clock and the animate switch, `compose_line` scrolls the left group through `ansi::scroll` when it is over budget, right group untouched; config goldens `ticker` at three instants and `ticker-frozen` with `GARNISH_ANIMATE=0`; `truncate = false` keeps meaning "hand the harness the whole row"; `presets/single-line-full.toml` switches to it and `tests/presets.rs` asserts every preset renders uncut inside the box at its declared width (it collects every offender; `compact-aligned` and `three-lines-double` had been cut at their declared 100/110 columns all along and now declare 110/130); criterion `tick_in_process_ticker`
 - [x] Text modules: `src/modules/text.rs` with a `SCHEMA` (`text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, colour `text`, plus the common `label`/`prefix`/`suffix`/`hide_when_empty`); `Config.texts` is built by `resolve_texts` from `[modules.text.<name>]` through the shared `parse_overrides` (now taking its path), `refresh`/`preset` rejected, `step` must be positive; `text.<name>` line ids are valid only with a table; `render_group` branches on the prefix; ANSI/OSC/control stripped (`text::sanitize`); `garnish modules` lists the family, `docs/modules/text.md` is generated from the schema with the SPEC example, `config show`/`init` emit the tables (or a commented example); config goldens `text-scroll` and `text-scroll-wrap` at three instants, `text-boxes` for clip/justify/pad/hug. Review: `text` and `gap` (and `ticker_gap`) are reduced to plain text at config time (an escape sequence cut by the window leaked colour into the row), names must be bare keys so `config show` round-trips (test), an explicit `colors.text` wins over the `color` shorthand, `refresh`/`preset`/`icons` each give one error
 - [x] CLAUDE.md convention amended (done in the roadmap PR: "fixed, plus the text family"); presets: `single-line-full` is the ticker preset (Phase 15 ticker layer) and `motd-ticker` is the text-module example
+- [x] Ticker durations (decided with Daniel 2026-09-06, layer `phase-15/ticker-durations`): with `overflow = "ticker"` the top-level `durations` defaults to `fixed` so the window slides instead of jumping when a timer changes width; an explicit `durations = "compact"` still wins; every timer module (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) carries a schema option `durations = "inherit" | "compact" | "fixed"` read through `Ctx::durations_for`; unit tests in `config` and `render`, `config show` prints the implied `fixed` (CLI test), config golden `ticker-module-compact` at two instants; SPEC § 4.1, guide, `docs/config.md`
 - [x] Bench: the scroller runs only when a group overflows or a text module scrolls; the warm default tick is untouched (`tick_in_process_default` 13.8 µs); a full-preset row squeezed into 60 columns and scrolling (`tick_in_process_ticker`, nine modules) takes 31.7 µs in-process, well inside the 0.2 ms line, and `bench/run.sh`'s warm scenarios never overflow
 
 ## Phase 16 — Animation framework (SPEC § 4.2)
@@ -537,3 +538,25 @@ and user feedback. Pick from here when no phase is in progress.
   (the plain-text invariant is by convention; a private field with an
   accessor would let the compiler hold it) and a schema-level `max` on
   `OptSpec` (backlog).
+- **2026-09-06 (ticker durations, one layer)** — Daniel's answer to the
+  whole-stack review's open question: a ticker should not leave the smooth
+  case to the user. `phase-15/ticker-durations`, on top of the review
+  layers: with `overflow = "ticker"` the top-level `durations` defaults to
+  `fixed`, an explicit `compact` still wins, and the seven timer modules
+  carry a schema option `durations = "inherit" | "compact" | "fixed"`
+  (`Ctx::durations_for`, so a right-group countdown can stay compact while
+  the scrolled group holds its width). `config show` prints the implied
+  `fixed`. Only the `ticker` golden's first instant changed (the group is
+  wider, so the offset lands elsewhere); config golden
+  `ticker-module-compact` pins the override. Review of the layer: the
+  golden pinned `api`/`limit5h`, whose values read the same in both styles
+  (hollow; now `cache`/`limit7d`, `47m` vs `47m00s` and `3d4h` vs `3d04h`);
+  `config init` wrote a live `durations = "compact"`, which would have
+  defeated the default for anyone starting from `init` and later switching
+  the ticker on (now a comment in the annotated file, as `separator` is);
+  `time::countdown` was the last public compact-only formatter (removed,
+  `countdown_at` is test-only); `single-line-full` drops its now redundant
+  `durations = "fixed"`; a bad `durations` value under a ticker falls back
+  to the implied `fixed` (asserted); the CHANGELOG bullet moved next to the
+  ticker's. Release: Daniel chose to date the CHANGELOG heading in one small
+  PR after the stack merges and tag that commit (option A).
