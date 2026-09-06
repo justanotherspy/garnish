@@ -183,6 +183,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `<key>_frames` on any `[modules.<id>.icons]` key: `parse_icons` validates (equal widths, plain text, at least one frame, a known base key), `ModuleCfg.icon_frames` keeps them, `ModuleCfg::animated` gives `render_group` a per-tick view in which every framed icon shows `frames[floor(now) mod n]` (borrowed, so a module without frames costs nothing); with animations off every cycle sits on `frames[0]` (SPEC § 4.2). The clock spinner's built-in glyph string stays the default cycle (goldens byte-identical) and `spinner_frames` is the general form; `config show` writes `<key>_frames`
 - [x] Goldens: `frame-pattern`, `frame-pattern-left`, `separator-frames`, `icon-frames` at two or three instants; docs render at frame 0 (`Clock::fixed()`), said in the `[frame]` section and on every module page's icons table
 - [x] Bench unchanged (`Cow::Borrowed` when nothing animates; frame lookups only); guide § 6 "Animation" with the accessibility note; `presets/animated-dots`
+- [x] Frozen ticker (decided with Daniel 2026-09-06, layer `phase-16/frozen-ticker`): with animations off a ticker line is truncated with `…` like `overflow = "truncate"` instead of a window frozen at offset 0, so the cut is visible to the readers the switch is for; text modules keep offset 0 inside their declared box; `compose_line` filters the ticker on `animate`; unit test, config goldens `ticker-frozen` and `animate-config-off` re-pinned, docs rows, guide, SPEC
 
 ## Phase 17 — Presets gallery (SPEC § 12)
 
@@ -210,7 +211,7 @@ and user feedback. Pick from here when no phase is in progress.
 
 - [x] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a golden test over them (`tests/config_golden.rs`, 2026-09-05)
 - [x] Sanitise every string that reaches a row (Phase 15 review; done in the whole-stack review layer, 2026-09-06). The full sink list was: `label`/`prefix`/`suffix`, every static `icons.<key>` override, the frame glyphs (`first`…`right_single`, `pad`, `separator`, `fill_char`), per-line `separator`, the `⚠ config:` line's own `e.path`, and the payload strings (`model.display_name`/`id`, `output_style.name`, `session_name`, `agent.name`, `cwd`/`project_dir`, `worktree.name`/`branch`, `pr.url`). Now `Segment::plain`/`styled` reduce everything to plain text (`ansi::plain_text`, extended to bidi/format characters) and the config strings are reduced at parse time as well, so width arithmetic sees real cells; `Painter` emits OSC 8 only for `http(s)://` printable-ASCII URLs. Backlog note: a schema-level `max` on `OptSpec` would make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md`; today they live in `config::bounded`
-- [ ] Question for Daniel: with `GARNISH_ANIMATE=0` a ticker is frozen at offset 0, which is a silent cut with no `…` (SPEC § 4.2 says frame 0); falling back to `truncate` when animations are off would mark the cut for the very users the switch exists for (Phase 15 review)
+- [x] Question for Daniel: with `GARNISH_ANIMATE=0` a ticker was frozen at offset 0, a silent cut with no `…` (Phase 15 review). Decided 2026-09-06: a frozen ticker line is truncated with `…` (layer `phase-16/frozen-ticker`, SPEC § 4.1/§ 4.2)
 - [ ] Phase 4: test a tick killed mid-run while the worker completes (needs a harness that can kill a process group deterministically)
 - [ ] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end
 - [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)
@@ -560,3 +561,20 @@ and user feedback. Pick from here when no phase is in progress.
   to the implied `fixed` (asserted); the CHANGELOG bullet moved next to the
   ticker's. Release: Daniel chose to date the CHANGELOG heading in one small
   PR after the stack merges and tag that commit (option A).
+- **2026-09-06 (frozen ticker, one layer)** — Daniel's answer to the second
+  open question: with animations off a ticker line is cut with `…` like
+  `truncate` instead of frozen at offset 0 (`phase-16/frozen-ticker`, top
+  of the stack). `compose_line` takes the scroll path only for a ticker
+  that animates; text modules still sit at offset 0 in their box (a chosen
+  width, unlike the cut). Goldens `ticker-frozen` and `animate-config-off`
+  re-pinned; the presets page's ticker sample now shows the cut form.
+  Review of the layer: the rule is now structural (`Layout.ticker` is
+  `None` while animations are off; `Ticker.animate` is gone, the switch is
+  decided once on `Ctx`); the `animate-config-off` golden never reached its
+  text module (now on its own line, so "offset 0 in the box" is pinned next
+  to the cut); stale "frame 0" wording in code docs, `config init`'s
+  comment, SPEC's config listing and hooks table, and the statusline skill
+  (which claimed `preview` shows frame 0: it runs with the live clock);
+  the three binary test harnesses clear `GARNISH_ANIMATE`; SPEC notes that
+  a frozen ticker line still prints fixed timers (the default follows the
+  key, not the motion).

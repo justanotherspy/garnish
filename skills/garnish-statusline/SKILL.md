@@ -70,8 +70,9 @@ they approve, copy it into place (`cp "$DRAFT" "$(garnish config path)"`,
 creating the directory if needed) and say that the previous file, if any,
 was replaced. Explain each key you set in one line so the person can tweak
 it later (point at `docs/config.md` and the module pages). Finish with
-`garnish config check` reporting `ok`, and remind them that a saved-payload
-preview shows frame 0 of any animation.
+`garnish config check` reporting `ok`, and remind them that `preview` runs
+with the live clock, so animations move between runs; `GARNISH_ANIMATE=0`
+freezes them (and cuts a ticker line with `…`) for a still picture.
 
 ## 4. Hook it up (only if asked or not yet done)
 

@@ -262,7 +262,8 @@ pub struct Config {
     /// Text between the end of a scrolled group and its wrapped-around start.
     pub ticker_gap: String,
     /// Master switch for every animation; `false` freezes them at frame 0
-    /// (SPEC § 4.2). `GARNISH_ANIMATE=0` does the same for a session.
+    /// and cuts a ticker line with the ellipsis (SPEC § 4.2).
+    /// `GARNISH_ANIMATE=0` does the same for a session.
     pub animate: bool,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,

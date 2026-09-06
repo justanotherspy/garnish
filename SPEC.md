@@ -287,7 +287,7 @@ hide_empty_lines = true   # drop a line whose modules all rendered nothing; `mod
 overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider than the box (§ 4.1)
 ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
 ticker_gap = "   "        # text between the end and the wrapped-around start
-animate = true            # master switch for every animation; false freezes them at frame 0 (§ 4.2)
+animate = true            # master switch for every animation; false freezes them at frame 0 and cuts a ticker line with … (§ 4.2)
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print; fixed by default with overflow = "ticker", and each timer module has its own (§ 4.1)
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
@@ -414,7 +414,12 @@ modules = []              # an intentionally empty line: a blank framed row (spa
   survives the harness cancelling a tick. `ticker_gap` is plain text
   (escapes and control characters stripped at config time). The right group
   is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
-  `truncate = false` hands the whole row over, ticker or not.
+  `truncate = false` hands the whole row over, ticker or not. With
+  animations off (`animate = false`, `GARNISH_ANIMATE=0`) a ticker line is
+  cut with `…` like `truncate`, not frozen at offset 0 (decided 2026-09-06:
+  a silent cut hides what is missing from the readers the switch is for).
+  The `durations` default above follows the key, not the motion, so a
+  frozen ticker line still prints fixed timers.
   A ticker only moves as often as the harness ticks (`refreshInterval`,
   minimum 1 s), which is the documented limit of the effect. Two
   consequences of the stateless rule (whole-stack review, 2026-09-06): the
@@ -459,7 +464,7 @@ The cadence is whatever the harness ticks at (`refreshInterval`, minimum
 1 s); `step` below 1 slows an animation down (0.5 = every second tick).
 
 ```toml
-animate = true            # master switch; false freezes every animation at frame 0
+animate = true            # master switch; false freezes every animation at frame 0 (a ticker line is cut with … instead)
 
 [frame]
 fill_pattern   = "·  "    # repeated across the rule instead of fill_char
@@ -500,15 +505,17 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   cycled the same way; `spinner_frames` is the general form and takes frames
   of any one width.
 - **Scrollers.** The line ticker (§ 4.1) and text modules (§ 3.7) use the
-  same clock rule with a cell offset instead of a frame index.
+  same clock rule with a cell offset instead of a frame index. Off, a text
+  module sits at offset 0 inside its declared box, while a ticker line is
+  cut with `…` (§ 4.1): the box is a chosen width, the cut is not.
 - **Cost.** Animation adds no I/O; the pattern and separator frames are a
   lookup, and a module with icon frames costs one clone of its resolved
   config per tick (about half a microsecond; nothing when no module has
   frames). The tick budget (§ 8) is unchanged. Docs render with
   `Clock::fixed()`, so the generated samples show frame 0.
 - **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
-  session) freezes everything at frame 0; the guide recommends it for
-  screen readers and for recordings.
+  session) freezes everything at frame 0 and cuts a ticker line with `…`;
+  the guide recommends it for screen readers and for recordings.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
@@ -666,7 +673,7 @@ per-module render cost.
 | `GARNISH_NO_SPAWN` | record intended worker spawns instead of spawning |
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
-| `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session (§ 4.2) |
+| `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
 
 ## 10. Documentation
 

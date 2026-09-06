@@ -128,6 +128,9 @@ fn every_preset_has_a_header_validates_and_renders() {
                 .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
                 .env_remove("DISABLE_AUTO_COMPACT")
                 .env_remove("DISABLE_COMPACT")
+                // The movement promises need animations on whatever the
+                // developer's shell says.
+                .env_remove("GARNISH_ANIMATE")
                 .output()
                 .unwrap();
             let out = String::from_utf8_lossy(&render.stdout).into_owned();

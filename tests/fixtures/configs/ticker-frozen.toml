@@ -3,8 +3,9 @@
 # now: 1738425601, 1738425603
 # icons: unicode
 # env: GARNISH_ANIMATE=0
-# The same ticker with animations frozen: the window stays at offset 0 at
-# both instants (SPEC § 4.2 accessibility switch).
+# The same ticker with animations off: the line is cut with `…` at both
+# instants, like `overflow = "truncate"`, instead of a window frozen at
+# offset 0 with no mark (SPEC § 4.1, decided 2026-09-06).
 
 overflow   = "ticker"
 ticker_gap = " · "
