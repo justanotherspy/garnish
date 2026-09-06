@@ -585,4 +585,12 @@ and user feedback. Pick from here when no phase is in progress.
   `[[line]]` spacer gives a spaces-only row one braille blank (U+2800),
   which Claude Code's `trim` does not strip; off by default so the harness
   rule stands until the user asks; reported on a line with modules. Golden
-  `spacer-blank`; `config show` round-trips the key.
+  `spacer-blank`; `config show` round-trips the key. Review of the layer:
+  the premise was too broad. The harness trims raw bytes with no ANSI strip
+  (2.1.263), so with colour on the rule's colour codes already keep an
+  unframed spacer; only colour off (`color = "never"`, `NO_COLOR`) loses
+  it. SPEC § 2.1/§ 4.1, CLAUDE.md, docs and the CHANGELOG now say so, and a
+  test paints the default spacer to pin it. `keep_blank` tests the harness's
+  own predicate (`is_whitespace`, so a no-break-space rule counts), keeps
+  the width by replacing a one-cell character, and makes an empty row
+  (`fill = false`, no frame) the one cell instead of a silent no-op.

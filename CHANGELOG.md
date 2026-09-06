@@ -50,8 +50,9 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   (`modules = []`, kept as an empty framed row), `bar = "blocks" | "line"`
   on the bar modules.
 - `blank = true` on a spacer keeps it on screen without a frame: the row
-  gets one invisible cell, since Claude Code drops whitespace-only rows.
-  Off by default.
+  gets one invisible cell, since Claude Code drops whitespace-only rows
+  (with colour off; the rule's colour codes keep it otherwise). Off by
+  default.
 
 **Text and motion** (SPEC § 3.7, 4.2)
 

@@ -774,11 +774,11 @@ fn align_sample(align: bool) -> String {
 fn presets_section(o: &mut String) {
     let _ = writeln!(
         o,
-        "## `[[line]]`\n\nEach entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = \"none\"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output (`preview` still shows it); `blank = true` on the spacer keeps it on screen by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and any font with the clock spinner's braille draws empty). It is off by default, so the harness's own rule stands unless you opt in; on a line with modules it is reported.\n"
+        "## `[[line]]`\n\nEach entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = \"none\"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output when colour is off (`color = \"never\"`, `NO_COLOR`; with colour on the rule's colour codes keep the row; `preview --color never` shows what the screen drops). `blank = true` on the spacer keeps it on screen either way by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and a font with the clock spinner's braille should draw empty). It is off by default, so the harness's own rule stands unless you opt in; on a line with modules it is reported.\n"
     );
     let _ = writeln!(
         o,
-        "```toml\n[[line]]\nmodules = [\"path\", \"branch\", \"sync\", \"pr\"]\nright   = [\"clock\"]\nseparator = \"  \"\n```\n"
+        "```toml\n[[line]]\nmodules = [\"path\", \"branch\", \"sync\", \"pr\"]\nright   = [\"clock\"]\nseparator = \"  \"\n\n[[line]]\nmodules = []          # a spacer\nblank = true          # keep it on screen even without a frame\n```\n"
     );
 
     let _ = writeln!(o, "## Top-level presets\n");

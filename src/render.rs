@@ -262,22 +262,48 @@ pub fn render_lines_at(
 /// The one cell that keeps an unframed spacer on screen (SPEC § 4.1).
 ///
 /// A braille blank: Claude Code's `trim` does not count it as whitespace
-/// (SPEC § 2.1), and any font with the clock spinner's braille draws it
-/// empty.
+/// (SPEC § 2.1), and a font with the clock spinner's braille should draw
+/// it empty.
 pub const BLANK_CELL: char = '\u{2800}';
 
 /// A `blank = true` spacer (SPEC § 4.1).
 ///
-/// When the composed row is spaces only, its first cell becomes
-/// [`BLANK_CELL`] so the harness keeps the row; a row with a visible frame
-/// is returned as is. The width never changes.
+/// When the composed row is whitespace only, its first one-cell whitespace
+/// character becomes [`BLANK_CELL`] so the harness keeps the row (an empty
+/// row, `fill = false` with no frame, becomes that one cell); a row with a
+/// visible frame is returned as is. The width never changes: a whitespace
+/// character two cells wide is left alone.
 fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
-    if row.iter().any(|s| s.text.chars().any(|c| c != ' ')) {
+    // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
+    // which `plain_text` has already dropped): the same set as
+    // `char::is_whitespace`, so this is the harness's own test.
+    if row.iter().any(|s| s.text.chars().any(|c| !c.is_whitespace())) {
         return row;
     }
-    if let Some(first) = row.iter_mut().find(|s| !s.text.is_empty()) {
-        let text = first.text.replacen(' ', &BLANK_CELL.to_string(), 1);
-        *first = Segment::styled(text, first.style);
+    let one_cell = |c: char| crate::ansi::display_width(&c.to_string()) == 1;
+    let slot = row.iter().position(|s| s.text.chars().any(one_cell));
+    match slot.and_then(|i| row.get_mut(i)) {
+        Some(seg) => {
+            let mut done = false;
+            let text: String = seg
+                .text
+                .chars()
+                .map(|c| {
+                    if !done && one_cell(c) {
+                        done = true;
+                        BLANK_CELL
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            *seg = Segment { text, ..seg.clone() };
+        }
+        None => {
+            if row.iter().all(|s| s.text.is_empty()) {
+                row.push(Segment::plain(BLANK_CELL));
+            }
+        }
     }
     row
 }
@@ -727,12 +753,34 @@ mod tests {
         assert_eq!(row.chars().next(), Some(BLANK_CELL), "{row:?}");
         assert!(row.chars().skip(1).all(|c| c == ' '), "{row:?}");
         assert!(!row.trim().is_empty(), "the harness keeps it: {row:?}");
-        // JavaScript's trim strips U+0020, U+00A0, U+FEFF and the
-        // Unicode White_Space set; the braille blank is in none of them.
+        // JavaScript's trim strips the Unicode White_Space set plus U+FEFF;
+        // the braille blank (category So) is in neither.
         assert!(!BLANK_CELL.is_whitespace() && BLANK_CELL != '\u{feff}');
         let framed = plain("[[line]]\nmodules = []\nblank = true\n");
         assert!(!framed.contains(BLANK_CELL), "a visible frame needs no cell: {framed:?}");
         assert_eq!(display_width(framed.lines().next().unwrap()), 36);
+        // `fill = false` and no frame: the row is empty, so the cell is the row.
+        let bare = plain(
+            "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = []\nblank = true\n",
+        );
+        assert_eq!(bare.lines().next().unwrap(), BLANK_CELL.to_string(), "{bare:?}");
+        // A rule of no-break spaces is whitespace to the harness too.
+        let nbsp = plain(
+            "[frame]\nstyle = \"custom\"\nfill_char = \"\\u00a0\"\n[[line]]\nmodules = []\nblank = true\n",
+        );
+        let row = nbsp.lines().next().unwrap();
+        assert_eq!(row.chars().next(), Some(BLANK_CELL), "{row:?}");
+        assert!(row.chars().skip(1).all(|c| c == '\u{a0}'), "{row:?}");
+        assert_eq!(display_width(row), 36);
+        // With colour on, the frame's colour codes already keep the default
+        // spacer: the harness trims raw bytes, escapes included (SPEC § 2.1).
+        let (config, _) =
+            config::parse("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n", &SCHEMAS);
+        let rows = render_lines_at(&payload, &config, Some(40), &Clock::fixed());
+        let painter =
+            crate::ansi::Painter { mode: crate::ansi::ColorMode::TrueColor, links: false };
+        let bytes = painter.paint(rows.first().unwrap());
+        assert!(bytes.contains('\u{1b}') && !bytes.trim().is_empty(), "{bytes:?}");
         // Two blank spacers around a module row: only the spacers change.
         let three = plain(
             "[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\nblank = true\n[[line]]\nmodules = [\"model\"]\n[[line]]\nmodules = []\nblank = true\n",
