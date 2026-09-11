@@ -3,6 +3,15 @@
 User-visible changes per release. The tag message for a release is this
 file's section for it. `PLAN.md` holds the session-by-session detail.
 
+## Unreleased
+
+**Install**
+
+- Prebuilt binaries for Linux and macOS (x86_64 and aarch64) on every
+  release, and a Homebrew cask: `brew install --cask justanotherspy/tap/garnish`.
+  The release workflow publishes the cask to the tap only after a manual
+  approval (CLAUDE.md § Release process).
+
 ## 0.2.0 — 2026-09-06 (PLAN Phases 12–18)
 
 **Fixes**
