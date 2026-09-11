@@ -172,24 +172,34 @@ Daniel's approval.
    git push origin vX.Y.Z
    ```
 3. **The workflow** then runs, job by job: `verify` (the tag names the crate
-   version, sits on `main`, has its CHANGELOG section) → `release` (a GitHub
-   *pre-release* whose notes are the section body) → `build` (one
-   `garnish-<target>.tar.gz` plus `.sha256` per target: x86_64/aarch64 for
-   Linux and macOS) → **`cask` waits in the `release` environment until
-   Daniel approves it** (the run's page → *Review deployments*) → it renders
+   version, sits on `main`, has its CHANGELOG section, no `## Unreleased`
+   left; the `release` environment exists with a required reviewer) →
+   `release` (a GitHub *pre-release* whose notes are the section body) →
+   `build` (one `garnish-<target>.tar.gz` plus `.sha256` per target:
+   x86_64/aarch64 for Linux and macOS) → `render` (fills
    `.github/homebrew/garnish-cask.rb.tmpl` with `scripts/render-cask.sh`,
-   checks the result with `brew fetch`, and pushes `Casks/garnish.rb` to
-   `justanotherspy/homebrew-tap` with a short-lived octo-sts token →
-   `promote` flips the release to *Latest*. A rejected approval leaves a
-   pre-release with binaries and no cask; fix, then re-run the failed jobs
-   from the same run. `brew install --cask justanotherspy/tap/garnish` then
-   serves the release.
-4. **Repository state** the workflow relies on (settings, not files; both
-   must exist before the first tag): the `release` environment on
-   `justanotherspy/garnish` with Daniel as its required reviewer (optionally
-   restricted to `v*` tags), and the octo-sts app on the tap with
-   `.github/chainguard/garnish.sts.yaml` trusting the subject
-   `repo:justanotherspy/garnish:environment:release`.
+   prints the cask in its log, checks it with `brew fetch`, keeps it as the
+   `cask` artifact) → **`publish` waits in the `release` environment until
+   Daniel approves it** (the run's page → *Review deployments*; read the
+   render log first, that is the cask being approved) → it pushes that
+   `Casks/garnish.rb` to `justanotherspy/homebrew-tap` with a short-lived
+   octo-sts token → `promote` flips the release to *Latest*.
+   `brew install --cask justanotherspy/tap/garnish` then serves the release.
+   A rejected approval or a failed job leaves a pre-release with binaries
+   and no cask. Only a settings or transient failure is fixed by re-running
+   the failed jobs of the same run; anything that needs a code change is a
+   new version through steps 1–2 (a tag is never moved).
+4. **Repository state** the workflow relies on (settings, not files; all of
+   it must exist before the first tag): the `release` environment on
+   `justanotherspy/garnish` with Daniel as its required reviewer,
+   deployment branches/tags restricted to `v*` tags, and *allow
+   administrators to bypass* off (`verify` refuses to run when the
+   environment is missing or has no required reviewer); the octo-sts app on
+   the tap with `.github/chainguard/garnish.sts.yaml` trusting the subject
+   `repo:justanotherspy/garnish:environment:release`; and, so that only
+   Daniel can start a release at all, a tag ruleset on `v*` limited to
+   Daniel with required signatures (the pre-release and its binaries are
+   created before the approval; only the cask push is behind it).
 
 `scripts/changelog-section.sh` and `scripts/render-cask.sh` are plain
 shell so a release can be reproduced by hand; `render-cask.sh <version>`

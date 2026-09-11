@@ -621,3 +621,19 @@ and user feedback. Pick from here when no phase is in progress.
   `.github/chainguard/garnish.sts.yaml` and the README/SECURITY tables.
   Repository state for Daniel: the `release` environment with Daniel as
   required reviewer, and merging the tap policy before the first tag.
+  Adversarial review of the pipeline (four confirmed, seven advisory, all
+  taken): `render-cask.sh` captured each sha inside sed's argument list,
+  where `set -e` ignores a failed substitution, so a missing archive
+  rendered `sha256 ""` (now plain assignments plus a 64-hex check, and no
+  `--retry-all-errors` so a 404 fails at once); the concurrency group was
+  per tag, so two tags could race for the tap (now the constant `release`);
+  a missing `release` environment would be auto-created unprotected and
+  the cask pushed unapproved (`verify` now requires the environment and a
+  required-reviewer rule through the API, and CLAUDE.md makes the `v*`
+  restriction, no admin bypass and a tag ruleset part of the setup); the
+  approval came before the cask existed (now `render` checks and prints it,
+  `publish` is the gated job that pushes the artifact); `locked: true` on
+  the upload action; `persist-credentials: false` on every checkout that
+  does not push; `brew audit || true` so style still runs; `verify` rejects
+  a leftover `## Unreleased`; the docs say a code fix is a new version, not
+  a re-run.
