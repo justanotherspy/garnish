@@ -221,6 +221,8 @@ and user feedback. Pick from here when no phase is in progress.
 - [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened
 - [ ] `Segment.text` is `pub`, so the plain-text invariant (SPEC § 5) holds by convention; a private field with an accessor would let the compiler hold it (whole-stack review, 2026-09-06)
 - [ ] A schema-level `max` on `OptSpec` would replace the key-name match in `config::bounded` and make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md` (whole-stack review, 2026-09-06)
+- [x] Release pipeline with the Homebrew tap (2026-09-11): `.github/workflows/release.yml` on a `vX.Y.Z` tag builds four archives, publishes a pre-release from the CHANGELOG section, waits for Daniel's approval in the `release` environment, pushes `Casks/garnish.rb` to `justanotherspy/homebrew-tap` (octo-sts token, `brew fetch` check first), then marks the release Latest (CLAUDE.md § Release process)
+- [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
 
 ## Session log
 
@@ -602,3 +604,36 @@ and user feedback. Pick from here when no phase is in progress.
   `.claude/worktrees/`; `v0.2.0` is a signed tag on `main` whose message is
   the CHANGELOG section. Open drafts #27 (FUTURE-SPEC) and #40
   (GARLIC-INTEGRATION) and the website pointer are parked by Daniel.
+- **2026-09-11 (release pipeline, Homebrew tap)** — Daniel asked for
+  garnish in `justanotherspy/homebrew-tap` like the other tools, with
+  Daniel's approval before the cask goes out. Modelled on garlic's release workflow
+  (a Rust CLI with a hand-written cask template) and the tap's octo-sts
+  trust policies: `release.yml` runs on a `vX.Y.Z` tag push (verify → GitHub
+  pre-release → four archives, the Linux arm64 one built natively on
+  `ubuntu-24.04-arm` → cask job gated by the `release` environment → promote
+  to Latest). The cask covers macOS and Linux like shuck's and sproot's; it
+  is `brew fetch`-checked in the publisher before the push, which the tap's
+  own audit only does afterwards. `scripts/changelog-section.sh` reproduces
+  the `v0.2.0` tag message byte for byte and doubles as the release-notes
+  source; `scripts/render-cask.sh` renders the template from the published
+  archives. `scripts/setup.sh` learned the `linux-arm` nextest download so
+  the arm runner can reuse it. Tap side (same branch name in the tap repo):
+  `.github/chainguard/garnish.sts.yaml` and the README/SECURITY tables.
+  Repository state for Daniel: the `release` environment with Daniel as
+  required reviewer, and merging the tap policy before the first tag.
+  Adversarial review of the pipeline (four confirmed, seven advisory, all
+  taken): `render-cask.sh` captured each sha inside sed's argument list,
+  where `set -e` ignores a failed substitution, so a missing archive
+  rendered `sha256 ""` (now plain assignments plus a 64-hex check, and no
+  `--retry-all-errors` so a 404 fails at once); the concurrency group was
+  per tag, so two tags could race for the tap (now the constant `release`);
+  a missing `release` environment would be auto-created unprotected and
+  the cask pushed unapproved (`verify` now requires the environment and a
+  required-reviewer rule through the API, and CLAUDE.md makes the `v*`
+  restriction, no admin bypass and a tag ruleset part of the setup); the
+  approval came before the cask existed (now `render` checks and prints it,
+  `publish` is the gated job that pushes the artifact); `locked: true` on
+  the upload action; `persist-credentials: false` on every checkout that
+  does not push; `brew audit || true` so style still runs; `verify` rejects
+  a leftover `## Unreleased`; the docs say a code fix is a new version, not
+  a re-run.

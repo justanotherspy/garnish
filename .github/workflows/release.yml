@@ -1,0 +1,279 @@
+name: Release
+
+# A signed `vX.Y.Z` tag on `main` publishes that version (CLAUDE.md
+# § Release process): a GitHub pre-release whose notes are the CHANGELOG
+# section, one archive per target, the Homebrew cask in
+# justanotherspy/homebrew-tap, and only then the "Latest" badge. The cask
+# is rendered and checked first, then its push waits in the `release`
+# environment until Daniel approves it, so a tag on its own never changes
+# what `brew install` gives people.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+# One release at a time, whatever the tag: two in flight would race for
+# the tap's main branch. A release is never cancelled half-way.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Every action is pinned to a full commit SHA (Renovate keeps the pins and the
+# version comments current). Checkouts that never push drop the token from
+# .git/config (persist-credentials: false) so build scripts cannot read it.
+jobs:
+  # The tag must name the crate version, sit on `main` (which CI has already
+  # gated), have its CHANGELOG section with no `## Unreleased` left over,
+  # and the `release` environment must exist with a required reviewer:
+  # GitHub would otherwise create it on first use with no protection at all
+  # and the cask job would run unapproved.
+  verify:
+    name: verify tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [ "$version" != "$crate" ]; then
+            echo "::error::tag $TAG does not match Cargo.toml version $crate"
+            exit 1
+          fi
+          commit="$(git rev-parse "$TAG^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "::error::$TAG is not on main; releases are tagged from main only"
+            exit 1
+          fi
+          if grep -q '^## Unreleased' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md still has an Unreleased section; the release PR renames it"
+            exit 1
+          fi
+          scripts/changelog-section.sh "$version" > /dev/null
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: The release environment must require a reviewer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! env_json="$(gh api "repos/$GITHUB_REPOSITORY/environments/release")"; then
+            echo "::error::no 'release' environment on $GITHUB_REPOSITORY; create it with a required reviewer first (CLAUDE.md § Release process)"
+            exit 1
+          fi
+          reviewers="$(printf '%s' "$env_json" | jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length')"
+          if [ "$reviewers" = 0 ]; then
+            echo "::error::the 'release' environment has no required reviewer; the cask would be published unapproved"
+            exit 1
+          fi
+
+  # The pre-release the build jobs attach their archives to. Notes are the
+  # CHANGELOG section, the same text as the tag message. A re-run keeps an
+  # existing release.
+  release:
+    name: github pre-release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release $TAG already exists; keeping it"
+            exit 0
+          fi
+          scripts/changelog-section.sh --body "$VERSION" > notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --prerelease --title "garnish $VERSION" --notes-file notes.md
+
+  # One `garnish-<target>.tar.gz` (plus `.sha256`) per target, built on that
+  # target's own runner where one exists; only x86_64 macOS is cross-built.
+  build:
+    name: build ${{ matrix.target }}
+    needs: [verify, release]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same toolchain as CI (rust-toolchain.toml), plus the target.
+      - run: ./scripts/setup.sh
+      - run: rustup target add "${{ matrix.target }}"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.target }}
+      # Built once here with --locked so the smoke test below sees the real
+      # binary; the upload action's own --locked build is then a no-op.
+      - run: cargo build --release --locked --target "${{ matrix.target }}"
+      # The x86_64 macOS binary is built on an arm runner and cannot run there.
+      - if: matrix.target != 'x86_64-apple-darwin'
+        run: "target/${{ matrix.target }}/release/garnish --version"
+      - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
+        with:
+          bin: garnish
+          target: ${{ matrix.target }}
+          archive: garnish-$target
+          tar: unix
+          zip: none
+          checksum: sha256
+          locked: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Renders the cask from the published archives and lets Homebrew itself
+  # download and verify one (`brew fetch`, blocking) before anyone is asked
+  # to approve it. The rendered cask is printed in this job's log and kept
+  # as the `cask` artifact: that is what the approval is for.
+  render:
+    name: render and check cask
+    needs: [verify, build]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Render the cask from the released archives
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          scripts/render-cask.sh "$VERSION" > out/garnish.rb
+          echo "::group::Casks/garnish.rb as it will be pushed"
+          cat out/garnish.rb
+          echo "::endgroup::"
+      # A read-only copy of the tap (it is public) so Homebrew sees the new
+      # cask in its real place, next to the others.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: justanotherspy/homebrew-tap
+          path: homebrew-tap
+          persist-credentials: false
+      # Blocking: Homebrew downloads the archive for this runner's platform
+      # and verifies the pinned sha256 (the tap's own audit does the same
+      # after the push; this catches it before).
+      - name: brew fetch the rendered cask
+        run: |
+          set -euo pipefail
+          cp out/garnish.rb homebrew-tap/Casks/garnish.rb
+          tap_dir="$(brew --repository)/Library/Taps/justanotherspy/homebrew-tap"
+          mkdir -p "$(dirname "$tap_dir")"
+          ln -s "$GITHUB_WORKSPACE/homebrew-tap" "$tap_dir"
+          brew fetch --cask --force justanotherspy/tap/garnish
+      # Advisory, like the tap's audit workflow: best-practice findings on a
+      # generated cask are read, not fatal (`|| true` so style still runs
+      # when audit complains; the step never fails).
+      - name: brew audit and style (non-blocking)
+        run: |
+          brew audit --cask --online justanotherspy/tap/garnish || true
+          brew style homebrew-tap/Casks/garnish.rb || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cask
+          path: out/garnish.rb
+          if-no-files-found: error
+
+  # Waits for Daniel's approval (the `release` environment's required
+  # reviewer), then pushes exactly the cask the render job checked.
+  publish:
+    name: publish cask (approval)
+    needs: [verify, render]
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://github.com/justanotherspy/homebrew-tap/blob/main/Casks/garnish.rb
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cask
+          path: out
+      # The default GITHUB_TOKEN only reaches this repository. Rather than a
+      # long-lived PAT, federate this job's OIDC token for one scoped to the
+      # tap alone and valid for the run (the action revokes it in its post
+      # step). The grant is .github/chainguard/garnish.sts.yaml in the tap
+      # and trusts exactly this job's subject,
+      # repo:justanotherspy/garnish:environment:release: an environment
+      # always overrides the ref in the OIDC subject, and this job only
+      # runs once that environment's reviewer has approved it.
+      - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        id: tap-sts
+        with:
+          scope: justanotherspy/homebrew-tap
+          identity: garnish
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: justanotherspy/homebrew-tap
+          token: ${{ steps.tap-sts.outputs.token }}
+          path: homebrew-tap
+      - name: Commit and push the cask
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cp out/garnish.rb homebrew-tap/Casks/garnish.rb
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/garnish.rb
+          if git diff --cached --quiet; then
+            echo "cask already up to date; nothing to push"
+            exit 0
+          fi
+          git commit -m "chore(cask): garnish $TAG"
+          git push
+
+  # Only once the archives and the cask are in place does the release
+  # become "Latest", so the badge never points at a half-published version.
+  promote:
+    name: mark latest
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease=false --latest

@@ -38,7 +38,14 @@ done
 
 log() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
-os() { case "$(uname -s)" in Darwin) echo mac ;; *) echo linux ;; esac; }
+# The get.nexte.st platform name: mac (universal), linux, linux-arm.
+os() {
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/*) echo mac ;;
+    */aarch64 | */arm64) echo linux-arm ;;
+    *) echo linux ;;
+  esac
+}
 sudo_cmd=""
 if [ "$(id -u)" != 0 ] && have sudo; then sudo_cmd="sudo"; fi
 

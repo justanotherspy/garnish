@@ -91,9 +91,22 @@ shows, not the lines. To switch presets outright, delete the `[[line]]` and
 
 ## Install
 
+With [Homebrew](https://brew.sh) (macOS and Linux, prebuilt binary):
+
+```sh
+brew install --cask justanotherspy/tap/garnish
+```
+
+Or from source:
+
 ```sh
 git clone https://github.com/justanotherspy/garnish.git && cd garnish
 make install            # cargo install --path . --locked  →  ~/.cargo/bin/garnish
+```
+
+Then hook it into Claude Code:
+
+```sh
 garnish install         # writes statusLine into ~/.claude/settings.json (backup kept)
 garnish config init     # writes ~/.config/garnish/garnish.toml with the defaults
 ```

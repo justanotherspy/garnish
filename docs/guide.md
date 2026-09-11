@@ -10,14 +10,23 @@ here.)
 
 ## 1. Install
 
+With [Homebrew](https://brew.sh) (macOS and Linux, prebuilt binary):
+
+```sh
+brew install --cask justanotherspy/tap/garnish
+garnish --version
+```
+
+Or from source:
+
 ```sh
 git clone https://github.com/justanotherspy/garnish.git && cd garnish
 make install            # cargo install --path . --locked  →  ~/.cargo/bin/garnish
 garnish --version
 ```
 
-Requirements: Linux or macOS; [rustup](https://rustup.rs) (the repo pins a
-nightly toolchain, which rustup installs on first build); Claude Code
+Requirements: Linux or macOS; for a source build, [rustup](https://rustup.rs)
+(the repo pins a nightly toolchain, which rustup installs on first build); Claude Code
 2.1.251 or newer; a terminal with ANSI colors; a
 [Nerd Font](https://www.nerdfonts.com) for the default `nerd` icon set (or
 set `icons = "unicode"` / `"emoji"` / `"ascii"`); OSC 8 hyperlink support
