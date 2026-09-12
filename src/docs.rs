@@ -68,7 +68,14 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         out,
         "Master switch for every animation (spinner, scrolling text, rule pattern, separator and icon frames); false freezes them at frame 0 and cuts a ticker line with …",
     );
-    let _ = writeln!(out, "animate = {}", cfg.animate);
+    c(
+        out,
+        "Unset, animations follow Claude Code's prefersReducedMotion setting; GARNISH_ANIMATE=0 freezes a session either way",
+    );
+    // Left as a comment in an annotated file so the settings rule keeps
+    // working after `config init`; `show` prints the value in effect.
+    let prefix = if annotated { "# " } else { "" };
+    let _ = writeln!(out, "{prefix}animate = {}", cfg.animate.unwrap_or(true));
     c(
         out,
         "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m); unset, it is fixed under overflow = \"ticker\" and compact otherwise, and each timer module can pin its own",
@@ -1000,7 +1007,11 @@ mod tests {
         assert!(text.contains("first = \">>\""), "{text}");
         let (again, errs) = config::parse(&text, &SCHEMAS);
         assert!(errs.is_empty(), "{errs:?}\n{text}");
-        assert_eq!(again, cfg);
+        // `show` prints the animation switch in effect, so an unset one
+        // comes back explicit (SPEC § 4.2); everything else is identical.
+        let mut expected = cfg.clone();
+        expected.animate = Some(cfg.animate.unwrap_or(true));
+        assert_eq!(again, expected);
         let model = again.modules.get("model").unwrap();
         assert_eq!(model.color("name"), cfg.theme.role(Role::Danger));
         assert!(!model.hide_when_empty);
@@ -1074,7 +1085,9 @@ mod tests {
         );
         let (again, errs) = config::parse(&shown, &SCHEMAS);
         assert_eq!(errs, Vec::new(), "{shown}");
-        assert_eq!(again, cfg);
+        let mut expected = cfg.clone();
+        expected.animate = Some(cfg.animate.unwrap_or(true));
+        assert_eq!(again, expected);
         assert_eq!(config_toml(&again, false), shown, "show is idempotent");
         // The annotated form carries the tables too and still parses.
         let (from_init, errs) = config::parse(&config_toml(&cfg, true), &SCHEMAS);

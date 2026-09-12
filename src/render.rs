@@ -172,7 +172,7 @@ pub fn render_lines_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
-        animate: clock.animate && config.animate,
+        animate: clock.animate && config.animate.unwrap_or(true),
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
