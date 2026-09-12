@@ -1104,6 +1104,7 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
+| `GARNISH_STDIN_TTY` | target state (§ 14): `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish`, so the pointer path is testable without a pty |
 
 ## 10. Documentation
 
@@ -1330,8 +1331,11 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   a width other than the terminal's to check a narrower box. The pane is
   a `Paragraph` of the rendered rows, so what it shows is byte for byte
   what the status line prints at that width, with the § 2.1 dim reset.
-- **Saving.** Edits live in memory until `s` writes the file (with the
-  § 5 backup); because the tick re-reads the config every second, a saved
+- **Saving.** Edits live in memory as a resolved config, and `s` writes
+  it the way `config show` prints it (with the § 5 backup), so a
+  hand-written file's comments and ordering do not survive a save; the
+  status bar says so before the first save and the backup keeps the
+  original. Because the tick re-reads the config every second, a saved
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
