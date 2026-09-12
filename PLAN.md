@@ -762,7 +762,14 @@ and user feedback. Pick from here when no phase is in progress.
   (first left, last right, middle centre), overflow cut or scrolled inside
   the column so nothing spills into a neighbour, the frame fill in every
   empty cell; the two-group line stays as the *flex* shape. It answers
-  FUTURE-SPEC A2 in the general form.
+  FUTURE-SPEC A2 in the general form. And for the builder: selection in
+  the preview itself, by mouse or keyboard, backed by a placement map
+  the renderer emits from its segment lists; an overlay form of
+  checkboxes, radio lists, steppers and swatches generated from the
+  schema; string pickers seeded from what the presets and frame styles
+  already use, with a custom entry; and a glyph picker per icon key
+  showing the four sets plus schema-declared suggestions, each drawn with
+  the doctor's width marker, writing per-key overrides so sets mix.
   Chosen from the rest, by the rule "Tier A, no crate, no non-goal, no
   tick-side write, module set unchanged": the per-row dim reset (A1),
   reduced motion (N6), doctor's settings report (N5), the never-rewrite
