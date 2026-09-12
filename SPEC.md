@@ -796,9 +796,10 @@ color = "accent"               # role or literal for the box's glyphs; default t
   column matches a three-box neighbour (a boxed one-row column is a
   three-row box); `box = true` on a line boxes that line alone with no
   title, so three adjacent `box = true` lines are three boxes. Boxes
-  never nest (a line inside a boxed column may not carry `box`; reported
-  and ignored); a name reused for a non-adjacent run is reported and the
-  second run unboxed. Rows outside every box keep
+  never nest: a line inside a boxed column may not carry `box`, and a
+  column may not carry `box` on a line that has one; both are reported
+  and the inner box ignored. A name reused for a non-adjacent run is
+  reported and the second run unboxed. Rows outside every box keep
   the frame's caps as today. The built-in styles gain their corners and
   side: `rounded` `╭ ╮ ╰ ╯ │`, `square` `┌ ┐ └ ┘ │`, `double`
   `╔ ╗ ╚ ╝ ║`, `heavy` `┏ ┓ ┗ ┛ ┃`, with `fill_char` as the horizontal;

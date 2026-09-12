@@ -312,4 +312,19 @@ was built, what the reviews found and what was decided, not how.
   samples contradicted the box rules; the lock horizon could never fire;
   `path.depth` already existed; a dozen corners defined, listed in the
   commit `51d4b66`). Then this plan was compacted to the drift between
-  SPEC and the code plus this log. Open drafts #27 and #40 stay parked.
+  SPEC and the code plus this log. Daniel asked for the spec's
+  ambiguities, traps and stale text to be fleshed out, a second review,
+  and the phases checked against the code: the "target state" marks came
+  off the shipped sections, § 4.3 and § 14 gained edge-case and trap
+  lists, a read-only code map (recorded at the top of each open phase)
+  re-cut the layers where the code's shape demanded (a colour-on golden
+  mode, `animate` as `Option<bool>`, a `COMMON_OPTS` table, a `rows`
+  layer with block caps and rule segments that the placement map reads,
+  an embedded `fixtures.rs`, the install core apart from its printing,
+  a `GARNISH_STDIN_TTY` hook), and a second adversarial review returned
+  25 more findings, all taken (commit `cada6ef`: one `truncate = false`
+  rule, gap-then-column clamping, `auto` and no-`fr` cases, the fill
+  pattern phased over the row, a segment-to-span painter for the preview
+  pane, `config show` as a fixed point, both-direction nesting, backups
+  on `config init --force` and `setup --preset`). Open drafts #27 and #40
+  stay parked.
