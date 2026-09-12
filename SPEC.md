@@ -370,7 +370,7 @@ style = "rounded"         # none | rounded | square | double | heavy | powerline
 fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
 # custom: first middle last single fill_char right_first right_middle right_last right_single separator pad
-# boxes (§ 4.4): top_left top_right bottom_left bottom_right side
+# boxes (§ 4.3): top_left top_right bottom_left bottom_right side
 # animation (§ 4.2): fill_pattern fill_step fill_direction separator_frames separator_step
 
 [[line]]
@@ -605,100 +605,154 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   explicitly; the harness honours the same key for its own spinners, so
   the two stay in step. `config show` prints the effective value.
 
-### 4.3 Grid lines (target state; PLAN Phase 21)
+### 4.3 Layout: lines, columns and boxes (target state; PLAN Phase 21)
 
-Daniel's idea, 2026-09-12. A line today is two groups, left and right,
-with the frame rule filling whatever gap is left between them, and the
-left group is the one that gives way. A **grid line** divides the box into
-*N* columns of equal share instead, and each column aligns its own modules
-left, centre or right inside that share. The columns keep their places as
-the terminal is resized, the way a three-column layout keeps its title in
-the middle, so a layout that reads well at 100 columns reads the same way
-at 200. It answers FUTURE-SPEC § 6.2 (A2, a `center` group and flex
-points) in the general form.
+Decided 2026-09-12 with Daniel, consolidating three ideas from that day
+(grid columns, titled rules and boxes, panels of stacked boxes) into one
+model. Today's line is kept as the base case, so every existing config is
+already a valid instance of it and nothing changes until someone adds a
+column.
+
+**The model in five sentences.** A config is a list of **lines**, each a
+horizontal band of the status line. A line is made of **columns** side by
+side; a line written with `modules`/`right` and no `[[line.col]]` is one
+column that fills the width, which is exactly today's line. A column holds
+either one row of modules or a **stack** of lines, and columns share the
+width by `width`. Inside a column, `modules` with `right` is the flex form
+(the groups anchor to the column's edges and the rule fills between; today's
+rule), while `modules` alone sits where `justify` says. **Titles** decorate
+rules and **boxes** decorate lines and columns; the tree is two levels deep
+and never deeper, so `setup` (§ 14) can always draw it.
 
 ```toml
-[[line]]                  # a grid line: one [[line.col]] per column, in order
-gap = 1                   # cells kept empty at every boundary between columns (default 1)
-[[line.col]]
-modules = ["path", "branch", "sync"]
-align   = "left"          # left | center | right; default: first column left, last right, the rest center
-weight  = 2               # this column's share of the width in fr units (default 1): 2/4 of the box here
-[[line.col]]
-modules = ["session_name"]
-[[line.col]]
-modules = ["clock"]
+[[line]]                       # a line: one or more columns side by side
+gap = 1                        # empty cells between columns (default 1)
+separator = " · "              # joins the modules of every column (per-line override, § 4)
+title = "Session"              # text set into the line's rule; see Titles
+title_justify = "center"       # left | center | right (default left)
+title_pad = 1                  # spaces on each side of the title
+title_color = "accent"         # role or literal; default the frame colour
+box = "repo"                   # this line is inside box `repo`; `true` boxes it alone; see Boxes
+blank = false                  # § 4.1
+
+[[line.col]]                   # a column; a line with no [[line.col]] is one "1fr" column
+width = "1fr"                  # "<n>fr" share of the free width | "auto" its content | 24 cells
+modules = ["path", "branch"]   # one row of modules …
+right   = ["pr"]               # … flex: `right` anchors to the column's right edge, the rule fills between
+justify = "left"               # left | center | right: where `modules` sit when there is no `right`
+valign  = "top"                # top | center | bottom: where a short stack sits in a taller line
+box = "repo"                   # the whole column is one box, the line's full height
+[[line.col.line]]              # … or a stack of lines (then no `modules` on the column)
+modules = ["context"]          # an inner line takes every line key except `gap` and [[line.col]]
+box = true
+
+[box.repo]                     # a box: lines and columns join it by name
+title = "Repository"
+title_justify = "left"
+style = "double"               # inherits [frame] style, fill and colour when absent
+fill = false
 ```
 
-- **One column, two, three, six.** With one column the whole box is the
-  column and `align` is where its modules sit; two columns are the familiar
-  left and right, but as halves; three give left, centre, right; any number
-  works and each takes its share. The defaults follow that pattern (first
-  left, last right, every middle column centre), so `align` is only
-  written to change it.
-- **Shares.** The width is the box of § 2.1 minus `gap` per internal
-  boundary. Column *i* gets `floor(width × weight_i ÷ Σ weight)` cells and
-  the leftover cells go one each to the first columns, so the shares differ
-  by at most one cell and add up exactly. A column's modules are joined
-  by the line's `separator`, then placed inside the share by `align`
-  (centre splits the slack with the extra cell on the right).
-- **Overflow stays inside the column.** Content wider than its share is
-  cut with `…` (`overflow = "truncate"`) or scrolled inside the share
+- **Columns and width.** The line's width is the box of § 2.1 minus
+  `gap` cells per boundary. A column with `width = 24` takes 24 cells and
+  `"auto"` takes its content's width (its modules joined by the
+  separator; `max_width` applies); what is left is the free width, shared
+  by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
+  cells going one each to the first of them, so shares differ by at most
+  one cell and always add up. Defaults: `"1fr"`, so three bare columns
+  are thirds and six are sixths. Content wider than its column is cut
+  with `…` (`overflow = "truncate"`) or scrolled inside the column
   (`overflow = "ticker"`, each over-wide column its own window under the
-  § 4.2 rule), never spilled into a neighbour. That is the guarantee the
-  grid is for: a growing branch name moves nothing outside its own column.
-  `truncate = false` still hands the harness the whole row.
-- **Frame.** The caps and the fill are the frame's as today: with
-  `fill = true` every empty cell of the row inside the caps carries the
-  rule glyph (or the animated `fill_pattern`), so a centred module floats
-  on the rule, `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; with `fill = false`
-  the empty cells are spaces. `gap` cells are always empty of modules;
-  they carry the fill like any other empty cell.
-- **Aligned columns.** `align = true` (§ 4) works per grid column: module
-  *k* of column *c* is padded to the widest module *k* of column *c*
-  across the lines that have a column *c* with a module after it, so
-  separators stack between grid lines with the same column count.
-  `right_justify` chooses the pad side for a right-aligned column as it
-  does for the right group.
-- **Mixing.** A `[[line]]` has either `modules`/`right` (the two-group
-  line) or `[[line.col]]` (a grid); both on one line is reported and the
-  grid wins. Grid and two-group lines mix freely across a config. A grid
-  line whose every column rendered nothing is empty for
-  `hide_empty_lines`; a `[[line]]` with `[[line.col]]` entries that are
-  all `modules = []` is a spacer. `config show` writes the `[[line.col]]`
-  form back verbatim; `config check` reports an `align` outside the three
-  words, a `weight` of 0 (or above 64) and a `gap` above 16.
-- **Setup.** The builder (§ 14) offers a line as *1 column* (pick its
-  alignment), *2 columns* (left, right), *3 columns* (left, centre, right)
-  or *N columns*, each column editable, and the two-group line as the
-  *flex* choice for people who want the rule to take the slack instead.
-- **Cost.** A grid line is the same segment lists placed by arithmetic;
-  nothing new is read or spawned. The presets gallery gets a three-column
-  and a six-column preset so the goldens pin the shares at three widths.
+  § 4.2 rule) and never spills into a neighbour, which is what keeps a
+  layout's shape as the terminal is resized. `truncate = false` still
+  hands the harness the whole row.
+- **Inside a column.** `modules` with `right`: the flex line of § 4, laid
+  out to the column's width (left group anchored left, right group
+  anchored right, the fill between, the left group cut first). `modules`
+  alone: one group placed by `justify`, whose default follows the
+  column's position (the first column left, the last right, any middle
+  column centre; a lone column left), so a three-column line reads
+  left / centre / right without writing it. `align = true` (§ 4) pads
+  module *k* of column *c* to the widest module *k* of column *c* across
+  the lines that have one, so separators stack between lines with the
+  same column count; `right_justify` picks the pad side for `right`
+  groups and right-justified columns.
+- **Stacks.** `[[line.col.line]]` entries make the column a stack of
+  lines, each laid out to the column's width with the rules above (an
+  inner line's `justify` overrides the column's). The line is as tall as
+  its tallest column, box rules counted; a shorter stack is padded with
+  empty rows placed by `valign`. Inner lines take no `[[line.col]]` and
+  no `gap`; a column with both `modules` and inner lines is reported and
+  the stack wins.
+- **Frame and fill.** The `[frame]` caps sit at both ends of every
+  terminal row (first/middle/last decided over all the config's rows,
+  a multi-row line counting as one block). On a single-row line, `fill`
+  draws the rule glyph (or the animated `fill_pattern`) in every empty
+  cell inside the caps, gaps included, so a centred module floats on one
+  continuous rule: `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`. On a multi-row
+  line it draws only inside each inner line's own cells; gap cells and
+  padding rows are spaces, since a rule running past a box's side would
+  look wrong. With colour off the harness drops a row that is spaces only
+  (§ 2.1), so a multi-row line of bare columns should keep a box or set
+  `blank` on its inner lines.
+- **Titles.** `title` is plain text (reduced like every config string,
+  § 5) set into the line's rule in the frame colour with `title_pad`
+  spaces on each side; `title_color` picks another role or literal.
+  `title_justify` puts it right after the left cap, centred, or right
+  before the right cap; on a row that carries modules a centred title
+  goes in the widest fill gap. A title wider than its space is cut with
+  `…` and never widens the row. A `[[line]]` with only a `title` is a
+  titled spacer (`├─ Repository ────┤`), always kept (§ 4.1).
+- **Boxes.** `[box.<name>]` (a bare key, as for text modules) carries a
+  title (the four `title*` keys), `style`, `fill` and `colors.frame`,
+  each inheriting from `[frame]` when absent, so a `double` box can sit
+  in a `rounded` frame. A box is drawn as a corner-capped top rule with
+  the title, the style's side glyphs at both edges of each line inside
+  (the line laid out to the width between them), and a bottom rule: two
+  extra rows. Three ways to join one: adjacent lines with the same
+  `box = "<name>"` form one box spanning them; a column with
+  `box = "<name>"` is one box the line's full height, its padding rows
+  drawn as empty interior rows, so a one-box column matches a three-box
+  neighbour; `box = true` on a line boxes that line alone with the
+  `[frame]` style and no title, so three adjacent `box = true` lines are
+  three boxes. Boxes never nest (a line inside a boxed column may not
+  carry `box`; reported and ignored); a name reused for a non-adjacent
+  run is reported and the second run unboxed. Rows outside every box keep
+  the frame's caps as today. The built-in styles gain their corners and
+  side: `rounded` `╭ ╮ ╰ ╯ │`, `square` `┌ ┐ └ ┘ │`, `double`
+  `╔ ╗ ╚ ╝ ║`, `heavy` `┏ ┓ ┗ ┛ ┃`, with `fill_char` as the horizontal;
+  `none` draws an invisible box (lines indented by the pad); `powerline`
+  has no box shape and is reported and drawn rounded. A `custom` frame
+  adds `top_left`, `top_right`, `bottom_left`, `bottom_right` and `side`,
+  one cell each (reported otherwise, the style's glyph stays); every
+  glyph passes the § 4.1 width guard.
+- **Hiding.** A stale or hidden module leaves its line (§ 3.6, § 4.1);
+  under `hide_empty_lines` an inner line whose modules all rendered
+  nothing is dropped (its stack shortens and the line's height follows
+  the tallest column that remains), a box whose lines all went is
+  dropped with its rules (a title alone keeps nothing), and a line is
+  dropped when every column is empty. A `[[line]]` whose columns are all
+  `modules = []` is a spacer.
+- **Validation.** `config check` reports: `justify`/`valign` outside
+  their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
+  count (≤ 1024); `gap` above 16; `box` naming no `[box.<name>]`; a line
+  with both `modules` and `[[line.col]]` (the columns win); nesting; a
+  non-adjacent reuse. `config show` writes every form back verbatim.
+- **Setup.** The builder (§ 14) shows a line as its columns side by side:
+  *Add a column*, its `width` and `justify`, *Stack* to turn a column
+  into lines, *Add a title*, *Wrap in a box* over a selected run of
+  lines and *Box the column*; the placement map lists every inner line,
+  title and box edge so a click lands on the right thing.
+- **Cost.** Layout is arithmetic over the segment lists the modules
+  already render; nothing new is read or spawned. Presets `grid-three`,
+  `grid-six`, `boxed-panels` and `dashboard-panels` pin the shares, the
+  titles and the stacks at two widths each.
 
-### 4.4 Titles and boxes (target state; PLAN Phase 21)
-
-Daniel's idea, 2026-09-12. Every framed row is a rule with caps
-(`├─ ───…─── ┤`), so a **title** is text set into that rule, and a
-**box** is a run of lines that gets its own titled top rule, vertical
-sides and a bottom rule, so a config can group its lines into named
-panels: a *Repository* box over the repo line, a *Session* box over the
-timers, each with its own frame style if wanted.
+Two samples. A titled box around two lines, at 40 columns:
 
 ```toml
-[[line]]
-modules = []
-title = "Repository"      # a titled rule row: ├─ Repository ─────────┤
-title_align = "center"    # left | center | right (default left)
-title_pad = 1             # spaces on each side of the title inside the rule
-title_color = "accent"    # role or literal; default the frame colour
-
-[box.repo]                # a box: lines join it with `box = "repo"`
+[box.repo]
 title = "Repository"
-title_align = "left"
-style = "rounded"         # inherits [frame] style when absent; fill inherits too
-fill = false              # a box usually wants a clean interior
-
 [[line]]
 box = "repo"
 modules = ["path", "branch", "sync"]
@@ -708,8 +762,6 @@ box = "repo"
 modules = ["worktree"]
 ```
 
-renders, at 40 columns, as
-
 ```text
 ╭─ Repository ─────────────────────────╮
 │ ~/p/garnish  main ⇡2             #42 │
@@ -717,90 +769,31 @@ renders, at 40 columns, as
 ╰──────────────────────────────────────╯
 ```
 
-- **Titles on rows.** `title` is plain text (reduced like every config
-  string, § 5), drawn in the rule in the frame colour with one space of
-  `title_pad` on each side (`╭─ Repository ──`); `title_color` picks
-  another role or literal. `title_align` places it right after the left
-  cap, centred over the row's fill, or right before the right cap. On a
-  row that carries modules a `center` title needs a gap to sit in, so it
-  goes in the widest fill gap of the row (between the groups, or between
-  two grid columns); a title wider than the space it has is cut with `…`
-  and never widens the row. A `[[line]]` with only a `title` is a spacer
-  that carries it (the § 4.1 rules: always kept, `blank` irrelevant since
-  the title makes the row non-blank).
-- **Boxes.** `[box.<name>]` declares a box (`<name>` a bare key like a
-  text module's); lines join it with `box = "<name>"`, and adjacent lines
-  with the same `box` form one box. A box is drawn as a top rule row
-  (corner caps, the title as above), its lines with the style's vertical
-  side glyphs at both edges and their modules laid out to the width
-  inside the sides (the two-group and grid rules of § 4 and § 4.3 apply
-  unchanged, with `fill` drawing the rule or spaces between the modules
-  as it does today; `fill = false` is the usual choice inside a box), and
-  a bottom rule row. Each box costs two terminal rows beyond its lines.
-  `style`, `fill` and the box's own `colors.frame` inherit from `[frame]`
-  when absent, so a `double` box can sit in a `rounded` frame. Boxes do
-  not nest; boxes side by side are a panel (§ 4.5). `box = true` boxes a
-  single line on its own with the `[frame]` style and no title, so three
-  adjacent `box = true` lines are three boxes, while a name spans a run;
-  the same name used for two non-adjacent runs is reported and the
-  second run is unboxed. Rows outside every box keep today's caps, with
-  a box counting as one block when the frame decides which row is first
-  or last. Under `hide_empty_lines` a box whose lines all rendered
-  nothing is dropped with its rules; a box's `title` is not a line and
-  does not keep it. `config show` writes the `[box.<name>]` tables and
-  the `box` keys back verbatim.
-- **Glyphs.** The built-in styles gain their corners and side:
-  `rounded` `╭ ╮ ╰ ╯ │`, `square` `┌ ┐ └ ┘ │`, `double` `╔ ╗ ╚ ╝ ║`,
-  `heavy` `┏ ┓ ┗ ┛ ┃`, with `fill_char` as the horizontal; `none` draws a
-  box with no visible glyphs (its lines are simply indented by the pad);
-  `powerline` has no box shape, so a powerline box is reported and drawn
-  with the `rounded` glyphs. A `custom` frame adds `top_left`,
-  `top_right`, `bottom_left`, `bottom_right` and `side`, each one cell
-  (reported otherwise, the style's glyph stays). Every glyph passes the
-  § 4.1 width guard.
-- **Setup.** The builder (§ 14) offers *Add a title* on any line and *Wrap
-  in a box* over a selected run of lines, with the title through the
-  string picker; the placement map (§ 14) lists titles and box edges so
-  a click on a box's top rule opens the box's own form.
-- **Cost.** Titles and boxes are arithmetic over rows already rendered;
-  nothing new is read or spawned. A `boxed-panels` preset pins two boxes
-  with titles at two widths.
-
-### 4.5 Panels: columns of stacked lines and boxes (target state; PLAN Phase 21)
-
-Daniel's idea, 2026-09-12. A grid column (§ 4.3) holds one row of modules.
-A **panel** is a grid line whose columns hold *stacks* instead: each
-column is a sequence of lines, with the box rules of § 4.4 applied inside
-it, so one column can be a single double-lined titled box, the next a
-bare centred module, and the next three small boxes on top of each other.
-The panel is as tall as its tallest column and the columns keep their
-shares as the terminal is resized, as in § 4.3.
+A dashboard line of three columns, at 60 columns with `[frame]
+style = "none"`: a double box the full height, a bare centred column,
+three stacked boxes:
 
 ```toml
-[frame]
-style = "none"
-
 [box.repo]
 style = "double"
 title = "Repository"
 
-[[line]]                      # a panel: a grid line whose columns hold lines
+[[line]]
 gap = 2
 [[line.col]]
-box = "repo"                  # the whole column is one box, the panel's full height
+box = "repo"
 [[line.col.line]]
 modules = ["path", "branch"]
 [[line.col.line]]
 modules = ["sync", "pr"]
 
-[[line.col]]                  # a bare column: no glyphs, its lines centred
-align = "center"
-valign = "top"                # top | center | bottom: where a short stack sits
+[[line.col]]
+justify = "center"
 [[line.col.line]]
 modules = ["model", "effort"]
 
-[[line.col]]                  # three one-line boxes stacked
-align = "center"
+[[line.col]]
+justify = "center"
 [[line.col.line]]
 box = true
 modules = ["context"]
@@ -811,8 +804,6 @@ modules = ["limit5h"]
 box = true
 modules = ["cost"]
 ```
-
-renders, at 60 columns, as
 
 ```text
 ╔═ Repository ════╗      Opus  high       ╭────────────────╮
@@ -825,46 +816,6 @@ renders, at 60 columns, as
 ║                 ║                       │     $1.23      │
 ╚═════════════════╝                       ╰────────────────╯
 ```
-
-- **Shape.** A `[[line.col]]` has either `modules` (one row, § 4.3) or
-  `[[line.col.line]]` entries (a stack); both is reported and the stack
-  wins. Each inner line is an ordinary line laid out to the column's
-  share: `modules` with an optional `right` group is the flex form, and
-  `modules` alone sits by the column's `align` (an inner `align` overrides
-  it per line). Inner lines take `box`, `title`, `separator` and `blank`
-  as top-level lines do; they take no `[[line.col.line.col]]` (a panel
-  does not nest, so the config stays two levels deep and `setup` can draw
-  it).
-- **Height.** The panel spans as many terminal rows as its tallest column,
-  box rules counted. A shorter stack is padded with empty rows placed by
-  the column's `valign` (`top` by default); a padding row in a bare
-  column is spaces (with colour off the harness drops a whitespace-only
-  panel row, § 2.1, so a panel with only bare columns should set `blank`
-  on the inner lines or keep one box). A column-level `box` (the box
-  named on the `[[line.col]]`) spans the column's full height, its
-  padding rows drawn as empty interior rows, so a one-box column matches
-  the height of a three-box neighbour; a line-level box is as tall as its
-  lines.
-- **Frame.** The outer `[frame]` caps, when the style has them, sit at
-  both ends of every panel row (first/middle/last decided over all the
-  config's rows as today, the panel counting as one block); the `fill`
-  rule applies inside bare inner lines as it does to any line and never
-  to `gap` cells or padding rows. Every row of the panel is exactly the
-  box width, so `preview` and the harness show the same picture.
-- **Rules that carry over.** Overflow stays inside the column (§ 4.3);
-  `align = true` pads per column and per inner line index; a stale or
-  hidden module leaves its inner line, and `hide_empty_lines` drops an
-  inner line whose modules all rendered nothing (the stack shortens, the
-  panel's height follows the tallest column that remains) and drops the
-  panel when every column is empty. `config show` writes the nested form
-  back verbatim.
-- **Setup.** The builder (§ 14) shows a panel as its columns side by
-  side, each a small line list of its own with *Add a line*, *Wrap in a
-  box* and *Box the column*; the placement map covers every inner line,
-  so a click lands in the right column.
-- **Cost.** A panel is the same segment lists placed in two dimensions;
-  nothing new is read or spawned. Presets `dashboard-panels` (the layout
-  above) pins it at 60 and 120 columns.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
@@ -1199,13 +1150,12 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   preset in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen
   and re-renders on every change. Below it, the `[[line]]` list: each line
-  shows its groups or grid columns (§ 4.3) as chips; keys add, insert,
-  delete, clone and move lines, choose a line's shape (*flex*: left and
-  right groups with the rule taking the slack; *1 column* with its
-  alignment; *2 columns*; *3 columns*; *N columns*, each with `align` and
-  `weight`), move a module within a group or column or into the next one,
-  mark a line as a spacer, give it a title, and wrap a selected run of
-  lines in a titled box (§ 4.4). Adding a module opens a **picker**
+  shows its columns as chips (§ 4.3; a plain line is one column); keys
+  add, insert, delete, clone and move lines, add a column and set its
+  `width` and `justify`, turn a column into a stack, move a module
+  within a column or into the next one, mark a line as a spacer, give it
+  a title, wrap a selected run of lines in a titled box and box a whole
+  column. Adding a module opens a **picker**
   with fuzzy and initialism search over the 21 ids and the `text.<name>`
   family (`sy` finds `sync`, `sn` finds `session_name`), each with its
   one-line summary from `garnish modules`. `Enter` on a module

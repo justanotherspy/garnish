@@ -241,23 +241,24 @@ module set stays at 21.
 - [ ] `limit5h`/`limit7d`/`spend`: `reset = "countdown" | "absolute" | "both"` (A10) formatted with jiff in the `clock` zone, weekday past a day; unit tests at two instants, config golden `reset-absolute` pinned at two `# now:` values
 - [ ] Schema → render → `make docs` → `UPDATE_GOLDEN=1`; guide § 5 gains the three presentation keys; CHANGELOG; adversarial review; session log
 
-## Phase 21 — Grid lines, titles, boxes and panels (SPEC § 4.3–4.5)
+## Phase 21 — Layout: lines, columns and boxes (SPEC § 4.3)
 
-Daniel's ideas, 2026-09-12: a line divided into N equal columns, each
-aligning its own modules left, centre or right, so the layout keeps its
-shape as the terminal is resized (supersedes FUTURE-SPEC A2); a title set
-into any framed rule; boxes, runs of lines with their own titled top
-rule, sides and bottom rule; and panels, grid columns that hold stacks of
-lines and boxes side by side.
+Daniel's ideas, 2026-09-12, consolidated the same day into one model: a
+line is columns side by side (a plain line is one column, today's flex
+rule inside it), a column holds one row of modules or a stack of lines,
+columns share the width by `width` (`fr`, `auto`, cells) and place a lone
+group by `justify`; titles decorate rules and boxes decorate lines and
+columns; two levels, never deeper. Supersedes FUTURE-SPEC A2. The layers
+build the model inside out so each one ships with goldens and a
+byte-identical default render.
 
-- [ ] `phase-21/grid-config`: `LineCfg` gains `cols: Vec<ColCfg { modules, align, weight }>` and `gap`, parsed from `[[line.col]]` with the per-key fallback (default alignments first left / last right / middle centre; `weight` in `1..=64`, `gap ≤ 16`); a line with both forms is reported and the grid kept; all-empty columns make a spacer; `config show` round-trips the form (test over a fixture config); `config check` messages with TOML paths
-- [ ] `phase-21/grid-render`: `render::compose_grid`: shares by weight with the remainder to the first columns (unit test that shares add up to the width at every width from 10 to 400 and differ by at most one cell), placement by `align`, the fill glyph or pattern in every empty cell, `gap` boundaries, `…` cut or a per-column ticker window for over-wide content (the § 4.2 rule with the share as the window), `align = true` per column, `right_justify` on right-aligned columns; config goldens `grid-one` (each alignment), `grid-three`, `grid-six`, `grid-weights`, `grid-ticker` at two instants, each at 80 and 160 columns (one file per width, the header takes one)
-- [ ] Presets `grid-three-centered` and `grid-six-dashboard` (declared widths, `tests/presets.rs` covers them); `docs/config.md` gains a `[[line.col]]` section with a sample at two widths; README layout paragraph and guide § 5; CHANGELOG
-- [ ] `phase-21/titles`: `title`, `title_align`, `title_pad`, `title_color` on `[[line]]` (reduced to plain text, capped like `label`); `frame::Rule::paint` sets the title into the rule after the left cap, before the right cap, or centred in the widest fill gap of a module row; cut with `…` when wider than its space, never widening the row; a title-only line is a spacer that keeps its row; config goldens `title-rows` (each alignment on a spacer and on a module row, at 60 and 120 columns); `config show` round trip
-- [ ] `phase-21/boxes`: `[box.<name>]` (`title*`, `style`, `fill`, `colors.frame`, inheriting from `[frame]`) and `box = "<name>"` on lines; adjacent lines with one name form a box drawn as a corner-capped top rule with the title, side glyphs around each line with the modules laid out inside, and a bottom rule; a non-adjacent reuse reported and unboxed; the frame's first/last caps treat a box as one block; `hide_empty_lines` drops a box whose lines all rendered nothing; corners and `side` on the built-in styles (`none` invisible, `powerline` reported and drawn rounded) and the five `custom` keys with the one-cell check; config goldens `boxes-two` (two titled boxes around unboxed lines) and `box-grid` (a grid line inside a box) at two widths; a unit test that every box row is exactly the box width
-- [ ] `phase-21/panels`: `ColCfg` gains `lines: Vec<LineCfg>` (from `[[line.col.line]]`, no deeper nesting: `config check` reports a `col` inside an inner line), `valign`, and a column-level `box`; `box = true` as the anonymous one-line box; `render::compose_panel` lays each column's stack out to its share (inner flex or single-group lines by the column's or the line's `align`, boxes by the § 4.4 rules, a column-level box stretched to the panel height), pads short stacks by `valign`, joins the columns row by row with `gap` and the outer caps; `hide_empty_lines` per inner line and for the whole panel; unit test that every panel row is exactly the box width over widths 10–400 and stacks of unequal height; config goldens `panel-dashboard` (the SPEC sample: a full-height double box, a bare centred column, three stacked boxes) at 60 and 120 columns, `panel-valign` and `panel-hidden` (an inner line that renders nothing); `config show` round trip
-- [ ] Presets `boxed-panels` and `dashboard-panels` (declared widths, `tests/presets.rs`); `docs/config.md` gains `title` rows, a `[box.<name>]` section and a panel section, each with a sample; README and guide § 5; CHANGELOG
-- [ ] Bench: `tick_in_process_grid` (a six-column line), `tick_in_process_boxes` (two boxes) and `tick_in_process_panel` (the dashboard); placement is arithmetic over the rendered segments, so the warm default tick is untouched; adversarial review (a column narrower than a module, `weight` totals overflowing `usize`, zero width after `gap`, a grid line under `hide_empty_lines` and `stale_style = "hide"`, a title wider than the row, a box at the minimum width of 10, a box whose title is a module id, `blank` on a titled spacer, a panel whose every column is bare with colour off, a column-level box with no lines, a stack that scrolls under `overflow = "ticker"`); session log
+- [ ] `phase-21/layout-model`: `LineCfg` gains `cols: Vec<ColCfg>`, `gap`, the four `title*` keys and `box`; `ColCfg { width: Width::{Fr(n), Auto, Cells(n)}, modules, right, justify, valign, box, lines: Vec<LineCfg> }`, parsed from `[[line.col]]` and `[[line.col.line]]` with the per-key fallback; a line without columns becomes one `1fr` column carrying its `modules`/`right` (so the resolved tree is always the same shape; a test over every fixture and preset shows the resolved config and the render byte-identical); `justify` defaults by position; validation as SPEC § 4.3 lists (words, the `width` grammar, `gap`, unknown box names, both forms on a line or a column, nesting, non-adjacent reuse), each with its TOML path; `config show` round-trips every form (test over a fixture config that uses all of them); all-empty columns make a spacer
+- [ ] `phase-21/layout-columns`: `render::compose_line` generalised to columns: `auto` and cell widths taken first, the free width shared by `fr` with the remainder to the first columns (unit test that shares add up to the width at every width from 10 to 400 and differ by at most one cell), the flex rule inside a column with `right`, `justify` placement for a lone group, `gap` boundaries, the fill glyph or pattern in every empty cell of a single-row line, `…` cut or a per-column ticker window for over-wide content (the § 4.2 rule with the column as the window), `align = true` per column index, `right_justify` on right groups and right-justified columns; the two-group path deleted, since a plain line is one column (goldens byte-identical); config goldens `columns-one` (each `justify`), `columns-three`, `columns-six`, `columns-widths` (`auto`, cells and `fr` mixed), `columns-ticker` at two instants, each at 80 and 160 columns (one file per width, the header takes one)
+- [ ] `phase-21/titles`: the `title*` keys reduced to plain text and capped like `label`; `frame::Rule::paint` sets the title after the left cap, before the right cap, or centred in the widest fill gap; cut with `…` when wider than its space, never widening the row; a title-only line is a titled spacer; config goldens `title-rows` (each `title_justify` on a spacer and on a module row, at 60 and 120 columns)
+- [ ] `phase-21/boxes`: `[box.<name>]` (`title*`, `style`, `fill`, `colors.frame`, inheriting from `[frame]`); adjacent lines with one name form a box, `box = true` boxes a line alone, a column-level `box` spans the line's height; drawn as a corner-capped top rule with the title, side glyphs around each line with the line laid out between them, and a bottom rule; corners and `side` on the built-in styles (`none` invisible, `powerline` reported and drawn rounded) and the five `custom` keys with the one-cell check; the frame's first/last caps treat a multi-row line as one block; `hide_empty_lines` drops a box whose lines all went; config goldens `boxes-two` (two titled boxes around unboxed lines), `box-columns` (a three-column line inside a box) and `box-column` (a boxed column beside a bare one) at two widths; a unit test that every box row is exactly the box width
+- [ ] `phase-21/stacks`: `[[line.col.line]]` laid out to the column's width (inner `justify` overriding the column's), the line's height as the tallest column, `valign` padding, spaces in gap cells and padding rows of a multi-row line, the outer caps on every terminal row; `hide_empty_lines` per inner line and for the whole line; unit test that every row is exactly the box width over widths 10–400 with stacks of unequal height; config goldens `dashboard` (the SPEC sample: a full-height double box, a bare centred column, three stacked boxes) at 60 and 120 columns, `stack-valign` and `stack-hidden` (an inner line that renders nothing)
+- [ ] Presets `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` (declared widths, `tests/presets.rs`); `docs/config.md` gains a `[[line.col]]` section (widths, `justify`, stacks), `title` rows and a `[box.<name>]` section, each with a sample at two widths; README layout paragraph and guide § 5 rewritten around "a line is columns"; CHANGELOG
+- [ ] Bench: `tick_in_process_columns` (six columns), `tick_in_process_boxes` (two boxes) and `tick_in_process_dashboard`; layout is arithmetic over the rendered segments, so the warm default tick is untouched (the one-column path must cost what the two-group path cost: assert within 0.05 ms); adversarial review (a column narrower than a module, `fr` totals and cell widths overflowing the box, zero free width, `auto` columns wider than the box, a line under `hide_empty_lines` and `stale_style = "hide"`, a title wider than the row, a box at the minimum width of 10, a box whose title is a module id, `blank` on a titled spacer, a multi-row line of bare columns with colour off, a boxed column with no lines, a stack that scrolls under `overflow = "ticker"`); session log
 
 ## Phase 22 — Interactive setup (SPEC § 14)
 
@@ -269,8 +270,8 @@ dependency pair (crate map row in `CLAUDE.md` when the first layer lands).
 - [ ] `phase-22/setup-shell`: the crates, `src/setup/` module tree, `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly, terminal restored on panic and on `Ctrl+C`; `garnish` with a tty on stdin prints the one-line pointer and exits 0 (`tests/cli.rs`); `bench/run.sh` unchanged (note the cold-start delta in the commit)
 - [ ] `phase-22/setup-preview`: the preview pane through `render_lines_at` at `COLUMNS − 4 − padding` with the live clock and the bundled fixtures (`f` cycles, `w` sets a width); the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`), key sequences driven through the event loop
 - [ ] `phase-22/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs` and the narrower-than-declared warning; `Enter` writes with `.bak` and offers install; `e` opens the builder; `setup --preset <name> [--install]` non-interactive twin (`tests/cli.rs`)
-- [ ] `phase-22/setup-builder`: the line list (add, insert, delete, clone, move, spacer), the line shape choice (flex, 1 / 2 / 3 / N columns with `align` and `weight` per column, SPEC § 4.3), *Add a title* on a line and *Wrap in a box* over a selected run (SPEC § 4.4; titles and box edges in the placement map), a panel shown as its columns side by side with *Add a line*, *Wrap in a box* and *Box the column* per column (SPEC § 4.5), moves within and between groups or columns, the module picker with fuzzy and initialism search over the 21 ids and `text.<name>` (unit tests on the matcher), the top-level and `[colors]` screens; `s` saves through the `config show` writer with `.bak`, `q` asks once on a dirty draft, an unparsable file is never overwritten
-- [ ] `phase-22/setup-selection`: the placement map from `render_lines_at` (per row, the cell range of every module, separator, cap and rule, from the same segment lists the painter emits; unit test that the ranges tile each row and match the painted widths for two-group, grid and ticker lines); crossterm mouse capture on entry and off on exit (also on panic), click and wheel handling, `Tab`/`Shift-Tab`/arrows as the keyboard twins; the selection highlighted in the preview (inverse video) and on the chip; snapshot tests driving synthetic mouse events through `TestBackend`
+- [ ] `phase-22/setup-builder`: the line list (add, insert, delete, clone, move, spacer), a line shown as its columns side by side (SPEC § 4.3): *Add a column* with its `width` and `justify`, *Stack* to turn a column into lines, *Add a title*, *Wrap in a box* over a selected run and *Box the column* (titles and box edges in the placement map), moves within and between columns, the module picker with fuzzy and initialism search over the 21 ids and `text.<name>` (unit tests on the matcher), the top-level and `[colors]` screens; `s` saves through the `config show` writer with `.bak`, `q` asks once on a dirty draft, an unparsable file is never overwritten
+- [ ] `phase-22/setup-selection`: the placement map from `render_lines_at` (per row, the cell range of every module, separator, cap, rule, title and box edge, from the same segment lists the painter emits; unit test that the ranges tile each row and match the painted widths for flex, multi-column, stacked and ticker lines); crossterm mouse capture on entry and off on exit (also on panic), click and wheel handling, `Tab`/`Shift-Tab`/arrows as the keyboard twins; the selection highlighted in the preview (inverse video) and on the chip; snapshot tests driving synthetic mouse events through `TestBackend`
 - [ ] `phase-22/setup-module-editor`: the overlay form generated from `ModuleSchema` (checkboxes for booleans, radio lists for `preset` and enums, steppers with `max`, colour swatches plus a validated custom entry, text-module schema on the same screen), re-rendering the preview on every change, a dot on chips that carry overrides; the unit test that every `OptSpec` kind and every top-level key has a form row
 - [ ] `phase-22/setup-pickers`: the string picker seeded from the distinct values in the built-in presets, the frame tables and `gallery::PRESETS` (deduplicated at start-up, each drawn as it renders) plus *custom…* through the config parser's plain-text and width checks; the glyph picker with one row per icon set, the schema's `IconOpt.suggestions` per key, `doctor`'s two-cell `|` marker on every candidate and *custom…*, writing per-key `[modules.<id>.icons]` overrides; `suggestions` added to the schemas for every icon key (a few per set) and covered by the existing glyph guard test; `garnish docs` lists them as *also try* on each module page (`make docs`, `docs_sync`)
 - [ ] `phase-22/setup-install`: the install screen through `install`'s own code (`--dry-run` summary, one confirmation), the doctor's settings report in the status bar; `garnish-statusline` skill names `setup`; README "Set up" section and guide § 2 rewritten around it; CHANGELOG
@@ -764,12 +765,11 @@ and user feedback. Pick from here when no phase is in progress.
   named in SPEC and join the crate map when Phase 22's first layer lands.
   Daniel then added grid lines (SPEC § 4.3, Phase 21, before the setup so
   the builder knows the shape): a `[[line]]` split into N columns of equal
-  share (`[[line.col]]`, `weight` in fr units, `gap` between), each
-  aligning its own modules left, centre or right with the natural defaults
-  (first left, last right, middle centre), overflow cut or scrolled inside
-  the column so nothing spills into a neighbour, the frame fill in every
-  empty cell; the two-group line stays as the *flex* shape. It answers
-  FUTURE-SPEC A2 in the general form. And for the builder: selection in
+  share (`[[line.col]]`, `gap` between), each placing its own modules
+  left, centre or right with the natural defaults (first left, last
+  right, middle centre), overflow cut or scrolled inside the column so
+  nothing spills into a neighbour. It answers FUTURE-SPEC A2 in the
+  general form. And for the builder: selection in
   the preview itself, by mouse or keyboard, backed by a placement map
   the renderer emits from its segment lists; an overlay form of
   checkboxes, radio lists, steppers and swatches generated from the
@@ -777,20 +777,30 @@ and user feedback. Pick from here when no phase is in progress.
   already use, with a custom entry; and a glyph picker per icon key
   showing the four sets plus schema-declared suggestions, each drawn with
   the doctor's width marker, writing per-key overrides so sets mix.
-  Then titles and boxes (SPEC § 4.4, in Phase 21 with the grid): a
-  `title` set into any framed rule (left, centred in the widest gap, or
-  right), and `[box.<name>]` panels that a run of adjacent lines joins
-  with `box = "<name>"`, drawn with a titled corner-capped top rule,
-  side glyphs around each line and a bottom rule, style and fill
-  inherited from `[frame]`, two extra rows per box; the built-in styles
-  gain corners and a side, `custom` five keys, `powerline` falls back to
-  rounded. And panels (SPEC § 4.5): a grid column whose entries are
-  `[[line.col.line]]` stacks instead of one row, with the box rules
-  inside it (a column-level `box` stretched to the panel's height,
-  `box = true` for an anonymous one-line box), `valign` for short
-  stacks, no deeper nesting so `setup` can draw it; the SPEC sample is a
-  full-height double box, a bare centred column and three stacked boxes,
-  measured at 60 cells per row.
+  Then titles (a `title` set into any framed rule: left, centred in the
+  widest gap, or right), boxes (`[box.<name>]` that a run of adjacent
+  lines joins with `box = "<name>"`, drawn with a titled corner-capped
+  top rule, side glyphs around each line and a bottom rule, style and
+  fill inherited from `[frame]`, two extra rows per box; the built-in
+  styles gain corners and a side, `custom` five keys, `powerline` falls
+  back to rounded), and panels (a column whose entries are
+  `[[line.col.line]]` stacks instead of one row, a column-level `box`
+  stretched to the line's height, `box = true` for an anonymous one-line
+  box, `valign` for short stacks). Asked whether it all still read as one
+  thing, I said the column key `align` collided with the top-level
+  `align`, that three sections had grown where one model would do, and
+  that flex and grid were the same thing once a plain line is one
+  column; Daniel agreed and left the consolidation to me. SPEC § 4.3 is
+  now that one model: a line is columns, a column is a row of modules or
+  a stack of lines, `width = "1fr" | "auto" | cells` shares the width,
+  `justify` (the text modules' word) places a lone group, `modules` with
+  `right` inside a column is today's flex rule, titles and boxes are
+  decorations, two levels deep. `[[line]]` keeps its name (every preset,
+  doc and skill uses it, and ccstatusline users know it) and a plain line
+  resolves to one `1fr` column, so the default render is byte-identical
+  and the two-group render path can go. The dashboard sample is measured
+  at 60 cells per row. Phase 21 is re-cut into five layers that build the
+  model inside out.
   Chosen from the rest, by the rule "Tier A, no crate, no non-goal, no
   tick-side write, module set unchanged": the per-row dim reset (A1),
   reduced motion (N6), doctor's settings report (N5), the never-rewrite
