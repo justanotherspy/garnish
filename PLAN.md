@@ -194,7 +194,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `garnish docs` renders `docs/presets.md` (`docs::presets_page`: a table, then per preset the sample at the declared width from `subscription-full` at frame 0 and the file in a collapsed block); `docs_sync` covers it, the index and README link to it
 - [x] `garnish presets` lists names, summaries, widths and needs; `garnish config init --preset <gallery name>` writes the file with the tooling header lines stripped (a built-in name still gets the annotated default file; an unknown name lists both kinds); end-to-end test in `tests/cli.rs`
 - [x] `presets/screenshots/<name>.png` convention, named in README, `presets/README.md` and the gallery page intro (the `garnish-submit-preset` skill of Phase 18 asks for one)
-- [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary and for this roadmap; stays open here as the pointer)
+- [x] ~~Website: a static page built from `docs/presets.md` and the screenshots~~ dropped 2026-09-12 with Daniel: the interactive setup (Phase 21) shows every preset rendered at the person's own width, which a page of screenshots cannot; SPEC § 12 records the decision
 
 ## Phase 18 — Bundled skills (SPEC § 13)
 
@@ -204,6 +204,55 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `garnish skills install [--dir D] | list` (`src/skills.rs`, the three files embedded with `include_str!`, written to `~/.claude/skills/<name>/SKILL.md` next to the settings file, only garnish's own files ever touched); `garnish install` writes them unless `--no-skills` (`--dry-run` says so); README/guide section; unit test plus `tests/cli.rs` end to end (dry run, install, list, `--dir`)
 - [x] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`, same sections and commands as the skills, labels in the frontmatter); the `feedback`, `alignment`, `preset` labels are repository state and are created by Daniel (`gh label create …`, listed in the PR)
 - [x] Release chores: `Cargo.toml`/`Cargo.lock` at `0.2.0`, `CHANGELOG.md` (new; the `v0.2.0` tag message is its section); the stack merged 2026-09-06 and `v0.2.0` was tagged the same day from `main` after the heading was dated in one small PR
+
+Phases 19–21 are the 2026-09-12 review of `FUTURE-SPEC.md` (PR #27) with
+Daniel: the cheap, invariant-safe ideas moved into `SPEC.md` (each
+paragraph there names its FUTURE-SPEC section and proposal id), and the
+interactive setup he chose in place of the website. **Order: 19 → 20 → 21.**
+Phase 19 first because the dim reset changes what every golden and every
+`setup` preview shows; Phase 20's `max_width` and the schema-generated
+matrix test are what the builder's module editor is built on; Phase 21 is
+the one that adds crates. Each phase is its own `gh stack` chain of
+`phase-N/<concern>` layers, as before; one release per phase is fine,
+`v0.3.0` being whichever lands first through the pipeline. Nothing here
+lifts a non-goal: no network, no transcript, no tick-side write, the
+module set stays at 21.
+
+## Phase 19 — Harness fidelity (SPEC § 2.1, § 4.2, § 5, § 6, § 7)
+
+- [ ] Dim reset (A1): confirm on screen that the harness wraps each row in SGR 2 (2.1.261 `<Text dimColor wrap="truncate">`; re-locate it in the current binary), then prefix every row with `ESC[0m` when colour is on; regenerate goldens; the fact in `CLAUDE.md` with how to re-verify; a unit test that `--color never` emits no prefix
+- [ ] Reduced motion (N6): `claude_settings` resolves `prefersReducedMotion` on the same chain as the autocompact keys; effective `animate` is `config.animate.unwrap_or(!reduced)`; `config show` prints the effective value; unit test with a settings file, config golden `reduced-motion` with `# env:`
+- [ ] Never rewrite an unparsable file (SPEC § 5): `install`, `config init --force`, `skills install` refuse on a settings or config file that does not parse (name the problem, exit 1 quietly); `tests/cli.rs` covers each; `install` already writes through a temp file and `rename`, assert it
+- [ ] Doctor checks (N5): report `statusLine.refreshInterval` (suggest `1` when `clock`, a countdown or an animation is configured), `statusLine.hideVimModeIndicator` (suggest `true` when `vim` is on), `disableAllHooks`, `prefersReducedMotion`, and whether the settings file parses; unit tests on the doctor's report over a settings fixture
+- [ ] Lock horizon (SPEC § 6): a lock older than 24 h is abandoned whatever its pid; `cache_*` test with a back-dated lock carrying a live pid
+- [ ] Verify item 2 of FUTURE-SPEC § 4.9: re-check the 13 000 autocompact constant in the current binary; keep `compact_buffer_tokens` either way; note the version in SPEC § 2.3 and `CLAUDE.md`
+- [ ] Docs (`make docs`, README/guide troubleshooting: "the line looks dimmer than `preview`" goes away), CHANGELOG `## Unreleased`, adversarial review, session log
+
+## Phase 20 — Per-module presentation (SPEC § 3, § 3.7, § 9)
+
+- [ ] `max_width` (A5) as a common option next to `label`/`prefix`/`suffix` (`OptSpec` with `.max(1024)`), applied in `render_group` through `ansi::truncate` before alignment, OSC 8 wrapper kept balanced; unit tests on a linked `pr` and a wide branch name; config golden `max-width`
+- [ ] Module matrix from the schema (FUTURE-SPEC § 15 item 11): a test generated from `ModuleSchema` over module × preset × icon set × `max_width ∈ {0, 1, 4, 12}` × fixture asserting width ≤ `max_width`, nothing rendered for a hidden state, balanced OSC 8, no escape bytes in `Segment::text`; rayon like the other matrices, with the longer nextest budget
+- [ ] `path`: `style = "full" | "fish"` and `depth` (A7); unit tests on `~`, a root path, a one-segment base and a base shorter than `depth`; config golden `path-fish`
+- [ ] `branch`: `link = true` from `workspace.repo` (A8), GitLab `/-/tree/`, nothing when `repo` is absent or the head is detached; unit tests, a golden on the `git-worktree` fixture (it carries `repo`)
+- [ ] `text.<name>`: `url` (A8) through the painter's `http(s)://` rule; `config check` reports anything else; unit test, golden `text-link`
+- [ ] `context`: `scale = "usable"` (A11): percentage and bar against the § 2.3 threshold, marker hidden, falls back to `window` when compaction is disabled; unit tests at the threshold edges, config golden `context-usable` at 80 % and 96 % of 1M
+- [ ] `limit5h`/`limit7d`/`spend`: `reset = "countdown" | "absolute" | "both"` (A10) formatted with jiff in the `clock` zone, weekday past a day; unit tests at two instants, config golden `reset-absolute` pinned at two `# now:` values
+- [ ] Schema → render → `make docs` → `UPDATE_GOLDEN=1`; guide § 5 gains the three presentation keys; CHANGELOG; adversarial review; session log
+
+## Phase 21 — Interactive setup (SPEC § 14)
+
+Decided 2026-09-12 with Daniel: a full-screen `garnish setup` in the
+terminal, ccstatusline's shape with garnish's exact preview and
+schema-generated editors. `ratatui` + `crossterm` are the one new
+dependency pair (crate map row in `CLAUDE.md` when the first layer lands).
+
+- [ ] `phase-21/setup-shell`: the crates, `src/setup/` module tree, `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly, terminal restored on panic and on `Ctrl+C`; `garnish` with a tty on stdin prints the one-line pointer and exits 0 (`tests/cli.rs`); `bench/run.sh` unchanged (note the cold-start delta in the commit)
+- [ ] `phase-21/setup-preview`: the preview pane through `render_lines_at` at `COLUMNS − 4 − padding` with the live clock and the bundled fixtures (`f` cycles, `w` sets a width); the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`), key sequences driven through the event loop
+- [ ] `phase-21/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs` and the narrower-than-declared warning; `Enter` writes with `.bak` and offers install; `e` opens the builder; `setup --preset <name> [--install]` non-interactive twin (`tests/cli.rs`)
+- [ ] `phase-21/setup-builder`: the line list (add, insert, delete, clone, move, spacer), group moves, the module picker with fuzzy and initialism search over the 21 ids and `text.<name>` (unit tests on the matcher), the top-level and `[colors]` screens; `s` saves through the `config show` writer with `.bak`, `q` asks once on a dirty draft, an unparsable file is never overwritten
+- [ ] `phase-21/setup-module-editor`: the per-module editor generated from `ModuleSchema` (enum cycle, bool toggle, integer with `max`, colour with the theme's roles, icon with `doctor`'s cell count, text-module schema on the same screen); the unit test that every `OptSpec` kind and every top-level key has an editor
+- [ ] `phase-21/setup-install`: the install screen through `install`'s own code (`--dry-run` summary, one confirmation), the doctor's settings report in the status bar; `garnish-statusline` skill names `setup`; README "Set up" section and guide § 2 rewritten around it; CHANGELOG
+- [ ] Adversarial review of the phase (terminal left raw, a draft that `config check` would reject, a preset applied at a width where the terminal cuts it, `Ctrl+C` mid-save), tests for every bug found; session log
 
 ## Backlog (open after v0.1.0)
 
@@ -223,6 +272,7 @@ and user feedback. Pick from here when no phase is in progress.
 - [x] `OptSpec::max` replaces the key-name match in `config::bounded`; the caps are declared on `context.width`, the three `bar_width`s, `text.{text,width,pad,gap}` and, new, `cost.decimals` (≤ 8: `format!("{:.N$}")` allocated N bytes, so `decimals = 4000000000` was a 4 GB allocation on every tick), and the reference prints them in the type column (2026-09-12)
 - [x] Release pipeline with the Homebrew tap (2026-09-11): `.github/workflows/release.yml` on a `vX.Y.Z` tag builds four archives, publishes a pre-release from the CHANGELOG section, waits for Daniel's approval in the `release` environment, pushes `Casks/garnish.rb` to `justanotherspy/homebrew-tap` (octo-sts token, `brew fetch` check first), then marks the release Latest (CLAUDE.md § Release process)
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
+- [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for: a `center` group (A2), `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched
 
 ## Session log
 
@@ -676,3 +726,29 @@ and user feedback. Pick from here when no phase is in progress.
   the test counts `sync` spawns only.
   Still open, by design: the website pointer, the first release through the
   pipeline (repository state), and the optional headroom.
+- **2026-09-12 (FUTURE-SPEC review, documents only)** — Daniel asked for
+  the low-impact ideas in `FUTURE-SPEC.md` (PR #27) to be pulled into the
+  spec and plan, the website dropped, and an interactive setup put in its
+  place: a preset picker with a visual of each, or a custom builder over
+  every option of every module per line with a live preview, the way
+  ccstatusline's TUI works but on garnish's renderer. FUTURE-SPEC § 13
+  already argued that exact shape (option 7.3c, `ratatui`), so SPEC § 14
+  is that section made a decision: exact preview at the harness box width
+  through `render_lines_at`, editors generated from `ModuleSchema` (a test
+  that every option kind has one), the gallery as the first screen, save
+  is live because the tick re-reads the file, the install screen through
+  `install`'s own code, `setup --preset` as the scriptable twin, a
+  one-line pointer when `garnish` is typed at a terminal. The crates are
+  named in SPEC and join the crate map when Phase 21's first layer lands.
+  Chosen from the rest, by the rule "Tier A, no crate, no non-goal, no
+  tick-side write, module set unchanged": the per-row dim reset (A1),
+  reduced motion (N6), doctor's settings report (N5), the never-rewrite
+  rule for unparsable files, the 24 h lock horizon, `max_width` (A5),
+  `path` fish style and depth (A7), `branch` and text links (A8), the
+  `context` usable scale (A11), absolute reset times (A10) and the
+  schema-generated module matrix test; Phases 19 and 20, each key with
+  its FUTURE-SPEC reference in SPEC. Left in FUTURE-SPEC (backlog pointer):
+  the centre group, hide lists, number formats, a `version` module,
+  identity modules, pace, rotation, share/apply, gradients, segments, and
+  every Tier B/C decision. SPEC § 12's website bullet and the Phase 17
+  item record the drop.

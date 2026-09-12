@@ -77,6 +77,16 @@ colour codes around the spaces keep it (verified in the 2.1.263 binary:
 no ANSI strip before the trim). `preview --color never` shows the row the
 screen drops; § 4.1 `blank = true` keeps it in both cases.
 
+**Every row is drawn dim by the harness** (target state; PLAN Phase 19).
+The 2.1.261 binary renders each status line row as `<Text dimColor
+wrap="truncate">`, so the whole row sits inside SGR 2 and anything garnish
+leaves unpainted (the first plain segment, separators, frame glyphs) shows
+at reduced intensity on screen while `preview` shows it at full intensity.
+garnish prefixes every row with `ESC[0m` when colour is on, so the row
+renders as `preview` shows it; a golden pins the prefix. Phase 19 confirms
+the wrapper on screen first and records the fact in `CLAUDE.md` (from
+FUTURE-SPEC § 7.1, A1).
+
 ### 2.2 Payload (stdin JSON)
 
 | field | type | notes |
@@ -135,8 +145,16 @@ configurable (`modules.context.compact_buffer_tokens`).
 Every module has: `enabled` (bool), `preset` (`minimal|default|full`),
 `refresh` (seconds; `0` = payload-only, rendered every tick; `> 0` = cached with
 that TTL and refreshed by a worker), `icons.<key>`, `colors.<key>`, `label`,
-`prefix`, `suffix`, `hide_when_empty`. Option resolution: built-in default →
+`prefix`, `suffix`, `hide_when_empty`, `max_width`. Option resolution: built-in default →
 icon-set default → module preset → top-level preset → explicit key.
+
+`max_width` (target state; PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps
+one module's rendered width: `0` (default) is unlimited, otherwise the
+module's text is cut to that many cells with `…` through `ansi::truncate`
+(grapheme-aware, an OSC 8 wrapper kept balanced) *before* alignment, so a
+long branch name or session title cannot push the rest of the line off
+without the whole left group being cut. Capped at 1024 like every cell
+count (§ 5).
 
 ### 3.1 Repo group
 
@@ -150,6 +168,21 @@ icon-set default → module preset → top-level preset → explicit key.
 
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
+
+Two payload-only additions (target state; PLAN Phase 20; from FUTURE-SPEC
+§ 7.5, A7 and A8):
+
+- `path` gets `style = "full" | "fish"` and `depth = 0`. `fish` abbreviates
+  every directory of the base part but the last to its first character
+  (`~/r/g/src`), the way the fish shell prompts; `depth = N` keeps only the
+  last `N` segments of the base part (`0` = all). The subpath stays dim and
+  untouched, and both keys apply to every preset.
+- `branch` gets `link = false`: `true` wraps the name in an OSC 8 link to
+  the branch on the forge, built from `workspace.repo.{host,owner,name}`
+  in the payload (`https://<host>/<owner>/<name>/tree/<branch>`; GitLab
+  hosts use `/-/tree/`), no git call; nothing is linked when the payload
+  has no `repo` or the head is detached. Only `http(s)://` URLs of
+  printable ASCII are ever emitted (§ 5), as for `pr`.
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
@@ -177,6 +210,17 @@ module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
 threshold. No token counter. `used_percentage` null → empty bar and `–`.
 
+`scale = "window" | "usable"` (target state; PLAN Phase 20; from
+FUTURE-SPEC § 8.3, A11): with `usable` the bar and the percentage are
+measured against the autocompact threshold of § 2.3 instead of the whole
+window, so 100 % is the point where compaction runs (`used_percentage ×
+window ÷ threshold`, capped at 100). The compaction marker then sits at
+the bar's end and is not drawn; the window tag of the `full` preset still
+names the real window. `window` (default) is today's behaviour. When the
+marker is disabled (§ 2.3: compaction off) `usable` falls back to `window`
+and `config check` says nothing, since the setting can change under a
+running session.
+
 ### 3.3 Usage group
 
 | id | shows | minimal | default | full | refresh |
@@ -188,6 +232,16 @@ threshold. No token counter. `used_percentage` null → empty bar and `–`.
 
 Limit modules render nothing when their window is absent. `cost` has
 `only_without_rate_limits = true` so one usage line serves both auth modes.
+
+`reset = "countdown" | "absolute" | "both"` on `limit5h`, `limit7d` and
+`spend` (target state; PLAN Phase 20; from FUTURE-SPEC § 8.2, A10):
+`absolute` prints the local wall-clock time the window resets at
+(`⏱ 14:30`; `limit7d` and any reset more than a day away add the weekday,
+`⏱ Tue 14:30`), `both` prints the countdown followed by the time in
+parentheses, `countdown` (default) is today's behaviour. The time is
+formatted with jiff in the zone the `clock` module uses, so the two agree.
+The harness re-runs the line at each `resets_at`, so neither form is stale
+at the boundary.
 
 ### 3.4 Session group
 
@@ -274,6 +328,11 @@ color = "muted"
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
 - **Escapes.** `text` is plain text: ANSI and OSC sequences are stripped,
   control characters removed, so a config cannot break the row.
+- **Links.** `url = "https://…"` (target state; PLAN Phase 20; from
+  FUTURE-SPEC § 7.5, A8) wraps the box in an OSC 8 link. The URL is a
+  string in the config, so the module stays static; the painter's rule
+  (§ 5: `http(s)://`, printable ASCII) applies, and anything else is
+  reported by `config check` and dropped.
 - **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
   reference gets one page for it; `config check` validates `justify`,
   `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
@@ -538,6 +597,12 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
 - **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
   session) freezes everything at frame 0 and cuts a ticker line with `…`;
   the guide recommends it for screen readers and for recordings.
+  **Reduced motion** (target state; PLAN Phase 19; from FUTURE-SPEC § 8.4,
+  N6): when the Claude settings chain of § 2.3 (already read every tick for
+  the autocompact keys) resolves `prefersReducedMotion` to `true`, garnish
+  behaves as if `animate = false` unless the config sets `animate`
+  explicitly; the harness honours the same key for its own spinners, so
+  the two stay in step. `config show` prints the effective value.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
@@ -558,6 +623,13 @@ without an error report.
   errors carry the TOML path, syntax errors the line.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
+- **A file that fails to parse is never rewritten by any command** (target
+  state; PLAN Phase 19; from FUTURE-SPEC § 12.1 and § 13.4). `install`,
+  `config init --force`, `setup` (§ 14) and `skills install` refuse to
+  touch a `settings.json` or `garnish.toml` that does not parse, name the
+  problem and the file, and exit 1 quietly; the only way past is fixing or
+  moving the file by hand. A file that parses is edited through a temp
+  file and `rename`, with the backup rule `install` already has.
 - **Nothing but text reaches a row.** Every string that becomes part of a
   row is reduced to plain text: escape sequences (CSI, OSC, and the string
   sequences DCS/SOS/PM/APC with their payloads), control characters and the
@@ -618,6 +690,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
   Stale locks are reclaimed by an atomic rename so racing ticks cannot both
   win. A guard only unlinks a lock that still carries its own pid.
+  A lock older than 24 h is abandoned whatever its pid says (target state;
+  PLAN Phase 19; from FUTURE-SPEC § 15 item 2): a one-line safety net
+  against pid reuse, which the liveness check alone cannot see.
 - Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
   `process_group(0)`, spawned without wait. On Linux the tick takes the lock
   and passes `--lock-held`; elsewhere the worker takes it itself.
@@ -645,7 +720,8 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand) |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. Target state (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5): it also reports the settings keys that change what the line can show (`statusLine.refreshInterval`, suggesting `1` when `clock`, a countdown or an animation is configured; `statusLine.hideVimModeIndicator`, suggesting `true` when the `vim` module is on so the mode is not shown twice; `disableAllHooks`; `prefersReducedMotion`) and whether the settings file parses |
+| `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; with `--preset` and no terminal it writes that preset non-interactively (the same as `config init --preset P --force` plus `install` when `--install` is given), for scripts and the skill |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
@@ -703,6 +779,19 @@ per-module render cost.
   (`UPDATE_GOLDEN=1` regenerates).
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.
+- **Module matrix from the schema** (target state; PLAN Phase 20; from
+  FUTURE-SPEC § 15 item 11): a test generated from `ModuleSchema` renders
+  every module × every preset × every icon set × a few `max_width` values
+  against every fixture and asserts the shared invariants (never wider
+  than `max_width`, nothing rendered for a hidden state, OSC 8 wrappers
+  balanced, no escape or control byte in `Segment::text`), so a new module
+  or option gets the shared behaviour checked without a hand-written test.
+- **Setup snapshots** (target state; PLAN Phase 21): every `setup` screen is
+  rendered into ratatui's `TestBackend` at two terminal sizes and compared
+  with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1` regenerates);
+  key sequences are driven through the same event loop the terminal feeds,
+  so the picker, the builder and the install dialog are tested without a
+  tty.
 
 ### Test hooks (environment)
 
@@ -765,11 +854,13 @@ binary. Everything else is a **gallery preset**: a complete config file under
   file (with the header stripped of tooling lines); `garnish presets`
   lists names and summaries. The four built-in names keep working (and a
   gallery preset may not reuse one; a unit test guards it).
-- **Screenshots and website.** `presets/screenshots/<name>.png` are optional
+- **Screenshots.** `presets/screenshots/<name>.png` are optional
   real-terminal captures contributed with a preset (the submit-preset skill
-  in § 13 tells people how). A later static site is built from `docs/presets.md`
-  and those screenshots; it is out of scope for the binary, which only has
-  to keep the gallery page and the files honest.
+  in § 13 tells people how). The gallery page and `garnish setup` (§ 14)
+  are how people browse presets; a website built from them was in the
+  target design until 2026-09-12 and was dropped in favour of the
+  interactive setup (the picker shows a preset rendered at the person's
+  own width, which no screenshot can).
 - **Seed set.** The configs exercised in the 2026-09-05 walkthrough
   (`presets/` in this repository) are the first entries.
 
@@ -783,7 +874,10 @@ Markdown with frontmatter (`name`, `description`) and instructions; none of
 them needs network access from garnish itself, they drive `gh` and the
 `garnish` CLI.
 
-- **`garnish-statusline`.** Interactive config builder. Asks, with
+- **`garnish-statusline`.** Conversational config builder (the hands-on
+  one is `garnish setup`, § 14; both write the same file, and the skill
+  points at `setup` when the person would rather see the choices than
+  answer questions). Asks, with
   recommended defaults: terminal and font (Nerd Font? decides `icons`),
   usual terminal width (decides preset and line count), what matters most
   (repo, model/context, usage limits, timers), colour preference (theme,
@@ -812,3 +906,91 @@ them needs network access from garnish itself, they drive `gh` and the
   environment section, prints the whole issue body, and asks the person
   explicitly before `gh issue create`. Nothing leaves the machine on an
   unanswered or negative question.
+
+## 14. Interactive setup (target state; PLAN Phase 21)
+
+Decided 2026-09-12 with Daniel, from FUTURE-SPEC § 13 (option 7.3c): a
+full-screen `garnish setup` in the terminal, the way ccstatusline's TUI
+works, with the two things garnish can do that it cannot: an **exact** live
+preview (garnish knows the harness box width, § 2.1, and renders through
+the same code as the tick) and editors **generated from the module
+schemas** (every option's type, default, choices, cap and doc string is
+already in `ModuleSchema`, as the docs are). It replaces the website idea
+of the earlier § 12: a preset rendered at the person's own width is a
+better sample than a screenshot at someone else's.
+
+**Two ways in, one file out.** The home screen offers *Pick a preset* and
+*Build a custom layout*, plus *Install* and *Quit*; when a config already
+exists it opens on that config in the builder, previewed, so `setup` is
+also the editor for an existing file. Whatever route, the result is the
+ordinary `garnish.toml` of § 4, written the way `config show` writes it
+(the round trip already exists), never anything the tick could not read.
+
+- **Preset picker.** The four built-in presets and every gallery preset
+  (§ 12) in a list; the highlighted one is rendered live on the right, at
+  the real width (`COLUMNS − 4 − padding`), with its summary, declared
+  width and `needs` line, and a warning when the terminal is narrower than
+  the preset's declared width (the `…` cut is shown as it would be on
+  screen, not hidden). `Enter` applies it: the file is written with the
+  previous one kept as `garnish.toml.bak`, and the install screen follows
+  if the settings file has no `statusLine` yet. `e` opens the highlighted
+  preset in the builder instead of applying it.
+- **Builder.** The preview pane stays at the top of every builder screen
+  and re-renders on every change. Below it, the `[[line]]` list: each line
+  shows its left and right groups as chips; keys add, insert, delete, clone
+  and move lines, move a module within its group or between `modules` and
+  `right`, and mark a line as a spacer. Adding a module opens a **picker**
+  with fuzzy and initialism search over the 21 ids and the `text.<name>`
+  family (`sy` finds `sync`, `sn` finds `session_name`), each with its
+  one-line summary from `garnish modules`. `Enter` on a module
+  opens its **editor**: one row per schema option (`preset`, `refresh`,
+  `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then the
+  module's own options, then `icons.*` for the active icon set and
+  `colors.*`), showing the default, the current value and the doc string;
+  enums cycle, booleans toggle, integers edit with their `max` shown,
+  colours offer the theme's roles and accept a literal, icons accept any
+  string and show the cell count `doctor` would. A text module's editor is
+  the same screen over the text schema. Separate screens set the top-level
+  keys (`preset`, `icons`, `theme`, `color`, `frame` style/fill/separator,
+  `align`, `durations`, `right_justify`, `overflow`, `animate`, `padding`)
+  and the `[colors]` role overrides, each with the same row shape. Nothing
+  in the builder is hand-coded per option: a unit test walks every
+  `OptSpec` kind and every top-level key and asserts an editor exists for
+  it, so an option added to a schema appears in `setup` the next build.
+- **Preview.** Rendered in-process through `render_lines_at`, exactly as
+  `garnish preview` renders a fixture: the same clock (live, so animations
+  move; `GARNISH_ANIMATE=0` freezes them as everywhere), no git discovery,
+  no cache, no settings. `f` cycles the bundled fixtures (subscription,
+  API key, before the first response, no git, the PR states, 1M at 96 %)
+  so the person sees what an absent field does to their layout; `w` sets
+  a width other than the terminal's to check a narrower box. The pane is
+  a `Paragraph` of the rendered rows, so what it shows is byte for byte
+  what the status line prints at that width, with the § 2.1 dim reset.
+- **Saving.** Edits live in memory until `s` writes the file (with the
+  `.bak`); because the tick re-reads the config every second, a saved
+  change shows in a running Claude Code within a second, so there is no
+  apply step. `q` on an unsaved draft asks once. A file that does not
+  parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
+  says so in the status bar, and `s` refuses until the file is moved.
+- **Install.** The install screen mirrors `install --dry-run`: it lists
+  the settings path, the exact `statusLine` object it will merge, the
+  backup name, whether the skills will be written and the PATH warning if
+  any, and asks once. It runs the same code as `garnish install`; nothing
+  in `setup` writes to `settings.json` by another route.
+- **Non-interactive twin.** `garnish setup --preset <name> [--install]`
+  without a terminal on stdout writes that preset and, with `--install`,
+  hooks it up, for scripts and for the `garnish-statusline` skill (§ 13),
+  which keeps its conversational path and names `setup` as the hands-on
+  one. `garnish` typed at a terminal (stdin is a tty, so no payload is
+  coming) prints one line pointing at `garnish setup` and exits 0 instead
+  of waiting for JSON; the harness always pipes, so `render` is unchanged.
+- **Cost and shape.** The TUI lives in its own module tree (`src/setup/`)
+  and is never entered on the render path, so the tick budget (§ 8) does
+  not move; `bench/run.sh` is the check, and a cargo feature (`setup`, on
+  by default) is the fallback if binary size ever shows in the cold
+  start. Crates: `ratatui` with the `crossterm` backend, the one new
+  dependency pair (`inquire`, a prompt wizard, was the alternative and has
+  no live pane; a WebAssembly page was the other and is the website again
+  by another name). `setup` reads the schemas, the presets, the bundled
+  fixtures and the config; it runs no command and makes no network call.
+  Every screen has a snapshot test (§ 9).
