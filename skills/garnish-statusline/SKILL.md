@@ -15,13 +15,14 @@ never edit `~/.claude/settings.json` yourself (`garnish install` owns it).
 ## 1. Check the tools
 
 ```sh
-garnish --version && garnish doctor | head -12
+garnish --version && garnish doctor | head -20
 ```
 
 If `garnish` is missing, stop and point at the install section of the README.
-If the doctor's `statusLine` line is anything but `command=…` (not
-configured, settings missing or not valid JSON), offer `garnish install`
-after the config is written.
+If the doctor's `statusLine` row says `not configured`, offer `garnish
+install` after the config is written; if one of its settings file rows says
+the file does not parse, say so and stop there (`garnish install` refuses to
+rewrite such a file, so it must be fixed by hand first).
 
 ## 2. Ask, with recommended defaults
 

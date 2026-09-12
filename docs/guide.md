@@ -52,7 +52,11 @@ cached value has expired the tick spawns one detached worker and moves on.
 garnish makes no network calls of its own; only `[modules.sync]
 fetch_interval` opts into a background `git fetch`. `garnish install` rewrites
 `settings.json` in one read-modify-write with no lock, so run it while no
-other tool is editing that file.
+other tool is editing that file, and it refuses a `settings.json` that is
+not valid JSON rather than rewrite it. `garnish doctor` lists the settings
+files Claude Code reads for the current directory, which one sets
+`statusLine`, and suggests `refreshInterval = 1` or
+`hideVimModeIndicator = true` when your config calls for them.
 
 ## 3. Try it before you commit
 
@@ -91,7 +95,9 @@ width  = 30
 A bad key never blanks the status line: every valid key stays in effect, the
 built-in default stands in for the bad one, and a dim `⚠ config: <file>
 <path>: <message>` line is appended. Only a file that does not parse as TOML
-falls back to the defaults wholesale, with the line of the syntax error.
+falls back to the defaults wholesale, with the line of the syntax error;
+such a file is never overwritten either (`config init --force` refuses it
+and keeps a backup of any file it does replace).
 
 ## 5. Compose your own lines
 
@@ -194,7 +200,11 @@ whatever Claude Code ticks at (`refreshInterval`, at least 1 s); a `step`
 below 1 slows an animation down (0.5 = every second tick). `animate = false`
 in the config, or `GARNISH_ANIMATE=0` in the environment, freezes every
 animation at frame 0 and cuts a ticker line with `…` instead of leaving it
-frozen mid-scroll; use it for screen readers and recordings.
+frozen mid-scroll; use it for screen readers and recordings. Claude Code's
+own *Reduce motion* setting (`prefersReducedMotion` in its settings files)
+freezes garnish the same way as long as the config leaves `animate` unset,
+so the two stay in step; an explicit `animate` wins over the setting, and
+`garnish config show` prints the value in effect.
 
 ## 7. Troubleshooting
 
@@ -218,6 +228,15 @@ frozen mid-scroll; use it for screen readers and recordings.
   `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
   refresh failed. `garnish doctor` shows the error.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
+- **The line looks dimmer than `preview`** → Claude Code draws every
+  status line row dim and folds that into every coloured piece of it;
+  nothing a status line command prints can undo it, so `preview` shows the
+  same colours at full intensity. If the line reads too faint, pick
+  brighter roles under `[colors]` or a theme with more contrast.
+- **Nothing moves** → `garnish doctor` says whether `refreshInterval` is
+  set (Claude Code re-runs the line every second only with `refreshInterval:
+  1`) and whether Claude Code's *Reduce motion* setting is freezing the
+  animations; `animate = true` in the config overrides the setting.
 - **Right edge cut with `…`** → Claude Code's status line box is 4 cells
   narrower than the terminal, plus 2 cells per unit of `statusLine.padding`.
   garnish subtracts the 4 on its own; if `statusLine.padding` is set in

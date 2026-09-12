@@ -5,6 +5,30 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Harness fidelity** (PLAN Phase 19)
+
+- `animate` left unset now follows Claude Code's *Reduce motion* setting
+  (`prefersReducedMotion`, read from the same settings files as the
+  autocompact keys); an explicit `animate` wins over it and
+  `GARNISH_ANIMATE=0` over both. `config init` writes the key as a comment
+  and `config show` prints the value in effect.
+- `garnish install` and `config init --force` never rewrite a
+  `settings.json` or `garnish.toml` that does not parse: one line names the
+  file and the problem and nothing is written. `config init --force` keeps
+  a backup of the file it replaces, as `install` does.
+- `garnish doctor` lists Claude Code's settings files for the current
+  directory (managed, local, project, user) and whether each parses, then
+  the keys that change what the line can show, resolved as Claude Code
+  resolves them: it suggests `refreshInterval = 1` when the config shows a
+  clock, a timer or an animation and `hideVimModeIndicator = true` when the
+  `vim` module is on, and says when `disableAllHooks` or
+  `prefersReducedMotion` is in effect.
+- Verified against Claude Code 2.1.270 (and 2.1.261): every status line
+  row is drawn dim by Claude Code and nothing the command prints can undo
+  it, so the planned per-row reset was dropped and the guide explains the
+  difference from `preview`. The 13 000-token autocompact buffer is
+  unchanged.
+
 **Fixes**
 
 - `cost.decimals` is capped at 8: the money formatter allocated one byte

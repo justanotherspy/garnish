@@ -325,9 +325,13 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - Fixtures: `tests/fixtures/payloads/*.json`, `tests/fixtures/configs/*.toml`;
   golden renders in `tests/golden/`. Payload goldens (`tests/golden.rs`) vary
   fixture × preset × icon set; config goldens (`tests/config_golden.rs`) render
-  one config file per `# fixture/columns/now/icons/env` header, one golden per
+  one config file per `# fixture/columns/now/icons/color/env` header, one golden per
   `# now:` instant, so a clock-driven key is pinned at two instants and a
-  test hook can be set per file. Tests that touch the cache dir or PATH
+  test hook can be set per file (`$ROOT` in a `# env:` value is the
+  repository root, which is how `HOME` points at a settings fixture under
+  `tests/fixtures/settings/`); `# color: always` renders one with colour
+  on (the row-start guards of both suites strip escape sequences first;
+  `colour-on` is the one such golden). Tests that touch the cache dir or PATH
   shims are named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
   serially (`.config/nextest.toml`). A test that must kill a process group
   (the tick's, to prove the worker outlives it) spawns the tick with
@@ -343,7 +347,7 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `bench/run.sh` enforces it. If a change costs more than 0.2 ms, justify it in
   the commit message.
 
-## Claude Code facts we depend on (verified 2026-09-05, v2.1.261)
+## Claude Code facts we depend on (verified 2026-09-05 on 2.1.261, re-read 2026-09-12 on 2.1.270)
 
 - Payload fields and absence rules: see `SPEC.md` § Payload. `rate_limits`
   present ⇒ subscription; absent ⇒ show `cost`.
@@ -351,7 +355,33 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   debounces at 300 ms; `refreshInterval` minimum is 1 s.
 - Autocompact fires at `effective_window − 13_000` tokens
   (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers it). Constant observed in the
-  2.1.260 binary; configurable as `modules.context.compact_buffer_tokens`.
+  2.1.260 binary and unchanged in 2.1.261 and 2.1.270 (`let r=e-13000` in
+  the threshold function next to `testPctOverride`); configurable as
+  `modules.context.compact_buffer_tokens`.
+- **Every row is drawn dim, and nothing garnish prints can undo it**
+  (2.1.261 and 2.1.270). The status line component renders each row as
+  `<Text dimColor wrap="truncate">` around a child that parses the row's
+  escape sequences into per-piece style props and re-emits them; the Ink
+  fork merges the parent's `dim` into every piece (the text-tree walk
+  `h=n.textStyles?{...s,...n.textStyles}:s`) and a piece can only add
+  styles, so a reset (`ESC[0m`) is parsed away. `preview` shows the
+  colours at full intensity, the screen at reduced intensity; the guide
+  says so and SPEC § 2.1 records why the FUTURE-SPEC A1 prefix was
+  dropped. To re-verify after an upgrade: `grep -a -o` the binary (a Bun
+  executable holding minified JS) for `dimColor:!0,wrap:"truncate",children:e(`
+  next to the function that splits the stdout on newlines and carries the
+  previous rows' escape sequences onto the next row; follow its child to a
+  `memo` over a function destructuring `children`, `dimColor`, `italic`,
+  `wrap` that feeds the text to a tokenizer (`.feed(`) and collects
+  `{text, props}` pieces; then find the `textStyles` merge in the Ink
+  core. The 2.1.261 binary is the `@anthropic-ai/claude-code-linux-x64`
+  npm package of that version (`npm pack`), handy for a before/after.
+- `LINES` is the full terminal height (2.1.270: the hook runner copies
+  `process.stdout.rows` next to `columns`), and the status line component
+  draws every row of the output with no cap of its own (`lines.map(…)`
+  into a column) inside a footer column with `flexShrink: 1`. What the
+  screen does when the status line is taller than the terminal allows is
+  unverified (PLAN § Backlog).
 - `COLUMNS`/`LINES` are `process.stdout.columns`/`rows` (the full terminal);
   OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
   ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is
@@ -406,5 +436,13 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   rejects it for cached ones.
 - GC compares file mtimes with the wall clock, not `GARNISH_NOW`.
 - Docs and goldens render with `Clock::fixed()`: no git discovery, no
-  settings env, no cache. Tests that run the binary must set
-  `GARNISH_CACHE_DIR` and `GARNISH_NO_SPAWN` and clear `CLAUDE_*`/`DISABLE_*`.
+  settings env, no settings files (`Clock.settings = false`;
+  `prefersReducedMotion` is read only through `Clock::from_env`, and only
+  when the config leaves `animate` unset with the session switch on), no
+  cache. Tests that run the binary must set `GARNISH_CACHE_DIR` and
+  `GARNISH_NO_SPAWN` and clear `CLAUDE_*`/`DISABLE_*`.
+- Every file a command rewrites goes through `install::replace_file` (a
+  never-clobbered backup next to the target, a temp file in the same
+  directory, `rename`), and a file that does not parse is refused before
+  that (`install::merge` for JSON, `config::syntax_error` for TOML) with
+  one stderr line and `Quiet` (SPEC § 5).
