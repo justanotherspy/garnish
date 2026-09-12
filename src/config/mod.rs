@@ -1253,6 +1253,11 @@ fn parse_overrides(
                 None => err(key, "expected a non-negative integer (seconds)".into()),
             },
             "label" | "prefix" | "suffix" => match value.as_str() {
+                // Row text like `text`/`gap`: bounded the same way (these are
+                // common keys, so the cap cannot sit on a schema option).
+                Some(s) if s.chars().count() > MAX_TEXT_CHARS => {
+                    err(key, format!("must be at most {MAX_TEXT_CHARS} characters"));
+                }
                 Some(s) => {
                     let s = crate::ansi::plain_text(s);
                     match key.as_str() {
@@ -2076,6 +2081,17 @@ x = 1
         assert_eq!(errs[0].path, "modules.text.a.text");
         assert!(errs[0].message.contains("at most 4096 characters"), "{errs:?}");
         assert_eq!(c.texts.get("a").unwrap().str("gap").chars().count(), MAX_TEXT_CHARS);
+        // The common row strings are bounded the same way.
+        let long = format!(
+            "[modules.model]\nlabel = \"{}\"\nprefix = \"{}\"\nsuffix = \"ok\"\n",
+            "x".repeat(MAX_TEXT_CHARS + 1),
+            "y".repeat(MAX_TEXT_CHARS)
+        );
+        let (c, errs) = parse(&long, &crate::modules::SCHEMAS);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["modules.model.label"], "{errs:?}");
+        let model = c.modules.get("model").unwrap();
+        assert_eq!((model.label.as_str(), model.prefix.chars().count()), ("", MAX_TEXT_CHARS));
     }
 
     #[test]

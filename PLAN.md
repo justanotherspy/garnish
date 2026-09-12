@@ -641,8 +641,9 @@ and user feedback. Pick from here when no phase is in progress.
   the plan and spec still left open to be built. Every unchecked codebase
   item closed: the Phase 4 killed-tick test (the tick as a process-group
   leader, the group killed with the `kill` binary after the spawn; dash's
-  builtin `kill` accepts neither `--` nor a negative pid, which made the
-  first cut pass with the worker in the tick's group), the Phase 5 behind /
+  builtin `kill` accepts neither `--` nor a negative pid and fails with
+  `Illegal number`, which the first cut's unchecked `sh -c` hid, so it
+  passed with the worker in the tick's group), the Phase 5 behind /
   diverged / no-upstream tests against a second clone and a successful
   `fetch_interval` end to end, `Segment.text` private behind sanitising
   setters, `OptSpec::max` replacing `config::bounded`'s key-name match (and
@@ -660,5 +661,15 @@ and user feedback. Pick from here when no phase is in progress.
   read by name), the frame-style / one-per-line / all-on-one-line matrix,
   and `preview <dir>`. `cache_tick_killed_midway_does_not_corrupt_entries`
   was renamed to what it tests (leftover temp and truncated entries).
+  Review of the session: the scan checked only the last literal of
+  `icon(cfg, "icon", "color")` (now every direct literal argument, and keys
+  are checked against the schemas defined in the same file rather than all
+  of them); `Segment::push_str` allocated per bar cell (plain text appends
+  directly now); `label`/`prefix`/`suffix` had no length cap (now
+  `MAX_TEXT_CHARS`, like `ticker_gap`); the kill test read a locale-
+  dependent error (`LC_ALL=C`), the shim did not quote git's path, and the
+  `preview <dir>` test pinned the heading's escape codes under `NO_COLOR`
+  (it compares the plain heading; whether the heading should honour
+  `--color never` is Daniel's call, SPEC § 7 does not say).
   Still open, by design: the website pointer, the first release through the
   pipeline (repository state), and the optional headroom.

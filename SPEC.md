@@ -574,14 +574,15 @@ without an error report.
   a `\n` in a session name added a row, an escape passed `--color never`,
   and a cut could split the sequence.)
 - **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`) above 1024, a
-  row string (`text`, `gap`, `ticker_gap`) above 4096 characters or
+  row string (`text`, `gap`, `ticker_gap`, `label`, `prefix`, `suffix`) above 4096 characters or
   `cost.decimals` above 8 (the money formatter allocates one byte per place)
   is reported like any bad value and the default stands in; the renderers
   clamp again, and the effective width never exceeds 4096 cells whatever
   `COLUMNS` says. Each cap is the option's `max` in its module schema, so
   the generated reference prints it in the type column (`integer ≤ 1024`,
-  `string ≤ 4096 chars`); `ticker_gap` is a top-level key and is checked by
-  hand. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
+  `string ≤ 4096 chars`); `ticker_gap` (top-level) and `label`/`prefix`/
+  `suffix` (common to every module) are checked by hand against the same
+  constant. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
   is no default config or settings location: `install`, `config init`,
   `config path` and `skills install` refuse with a one-line note naming the
   flag to pass, rather than writing into the current directory. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
@@ -675,7 +676,9 @@ per-module render cost.
   math; ANSI width/truncation; frame assembly; preset resolution order;
   schema completeness (a scan of `src/modules/*.rs` checks that every
   icon, colour and option key the render code reads by name exists in a
-  schema, since `ModuleCfg` answers an unknown key silently).
+  schema of a module that file defines, since `ModuleCfg` answers an
+  unknown key silently; files hold several modules, so a key of one read
+  by a sibling in the same file is not caught).
 - **Integration** (real binary): payload fixtures (the files under
   `tests/fixtures/payloads/`: subscription, API key, pre-first-response
   nulls, no git, worktree session, git worktree, the PR states and an MR,

@@ -441,14 +441,18 @@ mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
 
-    /// The string literal that ends the call starting at `open` (the byte
-    /// after the `(`), or `None` when the last argument is not a literal.
-    fn last_literal_argument(src: &str, open: usize) -> Option<String> {
+    /// The string literals that are direct arguments of the call starting at
+    /// `open` (the byte after the `(`; literals inside a nested call such as
+    /// `format!("…")` are skipped), and whether the last argument is one of
+    /// them.
+    fn literal_arguments(src: &str, open: usize) -> (Vec<String>, bool) {
         let mut depth = 1_usize;
         let mut in_str = false;
-        let mut last = None;
+        let mut literals = Vec::new();
+        let mut last_is_literal = false;
         let mut current = String::new();
-        let mut chars = src.get(open..)?.chars();
+        let Some(rest) = src.get(open..) else { return (literals, false) };
+        let mut chars = rest.chars();
         while let Some(c) = chars.next() {
             if in_str {
                 match c {
@@ -457,7 +461,11 @@ mod tests {
                     }
                     '"' => {
                         in_str = false;
-                        last = Some(std::mem::take(&mut current));
+                        if depth == 1 {
+                            literals.push(std::mem::take(&mut current));
+                            last_is_literal = true;
+                        }
+                        current.clear();
                     }
                     _ => current.push(c),
                 }
@@ -469,37 +477,44 @@ mod tests {
                 ')' | ']' | '}' => {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
-                        return last;
+                        return (literals, last_is_literal);
                     }
                 }
-                // An identifier or number after the literal means the
-                // literal was not the last argument (`"x", y)`).
-                c if c.is_alphanumeric() || c == '_' || c == '.' => last = None,
+                // An identifier or number after a literal means the literal
+                // was not the last argument (`"x", y)`).
+                c if depth == 1 && (c.is_alphanumeric() || c == '_' || c == '.') => {
+                    last_is_literal = false;
+                }
                 _ => {}
             }
         }
-        None
+        (literals, false)
     }
 
     /// SPEC § 9 schema completeness: every icon, colour and option key the
     /// render code reads by name (`cfg.icon("…")`, `seg(cfg, …, "…")`,
-    /// `icon(cfg, "…")`, `cfg.str("…")` and the other typed readers) exists
-    /// in some module schema. `ModuleCfg` answers an unknown key with an
-    /// empty icon or the default colour, so a typo would render silently;
-    /// this scan of the module sources is what catches it.
+    /// `icon(cfg, "…", "…")`, `cfg.str("…")` and the other typed readers)
+    /// exists in a schema of a module defined in that file (a file that
+    /// defines none, like this one, is checked against every schema).
+    /// `ModuleCfg` answers an unknown key with an empty icon or the default
+    /// colour, so a typo would render silently; this scan of the module
+    /// sources is what catches it.
     #[test]
     fn every_key_the_modules_read_is_in_a_schema() {
-        let known: std::collections::BTreeSet<&str> = SCHEMAS
-            .iter()
-            .chain(std::iter::once(&*text::SCHEMA))
-            .flat_map(|s| {
-                s.opts
-                    .iter()
-                    .map(|o| o.key)
-                    .chain(s.icons.iter().map(|i| i.key))
-                    .chain(s.colors.iter().map(|c| c.key))
-            })
-            .collect();
+        let all: Vec<&ModuleSchema> =
+            SCHEMAS.iter().chain(std::iter::once(&*text::SCHEMA)).collect();
+        let keys_of = |schemas: &[&ModuleSchema]| -> std::collections::BTreeSet<&str> {
+            schemas
+                .iter()
+                .flat_map(|s| {
+                    s.opts
+                        .iter()
+                        .map(|o| o.key)
+                        .chain(s.icons.iter().map(|i| i.key))
+                        .chain(s.colors.iter().map(|c| c.key))
+                })
+                .collect()
+        };
         let readers = [
             ".icon(\"",
             ".color(\"",
@@ -522,8 +537,20 @@ mod tests {
             if path.extension().is_none_or(|e| e != "rs") {
                 continue;
             }
+            // Test modules render nothing (and this test quotes the patterns
+            // it searches for).
             let src = std::fs::read_to_string(&path).unwrap();
+            let src = src.split("#[cfg(test)]").next().unwrap().to_owned();
             let file = path.file_name().unwrap().to_string_lossy().into_owned();
+            // The schemas a file of module implementations defines: those
+            // whose id it quotes. A helper file (this one, `util.rs`) reads
+            // on behalf of any module.
+            let here: Vec<&ModuleSchema> = if src.contains("impl Module for") {
+                all.iter().copied().filter(|s| src.contains(&format!("\"{}\"", s.id))).collect()
+            } else {
+                all.clone()
+            };
+            let known = keys_of(&here);
             // A read quoted in a comment (this test's own doc, say) is not one.
             let in_comment = |at: usize| {
                 let line_start = src.get(..at).and_then(|s| s.rfind('\n')).map_or(0, |i| i + 1);
@@ -545,18 +572,40 @@ mod tests {
                     check(key, at);
                 }
             }
-            // `seg(cfg, text, "color")` and `icon(cfg, "icon")`: the key is
-            // the last argument.
-            for call in ["seg(", " icon(", "(icon("] {
+            // `seg(cfg, text, "color")`: the key is the last argument, when
+            // that is a literal (`seg(cfg, x, key)` passes a variable).
+            for (at, _) in src.match_indices("seg(") {
+                let (literals, last_is_literal) = literal_arguments(&src, at + "seg(".len());
+                if last_is_literal && let Some(key) = literals.last() {
+                    check(key, at);
+                }
+            }
+            // `icon(cfg, "icon", "color")`: both literals are keys.
+            for call in [" icon(", "(icon("] {
                 for (at, _) in src.match_indices(call) {
-                    if let Some(key) = last_literal_argument(&src, at + call.len()) {
+                    for key in literal_arguments(&src, at + call.len()).0 {
                         check(&key, at);
                     }
                 }
             }
         }
         assert!(unknown.is_empty(), "keys read but not in any schema: {unknown:#?}");
-        assert!(seen > 150, "the scan found only {seen} reads; are the patterns stale?");
+        // A count well under what the sources hold today (≈ 200) means a
+        // reader pattern went stale, not that the modules read less.
+        assert!(seen > 180, "the scan found only {seen} reads; are the patterns stale?");
+    }
+
+    #[test]
+    fn literal_arguments_follow_nesting_and_the_last_argument() {
+        let src = "seg(cfg, format!(\"{} \", x), \"key\")";
+        assert_eq!(literal_arguments(src, 4), (vec!["key".to_owned()], true));
+        let src = "icon(cfg, \"branch\", \"icon\")";
+        assert_eq!(literal_arguments(src, 5), (vec!["branch".to_owned(), "icon".to_owned()], true));
+        assert_eq!(literal_arguments("seg(cfg, \"x\", key)", 4), (vec!["x".to_owned()], false));
+        assert!(literal_arguments("seg(\n    cfg,\n    text,\n    \"k\",\n)", 4).1);
+        // An escape is skipped whole; keys never carry one, the scan only
+        // has to get past it.
+        assert_eq!(literal_arguments("f(\"a\\\"b\")", 2).0, vec!["ab"]);
     }
 
     /// Why a glyph is unsafe for a built-in icon set, if it is.

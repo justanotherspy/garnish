@@ -449,7 +449,9 @@ fn real_git() -> PathBuf {
         .unwrap()
         .split(':')
         .map(|d| Path::new(d).join("git"))
-        .find(|p| p.is_file())
+        .find(|p| {
+            p.is_file() && std::fs::metadata(p).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+        })
         .expect("git on PATH")
 }
 
@@ -469,7 +471,7 @@ fn spawn_worker_outlives_the_ticks_process_group() {
     let shim = env.work.parent().unwrap().join("shim");
     std::fs::create_dir_all(&shim).unwrap();
     let fake = shim.join("git");
-    std::fs::write(&fake, format!("#!/bin/sh\nsleep 1\nexec {} \"$@\"\n", real_git().display()))
+    std::fs::write(&fake, format!("#!/bin/sh\nsleep 1\nexec '{}' \"$@\"\n", real_git().display()))
         .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
@@ -499,7 +501,11 @@ fn spawn_worker_outlives_the_ticks_process_group() {
     // everything left in the tick's process group, as a cancelled script's
     // process tree would be. A worker in that group dies here. (The `kill`
     // binary: dash's builtin takes no `--` and no negative pid.)
-    let killed = Command::new("kill").args(["-KILL", "--", &format!("-{pgid}")]).output().unwrap();
+    let killed = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{pgid}")])
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&killed.stderr);
     assert!(
         killed.status.success() || stderr.contains("No such process"),

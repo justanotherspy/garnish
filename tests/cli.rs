@@ -282,8 +282,9 @@ fn preview_of_a_directory_renders_every_fixture_in_order() {
         .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    let headings: Vec<&str> =
-        out.lines().filter_map(|l| l.strip_prefix("\x1b[2m── ")?.strip_suffix("\x1b[0m")).collect();
+    // The heading is dim; compare it without the styling.
+    let plain = out.replace("\x1b[2m", "").replace("\x1b[0m", "");
+    let headings: Vec<&str> = plain.lines().filter_map(|l| l.strip_prefix("── ")).collect();
     assert_eq!(headings, names, "{out}");
     assert!(!out.contains("⚠ garnish"), "{out}");
 }

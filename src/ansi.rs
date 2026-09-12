@@ -258,9 +258,14 @@ impl Segment {
         &self.text
     }
 
-    /// Append text, sanitised like [`Segment::plain`].
+    /// Append text, sanitised like [`Segment::plain`] (no allocation when
+    /// it is already plain: the bar builder appends a glyph per cell).
     pub fn push_str(&mut self, text: &str) {
-        self.text.push_str(&plain_text(text));
+        if text.chars().any(|c| c.is_control() || is_format_char(c)) {
+            self.text.push_str(&plain_text(text));
+        } else {
+            self.text.push_str(text);
+        }
     }
 
     /// Display width of the text.

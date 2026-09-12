@@ -170,7 +170,8 @@ impl OptSpec {
     }
 
     /// Why `value` exceeds [`OptSpec::max`], if it does. Anything else
-    /// passes, a negative integer included: the reader treats it as 0.
+    /// passes (a negative integer never gets here: the coercion to
+    /// [`Kind::Int`] rejects it first).
     #[must_use]
     pub fn over_max(&self, value: &Value) -> Option<String> {
         let max = self.max?;
