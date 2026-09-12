@@ -1031,6 +1031,58 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   in the builder is hand-coded per option: a unit test walks every
   `OptSpec` kind and every top-level key and asserts an editor exists for
   it, so an option added to a schema appears in `setup` the next build.
+- **Selecting in the preview.** The preview is not a picture: every
+  module, separator, cap and rule in it can be selected, with the mouse
+  or the keyboard, and the selection is highlighted in place (inverse
+  video over the module's cells and a marker on its chip in the line
+  list). The renderer makes this possible with a **placement map**: an
+  optional output of `render_lines_at` that lists, for every row, the cell
+  range each module, separator and frame element occupies, computed from
+  the same segment lists the painter emits (a unit test checks the ranges
+  tile each row exactly and match the painted widths, grid columns and
+  the ticker included; a scrolled module reports the cells its window
+  shows). A click (crossterm mouse capture, on while `setup` runs and off
+  when it exits, with the wheel scrolling lists) or `Tab`/`Shift-Tab`/the
+  arrows move the selection; `Enter` or a click on the selected item
+  opens its editor as an **overlay panel** beside it; clicking the rule
+  opens the frame screen, a separator its picker, a cap the frame style
+  list. Everything the mouse does has a key, since tmux and some SSH
+  sessions swallow mouse events.
+- **Editing by ticking.** The overlay lists every option of the selected
+  module as a form: booleans as checkboxes (`[x] hide_when_empty`),
+  `preset` and every enum as a radio list, integers as a stepper showing
+  the `max`, colours as a swatch list of the theme's roles plus *custom*
+  (a hex or 256 index, validated as `config check` would), and strings
+  and icons as the pickers below. Every change re-renders the preview at
+  once; `Esc` closes the panel, and the module's chip shows a dot while it
+  carries overrides. The form is generated from `ModuleSchema` like the
+  rest of the builder, so a new option is a new row.
+- **Freeform values come with suggestions.** A string option (`label`,
+  `prefix`, `suffix`, `text`, `gap`, a line's `separator`, `ticker_gap`,
+  the frame's `fill_char` and caps) opens a picker whose first entries are
+  the distinct values the built-in presets, frame styles and the gallery
+  presets already use (gathered from `gallery::PRESETS` and the frame
+  tables at start-up, deduplicated, each drawn as it would render), then
+  *custom…*, which opens an input line that is reduced to plain text and
+  width-checked the way the config parser does (§ 5). So a separator
+  picker offers ` │ `, ` ┃ `, `  `, ` · `, the powerline glyphs, and
+  whatever a preset author found, before asking anyone to type one.
+- **Glyph picker.** An icon key opens a picker with one row per icon set
+  (the nerd, unicode, emoji and ascii glyphs for that key) followed by
+  the key's **suggested alternatives**, a short list per key declared in
+  the schema (`IconOpt.suggestions`, a few per set: a robot, a brain and
+  a sparkle for `model.icon`, three branch shapes for `branch.icon`, …),
+  then *custom…*. Every candidate is drawn in the person's own terminal
+  the way `doctor`'s glyph grid draws it, padded to two cells and followed
+  by `|` and garnish's cell count, so a glyph the font draws wider or
+  missing shows at once. Choosing one writes the per-key override
+  (`[modules.<id>.icons] <key> = "…"`) that the config already supports,
+  so sets mix freely: `icons = "nerd"` as the base with an emoji clock and
+  a unicode branch is three lines of TOML, and `config show` round-trips
+  it. The suggestions pass the same unit test as the sets (one or two
+  cells by every table, no East Asian Ambiguous character, no variation
+  selector), and the generated module pages list them under the icons
+  table as *also try*.
 - **Preview.** Rendered in-process through `render_lines_at`, exactly as
   `garnish preview` renders a fixture: the same clock (live, so animations
   move; `GARNISH_ANIMATE=0` freezes them as everywhere), no git discovery,
