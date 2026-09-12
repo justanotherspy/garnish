@@ -249,6 +249,83 @@ fn config_show_prints_the_durations_a_ticker_implies() {
     assert!(session.contains("durations = \"inherit\""), "{session}");
 }
 
+/// SPEC § 5: a `settings.json` or `garnish.toml` that does not parse is
+/// never rewritten by `install` or `config init --force`; the command names
+/// the file and the problem on one line and exits 1 without a report. A
+/// file that parses is replaced with a never-clobbered backup next to it.
+#[test]
+fn unparsable_files_are_never_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let broken_json = "{\"statusLine\": {\"type\": \"command\",\n";
+    std::fs::write(&settings, broken_json).unwrap();
+    for args in [&["install", "--absolute"][..], &["install", "--absolute", "--dry-run"]] {
+        let (out, err, ok) = run(args, home, &[]);
+        assert!(!ok, "{args:?}: {out}");
+        assert_eq!(err.lines().count(), 1, "{args:?}: {err}");
+        assert!(err.contains("settings.json") && err.contains("JSON"), "{args:?}: {err}");
+        assert!(!err.contains("Location:") && !err.contains("Error:"), "{args:?}: {err}");
+        assert!(out.is_empty(), "{args:?}: {out}");
+    }
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), broken_json, "untouched");
+    assert!(!home.join(".config/garnish/garnish.toml").exists(), "nothing else is written");
+    let entries = |dir: &Path| -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect()
+    };
+    assert_eq!(entries(settings.parent().unwrap()), vec!["settings.json"], "no backup, no temp");
+    std::fs::write(&settings, "[1, 2]\n").unwrap();
+    let (_, err, ok) = run(&["install", "--absolute"], home, &[]);
+    assert!(!ok && err.contains("object"), "{err}");
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), "[1, 2]\n");
+
+    // A TOML syntax error is refused with its line; a bad value still
+    // parses, so the file is replaced and kept as a backup.
+    let cfg = home.join(".config").join("garnish").join("garnish.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, "preset = \"full\"\n[frame\n").unwrap();
+    let (out, err, ok) = run(&["config", "init", "--force"], home, &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("garnish.toml") && err.contains("line 2"), "{err}");
+    assert!(!err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "preset = \"full\"\n[frame\n");
+    assert_eq!(entries(cfg.parent().unwrap()), vec!["garnish.toml"]);
+    std::fs::write(&cfg, "theme = \"nope\"\n").unwrap();
+    let (out, _, ok) = run(&["config", "init", "--force"], home, &[]);
+    assert!(ok && out.starts_with("wrote ") && out.contains("(backup: "), "{out}");
+    let names = entries(cfg.parent().unwrap());
+    let backups: Vec<&String> =
+        names.iter().filter(|n| n.starts_with("garnish.toml.bak-")).collect();
+    assert_eq!(backups.len(), 1, "{names:?}");
+    assert_eq!(
+        std::fs::read_to_string(cfg.parent().unwrap().join(backups[0])).unwrap(),
+        "theme = \"nope\"\n"
+    );
+    assert!(std::fs::read_to_string(&cfg).unwrap().contains("[modules.context]"));
+    assert!(names.iter().all(|n| !n.contains(".tmp.")), "{names:?}");
+    // A gallery preset goes through the same probe and backup.
+    let (out, _, ok) = run(&["config", "init", "--force", "--preset", "minimal-clean"], home, &[]);
+    assert!(ok && out.contains("(backup: "), "{out}");
+    assert_eq!(
+        entries(cfg.parent().unwrap())
+            .iter()
+            .filter(|n| n.starts_with("garnish.toml.bak-"))
+            .count(),
+        2
+    );
+    // A first write needs no backup and says so by omission.
+    let fresh = home.join("fresh").join("garnish.toml");
+    let (out, _, ok) = run(&["--config", fresh.to_str().unwrap(), "config", "init"], home, &[]);
+    assert!(ok && out.trim_end().ends_with("fresh/garnish.toml"), "{out}");
+    assert_eq!(entries(fresh.parent().unwrap()), vec!["garnish.toml"]);
+}
+
 /// SPEC § 4.2: `config show` prints the animation switch in effect, which
 /// with `animate` unset follows Claude Code's `prefersReducedMotion` in the
 /// settings chain of the current directory and the home; an explicit key

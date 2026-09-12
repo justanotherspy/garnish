@@ -102,7 +102,7 @@ pub fn read_existing(path: &Path) -> Result<Option<String>, String> {
 ///
 /// A symlinked settings file is updated through the link (the target is
 /// rewritten, the link stays), the new file keeps the old file's permissions,
-/// and backups never overwrite each other.
+/// and backups never overwrite each other ([`replace_file`]).
 ///
 /// # Errors
 /// Propagates I/O errors and invalid existing JSON.
@@ -112,27 +112,55 @@ pub fn apply(plan: &Plan) -> Result<Outcome, String> {
     if existing.as_deref() == Some(merged.as_str()) {
         return Ok(Outcome { backup: None, changed: false });
     }
-    let target = if existing.is_some() {
-        std::fs::canonicalize(&plan.settings).unwrap_or_else(|_| plan.settings.clone())
-    } else {
-        plan.settings.clone()
-    };
-    let backup = if existing.is_some() { Some(write_backup(&target)?) } else { None };
-    if let Some(dir) = target.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    }
-    let tmp = target.with_extension(format!("json.tmp.{}", std::process::id()));
-    std::fs::write(&tmp, &merged).map_err(|e| format!("writing {}: {e}", tmp.display()))?;
-    if let Ok(meta) = std::fs::metadata(&target) {
-        let _ = std::fs::set_permissions(&tmp, meta.permissions());
-    }
-    std::fs::rename(&tmp, &target).map_err(|e| format!("replacing {}: {e}", target.display()))?;
+    let backup = replace_file(&plan.settings, &merged, existing.is_some())?;
     Ok(Outcome { backup, changed: true })
 }
 
-/// Copy `target` to `settings.json.bak-<epoch>[-n]`, never clobbering an
-/// existing backup. Uses the wall clock (not `GARNISH_NOW`).
-fn write_backup(target: &Path) -> Result<PathBuf, String> {
+/// Write `contents` over `target` the way every garnish command edits a
+/// file it may not lose (SPEC § 5).
+///
+/// Through a symlink (the target is rewritten, the link stays), keeping the
+/// old file's permissions, after a backup next to it that never overwrites
+/// another, via a temp file in the same directory and a rename, so no
+/// reader ever sees a partial file. `existed` says whether there is a file
+/// to back up; the backup's path comes back when one was written.
+///
+/// # Errors
+/// Any I/O failure, naming the file it hit.
+pub fn replace_file(
+    target: &Path,
+    contents: &str,
+    existed: bool,
+) -> Result<Option<PathBuf>, String> {
+    let target = if existed {
+        std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf())
+    } else {
+        target.to_path_buf()
+    };
+    let backup = if existed { Some(write_backup(&target)?) } else { None };
+    if let Some(dir) = target.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    }
+    let name =
+        target.file_name().map_or_else(|| "file".to_owned(), |n| n.to_string_lossy().into_owned());
+    let tmp = target.with_file_name(format!("{name}.tmp.{}", std::process::id()));
+    std::fs::write(&tmp, contents).map_err(|e| format!("writing {}: {e}", tmp.display()))?;
+    if let Ok(meta) = std::fs::metadata(&target) {
+        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    }
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("replacing {}: {e}", target.display())
+    })?;
+    Ok(backup)
+}
+
+/// Copy `target` to `<name>.bak-<epoch>[-n]` next to it, never clobbering
+/// an existing backup. Uses the wall clock (not `GARNISH_NOW`).
+///
+/// # Errors
+/// When the file cannot be read or the copy cannot be written.
+pub fn write_backup(target: &Path) -> Result<PathBuf, String> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -271,6 +299,36 @@ mod tests {
         // read_existing distinguishes missing from unreadable
         assert_eq!(read_existing(&dir.path().join("nope.json")).unwrap(), None);
         assert!(read_existing(dir.path()).is_err());
+    }
+
+    /// `replace_file` is the one way a file is rewritten (SPEC § 5): a new
+    /// file gets its directory and no backup, an existing one a backup with
+    /// its permissions, and no temp file survives either way.
+    #[test]
+    fn replace_file_creates_or_backs_up_and_leaves_no_temp_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("deep").join("garnish.toml");
+        assert_eq!(replace_file(&target, "a = 1\n", false).unwrap(), None);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "a = 1\n");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let backup = replace_file(&target, "a = 2\n", true).unwrap().unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "a = 2\n");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "a = 1\n");
+        assert!(backup.file_name().unwrap().to_string_lossy().starts_with("garnish.toml.bak-"));
+        assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+        let names: Vec<String> = std::fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().all(|n| !n.contains(".tmp.")), "{names:?}");
+        assert_eq!(names.len(), 2, "{names:?}");
+        // A directory in the way is an error naming it, not a panic.
+        let blocked = dir.path().join("blocked");
+        std::fs::create_dir_all(blocked.join("garnish.toml")).unwrap();
+        let err = replace_file(&blocked.join("garnish.toml"), "x", false).unwrap_err();
+        assert!(err.contains("garnish.toml"), "{err}");
     }
 
     #[test]

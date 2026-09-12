@@ -790,6 +790,21 @@ fn line_of(text: &str, byte: usize) -> usize {
     text.bytes().take(byte).filter(|&b| b == b'\n').count().saturating_add(1)
 }
 
+/// The TOML syntax error of `text` as `line N: message`, when it has one.
+///
+/// A syntax error is the one problem that makes a file unreadable rather
+/// than fixable per key (SPEC § 5), and so the one a writing command must
+/// refuse to paper over.
+#[must_use]
+pub fn syntax_error(text: &str) -> Option<String> {
+    toml::from_str::<toml::Table>(text).err().map(|e| {
+        e.span().map_or_else(
+            || e.message().to_owned(),
+            |s| format!("line {}: {}", line_of(text, s.start), e.message()),
+        )
+    })
+}
+
 impl Config {
     /// Built-in defaults.
     #[must_use]

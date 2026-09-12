@@ -432,7 +432,18 @@ fn install(
         eprintln!("warning: `garnish` is not on PATH; run `make install` first or use --absolute");
     }
     let existing = inst::read_existing(&plan.settings).map_err(|e| eyre!(e))?;
-    let merged = inst::merge(existing.as_deref().unwrap_or(""), &plan).map_err(|e| eyre!(e))?;
+    let merged = match inst::merge(existing.as_deref().unwrap_or(""), &plan) {
+        Ok(merged) => merged,
+        Err(problem) => {
+            // A settings file that does not parse is never rewritten (SPEC
+            // § 5): the file and the problem on one line, exit 1, no report.
+            eprintln!(
+                "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+                plan.settings.display()
+            );
+            return Err(Quiet.into());
+        }
+    };
     if dry_run {
         writeln!(stdout, "would write {}:", plan.settings.display())?;
         stdout.write_all(merged.as_bytes())?;
@@ -495,13 +506,10 @@ fn install_default_config(
     } else if dry_run {
         writeln!(stdout, "would write a default config to {}{seeded}", target.display())?;
     } else {
-        if let Some(dir) = target.parent() {
-            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        }
         let seed = config_padding.map_or_else(String::new, |p| format!("padding = {p}\n"));
         let (cfg, _) = config::parse(&seed, &SCHEMAS);
-        std::fs::write(&target, crate::docs::config_toml(&cfg, true))
-            .with_context(|| format!("writing {}", target.display()))?;
+        crate::install::replace_file(&target, &crate::docs::config_toml(&cfg, true), false)
+            .map_err(|e| eyre!(e))?;
         writeln!(stdout, "wrote default config to {}{seeded}", target.display())?;
     }
     Ok(())
@@ -637,17 +645,33 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             let Some(target) = config_target(config_path) else {
                 return Err(no_home("--config <FILE>", "the config goes"));
             };
-            if target.exists() && !force {
+            let existed = target.exists();
+            if existed && !force {
                 eprintln!("{} exists; pass --force to overwrite", target.display());
                 return Err(Quiet.into());
             }
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("creating {}", dir.display()))?;
+            if existed {
+                // A file that does not parse is never rewritten (SPEC § 5):
+                // the only way past is fixing or moving it by hand. A file
+                // with bad values parses, and is replaced under its backup.
+                let current = std::fs::read_to_string(&target)
+                    .with_context(|| format!("reading {}", target.display()))?;
+                if let Some(problem) = config::syntax_error(&current) {
+                    eprintln!(
+                        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+                        target.display()
+                    );
+                    return Err(Quiet.into());
+                }
             }
-            std::fs::write(&target, text)
-                .with_context(|| format!("writing {}", target.display()))?;
-            writeln!(stdout, "wrote {}", target.display())?;
+            let backup =
+                crate::install::replace_file(&target, &text, existed).map_err(|e| eyre!(e))?;
+            match backup {
+                Some(b) => {
+                    writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?;
+                }
+                None => writeln!(stdout, "wrote {}", target.display())?,
+            }
         }
     }
     Ok(())
