@@ -667,7 +667,11 @@ fill = false
   (`overflow = "ticker"`, each over-wide column its own window under the
   § 4.2 rule) and never spills into a neighbour, which is what keeps a
   layout's shape as the terminal is resized. `truncate = false` still
-  hands the harness the whole row.
+  hands the harness the whole row. (Decided with Daniel 2026-09-12: one
+  `width` key taking `"<n>fr"`, `"auto"` or an integer, in preference to
+  three single-typed keys, and `gap = 1` by default so adjacent columns
+  never touch without tuning; `config check` names the three accepted
+  forms when a `width` is a quoted number or anything else.)
 - **Inside a column.** `modules` with `right`: the flex line of § 4, laid
   out to the column's width (left group anchored left, right group
   anchored right, the fill between, the left group cut first). `modules`
