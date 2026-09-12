@@ -1,678 +1,342 @@
 # PLAN.md — implementation plan and progress
 
-Check items off as they land. Keep the **Session log** at the bottom current;
-it is how the next session knows where to resume. Spec: `SPEC.md`. Rules:
-`CLAUDE.md`. This file is about the codebase: anything still open after a
-phase closed goes in the **Backlog**; host trouble does not belong here.
+This file is the gap between `SPEC.md` (the target design) and the code as
+it is, plus a compact log of how the project got here. Check items off as
+they land; keep the **Work log** current; anything still open after a phase
+closes goes in the **Backlog**. Rules for working here: `CLAUDE.md`. Host
+trouble does not belong in this file.
 
-## Phase 0 — Environment & scaffold
+## Where things stand
 
-- [x] `cargo new garnish`, `rust-toolchain.toml` (rolling nightly with rustfmt, clippy, rust-analyzer, rust-src)
-- [x] Strict lints in `Cargo.toml`, `clippy.toml`, `rustfmt.toml`, release profile
-- [x] `.config/nextest.toml`, `Makefile`, `.gitignore`
-- [x] Dependencies: clap, color-eyre, itertools, rayon, serde, serde_json, toml, jiff, unicode-width; dev: criterion, tempfile (`command-run` was in the first cut and removed in Phase 9: no kill-on-timeout)
-- [x] CLAUDE.md, SPEC.md, PLAN.md, README.md
-- [x] `scripts/ci.sh`
-- [x] Scaffold compiles under strict lints; `make check` green
+`v0.2.0` (2026-09-06) shipped everything through Phase 18: the 21 modules,
+the schema-driven config with presets, themes, icon sets and frames, the
+cache and worker model, aligned columns and fixed durations, per-key config
+fallback, the clock-driven ticker, text modules and animations, the presets
+gallery and the three bundled skills. The release pipeline with the Homebrew
+tap landed on 2026-09-11 and waits for its first tag. On 2026-09-12 every
+open code item was closed and the spec was audited against the code, so
+**the only drift between SPEC and the code is Phases 19–22 below**, written
+that day from the FUTURE-SPEC review and Daniel's layout and setup ideas.
 
-## Phase 1 — Payload, time, ANSI, preview
+## Done — Phases 0–18, compacted
 
-- [x] `payload.rs`: serde model of the stdin JSON, all optional fields `Option`
-- [x] `tests/fixtures/payloads/`: subscription-full, api-key, pre-first-response, no-git, worktree-session, git-worktree, pr-approved/pending/changes/draft/mr/absent, spend-limit, fast-mode, ctx-1m-3/50/80/96, ctx-200k, vim, agent, session-name, no-effort, exceeds-200k
-- [x] `time.rs`: `now()` honoring `GARNISH_NOW`; duration/countdown formatting (`1h12m`, `3d4h`, `47m`)
-- [x] `ansi.rs`: styles, 256/truecolor, OSC 8, display width, ANSI-aware truncation with `…`
-- [x] `num.rs`: saturating float→int helpers (no `as`)
-- [x] `garnish preview <fixture|--all>` and golden-test harness (`UPDATE_GOLDEN=1`)
-- [x] Unit tests for time/ansi/num
+| phase | landed | when |
+|---|---|---|
+| 0 Scaffold | nightly toolchain, strict lints, nextest, Makefile, `scripts/ci.sh`, the four documents | 09-04 |
+| 1 Payload, time, ANSI | `payload.rs`, `time.rs` (`GARNISH_NOW`), `ansi.rs` (width, OSC 8, `…` truncation), `num.rs`, `preview`, the golden harness (`UPDATE_GOLDEN=1`), the payload fixtures | 09-04 |
+| 2 Schema, config, frame | `ModuleSchema`, config model with TOML-path validation, four icon sets, six themes, seven frame styles, `config init/check/path/show`, four built-in presets, the render matrix and (09-05) config-driven goldens | 09-04 |
+| 3 Payload modules | 16 payload-only modules incl. `context` with the autocompact chain, `⚠` failure rows, `GARNISH_DEBUG` | 09-04 |
+| 4 Cache & workers | `cache.rs` (atomic entries, TTL, GC), `spawn.rs` (detached workers, hard-linked locks, `GARNISH_NO_SPAWN`), `refresh`; serial tests incl. 32 ticks → one worker and (09-12) the killed-tick test | 09-04 |
+| 5 Repo modules | `git.rs` direct `.git` reads, worker ahead/behind/dirty/fetch, `path branch sync worktree pr`, temp-repo and PATH-shim tests (behind/diverged/fetch end to end on 09-12) | 09-04 |
+| 6 Docs | `garnish docs` → `docs/`, hand-written guide, `garnish modules`, docs-sync test, `config show` fully resolved | 09-04 |
+| 7 Install, doctor | `install` (merge, backup, `--absolute`, `--dry-run`), `doctor`, `gc`, `examples/garnish.toml`, stale styling | 09-04 |
+| 8 Performance | criterion benches, hyperfine gate; warm tick 2.5 ms of which 1.3 ms is process start | 09-04 |
+| 9 Hardening, v0.1.0 | hardening tests, two adversarial reviews (symref cycle, worker deadlock, fetch poisoning, install permissions and backups), `command-run` dropped, macOS paths, tag | 09-04 |
+| 10 CI, hosts | Actions on Linux/macOS with SHA-pinned actions and Renovate, `ci-annotate.sh`, `session-host.sh`, the SessionStart hook, `setup.sh`, documents split by role | 09-04/05 |
+| 11 Align, durations | `align = true` column padding, `durations = compact \| fixed`, byte-identical default render | 09-05 |
+| 12 Walkthrough fixes | wide-glyph guard and replacement sets (unicode, emoji, nerd borrowings), powerline pad, muted zero counts, line separator at the join, quiet `config check`, fetch-age spacing, doctor glyph grid, config-golden harness | 09-05 |
+| 13 Line keys | `right_justify`, `hide_empty_lines`, spacers, `bar = "blocks" \| "line"`, `blank` (09-06) | 09-05 |
+| 14 Per-key fallback | the file read as a table, each key converted alone, syntax errors the only wholesale fallback | 09-05 |
+| 15 Ticker, text modules | `time::frame`, `ansi::scroll`, `overflow = "ticker"`, `[modules.text.<name>]`, ticker durations default `fixed` (09-06) | 09-05 |
+| 16 Animation | `animate`, `fill_pattern`, `separator_frames`, `<key>_frames`, frozen ticker cut with `…` (09-06) | 09-06 |
+| 17 Presets gallery | `presets/*.toml` embedded, `docs/presets.md`, `garnish presets`, `config init --preset <gallery>`; website dropped 09-12 for the setup | 09-06 |
+| 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
 
-## Phase 2 — Schema, config, layout, frame
+Between 17 and 18 a whole-stack review added row hardening (every string
+reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
+only for `http(s)://`) and config/CLI polish. On 2026-09-11 the release
+pipeline (`release.yml`, cask template, `changelog-section.sh`,
+`render-cask.sh`) and its review landed. On 2026-09-12 the last open items
+closed (`Segment.text` private, `OptSpec::max`, the killed-tick and fetch
+tests, a source scan for schema completeness) and the spec's drift from
+the code was fixed.
 
-- [x] `config/schema.rs`: `Opt`, `IconOpt`, `ColorOpt`, `ModuleSchema`, preset tables
-- [x] `config/mod.rs`: top-level model, `[frame]`, `[[line]]` (left `modules` + `right`), `[modules.<id>]`, resolution order, validation with TOML paths
-- [x] Icon sets: nerd, unicode, emoji, ascii
-- [x] Themes: garnish, catppuccin-mocha, nord, dracula, tokyonight, mono; role overrides
-- [x] `frame.rs`: none/rounded/square/double/heavy/powerline/custom; fill to the box width (`$COLUMNS − 4 − padding` since 2026-09-05); overflow rules
-- [x] `garnish config init|check|path|show`
-- [x] Top-level presets: default, minimal, full, compact
-- [x] Config fixtures + matrix test — in-process matrix in `render::tests` (presets × icon sets × fixtures) plus config-driven goldens (`tests/config_golden.rs`, 2026-09-05)
+## Open — the drift between SPEC and the code
 
-## Phase 3 — Payload-only modules
+Phases 19–22 are the 2026-09-12 review of `FUTURE-SPEC.md` (PR #27) with
+Daniel: the cheap, invariant-safe ideas moved into `SPEC.md` (each
+paragraph there names its FUTURE-SPEC section and proposal id), his layout
+model, and the interactive setup he chose in place of the website.
+**Order: 19 → 20 → 21 → 22.** Phase 19 first because the dim reset changes
+every colour-on render and every `setup` preview (the goldens run with
+`--color never`, so it also brings the colour-on golden mode the later
+phases use); Phase 20's `max_width`
+and the schema-generated matrix test are what the builder's module editor
+is built on; Phase 21's layout model is what the builder must draw;
+Phase 22 is the one that adds crates. Each phase is its own `gh stack`
+chain of `phase-N/<concern>` layers, as before; one release per phase is
+fine, `v0.3.0` being whichever lands first through the pipeline. Nothing
+here lifts a non-goal: no network, no transcript, no tick-side write, the
+module set stays at 21.
 
-- [x] `model`, `effort`, `style`
-- [x] `context` (+ `claude_settings.rs` autocompact resolution, `exceeds_200k`, `warn_at`)
-- [x] `limit5h`, `limit7d`, `spend`, `cost`
-- [x] `session`, `api`, `cache`, `clock` (jiff, spinner)
-- [x] `session_name`, `vim`, `agent`, `lines`
-- [x] Unit + golden tests per module × preset × icon set × theme
-- [x] Failure rendering (`⚠` lines)
-- [x] `GARNISH_DEBUG` log (`debug.rs`; spawn failures land in `<cache>/debug.log`)
+### Phase 19 — Harness fidelity (SPEC § 2.1, § 4.2, § 5, § 7)
 
-## Phase 4 — Cache & workers
+Code map (2026-09-12): rows become escape text only in `render_loaded`
+(`src/render.rs:53-61`, `painter.paint(line)` per row); `Painter::PLAIN`
+serves the docs; both golden suites run `--color never`
+(`tests/golden.rs:27`, `tests/config_golden.rs:152`) and their `⚠ garnish:`
+guards match row starts; `config.animate` is a plain `bool`
+(`src/config/mod.rs:278`, `:967`) combined with `Clock.animate` once at
+`src/render.rs:175`; `claude_settings::settings_files`/`resolve`
+(`src/claude_settings.rs:84-130`) are shaped for the autocompact keys only;
+`doctor::settings_section` (`src/doctor.rs:46`) reads the user settings file
+alone and `report_with` returns one `String`; `install::merge`
+(`src/install.rs:60`) already rejects bad JSON but `src/cli.rs:445` turns it
+into an eyre report; `config init --force` (`src/cli.rs:597-635`) never
+reads the target; `IsTerminal` is used nowhere.
 
-- [x] `cache.rs`: root resolution, entry format, atomic write, TTL, GC
-- [x] `spawn.rs`: detached worker (`process_group(0)`), lock files, `GARNISH_NO_SPAWN`
-- [x] `garnish refresh --module|--all` (rayon for `--all`)
-- [x] Tests (serial group): TTL expiry, live lock, stale lock/dead pid, tmp/truncated ignored, 32 concurrent ticks → one worker, GC bounds
-- [x] Test: tick killed mid-run while the worker completes (`spawn_worker_outlives_the_ticks_process_group`, 2026-09-12: the tick runs as a process-group leader, the group is killed with the `kill` binary once the tick has spawned a worker whose git sleeps, and the worker still writes the entry; verified to fail with the worker's `process_group(0)` removed)
+- [ ] `phase-19/dim-reset`: confirm on screen that the harness wraps each row in SGR 2 (2.1.261 `<Text dimColor wrap="truncate">`; re-locate it in the current binary); prefix each row in `render_loaded` when `mode != ColorMode::Never` (not in `Painter::paint`, which the plain docs path shares, and not as a `Segment`, since `keep_blank` decides "whitespace only" from `Segment::text()`); a unit test that `--color never` emits no prefix and one that paints an unframed `fill = false` spacer and finds it; the fact in `CLAUDE.md` with how to re-verify; SPEC § 4.1's `blank` wording and the guide note
+- [ ] `phase-19/colour-goldens`: the goldens cannot pin the prefix while they render with `--color never`: add a `# color:` header key to `tests/config_golden.rs` (`HEADER_KEYS`, `Header::parse`, `render()`), one colour-on golden (`dim-reset`), and make the `⚠ garnish:` row-start guards in both suites strip a leading `ESC[0m` first; Phase 20's link goldens and Phase 22's snapshots need the same mode
+- [ ] `phase-19/animate-option`: `RawConfig.animate` becomes `Option<bool>` plumbed through `Config` so "set explicitly" is knowable; `config show` (`src/docs.rs:69-71`) prints the effective value; `examples/garnish.toml` and `tests/docs_sync.rs::example_config_matches_config_init` follow; goldens byte-identical
+- [ ] `phase-19/reduced-motion`: a `prefersReducedMotion` reader on the settings chain next to the autocompact keys (`claude_settings` gains a second resolved key, same file order); the combination at `src/render.rs:175` becomes `clock.animate && config.animate.unwrap_or(!reduced)` (env, config, settings, default); `Clock::fixed()` must not touch the filesystem (docs and goldens); unit tests for each precedence pair, config golden `reduced-motion` with `# env:`
+- [ ] `phase-19/never-rewrite`: `cli::install` maps `merge`'s parse error to `Quiet` after one stderr line instead of an eyre report; `config init --force` gains a read-and-`toml::from_str` probe before writing and keeps the previous file under `install::write_backup`'s never-clobbered rule (SPEC § 7); `tests/cli.rs` covers both; the temp-and-rename write is already asserted (`src/install.rs:217`)
+- [ ] `phase-19/doctor-settings`: extract the settings section into a testable function returning rows (the `glyph_rows` precedent, `src/doctor.rs:231`), give `report_with` the project dir so it can walk `settings_files` (caller `src/cli.rs:290`), then report `statusLine.refreshInterval` (suggest `1` when `clock`, a countdown or an animation is configured), `statusLine.hideVimModeIndicator` (suggest `true` when `vim` is on), `disableAllHooks`, `prefersReducedMotion`, and whether each file parses; unit tests over a settings fixture directory
+- [ ] Verify item 2 of FUTURE-SPEC § 4.9: re-check the 13 000 autocompact constant in the current binary; keep `compact_buffer_tokens` either way; note the version in SPEC § 2.3 and `CLAUDE.md`
+- [ ] Verify the status line's height: how many lines the harness shows before it caps, scrolls or squeezes the transcript (the footer's Ink box, `LINES` in the script's environment, a nine-line render on screen at a 24-line and a 50-line terminal); record the rule in SPEC § 2.1 and `CLAUDE.md`; it decides whether the § 14 picker warns on height as it does on width, and whether a multi-line row (§ 4.3) needs a cap of its own
+- [ ] Docs (`make docs`, README/guide troubleshooting: "the line looks dimmer than `preview`" goes away), CHANGELOG `## Unreleased`, adversarial review, work log
 
-## Phase 5 — Repo modules
+(A 24 h lock horizon from FUTURE-SPEC § 15 was on this list and was dropped
+in the spec review: `LOCK_STALE_MS` already bounds a lock's life.)
 
-- [x] `git.rs`: direct `.git` reads (HEAD, loose refs, packed-refs, worktree gitdir, upstream from config), reftable detection
-- [x] Worker: ahead/behind (`rev-list --left-right --count`), dirty (`status --porcelain=v2`, 2 s timeout), opt-in `git fetch` with `fetch_interval`
-- [x] `path`, `branch`, `sync`, `worktree`, `pr`
-- [x] Temp-repo tests (ahead/behind/no-upstream/detached/worktree in `git.rs`; ahead+dirty end to end in `tests/worker.rs`) + PATH shim test (hanging git never blocks a tick)
-- [x] Temp-repo tests for behind, diverged and no upstream (`git.rs` and `tests/worker.rs`, against a second clone that pushes) and `fetch_interval` end to end (a successful fetch sees the other clone's push, none within the interval, one again past it; the failed-fetch case was already covered) (2026-09-12)
+### Phase 20 — Per-module presentation (SPEC § 3, § 3.7, § 9)
 
-## Phase 6 — Docs
+Code map (2026-09-12): the common options are parsed by hand
+(`src/config/mod.rs:1239-1267`, `COMMON_KEYS` is `[&str; 8]` at
+`src/config/schema.rs:311`) and applied by `modules::decorate`
+(`src/modules/mod.rs:379-431`) from `render_group` (`src/render.rs:364`);
+`ansi::truncate` (`src/ansi.rs:320`) keeps `link` per segment and
+`Painter::paint` opens and closes OSC 8 per segment, and `Painter.links`
+is off under `--color never` (`src/render.rs:48`), so no golden can hold a
+link today; `repo.rs` has `shorten` (`:48`), `depth` (`:95`) and a `branch`
+`max_length` character cap (`:386`), and nothing reads `workspace.repo`;
+`context::compaction_percent` (`src/modules/context.rs:200`) returns a
+window percentage and early-returns when the marker is off; the three usage
+modules come from one schema builder (`src/modules/usage.rs:44-62`) with
+`show_reset` at `:75` and the countdown at `:162`; `Ctx.tz` exists
+(`src/render.rs:169`) but only durations are formatted.
 
-- [x] `docs.rs` + `garnish docs`: `docs/README.md`, `docs/config.md`, `docs/modules/<id>.md` with preset renders
-- [x] `docs/guide.md` (hand-written)
-- [x] `garnish modules`
-- [x] Docs-sync test (`tests/docs_sync.rs`, `UPDATE_DOCS=1` regenerates); `scripts/ci.sh` fails on drift
-- [x] `config show` emits fully resolved values (review M2); round-trip tests for both modes
+- [ ] `phase-20/common-opts`: a `COMMON_OPTS` table of `OptSpec`s (`label`, `prefix`, `suffix`, `hide_when_empty`, `max_width`) replaces the hand-parse so caps go through `over_max` and the reference's common-key table prints them; `COMMON_KEYS` grows to nine; `write_modules` (`src/docs.rs:241`) and the docs page follow; `max_width` rejected on text modules next to the text-name check (`src/config/mod.rs:997`) with a message naming `width`
+- [ ] `phase-20/max-width`: applied after `decorate` and before `align_columns` (between `src/render.rs:207` and `:210`) through `ansi::truncate`; balanced OSC 8 asserted on painted output, not on segments; `branch.max_length` stays the per-module character cap and is documented as such; unit tests on a linked `pr` and a wide branch name; config golden `max-width`
+- [ ] `phase-20/schema-matrix` (FUTURE-SPEC § 15 item 11): an in-crate test (it inspects `Segment::text`, private outside the crate) generated from `ModuleSchema` over module × preset × icon set × `max_width ∈ {0, 1, 4, 12}` × fixture asserting width ≤ `max_width`, nothing rendered for a hidden state, balanced OSC 8 on painted output, no escape bytes in text; rayon like `src/render.rs:1013`, under the longer nextest budget
+- [ ] `phase-20/path-style`: `style = "full" | "fish"` (A7) declared in `repo.rs`'s schema (the source scan checks keys against the schemas in the same file) and applied after `shorten`; unit tests on `~`, a root path, a one-segment base and `depth = 2` with `fish`; config golden `path-fish`
+- [ ] `phase-20/links`: `payload.rs` gains `workspace.repo.{host,owner,name}` if it lacks it; `branch` `link = true` (A8) builds the URL with a hand-written percent-encoder (unreserved and `/` kept; no indexing, no `as`) and GitLab `/-/tree/`, nothing when `repo` is absent or the head is detached; `text.<name>` `url` through the painter's `http(s)://` rule with `config check` reporting anything else; unit tests including `feature/#12` and a non-ASCII name; goldens `branch-link` (on `git-worktree`, which carries `repo`) and `text-link` under the Phase 19 `# color:` mode, since `--color never` paints no links
+- [ ] `phase-20/context-scale`: factor the threshold out of `compaction_percent` so it is available with the marker off, then `scale = "usable"` (A11): percentage and bar against the § 2.3 threshold, marker hidden, bands on the displayed percentage, falls back to `window` when compaction is disabled or the threshold is under a tenth of the window; unit tests at the threshold edges and the two fallbacks, config golden `context-usable` at 80 % and 96 % of 1M
+- [ ] `phase-20/reset-absolute`: a jiff wall-clock formatter in `time.rs` over `Clock.tz`, reached through a new `Ctx` method beside `countdown`; `reset = "countdown" | "absolute" | "both"` (A10) on the shared usage schema with the weekday rule as `limit7d`'s per-id branch in the builder (never on `limit5h` or `spend`); `show_reset = false` hides every form; unit tests at two instants and two zones, config golden `reset-absolute` pinned at two `# now:` values
+- [ ] Schema → render → `make docs` → `UPDATE_GOLDEN=1`; guide § 5 gains the three presentation keys; CHANGELOG; adversarial review; work log
 
-## Phase 7 — Install, doctor, polish
+### Phase 21 — Layout: lines, columns and boxes (SPEC § 4.3)
 
-- [x] `garnish install` (settings merge + backup, `--absolute`, PATH warning, default config, `--dry-run`)
-- [x] `garnish doctor`, `garnish gc`
-- [x] `examples/garnish.toml` generated by `config init` and kept in sync by `tests/docs_sync.rs`
-- [x] Stale styling (`⟳` / `✗`, `stale_style`)
-- [x] Theme/icon polish pass across all four icon sets (generated module pages reviewed; countdown samples use the pinned clock; `style` sample uses the `output-style` fixture)
+Daniel's ideas, 2026-09-12, consolidated the same day into one model: a
+**row** (`[[row]]`, the addressable unit, one or more terminal **lines**
+tall) is columns side by side (a plain row is one column, today's flex
+rule inside it), a column holds its own modules or a stack of rows,
+columns share the width by `width` (`fr`, `auto`, cells) and place a lone
+group by `justify`; titles decorate rules and boxes decorate rows and
+columns; two levels, never deeper. `[[line]]` and `hide_empty_lines`
+stay as permanent aliases. Supersedes FUTURE-SPEC A2. The layers build
+the model inside out so each one ships with goldens and a byte-identical
+default render. In the code map below the names are today's (`LineCfg`,
+`resolve_lines`, `render_lines_at`); the rename layer gives them their
+row names.
 
-## Phase 8 — Performance
+Code map (2026-09-12): `LineCfg` (`src/config/mod.rs:48-62`) is flat;
+`RawConfig::from_table` handles an array of tables only for `line`
+(`:414-427`) and `RawLine::from_table` (`:556-585`) matches keys by name
+with a literal unknown-key list, so `[[row.col]]` and
+`[[row.col.row]]` need hand-written recursion with the `field()`
+discipline (`:590-609`: report the path, keep the rest; a serde-derived
+column would discard a whole row on one bad key); `resolve_lines`
+(`:861`) is a 1:1 map with the spacer rule and the `bad_list` guard
+(`:549`); `frame::FrameChars` (`src/frame.rs:66-89`) has caps only,
+`ends(index, count)` (`:160`) assumes one terminal line per config entry, `Rule::paint`
+(`:202`) returns a `String` with no cell ranges, and `compose_line`
+(`:246-358`) owns the left budget, the truncate-or-scroll choice and the
+final row cut; `render_lines_at` (`src/render.rs:154-259`) applies
+`align_columns` (`:336`) and the `fill = false` splice (`:214-233`) over
+`lefts`/`rights`, then `hide_empty_lines`, `keep_blank` and the cap index
+per composed line; `docs::config_toml` writes `[[line]]` at
+`src/docs.rs:167-185`; `gallery::FILES` is a fixed-size sorted array
+(`src/gallery.rs:14`); config goldens are keyed by `(name, now)` with one
+`# columns:` per file and orphans deleted (`tests/config_golden.rs:225`).
 
-- [x] `benches/tick.rs` (criterion): parse, resolve, render per module, in-process tick
-- [x] `bench/run.sh` + `bench/check.sh` hyperfine gate (warm default, warm full, cold, refresh) — jq, not python
-- [x] ~~`--time` per-phase timing flag~~ dropped: criterion's per-module benches give the same breakdown without a runtime flag
-- [x] Budget green (2026-09-04): warm-default 2.50 ms mean / 3.74 ms p99, warm-full 2.56 / 3.99, cold 3.69 mean, refresh-sync 3.37 mean
-- [x] Headroom analysed (2026-09-04): a `println!` hello-world binary costs 1.3 ms, `garnish --version` 1.7 ms and a warm tick 2.4 ms on the same host. So ~55 % of the tick is process start-up the code cannot influence, ~0.4 ms is clap + static init, and ~0.7 ms is the render (0.3 ms user, 0.4 ms sys: config locate, three settings.json reads, cache lookups, `/etc/localtime`, stdin). Criterion: payload parse 3.5 µs, default config 25 µs, in-process tick 128 µs, full annotated config file ~390 µs. Skipping `color_eyre::install` on the render path made no measurable difference but is kept (the path cannot error).
+- [ ] `phase-21/row-rename`: `[[row]]` accepted beside `[[line]]` in `RawConfig::from_table` (both present in one file is reported and the file's `[[line]]` array ignored, since the two arrays cannot be ordered against each other), `hide_empty_rows` beside `hide_empty_lines`; `config show` writes the new names; `LineCfg`/`RawLine`/`resolve_lines` become `RowCfg`/`RawRow`/`resolve_rows` and `render_lines_at` keeps its name (it returns terminal lines); every preset, `examples/garnish.toml`, `docs/`, README, guide and the three skills say `[[row]]`, while two config-golden fixtures keep `[[line]]` to pin the alias; goldens byte-identical (`UPDATE_DOCS=1` for the regenerated files only)
+- [ ] `phase-21/layout-types`: `ColCfg { width: Width::{Fr(n), Auto, Cells(n)}, modules, right, justify, valign, box, rows: Vec<RowCfg> }`, `RowCfg` gains `cols`, `gap`, the four `title*` keys and `box`, `Config` gains `boxes`; `RawRow::from_table` gains `col` (and inner `row`) with hand-written per-key fallback and paths `row[i].col[j].row[k]`, the unknown-key list extended; `[box.<name>]` parsed like `[modules.text.<name>]` with bare-key names; validation as SPEC § 4.3 lists (words, the `width` grammar as integer-or-string, `gap`, the caps on columns, inner rows and `title_pad`, unknown or unjoined box names, both forms on a row or a column, nesting, non-adjacent reuse, a title on a boxed row), each with its TOML path; the `bad_list` rule holds for `[[row.col]]` too
+- [ ] `phase-21/layout-normalise`: `resolve_rows` turns a row without columns into one `1fr` column carrying its `modules`/`right` so the resolved tree is always the same shape, with `justify` defaulted by position and all-empty columns making a spacer; `docs::config_toml` writes `[[row.col]]`, `[[row.col.row]]` and `[box.<name>]` back and keeps skipping emptied non-spacer rows; a test over every fixture and preset shows the resolved config and the render byte-identical; `config show` round-trips a fixture config that uses every form
+- [ ] `phase-21/lines-per-row`: `render_lines_at` returns terminal lines grouped per configured row (a `Vec<Line>` per row, each line a segment list with the element kinds cap, rule, gap, module, separator, title, box edge, which is also what Phase 22's placement map reads), `ends()` takes a block index and count instead of a line index, `keep_blank`, `hide_empty_rows` and the cap choice move to the grouped form, and `Rule::paint` produces segments with known cell ranges; `render_loaded`, `render_plain_at` and `benches/tick.rs` keep their outputs byte-identical (goldens and docs unchanged)
+- [ ] `phase-21/layout-columns`: `compose_line` split into lay out columns (`auto` and cell widths first, the free width shared by `fr` with the remainder to the first columns; `checked_div`/`checked_rem` and the `num.rs` helpers, no `as`), compose each column (the flex rule with `right`, `justify` for a lone group, `…` cut or a per-column ticker window: the § 4.1 rule inside a flex column, a lone group as the window, `auto` never scrolling), then join with `gap` and caps with the fill glyph or pattern in every empty cell of a one-line row; left-to-right clamping when the width runs out (gap then column; a column whose gap plus one cell does not fit renders nothing with everything to its right, `GARNISH_DEBUG` logs it), `truncate = false` letting only the last column run past the box, no `fr` column meaning a rule after the last, the fill pattern phased over the whole line; `align_columns` and the `fill = false` splice ported to columns in the same commit (`align = true` per module position, counted from the left in left- and centre-justified columns and from the right in right-justified columns and `right` groups, only between rows with the same column count; `right_justify` a per-column property), so there is never a second alignment implementation; the two-group path deleted with a one-column fast path kept (goldens byte-identical; unit test that shares add up to the width at every width from 10 to 400 and differ by at most one cell); config goldens `columns-one` (each `justify`), `columns-three`, `columns-six`, `columns-widths` (`auto`, cells and `fr` mixed), `columns-ticker` at two instants, each at 80 and 160 columns (one file per width, both files present since orphans are deleted)
+- [ ] `phase-21/titles`: the `title*` keys reduced to plain text and capped like `label`; the rule segments from `lines-per-row` carry the title after the left cap, before the right cap, or centred in the widest empty gap; plain text at the same place under `fill = false` or `style = "none"`; the first line of a multi-line row; the `title*` keys of a `box = true` row titling that box; cut with `…` when wider than its space, never widening the line; a title-only row is a titled spacer; config goldens `title-rows` (each `title_justify` on a spacer and on a module row, at 60 and 120 columns)
+- [ ] `phase-21/boxes`: `[box.<name>]` (`title*`, `style` and `color` inheriting from `[frame]`, `fill` defaulting to `false`, an unstyled box `rounded` when the frame has no box shape, an unjoined box reported); adjacent rows with one name form a box, `box = true` boxes a row alone, a column-level `box` (name or `true`) spans the outer row's height, a boxed one-line column is a three-line box; drawn as a corner-capped top rule with the title, side glyphs at both ends of each line in place of the frame's caps, and a bottom rule (two extra lines, so a box is at least three lines); `FrameChars` gains corners and `side` per built-in style in `for_style` (`none` invisible, `powerline` reported and drawn rounded), `RawFrame::from_table` and `FRAME_KEYS` the five `custom` keys, reduced to plain text and one-cell-checked like the caps (`src/config/mod.rs:520`); the frame's first/last caps treat a multi-line row as one block; nesting reported in both directions; `hide_empty_rows` drops a box whose rows all went; config goldens `boxes-two` (two titled boxes around unboxed rows), `box-columns` (a three-column row inside a box) and `box-column` (a boxed column beside a bare one) at two widths; a unit test that every box line is exactly the box width
+- [ ] `phase-21/stacks`: `[[row.col.row]]` laid out to the column's width (inner `justify` overriding the column's), the outer row's height as the tallest column (a row's height its content's lines, a column's the sum of its rows'), `valign` padding, spaces in gap cells and padding lines of a multi-line row, `blank` on the outer row keeping every line, the outer caps on every non-box line; `hide_empty_rows` per inner row and for the whole row, an emptied column keeping its share beside a sibling that stayed; unit test that every line is exactly the box width over widths 10–400 with stacks of unequal height; config goldens `dashboard` (the SPEC sample: a full-height double box, a bare centred column, three stacked boxes) at 60 and 120 columns, `stack-valign` and `stack-hidden` (an inner row that renders nothing)
+- [ ] Presets `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` (declared widths chosen from the rendered fixture so every column holds its widest render without `…` at three instants, none of them scrolling, since `tests/presets.rs` fails on any `…` and its ticker-advance check assumes one window; `gallery::FILES` grows to 19 in alphabetical order, its unit test compares it with the directory); `docs/config.md` gains a `[[row.col]]` section (widths, `justify`, stacks), `title` rows and a `[box.<name>]` section, each with a sample at two widths; README layout paragraph and guide § 5 rewritten around "a row is columns, one or more lines tall"; the `garnish-statusline` skill's question table and examples updated for columns, `width`, `justify`, titles and boxes (it hand-writes the TOML, so nothing else would catch it going stale); CHANGELOG
+- [ ] Bench: `tick_in_process_columns` (six columns), `tick_in_process_boxes` (two boxes) and `tick_in_process_dashboard`; layout is arithmetic over the rendered segments, so the warm default tick is untouched (a criterion comparison of the in-process tick before and after, where a 0.05 ms difference is measurable; hyperfine stays the budget gate); adversarial review (a column narrower than a module, `fr` totals and cell widths overflowing the box, zero free width, `auto` columns wider than the box, a row under `hide_empty_rows` and `stale_style = "hide"`, a title wider than the line, a box at the minimum width of 10, a box whose title is a module id, `blank` on a titled spacer, a multi-line row of bare columns with colour off, a boxed column with no rows, a stack that scrolls under `overflow = "ticker"`, a file mixing `[[line]]` and `[[row]]`); work log
 
-## Phase 9 — Hardening & release
+### Phase 22 — Interactive setup (SPEC § 14)
 
-- [x] Garbage/missing payloads, extreme COLUMNS, unreadable config, unwritable cache (`tests/hardening.rs`)
-- [x] Adversarial review of phases 4–6: 1 critical (symref cycle stack overflow), 6 high, 7 medium fixed with regression tests (see session log)
-- [x] Adversarial review of phases 6–8 (install/doctor/docs/bench): 3 high (settings permissions widened, backup collisions, symlinked settings replaced), 6 medium, 11 low; all but the untestable ones fixed with regression tests. `command-run` removed: every subprocess needs kill-on-timeout.
-- [x] macOS code paths (cache root, managed settings, age-only locks) covered by the `macos` CI job; green on `main` since 2026-09-05 after the `/private/var` and lock hand-over test fixes
-- [x] Final `scripts/ci.sh` green; `cargo doc --no-deps` clean
-- [x] Tag `v0.1.0` (pushed to `origin`)
+Decided 2026-09-12 with Daniel: a full-screen `garnish setup` in the
+terminal, ccstatusline's shape with garnish's exact preview and
+schema-generated editors. `ratatui` + `crossterm` are the one new
+dependency pair (crate map row in `CLAUDE.md` when the first layer lands).
 
-## Phase 10 — CI, host setup, session hook
+Code map (2026-09-12): `cli::Command` (`src/cli.rs:90-171`) with
+`Preview`/`RenderArgs` (`:29-101`, `preview()` at `:534`); `Render` reads
+stdin unconditionally (`:252`) and `tests/cli.rs::run()` never gives a tty;
+`cli::install` (`:411-470`) writes settings, config and skills while
+printing to a locked stdout; `docs::config_toml` (`src/docs.rs:90`)
+serialises a resolved `Config`, so a saved draft loses a hand-written
+file's comments; payload fixtures are embedded only in `docs::sample_fixture`
+(`src/docs.rs:354`) and `benches/tick.rs:13`, everything else reads
+`tests/fixtures/payloads/` from disk; `Cargo.toml` has no `[features]` and
+`panic = "abort"` in release (`:71`), so a panic hook runs but nothing
+unwinds; `clippy::exit` and `clippy::panic` are denied and `missing_docs`
+gates rustdoc.
 
-- [x] GitHub Actions: Linux runs `scripts/ci.sh`, macOS runs `make check`, bench is manual and informational; every action SHA-pinned; Renovate on `config:best-practices`
-- [x] `scripts/ci-annotate.sh`: failures become check-run annotations (portable across GNU/BSD userlands, strips ANSI, anchors panics to `file:line`)
-- [x] `scripts/session-host.sh`: host class detection (`sprite`, `ci`, `macos`, `popos`, `unknown`)
-- [x] `.claude/settings.json` + `.claude/hooks/session-start.sh`: SessionStart hook exports `SESSION_HOST` via `CLAUDE_ENV_FILE` and loads `SPRITE.md` only on a Sprite
-- [x] `scripts/setup.sh` / `make setup`: rustup, latest nightly with the pinned components, `cargo-nextest`; `--bench` adds hyperfine and jq, `--all` adds watchexec; install method chosen per host
-- [x] CI runs `scripts/setup.sh` instead of a third-party install action
-- [x] Documents split by role (`CLAUDE.md` host-neutral, `SPRITE.md` for Sprites, `PLAN.md` codebase-only, `README.md` for users)
+- [ ] `phase-22/fixtures`: the embedded fixture table moves out of `docs.rs` into a `pub` `fixtures.rs` (name, `include_str!`) shared by the docs samples, `benches/tick.rs` and the preview pane, listing the fixtures SPEC § 14 names; a unit test that every embedded file equals the one on disk
+- [ ] `phase-22/setup-shell`: the crates, `src/setup/` module tree (every `pub` item documented), `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly through `Quiet`/`ExitCode`, never `process::exit`; a `Drop` guard restores the terminal on the normal path and a panic hook chained ahead of color-eyre's does it on a panic (it runs before the release profile's abort; the unwinding test is dev-profile only); `setup` without `--preset` and without a tty on stdout exits 1 with one line; `bench/run.sh` unchanged (note the cold-start delta in the commit; a `setup` cargo feature is the fallback)
+- [ ] `phase-22/tty-pointer`: the bare `garnish` checks `std::io::IsTerminal` on stdin and prints the one-line pointer, exit 0; the explicit `render` always reads stdin; a `GARNISH_STDIN_TTY` test hook (documented in SPEC § 9) forces the decision so `tests/cli.rs` can cover both paths without a pty
+- [ ] `phase-22/setup-preview`: a second painter target in `ansi.rs` turning segments into ratatui spans (ratatui interprets no escape bytes; no new crate), with a unit test that the span text and styles agree with `Painter::paint`'s output; the preview pane over the Phase 21 `lines-per-row` output at `w − 4 − padding` with the live clock and the embedded fixtures (`f` cycles, `w` sets a terminal width, `padding` edits re-shrink), honouring the config's `color` and `NO_COLOR` with the "colours off" status line, a minimum size message below 60 × 12 and a redraw on resize; the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`, `GARNISH_NOW` frozen and `TZ=UTC` pinned, the row-start guards stripping escape prefixes), key sequences driven through the event loop
+- [ ] `phase-22/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs` and the narrower-than-declared warning; `Enter` writes with `install`'s never-clobbered backup and offers install; `e` opens the builder; `setup --preset <name> [--install]` never opens the screen, and `setup` without `--preset` and without a tty on stdout exits 1 with one line (`tests/cli.rs`)
+- [ ] `phase-22/setup-builder`: the line list (add, insert, delete, clone, move, spacer), a line shown as its columns side by side (SPEC § 4.3): *Add a column* with its `width` and `justify`, *Stack* to turn a column into lines, *Add a title*, *Wrap in a box* over a selected run and *Box the column* (titles and box edges in the placement map), moves within and between columns, the module picker with fuzzy and initialism search over the 21 ids, the existing `text.<name>` tables and *New text module…* (a name checked by the § 3.7 rule, the table created with schema defaults; removing a last placement asks whether to drop the table; unit tests on the matcher), `Esc` closing the innermost layer only, the top-level and `[colors]` screens; the draft is a resolved `Config` and `s` saves it through `docs::config_toml` with `install`'s backup (the status bar says a hand-written file's comments live on in the backup only), `q` asks once on a dirty draft, a changed `(mtime, len)` on disk (or a file absent at open) asks overwrite-or-reload, a failed write shows the OS error and keeps the draft, an unparsable file is never overwritten
+- [ ] `phase-22/setup-selection`: the placement map computed from the Phase 21 `lines-per-row` output (each segment already carries its element kind; this layer adds the module id and cell ranges: several per module across a ticker wrap, the `…` cell owned by the cut module, an empty module owning none; measured through `Segment::width()`, never byte offsets; unit test that the ranges tile each row and match the painted widths for flex, multi-column, stacked and ticker lines); crossterm mouse capture on entry and off on exit (also on panic), click and wheel handling, `Tab`/`Shift-Tab`/arrows as the keyboard twins; the selection highlighted in the preview (inverse video) and on the chip; snapshot tests driving synthetic mouse events through `TestBackend`
+- [ ] `phase-22/setup-module-editor`: the overlay form generated from `ModuleSchema` (checkboxes for booleans, radio lists for `preset` and enums, steppers with `max`, colour swatches plus a validated custom entry, text-module schema on the same screen), re-rendering the preview on every change, a dot on chips that carry overrides; the unit test that every `OptSpec` kind and every top-level key has a form row
+- [ ] `phase-22/setup-pickers`: the string picker seeded from the distinct values in the built-in presets, the frame tables and `gallery::PRESETS` (deduplicated at start-up, each drawn as it renders) plus *custom…* through the config parser's plain-text and width checks; the glyph picker with one row per icon set, the schema's `IconSpec.suggestions` per key, `doctor`'s two-cell `|` marker on every candidate and *custom…*, writing per-key `[modules.<id>.icons]` overrides; `suggestions` added to the schemas for every icon key (a few per set) and covered by the existing glyph guard test; `garnish docs` lists them as *also try* on each module page (`make docs`, `docs_sync`)
+- [ ] `phase-22/setup-install`: the plan-and-apply core of `cli::install` extracted from its stdout reporting (a `Plan` the CLI prints and the screen lists) so the install screen runs the same code (`--dry-run` summary, one confirmation) and `setup --preset … --install` needs no shell-out; the doctor's settings report in the status bar; `garnish-statusline` skill names `setup`; README "Set up" section and guide § 2 rewritten around it; CHANGELOG
+- [ ] Adversarial review of the phase (terminal left raw, a draft that `config check` would reject, a preset applied at a width where the terminal cuts it, `Ctrl+C` mid-save), tests for every bug found; work log
 
-## Phase 11 — Aligned columns and fixed-width durations
+## Backlog
 
-Requested by Daniel (2026-09-05): separators should stack vertically across
-lines, with column widths that do not jitter as timers tick.
+Open items only; closed ones are in the work log.
 
-- [x] SPEC § 4: `align` (pad module *k* to the widest module *k* among lines with a module after it; left pads right, right pads left; last module never padded) and `durations = compact | fixed`
-- [x] `time::fixed_duration` + `DurationStyle`; every duration and countdown goes through `Ctx::duration` / `Ctx::countdown`
-- [x] `render::align_columns` runs after all lines render and before join/compose; default render byte-identical (goldens unchanged)
-- [x] Docs: config keys, `### Aligned columns` sample in `docs/config.md`, README and guide
-- [x] Tests: fixed-duration table, config parse/fallback, two-line alignment (separator columns equal, last module unpadded, right group mirrored), fixed durations in a full render
-
-## Phase 12 — Walkthrough fixes (bugs 1–11 from 2026-09-05)
-
-Bugs found by Daniel and by me while switching the live config through the
-presets, themes, frames, icon sets and module options (SPEC § 4.1, § 5).
-Every fix gets a unit test; user-visible ones get a golden or integration
-test. Bugs that add a config key live in the phase that owns the key: bug 3
-(`bar` shorthand) and bug 11 (`hide_empty_lines`) in Phase 13, bug 8
-(per-key fallback) in Phase 14.
-
-- [x] Config-driven golden harness (`tests/config_golden.rs`): one config file per case under `tests/fixtures/configs/` with a `# fixture/columns/now/icons/env` header, one golden per `# now:` instant, so every later phase can pin a key at two clock values; seeded with the aligned and fixed-duration layouts (closes the Phase 2 backlog item)
-- [x] Bug 1: `icons = "unicode"` misaligned the right edge in COSMIC Terminal on any line carrying one of `◆ ◔ ◫ ⧗ ▦` (garnish counted 1 cell, the terminal advanced 2). A unit test (`modules::tests`) now rejects, in the unicode and emoji sets, East Asian Ambiguous characters outside Box Drawing/Block Elements, the whole Geometric Shapes block and the `⧖ ⧗` hourglasses, and applies the same rules to the nerd set wherever it borrows a glyph from outside the private-use area; the fourteen unicode offenders (`▣ ● → ○ ◆ ◔ ◫ ▦ ¤ ♯ ☉ ◌ ⧖ ⧗`) became Dingbats/Math Operators glyphs (`❒ ✱ ➔ ❍ ❖ ⚙ ⊞ ≣ $ ❯ ✪ ❏ ↻ ⏳`; each checked against the monospace fonts on the host with `fc-list ':charset=…'`; `⏳` is the one two-cell glyph, kept knowingly like `⚡`), and the four nerd borrowings (`● ○ ◌ →`) became nf-fa glyphs (U+F111 U+F10C U+F192 U+F178); the guide names the override path. Daniel confirms the new set in COSMIC via `garnish doctor`
-- [x] Bug 2: `powerline` frame shipped with an empty `pad`; it is one space (unit test `powerline_caps_are_padded`), docs sample regenerated
-- [x] Bug 5: `sync` with `show_zero` coloured `⇡0 ⇣0` with the ahead/behind roles; the counts are a pure `count_segments` helper, zero counts muted, with a unit test on the styles
-- [x] Bug 6: with `fill = false` the left/right join used the frame's separator instead of the line's own; `compose_line` takes the line separator as a parameter (unit test, config golden `packed-line-separator`)
-- [x] Bug 7: `garnish config check` printed the problems and then a color-eyre report with a source location; a `cli::Quiet` error is mapped to `ExitCode::FAILURE` in `cli::run` (main returns `Result<ExitCode>`), `check` ends with `N problem(s) found` on stdout, `config init` refusing to overwrite is one stderr line; `tests/cli.rs` asserts stderr carries no report
-- [x] Bug 9: the `sync` fetch-age hint had no space between glyph and age (`⧖2h13m`); it has one (no golden renders inside a repository with `FETCH_HEAD`, so none changed)
-- [x] Bug 10: the emoji set contained variation-selector sequences (`⏱️ 🗄️ 🏷️ 🕰️ 🕵️ ❄️ ✏️ ⬆️ ⬇️`) that COSMIC draws one cell wide while garnish counts two; replaced with default-emoji glyphs (`⌚ ⏰ 💾 🔖 ⌛ 👤 🧊 ✨ 🔼 🔽`), the same unit test rejects U+FE0F, the guide warns about overrides
-- [x] Item 4 (guide): aligned columns pair positionally, so a `–` placeholder under a wide bar gets a wide blank column (guide § 5)
-- [x] Tour follow-up: the `garnish doctor` glyph test is a grid (`doctor::glyph_rows`), one row per icon set and module, every single-character icon padded to two cells and followed by `|` and garnish's cell count, so a glyph the terminal draws wider pushes its `|` out of the column and the block can be pasted into a feedback issue
-
-Phases 13–18 implement the spec changes of 2026-09-05, one phase per spec
-section. **Execution order (decided 2026-09-05): 12 → 14 → 13 → 15 → 16 →
-17 → 18.** Per-key config fallback (Phase 14) lands before any new config
-key so a typo in one can no longer discard a hand-edited config; the
-clock-driven `frame`/offset rule (Phase 15) is shared by the ticker, text
-modules and animations, so it lands first among the moving parts. The whole
-roadmap is one `gh stack` chain, one layer (PR) per concern, named
-`phase-N/<concern>` (`CLAUDE.md` § Session protocol); the bottom layer of
-each phase carries that phase's document sync, its top layer the session-log
-entry and the adversarial review. One release, `v0.2.0`, once the last
-Phase 18 layer has merged. Each phase follows the phase protocol in
-`CLAUDE.md`: spec re-read, schema → render → `make docs` → goldens →
-README/guide, adversarial review, tests for every bug found.
-
-## Phase 13 — Alignment and line keys (SPEC § 4.1)
-
-- [x] `right_justify = "end" | "start"`: which side a padded right-group module's text hugs; default `end` keeps today's output (goldens untouched); `align_columns` takes the pad side; only the filled-rule path is affected (with `fill = false` the line is one left-aligned sequence); unit test on the two-line alignment config, config golden `right-justify-start`
-- [x] `hide_empty_lines = true` (bug 11): a line whose modules all rendered nothing is dropped after rendering and alignment; first/last caps follow the surviving lines; unit test and config goldens `hide-empty-lines` / `keep-empty-lines` with `pr-absent`
-- [x] Intentional empty lines: `LineCfg.spacer` is set for `modules = []` with no `right`; a spacer is an empty framed row that `hide_empty_lines` never drops; config golden `spacer-line`, `[[line]]` section of docs/config.md
-- [x] `bar = "blocks" | "line"` shorthand on the bar-carrying modules (`context`, `limit5h`, `limit7d`, `spend`) (bug 3: hairline gaps between `█` blocks are the terminal font; the line-style fill `━`/`─` also drops the fractional cell); `ModuleCfg::resolve` applies it to the `fill`/`empty` icons so the resolved config is what renders and what `config show` prints; an explicit `icons.fill`/`icons.empty` override still wins; unit test, config golden `bar-line`, guide and README troubleshooting entries
-- [x] `blank = true` on a spacer (decided with Daniel 2026-09-06, layer `phase-13/blank-spacers`): an unframed spacer would be spaces only and Claude Code drops such rows; opted in, the row's first cell becomes the braille blank U+2800 (`render::keep_blank`, `BLANK_CELL`), width unchanged, framed spacers untouched, `blank` on a line with modules reported; default off so the harness's own rule stands; config golden `spacer-blank`, unit tests in `config` and `render`, `config show` writes it, SPEC § 4.1 and § 4 listing, guide, CLAUDE.md fact
-- [x] Goldens for each key (`right-justify-start`, `hide-empty-lines`, `keep-empty-lines`, `spacer-line`, `bar-line`); README layout paragraph, guide § 5 and § 7, SPEC § 4 config block. Review: an unframed spacer is whitespace only and Claude Code drops whitespace-only rows (SPEC § 2.1, CLAUDE.md fact), `stale_style = "hide"` can make a line come and go (documented), the ascii set keeps `=`/`-` under `bar = "line"`, tests for `right_justify` under `fill = false`, spacer caps, `spend` and the `config show` round trip
-
-## Phase 14 — Failure behaviour and CLI polish (SPEC § 5, § 7)
-
-- [x] Per-key fallback (bug 8): the file is read as a `toml::Table` and `RawConfig::from_table` converts each top-level, `[frame]` and `[[line]]` key on its own (`field()` reports a bad value under its TOML path and leaves the default); wholesale fallback only on a TOML syntax error; the `⚠ config:` line unchanged. Tests: bad theme + bad colour + unknown keys keep the custom frame, the lines and the module overrides; a syntax error still yields the defaults with a line; config golden `bad-colour-custom-frame`
-- [x] `config check` exits 1 quietly on problems (bug 7): done in Phase 12 (`cli::Quiet`)
-- [x] Per-key errors lose their line number (every value error has `line: None`; `toml::Value` carries no span); syntax errors keep theirs. `Loaded.errors` doc, doctor's wording (`has N problem(s); the built-in default stands in for each bad key`), SPEC § 5, README and guide updated to match
-
-## Phase 15 — Clock-driven scrolling: line ticker and text modules (SPEC § 3.7, § 4.1 ticker)
-
-- [x] `time::frame(now, step, period) -> usize`: the one stateless rule (`floor(now_secs × step) mod period`), with unit tests at the boundaries and for `step = 0.5`; `Clock.animate` (`GARNISH_ANIMATE=0`, and `Clock::fixed()` is frozen so docs show frame 0) feeds `Ctx::frame`, through which every moving part goes; the `clock` spinner is its first user (goldens byte-identical: 1738425600 mod 10 = 0); config golden `animate-off` at two instants
-- [x] `ansi::scroll(segments, width, offset, gap, wrap)`: window onto a segment list, cluster-aware like `truncate` (a wide cluster cut by an edge becomes spaces), `wrap = false` restarts at 0 after the end passes, `wrap = true` cycles text + gap; property test over widths × offsets × wrap that the window is always exactly `width` cells, plus slide/restart/wrap/style tests
-- [x] `overflow = "truncate" | "ticker"` with `ticker_step` (> 0, shared `resolve_step`) and `ticker_gap`: `Layout.ticker` carries step, gap, clock and the animate switch, `compose_line` scrolls the left group through `ansi::scroll` when it is over budget, right group untouched; config goldens `ticker` at three instants and `ticker-frozen` with `GARNISH_ANIMATE=0`; `truncate = false` keeps meaning "hand the harness the whole row"; `presets/single-line-full.toml` switches to it and `tests/presets.rs` asserts every preset renders uncut inside the box at its declared width (it collects every offender; `compact-aligned` and `three-lines-double` had been cut at their declared 100/110 columns all along and now declare 110/130); criterion `tick_in_process_ticker`
-- [x] Text modules: `src/modules/text.rs` with a `SCHEMA` (`text`, `width`, `pad`, `justify`, `overflow = clip | scroll | scroll-wrap`, `step`, `gap`, colour `text`, plus the common `label`/`prefix`/`suffix`/`hide_when_empty`); `Config.texts` is built by `resolve_texts` from `[modules.text.<name>]` through the shared `parse_overrides` (now taking its path), `refresh`/`preset` rejected, `step` must be positive; `text.<name>` line ids are valid only with a table; `render_group` branches on the prefix; ANSI/OSC/control stripped (`text::sanitize`); `garnish modules` lists the family, `docs/modules/text.md` is generated from the schema with the SPEC example, `config show`/`init` emit the tables (or a commented example); config goldens `text-scroll` and `text-scroll-wrap` at three instants, `text-boxes` for clip/justify/pad/hug. Review: `text` and `gap` (and `ticker_gap`) are reduced to plain text at config time (an escape sequence cut by the window leaked colour into the row), names must be bare keys so `config show` round-trips (test), an explicit `colors.text` wins over the `color` shorthand, `refresh`/`preset`/`icons` each give one error
-- [x] CLAUDE.md convention amended (done in the roadmap PR: "fixed, plus the text family"); presets: `single-line-full` is the ticker preset (Phase 15 ticker layer) and `motd-ticker` is the text-module example
-- [x] Ticker durations (decided with Daniel 2026-09-06, layer `phase-15/ticker-durations`): with `overflow = "ticker"` the top-level `durations` defaults to `fixed` so the window slides instead of jumping when a timer changes width; an explicit `durations = "compact"` still wins; every timer module (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) carries a schema option `durations = "inherit" | "compact" | "fixed"` read through `Ctx::durations_for`; unit tests in `config` and `render`, `config show` prints the implied `fixed` (CLI test), config golden `ticker-module-compact` at two instants; SPEC § 4.1, guide, `docs/config.md`
-- [x] Bench: the scroller runs only when a group overflows or a text module scrolls; the warm default tick is untouched (`tick_in_process_default` 13.8 µs); a full-preset row squeezed into 60 columns and scrolling (`tick_in_process_ticker`, nine modules) takes 31.7 µs in-process, well inside the 0.2 ms line, and `bench/run.sh`'s warm scenarios never overflow
-
-## Phase 16 — Animation framework (SPEC § 4.2)
-
-- [x] `animate` top-level key (default `true`) and `GARNISH_ANIMATE=0`; the effective switch is `clock.animate && config.animate`, set once on `Ctx` and on the ticker, so every animation freezes at frame 0 (`Ctx::frame` returns 0); config golden `animate-config-off` (spinner, ticker and a text module at two instants); guide § 6 "Animation"; key row, `config init` line, SPEC § 4 block
-- [x] `[frame] fill_pattern`, `fill_step`, `fill_direction`: `FrameCfg` carries the validated one-cell pattern, `render::rule_pattern` turns the clock frame into a start index (reversed for `right` so the dots travel toward the cap), `frame::Rule::paint` fills exactly the rule's cells; `fill_char` stays the static case; config goldens `frame-pattern` (three instants) and `frame-pattern-left` (`fill_step = 0.5`)
-- [x] `[frame] separator_frames`, `separator_step`: `Config::separator_at(line, frame)` picks the frame, a per-line `separator` wins; validation rejects frames of unequal width and reduces every frame to plain text; config golden `separator-frames`; `config show`/`init` write the five keys (empty = static); key rows in docs/config.md with the frame-0 sentence
-- [x] `<key>_frames` on any `[modules.<id>.icons]` key: `parse_icons` validates (equal widths, plain text, at least one frame, a known base key), `ModuleCfg.icon_frames` keeps them, `ModuleCfg::animated` gives `render_group` a per-tick view in which every framed icon shows `frames[floor(now) mod n]` (borrowed, so a module without frames costs nothing); with animations off every cycle sits on `frames[0]` (SPEC § 4.2). The clock spinner's built-in glyph string stays the default cycle (goldens byte-identical) and `spinner_frames` is the general form; `config show` writes `<key>_frames`
-- [x] Goldens: `frame-pattern`, `frame-pattern-left`, `separator-frames`, `icon-frames` at two or three instants; docs render at frame 0 (`Clock::fixed()`), said in the `[frame]` section and on every module page's icons table
-- [x] Bench unchanged (`Cow::Borrowed` when nothing animates; frame lookups only); guide § 6 "Animation" with the accessibility note; `presets/animated-dots`
-- [x] Frozen ticker (decided with Daniel 2026-09-06, layer `phase-16/frozen-ticker`): with animations off a ticker line is truncated with `…` like `overflow = "truncate"` instead of a window frozen at offset 0, so the cut is visible to the readers the switch is for; text modules keep offset 0 inside their declared box; `compose_line` filters the ticker on `animate`; unit test, config goldens `ticker-frozen` and `animate-config-off` re-pinned, docs rows, guide, SPEC
-
-## Phase 17 — Presets gallery (SPEC § 12)
-
-- [x] `presets/` seeded with the walkthrough configs (files with the `# name/summary/columns/needs` header), plus `motd-ticker` and `animated-dots` from Phases 15–16
-- [x] `tests/presets.rs`: every file validates, renders without `…` and inside the box at its declared width (animated presets must move between two ticks), name matches filename and is unique
-- [x] `src/gallery.rs`: the files embedded with `include_str!` (`gallery::PRESETS`, `find`, `header`, `body` strips the tooling lines), a unit test that the table lists exactly `presets/*.toml` and that every body validates
-- [x] `garnish docs` renders `docs/presets.md` (`docs::presets_page`: a table, then per preset the sample at the declared width from `subscription-full` at frame 0 and the file in a collapsed block); `docs_sync` covers it, the index and README link to it
-- [x] `garnish presets` lists names, summaries, widths and needs; `garnish config init --preset <gallery name>` writes the file with the tooling header lines stripped (a built-in name still gets the annotated default file; an unknown name lists both kinds); end-to-end test in `tests/cli.rs`
-- [x] `presets/screenshots/<name>.png` convention, named in README, `presets/README.md` and the gallery page intro (the `garnish-submit-preset` skill of Phase 18 asks for one)
-- [ ] Website: a static page built from `docs/presets.md` and the screenshots (separate repo or `gh-pages`; out of scope for the binary and for this roadmap; stays open here as the pointer)
-
-## Phase 18 — Bundled skills (SPEC § 13)
-
-- [x] `skills/garnish-statusline/SKILL.md`: interactive config builder (terminal/font → icons, width → preset, priorities → lines, theme, frame, align/durations, animation, free-text wish), starts from a gallery preset when one fits, previews with `garnish preview` (a sample payload is embedded for installs without the repository), writes, validates; never touches `settings.json` itself
-- [x] `skills/garnish-feedback/SKILL.md`: `gh issue create` with terminal app + version, font, OS, `garnish --version`, `config show`, `doctor` (glyph grid kept whole), the plain render, and a screenshot request; labels `feedback` (+ `alignment`)
-- [x] `skills/garnish-submit-preset/SKILL.md`: asks name/summary/columns/needs/author, builds the § 12 header, validates and renders at the declared width (no `…`, rows inside the box), opens a `preset` issue asking for a screenshot; README "Skills" section and guide § 9
-- [x] `garnish skills install [--dir D] | list` (`src/skills.rs`, the three files embedded with `include_str!`, written to `~/.claude/skills/<name>/SKILL.md` next to the settings file, only garnish's own files ever touched); `garnish install` writes them unless `--no-skills` (`--dry-run` says so); README/guide section; unit test plus `tests/cli.rs` end to end (dry run, install, list, `--dir`)
-- [x] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`, same sections and commands as the skills, labels in the frontmatter); the `feedback`, `alignment`, `preset` labels are repository state and are created by Daniel (`gh label create …`, listed in the PR)
-- [x] Release chores: `Cargo.toml`/`Cargo.lock` at `0.2.0`, `CHANGELOG.md` (new; the `v0.2.0` tag message is its section); the stack merged 2026-09-06 and `v0.2.0` was tagged the same day from `main` after the heading was dated in one small PR
-
-## Backlog (open after v0.1.0)
-
-Items left unchecked when their phase closed, plus follow-ups from reviews
-and user feedback. Pick from here when no phase is in progress.
-
-- [x] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a golden test over them (`tests/config_golden.rs`, 2026-09-05)
-- [x] Sanitise every string that reaches a row (Phase 15 review; done in the whole-stack review layer, 2026-09-06). The full sink list was: `label`/`prefix`/`suffix`, every static `icons.<key>` override, the frame glyphs (`first`…`right_single`, `pad`, `separator`, `fill_char`), per-line `separator`, the `⚠ config:` line's own `e.path`, and the payload strings (`model.display_name`/`id`, `output_style.name`, `session_name`, `agent.name`, `cwd`/`project_dir`, `worktree.name`/`branch`, `pr.url`). Now `Segment::plain`/`styled` reduce everything to plain text (`ansi::plain_text`, extended to bidi/format characters) and the config strings are reduced at parse time as well, so width arithmetic sees real cells; `Painter` emits OSC 8 only for `http(s)://` printable-ASCII URLs. Backlog note: a schema-level `max` on `OptSpec` would make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md`; today they live in `config::bounded`
-- [x] Question for Daniel: with `GARNISH_ANIMATE=0` a ticker was frozen at offset 0, a silent cut with no `…` (Phase 15 review). Decided 2026-09-06: a frozen ticker line is truncated with `…` (layer `phase-16/frozen-ticker`, SPEC § 4.1/§ 4.2)
-- [x] Phase 4: test a tick killed mid-run while the worker completes (2026-09-12, see Phase 4)
-- [x] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end (2026-09-12, see Phase 5)
-- [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)
-- [x] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fixed in `docs::index_page` and regenerated (2026-09-12)
-- [x] `Cargo.toml` said `repository = "local"`; it points at the GitHub URL (Phase 17, 2026-09-06)
 - [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened (SPEC § 3.2 says the settings chain is read every tick)
-- [x] `Segment.text` is private with `text()`, `with_text` and `push_str` (each sanitising), so the plain-text invariant (SPEC § 5) is held by the type (2026-09-12)
-- [x] `OptSpec::max` replaces the key-name match in `config::bounded`; the caps are declared on `context.width`, the three `bar_width`s, `text.{text,width,pad,gap}` and, new, `cost.decimals` (≤ 8: `format!("{:.N$}")` allocated N bytes, so `decimals = 4000000000` was a 4 GB allocation on every tick), and the reference prints them in the type column (2026-09-12)
-- [x] Release pipeline with the Homebrew tap (2026-09-11): `.github/workflows/release.yml` on a `vX.Y.Z` tag builds four archives, publishes a pre-release from the CHANGELOG section, waits for Daniel's approval in the `release` environment, pushes `Casks/garnish.rb` to `justanotherspy/homebrew-tap` (octo-sts token, `brew fetch` check first), then marks the release Latest (CLAUDE.md § Release process)
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
+- [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
+- [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
 
-## Session log
+## Work log
+
+Compacted on 2026-09-12 from the full session log; each entry keeps what
+was built, what the reviews found and what was decided, not how.
 
 - **2026-09-04** — Research (statusline contract, autocompact internals,
-  namtao toolkit), spec and plan approved. Phase 0 done: nightly
-  1.100.0 (2026-09-03), project scaffolded, deps added, docs written.
-  Phases 1–3 done in one pass: payload/time/ansi/num, schema-driven config with
-  presets/themes/icon sets/frames, all 21 modules registered (branch/sync are
-  payload-only stubs until Phase 5), render pipeline, docs generator, golden
-  suite (416 renders). Deviation from SPEC: role overrides live under
-  `[colors]`, not `[theme.colors]` (TOML cannot have `theme` be both a string
-  and a table).
-- **2026-09-04 (later)** — Phases 4–5 done: cache with hard-link locks and a
-  2 s hand-over grace window, detached workers, git reader, repo modules,
-  worker integration tests. Adversarial review of phases 1–3 found 2 critical
-  / 4 high / 6 medium issues; all fixed with regression tests (commit
-  `287e719`). Notable: a lock handed to a worker carried the tick's pid and
-  looked dead the moment the tick exited — fixed by the grace window plus the
-  worker re-stamping the lock. Spec drifts recorded in SPEC § 3: `lines`
-  renders `+156 −23`, `cache` shows the warm countdown in `default`, GitLab
-  MRs render as `!N`. Tooling: `make watch` (watchexec) added.
-- **2026-09-04 (evening)** — Phases 6–8 done: generated docs + guide +
-  docs-sync test, `install`/`doctor`/example config, hyperfine gate green
-  (warm 2.50 ms mean). Second adversarial review (phases 4–6) found a
-  symref-cycle stack overflow, a reftable `.invalid` branch, per-worktree
-  `FETCH_HEAD`, a pipe-buffer deadlock in the worker, an untimed fetch, fetch
-  failures poisoning `sync`, and failed entries respawning every tick; all
-  fixed with regression tests (git.rs, worker.rs, cache.rs). Locks are now
-  hard-linked and re-stamped by rename, hand-over is Linux-only, entries are
-  validated against the current head/upstream, GC uses the wall clock, and
-  docs/goldens render with a pinned `Clock` (no git, no settings env).
-- **2026-09-04 (night)** — Third adversarial review (install/doctor/docs/
-  bench) fixed: `install` keeps permissions, follows symlinks, never
-  clobbers a backup, strips a BOM, reports read errors in dry runs, warns on
-  stderr; `config init` leaves module presets/options/separator as comments
-  so the top-level preset keeps driving; doctor takes explicit cache/settings
-  (isolated unit test), probes writability, shows the debug.log tail; bench
-  `cold` really spawns workers, p99 index fixed, tool check added;
-  `command-run` dropped (no timeout). Headroom analysed: process start is
-  1.3 ms of the 2.4 ms tick. `v0.1.0` tagged.
-- **2026-09-04 (late)** — Pushed to `github.com/justanotherspy/garnish`.
-  GitHub Actions CI added (Linux `scripts/ci.sh`, macOS `make check`, manual
-  bench), actions SHA-pinned, Renovate on `config:best-practices`,
-  `scripts/ci-annotate.sh` for readable failures. macOS runs found: two
-  worker tests asserting the Linux-only `--lock-held` hand-over, `/var` vs
-  `/private/var` path comparisons in the install and worktree tests, and
-  the two 400-render matrices exceeding nextest's 60 s limit (now rayon
-  fan-out, 3.4 s → 1.2 s locally, with a 180 s budget in
-  `.config/nextest.toml`); the annotate script also learned nextest's
-  coloured `FAIL` lines and `stdout ───` blocks. Status line feedback from
-  Daniel: (1) the model icon `󰚩` (U+F06A9, Nerd Fonts v3 only) showed as a
-  box → `` (nf-cod-hubot, U+EB08); (2) the `sync` fetch age dimmed every
-  fifth tick because its 5 s TTL expired → new top-level `stale_after`
-  (default 5 TTLs, SPEC § 3.6): a value past its TTL spawns the worker but
-  renders unchanged until it is that overdue; (3) right side cut with `…` →
-  not reproducible in garnish (the right group is never truncated); Claude
-  Code renders each row with Ink `wrap="truncate"`, so the row must be wider
-  than the harness's box; workaround `padding = N`, root cause in the
-  backlog. PR #5 squash-merged.
-- **2026-09-05** — CI on `main` green on Linux and macOS (closes the
-  Phase 9 macOS item). Documents split by role: `CLAUDE.md` host-neutral,
-  new `SPRITE.md` loaded only on a Sprite, `PLAN.md` codebase-only with a
-  Backlog, `SPEC.md` synced with the CLI and config keys the code exposes
-  (`--config`, `config init --force`, `padding`, `stale_style` values, new
-  § 10 Documentation), `README.md`/`docs/guide.md` with the real clone URL
-  and requirements. Phase 10: `scripts/session-host.sh`, the SessionStart
-  hook (`SESSION_HOST` via `CLAUDE_ENV_FILE`, `SPRITE.md` only on a Sprite),
-  `scripts/setup.sh`/`make setup` for prerequisites on any host, CI switched
-  from `taiki-e/install-action` to the same script. `docs/` verified in
-  sync. Next: backlog.
-- **2026-09-05 (later)** — Right-edge `…` root cause. Daniel installed
-  from `main` and the default config still lost its right cap. Read the
-  2.1.261 binary: the footer is an Ink box of `width: columns` with
-  `paddingX: 2`, the status line sits inside it in a box with
-  `paddingX: statusLine.padding`, and each row is `wrap="truncate"`, so the
-  box is `COLUMNS − 4 − 2 × statusLine.padding` and garnish, filling to
-  `COLUMNS`, was 4 cells over on every tick. Fix: `Config::width` subtracts
-  `HARNESS_PADDING` (4) before `padding`, uniformly for `COLUMNS`,
-  `GARNISH_COLUMNS`, `--width` and the 120 fallback so `preview` stays
-  WYSIWYG; `padding` now documented as `2 × statusLine.padding`. Goldens
-  regenerated (the rule is 4 cells shorter; the `full` preset at 100
-  columns also truncates its left group 4 cells earlier), SPEC § 2.1 and
-  § 4 layout rule, README and guide troubleshooting, `CLAUDE.md` facts
-  (with how to re-verify after an upgrade). Backlog item closed.
-- **2026-09-05 (review follow-ups)** — The adversarial review of the width
-  fix landed after the merge. Fixed: `install --padding N` now seeds the
-  generated config with `padding = 2N` (or prints the value to set when a
-  config exists) and its help says so; the two render tests that allowed 4
-  cells of slack assert the real box width; `benches/tick.rs` builds its
-  `Ctx` with `Config::width`; every "fills to `$COLUMNS`" phrase in the
-  generated docs, SPEC, guide and `CLAUDE.md` names the real width;
-  `CLAUDE.md` records that the `COLUMNS` env and the footer's layout width
-  are both `process.stdout.columns`. README: the hand-written sample was
-  still 100 cells wide; it is now the generated `default` sample at 80
-  columns plus one sample per preset (docs `preset_columns`: 80/80/90/120,
-  a round width at which each preset shows no `…`; `full` still needs 120
-  and is the one block that may scroll), and a note that explicit
-  `[[line]]`/`[frame]` blocks in a config override the preset's lines. A
-  docs-sync test now checks that every render block in README appears
-  verbatim in `docs/config.md`. Second review round (same day): `--padding`
-  is range-checked (`u16` in the config; larger values used to parse as 0
-  silently), the "config exists" note goes to stderr so `--dry-run` stdout
-  stays a clean preview, the dry run names the padding it would seed, the
-  third slack test tightened, SPEC § 7 install row and § 9 width bound,
-  and the Phase 2 checklist wording updated.
-- **2026-09-05 (Phase 11)** — Daniel asked for an option that lines the
-  `│` separators up across lines and stops module widths jittering as
-  timers tick. Two top-level keys, spec'd first (§ 4): `align = true` pads
-  module *k* of each group to the widest module *k* among the lines that
-  have a module after it (left group pads right, right group counts from
-  the right end and pads left; a line's last module is never padded), so
-  bars stack between lines sharing a separator; `durations = "fixed"`
-  prints two units always with the small one two digits wide (`0m47s`,
-  `9m00s`, `1h05m`, `3d04h`). Every elapsed time and countdown now goes
-  through `Ctx::duration`/`Ctx::countdown`. `render_lines_at` renders all
-  groups first, aligns, then joins and composes; with the defaults the
-  output is byte-identical (goldens untouched). Sample in
-  `docs/config.md` § Aligned columns. Column widths are per tick (the
-  widest module wins), so a growing value only moves the bars when it was
-  already the widest; a persisted high-water mark per column is a possible
-  follow-up if that is not enough. Review round: modules that rendered
-  nothing were still counted as columns (a hidden `pr` produced a blank
-  padded column and a phantom bar, and made the visible last module
-  "not last"), fixed by dropping empty renders in `render_group`; with
-  `fill = false` the right group is left-anchored, so the line is now
-  aligned as one sequence (spec'd); the alignment test now uses groups
-  whose first, last and rightmost modules all differ in width, so padding
-  the last module, not mirroring the right group, or padding it on the
-  wrong side each fail it, plus a test with hidden modules.
-- **2026-09-05 (live walkthrough, roadmap)** — With #9, #10 and #11 merged
-  and the binary reinstalled, Daniel and I switched his live config
-  through every preset, theme, frame style and icon set, then seven
-  module-option steps (labels and placeholders; context and limit bars;
-  session/api/cache/cost detail with fast refreshes; per-line separators,
-  custom frame and `fill = false`; colours and 256-colour mode; emoji and
-  icon overrides with truncation limits; one 362-cell line with
-  `truncate = false`, then eight one-module lines). The config is re-read
-  every tick, so each change showed within a second. Findings are Phase 12
-  (eleven bugs and notes, with the diagnosis for each: the COSMIC Terminal
-  width mismatches come from specific unicode glyphs and from emoji that
-  need a variation selector; a bad colour discarded the whole config;
-  `config check` printed an error report; powerline caps had no padding;
-  `fill = false` ignored the line separator at the join; zero sync counts
-  were coloured; empty lines stayed as empty rows). Daniel's ideas became
-  SPEC § 4.1 (`right_justify`, intentional empty lines, a ticker for
-  overflow), § 12 (a `presets/` gallery with a generated page, screenshots
-  and eventually a website) and § 13 (three bundled skills:
-  `garnish-statusline` config builder, `garnish-feedback` issue filer,
-  `garnish-submit-preset`), then text modules (§ 3.7) and the animation
-  framework (§ 4.2), planned as Phases 13–18, one per spec section in
-  dependency order. This PR is
-  documentation plus the seed `presets/` files and a validation test;
-  no behaviour changed. His live config at the end of the session is the
-  eight-line step 7b layout; the pre-walkthrough full config is backed up
-  next to it as `garnish.toml.bak-2026-09-05`.
-- **2026-09-05 (Phase 12, stack layers 1–4)** — Execution order decided
-  with Daniel: 12 → 14 → 13 → 15 → 16 → 17 → 18, the whole roadmap as one
-  `gh stack` chain (one layer per concern, drafts, Daniel merges, a single
-  `v0.2.0` once Phase 18 lands). Layer `phase-12/config-goldens`:
-  `tests/config_golden.rs` renders every `tests/fixtures/configs/*.toml` at
-  the instants its `# now:` header lists (plus `# fixture/columns/icons/env`),
-  so later phases can pin clock-driven keys; seeded with the aligned and
-  fixed-duration layouts. Layer `phase-12/glyphs`: the walkthrough's wide
-  glyphs were not the East Asian Ambiguous set alone (`◔ ◫` are not
-  ambiguous by table, the bars `█ ▏` are), so the guard rejects ambiguous
-  characters outside Box Drawing/Block Elements, the whole Geometric Shapes
-  block, the `⧖ ⧗` hourglasses and `U+FE0F`; fourteen unicode and nine emoji
-  glyphs replaced, nerd untouched; `doctor` prints a marker grid. Layer
-  `phase-12/frame-fixes`: powerline pad, muted zero sync counts
-  (`count_segments`), the line's own separator at the unfilled join
-  (`compose_line` parameter), a space in the fetch-age hint. Layer
-  `phase-12/cli-exit`: `cli::Quiet` → `ExitCode::FAILURE` without a report.
-  Bugs 3, 8 and 11 moved to the phases that own their config keys.
-- **2026-09-05 (Phase 14, one layer)** — Per-key config fallback (bug 8).
-  The serde-derived `RawConfig` with `deny_unknown_fields` rejected the
-  whole file on the first bad key; it is now built by walking a
-  `toml::Table` (taken by value: cloning every value cost a fifth of the
-  parse on the full annotated file) and converting each top-level,
-  `[frame]` and `[[line]]` key on its own, module lists item by item, enum
-  keys with a message that names the choices. A syntax error is the only
-  wholesale fallback and the only error with a line; value errors carry the
-  TOML path. Review found that a bad list item blanked its whole row and
-  that `try_into`'s messages for enum keys given a table were misleading;
-  both fixed with tests, plus a doctor sentence for the syntax-error case
-  and the stale "renders the defaults" sentence in `docs/config.md`. Config
-  golden `bad-colour-custom-frame` at 160 columns shows the heavy frame,
-  both lines and the `⚠ config: … (+3 more)` note.
-- **2026-09-05 (Phase 13, three layers)** — Layout keys of SPEC § 4.1.
-  `phase-13/right-justify`: `align_columns` takes the pad side; `start`
-  pads a right-group module on the right so its text follows the separator.
-  `phase-13/empty-lines`: lines are filtered after rendering and alignment
-  (`hide_empty_lines`, default true), the caps follow the survivors,
-  `LineCfg.spacer` marks `modules = []` rows that always stay; no payload
-  golden changed because every preset line keeps at least one module.
-  `phase-13/bar-shorthand`: `bar = "line"` on the four bar modules; the
-  first cut resolved it at render time with an "overridden icons" set on
-  `ModuleCfg`, which broke the `config show` round trip (every printed icon
-  read back as an override) and would have printed `fill = "█"` while
-  rendering `━`; it is now applied once in `ModuleCfg::resolve`, so the
-  resolved icons are what renders and what `show` prints. Each key has a
-  config golden, a key row in `docs/config.md` and a `config init` line.
-  Review of the phase: nothing blocking; it found that Claude Code drops
-  whitespace-only rows from the script output (so a `style = "none"` spacer
-  is invisible; documented in SPEC § 2.1/§ 4.1 and CLAUDE.md rather than
-  worked around, glyph choice left to Daniel), the `stale_style = "hide"`
-  height change, and that the ascii set got `━`/`─` (now `=`/`-`).
-- **2026-09-05 (Phase 15, four layers)** — Clock-driven scrolling.
-  `phase-15/frame-rule`: `time::frame` (`floor(now × step) mod period`,
-  saturating), `Clock.animate` from `GARNISH_ANIMATE` and false for
-  `Clock::fixed()` so docs show frame 0, `Ctx::frame` as the single entry
-  point; the `clock` spinner moved onto it with byte-identical goldens.
-  `phase-15/scroller`: `ansi::scroll`, cluster-aware like `truncate`, with a
-  property test that the window is always exactly the requested width.
-  `phase-15/line-ticker`: `overflow = "ticker"`, `ticker_step`, `ticker_gap`
-  through `Layout.ticker` into `compose_line`; `single-line-full` became the
-  ticker preset, and tightening `tests/presets.rs` to "uncut and inside the
-  box at the declared width" showed `compact-aligned` and
-  `three-lines-double` had been cut all along (now 110/130 columns).
-  `phase-15/text-modules`: `src/modules/text.rs` with its own schema,
-  `Config.texts` built by `resolve_texts` through the shared
-  `parse_overrides` (which now takes its path), `color = …` shorthand,
-  `text.<name>` ids validated against the tables, `docs/modules/text.md`
-  generated, `config show`/`init` emit the tables, preset `motd-ticker`.
-  Review of the phase: `gap`/`ticker_gap` were not sanitised (an escape
-  sequence cut by the window leaked colour), text-module names had to become
-  bare keys for `config show` to round-trip, `colors.text` now beats the
-  `color` shorthand, the presets test checks a ticker preset actually scrolls.
-- **2026-09-06 (Phase 16, three layers)** — Animation framework of
-  SPEC § 4.2. `phase-16/animate-switch`: the `animate` key, effective switch
-  `clock.animate && config.animate` on `Ctx` and the ticker; guide § 6.
-  `phase-16/frame-animation`: `fill_pattern`/`fill_step`/`fill_direction`
-  (`render::rule_pattern` turns the clock frame into the pattern index of
-  the rule's first cell, reversed for `right`; `frame::Rule::paint`),
-  `separator_frames`/`separator_step` through `Config::separator_at`;
-  validation (one-cell pattern glyphs, equal-width frames, plain text,
-  positive steps) with the static frame as fallback. `phase-16/icon-frames`:
-  `<key>_frames` on any icon via `parse_icons`, kept on `ModuleCfg`, applied
-  by `ModuleCfg::animated` as a per-tick view handed to `Module::render`
-  (borrowed when nothing animates, so no cost otherwise); with animations
-  off every cycle sits on frame 0, so the clock spinner's built-in glyph
-  string stays the default cycle and goldens are byte-identical. Four config
-  goldens at two or three instants, preset `animated-dots`. Review of the
-  phase: the clock still split a multi-character `spinner_frames` frame into
-  characters (fixed, two-cell frames in the fixture and test), a rule shorter
-  than one period blinked (static fill below one period), `fill_pattern`
-  with `fill = false` is now reported, SPEC § 4.2 says "frame 0 when off"
-  everywhere, the presets test checks every animated preset moves, and
-  `animated-dots` animates the model icon (the fixture has no branch).
-- **2026-09-06 (Phase 17, three layers)** — Presets gallery of SPEC § 12.
-  `phase-17/gallery-embed`: `src/gallery.rs` embeds every `presets/*.toml`
-  with `include_str!` (a unit test keeps the table equal to the directory),
-  parses the header, and `body` strips the tooling lines for a written file.
-  `phase-17/gallery-docs`: `docs/presets.md` generated with every preset
-  rendered at its declared width at frame 0 plus the file in a collapsed
-  block; index and README link to it; the screenshots convention is named.
-  `phase-17/gallery-cli`: `garnish presets`, `config init --preset <gallery
-  name>` (built-in names keep the annotated default file; an unknown name
-  lists both kinds), end-to-end test; `Cargo.toml repository` points at
-  GitHub. The website stays a backlog pointer.
-- **2026-09-06 (Phase 18, three layers)** — Bundled skills of SPEC § 13.
-  `phase-18/skills-files`: the three `skills/<name>/SKILL.md` (config
-  builder with an embedded sample payload, feedback issue, preset
-  submission), README "Skills" section, guide § 9. `phase-18/skills-install`:
-  `src/skills.rs` embeds them, `garnish skills list | install [--dir D]`,
-  `garnish install` writes them next to the settings file unless
-  `--no-skills` (`--dry-run` says so; only garnish's own files are ever
-  written), unit and end-to-end tests. `phase-18/issue-templates`:
-  `.github/ISSUE_TEMPLATE/{feedback,preset}.md` mirror the skills' issue
-  bodies; labels are created by hand. Top of the stack: version `0.2.0`,
-  `CHANGELOG.md` introduced (its section is the tag message), every
-  Phase 12–18 box ticked. The `v0.2.0` tag follows the last merge. Review
-  of the phase: the submit-preset skill's frontmatter was not valid YAML
-  (quoted now, with a shape test), the statusline skill wrote before
-  previewing (drafts through `--config` now), widths came from `COLUMNS`/
-  `tput` which a shell without a tty does not know (asked for instead),
-  the sample payload hid five modules (it is `subscription-full.json`
-  verbatim, tested equal), `skills::install` rewrote identical files and
-  followed symlinks (compares, skips links, pid-named `create_new` temp),
-  the skills were written before the config (after now), and an unreadable
-  config dropped the command-line overlay.
-- **2026-09-06 (whole-stack review, two layers)** — Three reviewers over
-  `main...phase-18/issue-templates`: rendering and motion, config/gallery/
-  CLI/docs, security. `review/2026-09-06-row-hardening`: `Segment::plain`/
-  `styled` reduce every string to plain text (payload names and paths, git
-  output, the `⚠` line) and `plain_text` drops bidi/format characters; the
-  config's own strings are reduced at parse time (label/prefix/suffix, icon
-  overrides, frame glyphs, per-line separator), `fill_char` width is
-  reported; OSC 8 only for `http(s)://` printable ASCII; sizes bounded
-  (`MAX_CELLS`, `MAX_TEXT_CHARS`, `MAX_WIDTH`, `STEP_RANGE`) after
-  `width = i64::MAX` aborted a tick and a giant bar spun forever with
-  `config check` saying ok; a syntax error keeps the overlay; `install`/
-  `config init` refuse an unset `HOME`; a one-cell ascii box shows `.`;
-  SPEC § 4.1 documents the ticker's period following a compact duration
-  (pair with `durations = "fixed"`) and `align` pads travelling with the
-  window; `tests/presets.rs` checks three instants and the exact ticker
-  advance; config golden `hostile-strings`. `review/2026-09-06-config-cli-
-  polish`: `config show` round-trips (theme in effect, unknown ids
-  removed; a test over every fixture and preset), a mistyped `modules` is
-  not a spacer, doctor collapses `$HOME` to `~` and keeps every config
-  glyph field, `preview` typos are quiet one-liners, serde type names in
-  messages become plain words, the `⚠ config:` line drops the `config`
-  placeholder when there is no file, a gallery name may not shadow a
-  built-in (test), the gallery header ends at the first blank line under
-  CRLF too, both golden suites refuse to bake in `⚠ garnish:` (and config
-  goldens declare `# expect: config-warning`), the stale bug-10 caveat left
-  `emoji-overrides`, CHANGELOG/SPEC wording. Bench unchanged (warm 1.07 ms).
-  A focused review of the two layers then found: the HOME guard still let
-  `install --settings` and `config init` under `GARNISH_CONFIG` write
-  `./garnish/garnish.toml` (root fix: `default_path`/`default_settings_path`
-  return `None` without a home, `config init` resolves `--config` →
-  `GARNISH_CONFIG` → default), `modules = [1, 2]` was still a spacer
-  (length compare), `config show` wrote an emptied line as `modules = []`
-  and so turned a hidden row into a drawn spacer (skipped; the round-trip
-  test now compares renders), `bar_width` escaped the cap, DCS/SOS/PM/APC
-  payloads showed as text (consumed to ST), and the golden guards are
-  anchored at a row start. Open from that review: `Segment.text` is `pub`
-  (the plain-text invariant is by convention; a private field with an
-  accessor would let the compiler hold it) and a schema-level `max` on
-  `OptSpec` (backlog).
-- **2026-09-06 (ticker durations, one layer)** — Daniel's answer to the
-  whole-stack review's open question: a ticker should not leave the smooth
-  case to the user. `phase-15/ticker-durations`, on top of the review
-  layers: with `overflow = "ticker"` the top-level `durations` defaults to
-  `fixed`, an explicit `compact` still wins, and the seven timer modules
-  carry a schema option `durations = "inherit" | "compact" | "fixed"`
-  (`Ctx::durations_for`, so a right-group countdown can stay compact while
-  the scrolled group holds its width). `config show` prints the implied
-  `fixed`. Only the `ticker` golden's first instant changed (the group is
-  wider, so the offset lands elsewhere); config golden
-  `ticker-module-compact` pins the override. Review of the layer: the
-  golden pinned `api`/`limit5h`, whose values read the same in both styles
-  (hollow; now `cache`/`limit7d`, `47m` vs `47m00s` and `3d4h` vs `3d04h`);
-  `config init` wrote a live `durations = "compact"`, which would have
-  defeated the default for anyone starting from `init` and later switching
-  the ticker on (now a comment in the annotated file, as `separator` is);
-  `time::countdown` was the last public compact-only formatter (removed,
-  `countdown_at` is test-only); `single-line-full` drops its now redundant
-  `durations = "fixed"`; a bad `durations` value under a ticker falls back
-  to the implied `fixed` (asserted); the CHANGELOG bullet moved next to the
-  ticker's. Release: Daniel chose to date the CHANGELOG heading in one small
-  PR after the stack merges and tag that commit (option A).
-- **2026-09-06 (frozen ticker, one layer)** — Daniel's answer to the second
-  open question: with animations off a ticker line is cut with `…` like
-  `truncate` instead of frozen at offset 0 (`phase-16/frozen-ticker`, top
-  of the stack). `compose_line` takes the scroll path only for a ticker
-  that animates; text modules still sit at offset 0 in their box (a chosen
-  width, unlike the cut). Goldens `ticker-frozen` and `animate-config-off`
-  re-pinned; the presets page's ticker sample now shows the cut form.
-  Review of the layer: the rule is now structural (`Layout.ticker` is
-  `None` while animations are off; `Ticker.animate` is gone, the switch is
-  decided once on `Ctx`); the `animate-config-off` golden never reached its
-  text module (now on its own line, so "offset 0 in the box" is pinned next
-  to the cut); stale "frame 0" wording in code docs, `config init`'s
-  comment, SPEC's config listing and hooks table, and the statusline skill
-  (which claimed `preview` shows frame 0: it runs with the live clock);
-  the three binary test harnesses clear `GARNISH_ANIMATE`; SPEC notes that
-  a frozen ticker line still prints fixed timers (the default follows the
-  key, not the motion).
-- **2026-09-06 (blank spacers, one layer)** — Daniel's answer to the third
-  open question: an unframed spacer may opt in to staying on screen.
-  `phase-13/blank-spacers` (top of the stack): `blank = true` on a
-  `[[line]]` spacer gives a spaces-only row one braille blank (U+2800),
-  which Claude Code's `trim` does not strip; off by default so the harness
-  rule stands until the user asks; reported on a line with modules. Golden
-  `spacer-blank`; `config show` round-trips the key. Review of the layer:
-  the premise was too broad. The harness trims raw bytes with no ANSI strip
-  (2.1.263), so with colour on the rule's colour codes already keep an
-  unframed spacer; only colour off (`color = "never"`, `NO_COLOR`) loses
-  it. SPEC § 2.1/§ 4.1, CLAUDE.md, docs and the CHANGELOG now say so, and a
-  test paints the default spacer to pin it. `keep_blank` tests the harness's
-  own predicate (`is_whitespace`, so a no-break-space rule counts), keeps
-  the width by replacing a one-cell character, and makes an empty row
-  (`fill = false`, no frame) the one cell instead of a silent no-op.
-- **2026-09-06 (release 0.2.0)** — Daniel merged the whole stack (#13–#42)
-  bottom-up; the three layers opened outside `gh stack` (#39, #41, #42)
-  were rebased onto `main` with plain `git rebase --onto` after each squash
-  merge. `main` green, `scripts/ci.sh` and `bench/run.sh` green locally
-  (warm default 0.87 ms). This PR dates the CHANGELOG heading and ignores
-  `.claude/worktrees/`; `v0.2.0` is a signed tag on `main` whose message is
-  the CHANGELOG section. Open drafts #27 (FUTURE-SPEC) and #40
-  (GARLIC-INTEGRATION) and the website pointer are parked by Daniel.
-- **2026-09-11 (release pipeline, Homebrew tap)** — Daniel asked for
-  garnish in `justanotherspy/homebrew-tap` like the other tools, with
-  Daniel's approval before the cask goes out. Modelled on garlic's release workflow
-  (a Rust CLI with a hand-written cask template) and the tap's octo-sts
-  trust policies: `release.yml` runs on a `vX.Y.Z` tag push (verify → GitHub
-  pre-release → four archives, the Linux arm64 one built natively on
-  `ubuntu-24.04-arm` → cask job gated by the `release` environment → promote
-  to Latest). The cask covers macOS and Linux like shuck's and sproot's; it
-  is `brew fetch`-checked in the publisher before the push, which the tap's
-  own audit only does afterwards. `scripts/changelog-section.sh` reproduces
-  the `v0.2.0` tag message byte for byte and doubles as the release-notes
-  source; `scripts/render-cask.sh` renders the template from the published
-  archives. `scripts/setup.sh` learned the `linux-arm` nextest download so
-  the arm runner can reuse it. Tap side (same branch name in the tap repo):
-  `.github/chainguard/garnish.sts.yaml` and the README/SECURITY tables.
-  Repository state for Daniel: the `release` environment with Daniel as
-  required reviewer, and merging the tap policy before the first tag.
-  Adversarial review of the pipeline (four confirmed, seven advisory, all
-  taken): `render-cask.sh` captured each sha inside sed's argument list,
-  where `set -e` ignores a failed substitution, so a missing archive
-  rendered `sha256 ""` (now plain assignments plus a 64-hex check, and no
-  `--retry-all-errors` so a 404 fails at once); the concurrency group was
-  per tag, so two tags could race for the tap (now the constant `release`);
-  a missing `release` environment would be auto-created unprotected and
-  the cask pushed unapproved (`verify` now requires the environment and a
-  required-reviewer rule through the API, and CLAUDE.md makes the `v*`
-  restriction, no admin bypass and a tag ruleset part of the setup); the
-  approval came before the cask existed (now `render` checks and prints it,
-  `publish` is the gated job that pushes the artifact); `locked: true` on
-  the upload action; `persist-credentials: false` on every checkout that
-  does not push; `brew audit || true` so style still runs; `verify` rejects
-  a leftover `## Unreleased`; the docs say a code fix is a new version, not
-  a re-run.
-- **2026-09-12 (open items and spec drift)** — Daniel asked for whatever
-  the plan and spec still left open to be built. Every unchecked codebase
-  item closed: the Phase 4 killed-tick test (the tick as a process-group
-  leader, the group killed with the `kill` binary after the spawn; dash's
-  builtin `kill` accepts neither `--` nor a negative pid and fails with
-  `Illegal number`, which the first cut's unchecked `sh -c` hid, so it
-  passed with the worker in the tick's group), the Phase 5 behind /
-  diverged / no-upstream tests against a second clone and a successful
-  `fetch_interval` end to end, `Segment.text` private behind sanitising
-  setters, `OptSpec::max` replacing `config::bounded`'s key-name match (and
-  catching `cost.decimals`, whose formatter allocated one byte per place),
-  the `docs/README.md` wording. An audit of SPEC against the code then
-  fixed the spec's drift: `garnish render` is a visible subcommand,
-  `--width` belongs to `preview`, the context bar's `band_colors` default is
-  the four band roles and `exceeds_200k` is a flag plus `icons`/`colors`
-  keys, `sync` shows a glyph rather than the words `no upstream` and the
-  fetch-age hint uses the `stale` icon, the unicode PR glyphs are `❍`/`❏`
-  since Phase 12, `DISABLE_COMPACT` is honoured, temp entries are
-  `.<module>.tmp.<pid>`, the settings chain is read every tick (no 30 s
-  cache), and § 9 now names the fixtures that exist. Three § 9 promises
-  that had no test got one: schema completeness (a source scan of every key
-  read by name), the frame-style / one-per-line / all-on-one-line matrix,
-  and `preview <dir>`. `cache_tick_killed_midway_does_not_corrupt_entries`
-  was renamed to what it tests (leftover temp and truncated entries).
-  Review of the session: the scan checked only the last literal of
-  `icon(cfg, "icon", "color")` (now every direct literal argument, and keys
-  are checked against the schemas defined in the same file rather than all
-  of them); `Segment::push_str` allocated per bar cell (plain text appends
-  directly now); `label`/`prefix`/`suffix` had no length cap (now
-  `MAX_TEXT_CHARS`, like `ticker_gap`); the kill test read a locale-
-  dependent error (`LC_ALL=C`), the shim did not quote git's path, and the
-  `preview <dir>` test pinned the heading's escape codes under `NO_COLOR`
-  (it compares the plain heading; whether the heading should honour
-  `--color never` is Daniel's call, SPEC § 7 does not say). macOS CI then
-  failed the no-upstream step: it counted every logged spawn, and without
-  the Linux lock hand-over an unrefreshed `branch` spawns on every tick, so
-  the test counts `sync` spawns only.
-  Still open, by design: the website pointer, the first release through the
-  pipeline (repository state), and the optional headroom.
+  the namtao toolkit), spec and plan approved. Phases 0–9 in one day:
+  scaffold, payload/time/ansi/num, schema-driven config, all 21 modules,
+  cache and workers, git reader, docs generator, install/doctor, benches,
+  hardening. Three adversarial reviews fixed a symref-cycle stack overflow,
+  a pipe-buffer deadlock in the worker, an untimed fetch, fetch failures
+  poisoning `sync`, failed entries respawning every tick, a lock handed to
+  a worker that looked dead the moment the tick exited (grace window plus
+  re-stamping), and `install` widening permissions, colliding backups and
+  replacing symlinks; `command-run` was dropped for want of a timeout.
+  Deviation: role overrides live under `[colors]`, not `[theme.colors]`.
+  `v0.1.0` tagged, pushed, CI added on Linux and macOS (the macOS run found
+  the Linux-only lock hand-over asserted in tests and `/var` vs
+  `/private/var`). Daniel's first feedback: a Nerd Fonts v3 glyph drew as
+  a box (replaced), the fetch age dimmed every fifth tick (new
+  `stale_after`), the right edge was cut (root cause found the next day).
+- **2026-09-05** — CI green on both platforms; documents split by role
+  (`CLAUDE.md` host-neutral, `SPRITE.md`, `PLAN.md` codebase-only); Phase
+  10 host setup and the SessionStart hook. Right-edge root cause read from
+  the 2.1.261 binary: the box is `COLUMNS − 4 − 2 × statusLine.padding`,
+  so `Config::width` subtracts 4 (goldens regenerated, `install --padding`
+  seeds `padding = 2N`). Phase 11 (`align`, `durations = fixed`) for
+  Daniel, byte-identical by default; its review dropped empty renders from
+  the column count. A live walkthrough of every preset, theme, frame, icon
+  set and option with Daniel found eleven bugs (COSMIC's wide glyphs, a
+  bad colour discarding the whole config, an error report from
+  `config check`, unpadded powerline caps, the wrong separator at the
+  unfilled join, coloured zero counts, empty rows) and produced SPEC § 4.1,
+  § 3.7, § 4.2, § 12 and § 13, planned as Phases 12–18 in the order
+  12 → 14 → 13 → 15 → 16 → 17 → 18 as one `gh stack`. Phases 12, 14, 13 and
+  15 landed that day (glyph guard and replacement sets, per-key fallback,
+  the line keys, `time::frame`, `ansi::scroll`, the ticker, text modules);
+  the Phase 15 review found unsanitised `gap`/`ticker_gap` and text-module
+  names that broke the `config show` round trip.
+- **2026-09-06** — Phases 16, 17 and 18 (animation framework; presets
+  gallery with `include_str!` embedding and a generated page; the three
+  skills, `skills install`, issue templates). Reviews: a multi-character
+  spinner frame split into characters, a rule shorter than one period
+  blinked, the submit-preset skill's frontmatter was not YAML, the
+  statusline skill wrote before previewing, `skills::install` followed
+  symlinks. A whole-stack review by three reviewers then hardened every
+  row (`Segment::plain`/`styled` reduce everything to plain text, bounded
+  sizes after `width = i64::MAX` aborted a tick, OSC 8 only for
+  `http(s)://`, a `HOME` guard) and polished config/CLI (`config show`
+  round-trips, a mistyped `modules` is not a spacer, doctor collapses
+  `$HOME`). Daniel's three answers: ticker durations default to `fixed`
+  (module-level `durations` override), a frozen ticker is cut with `…`,
+  `blank = true` keeps an unframed spacer (premise narrowed on review: the
+  harness trims raw bytes, so only colour off loses the row). Stack #13–#42
+  merged bottom-up, `v0.2.0` tagged. Bench: warm default 0.87 ms.
+- **2026-09-11** — Release pipeline with the Homebrew tap, modelled on
+  garlic's workflow and the tap's octo-sts policies: tag → verify →
+  pre-release → four archives (Linux arm64 native) → cask rendered and
+  `brew fetch`-checked → Daniel's approval in the `release` environment →
+  push to the tap → promote. Its review fixed a `sha256 ""` from a failed
+  sed substitution under `set -e`, a per-tag concurrency group, an
+  auto-created unprotected environment, and moved the approval after the
+  cask exists; `CLAUDE.md` § Release process records the repository state
+  the workflow relies on.
+- **2026-09-12 (code)** — Every open plan item closed: the killed-tick test
+  (the tick as a process-group leader; dash's builtin `kill` takes neither
+  `--` nor a negative pid, which the first cut hid), behind/diverged/
+  no-upstream and `fetch_interval` tests against a second clone,
+  `Segment.text` private behind sanitising setters, `OptSpec::max`
+  replacing the key-name match (catching `cost.decimals`, a 4 GB
+  allocation per tick), the docs index wording. SPEC audited against the
+  code and its drift fixed (visible `render`, `--width` on `preview`,
+  `band_colors`, `exceeds_200k` as a flag, the `sync` glyphs,
+  `DISABLE_COMPACT`, temp entry names, no settings cache); three § 9
+  promises got tests (schema completeness by source scan, the frame-style
+  matrix, `preview <dir>`). Review: the scan checked one literal per call,
+  `push_str` allocated per bar cell, `label`/`prefix`/`suffix` had no cap;
+  macOS counted `branch` spawns without the lock hand-over.
+- **2026-09-12 (documents, PR #48)** — Daniel asked for FUTURE-SPEC's
+  low-impact ideas in the spec and plan, the website dropped, and an
+  interactive setup in its place. SPEC § 14: `garnish setup` as FUTURE-SPEC
+  § 13's `ratatui` option made a decision (exact preview through
+  `render_lines_at`, editors generated from `ModuleSchema`, the gallery
+  first, live save, install through `install`, `setup --preset` as the
+  scriptable twin, a pointer when `garnish` is typed at a terminal), then
+  selection in the preview by mouse or keyboard over a placement map, an
+  overlay form of checkboxes and pickers, string pickers seeded from the
+  presets, a glyph picker with schema suggestions drawn with the doctor's
+  width marker. Chosen from the rest by "Tier A, no crate, no non-goal, no
+  tick-side write, module set unchanged": the dim reset, reduced motion,
+  the doctor's settings report, never rewriting an unparsable file,
+  `max_width`, fish paths, branch and text links, the usable context
+  scale, absolute reset times, the schema-generated matrix test (Phases 19
+  and 20). Daniel's layout ideas arrived one at a time (grid columns,
+  titled rules and boxes, panels of stacked boxes); asked whether they
+  still read as one thing, I flagged the `align` collision and the three
+  sections, he left the consolidation to me, and SPEC § 4.3 became one
+  model: a line is columns, a column is a row of modules or a stack,
+  `width = "1fr" | "auto" | cells`, `justify`, titles and boxes as
+  decorations, two levels deep, with a plain line as one `1fr` column so
+  the default render is byte-identical. (I first kept the name `[[line]]`
+  to avoid a migration; Daniel then drew the distinction that settled it:
+  a *line* is one terminal line, a *row* is the addressable unit, one or
+  more lines tall, a box three of them, a future art or animation row
+  more. So the unit is `[[row]]`, with `[[row.col]]` and
+  `[[row.col.row]]` beneath, `[[line]]` and `hide_empty_lines` kept as
+  permanent aliases so nothing breaks, and a rename layer opens
+  Phase 21.)
+  Decided with Daniel: the one `width` key and `gap = 1`. An adversarial
+  review of the day's spec text returned 25 findings, all taken (the
+  samples contradicted the box rules; the lock horizon could never fire;
+  `path.depth` already existed; a dozen corners defined, listed in the
+  commit `51d4b66`). Then this plan was compacted to the drift between
+  SPEC and the code plus this log. Daniel asked for the spec's
+  ambiguities, traps and stale text to be fleshed out, a second review,
+  and the phases checked against the code: the "target state" marks came
+  off the shipped sections, § 4.3 and § 14 gained edge-case and trap
+  lists, a read-only code map (recorded at the top of each open phase)
+  re-cut the layers where the code's shape demanded (a colour-on golden
+  mode, `animate` as `Option<bool>`, a `COMMON_OPTS` table, a `rows`
+  layer with block caps and rule segments that the placement map reads,
+  an embedded `fixtures.rs`, the install core apart from its printing,
+  a `GARNISH_STDIN_TTY` hook), and a second adversarial review returned
+  25 more findings, all taken (commit `cada6ef`: one `truncate = false`
+  rule, gap-then-column clamping, `auto` and no-`fr` cases, the fill
+  pattern phased over the row, a segment-to-span painter for the preview
+  pane, `config show` as a fixed point, both-direction nesting, backups
+  on `config init --force` and `setup --preset`). Open drafts #27 and #40
+  stay parked.

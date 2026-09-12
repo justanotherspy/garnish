@@ -1,9 +1,13 @@
 # garnish — Product Requirements & Technical Specification
 
-Status: approved 2026-09-04; `v0.1.0` tagged the same day. Owner: Daniel
-Schwartz. Builder: Claude. This document is the target design of the whole
-system; when the design changes, it changes here first, with the reason
-(`CLAUDE.md` § Phase protocol). Progress lives in `PLAN.md`.
+Status: approved 2026-09-04 (`v0.1.0` the same day, `v0.2.0` on
+2026-09-06); revised 2026-09-12 with the layout model (§ 4.3), the
+interactive setup (§ 14) and the Phase 19–20 keys. Owner: Daniel Schwartz.
+Builder: Claude. This document is the target design of the whole system;
+when the design changes, it changes here first, with the reason
+(`CLAUDE.md` § Phase protocol). Everything without a "target state" mark
+is implemented; a section marked "target state; PLAN Phase N" is designed
+and not yet built. Progress lives in `PLAN.md`.
 
 ## 1. Purpose
 
@@ -19,8 +23,9 @@ sessions on one host do not notice it running.
 - **Fast**: a warm tick averages < 3 ms (p99 < 8 ms) in release; cold < 30 ms.
 - **Never blocks**: anything slow (git ahead/behind, dirty state, optional
   `git fetch`) runs in a detached worker; the tick renders cached data.
-- **Composable**: 21 granular modules, any of them on any line, left or right
-  aligned, each with `minimal` / `default` / `full` presets.
+- **Composable**: 21 granular modules plus static text modules, any of them
+  on any line, each with `minimal` / `default` / `full` presets; lines are
+  columns of modules or stacks, with titles and boxes (§ 4.3).
 - **Beautiful**: Nerd Font glyphs, smooth gradient bars, framed lines, named
   color themes, OSC 8 links.
 - **Documented from code**: module docs are generated from each module's
@@ -28,12 +33,16 @@ sessions on one host do not notice it running.
 - **Tested exhaustively**: real-binary integration tests over payload fixtures,
   temp git repos, PATH shims, a frozen clock, and a hyperfine latency gate.
 
-### Non-goals (v0.1)
+### Non-goals
 
-- No generic/plugin modules; the module set is fixed.
+- No generic/plugin modules; the module set is fixed (text modules are
+  static strings, never commands or files, § 3.7).
 - No network calls (PR state comes from the harness payload).
 - No Windows support. Linux and macOS only.
 - No daemon. Workers are one-shot detached processes.
+- The tick never writes anything but its own cache and debug log; nothing
+  reads the transcript. (FUTURE-SPEC lists the proposals that would lift
+  these; each is a decision for Daniel, none is taken.)
 
 ## 2. Claude Code contract
 
@@ -76,6 +85,19 @@ whitespace *after painting*: an unframed spacer with colour off
 colour codes around the spaces keep it (verified in the 2.1.263 binary:
 no ANSI strip before the trim). `preview --color never` shows the row the
 screen drops; § 4.1 `blank = true` keeps it in both cases.
+
+**Every row is drawn dim by the harness** (target state; PLAN Phase 19).
+The 2.1.261 binary renders each status line row as `<Text dimColor
+wrap="truncate">`, so the whole row sits inside SGR 2 and anything garnish
+leaves unpainted (the first plain segment, separators, frame glyphs) shows
+at reduced intensity on screen while `preview` shows it at full intensity.
+garnish prefixes every row with `ESC[0m` when colour is on, so the row
+renders as `preview` shows it; a golden pins the prefix. Phase 19 confirms
+the wrapper on screen first and records the fact in `CLAUDE.md` (from
+FUTURE-SPEC § 7.1, A1); the goldens render with `--color never`, so a
+colour-on golden mode (§ 9) is what pins it. A side effect worth stating: with colour on, every
+row then carries a non-whitespace byte, so the harness's trim keeps every
+configured row, and `blank` (§ 4.1) matters only with colour off.
 
 ### 2.2 Payload (stdin JSON)
 
@@ -135,8 +157,18 @@ configurable (`modules.context.compact_buffer_tokens`).
 Every module has: `enabled` (bool), `preset` (`minimal|default|full`),
 `refresh` (seconds; `0` = payload-only, rendered every tick; `> 0` = cached with
 that TTL and refreshed by a worker), `icons.<key>`, `colors.<key>`, `label`,
-`prefix`, `suffix`, `hide_when_empty`. Option resolution: built-in default →
+`prefix`, `suffix`, `hide_when_empty`, `max_width`. Option resolution: built-in default →
 icon-set default → module preset → top-level preset → explicit key.
+
+`max_width` (target state; PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps
+one module's rendered width: `0` (default) is unlimited, otherwise the
+module's text is cut to that many cells with `…` through `ansi::truncate`
+(grapheme-aware, an OSC 8 wrapper kept balanced) *before* alignment and
+before any column or line cut (§ 4.3), so a long branch name or session
+title cannot push the rest of the line off without the whole left group
+being cut. Capped at 1024 like every cell count (§ 5). Text modules
+(§ 3.7) have `width` for the same purpose and no `max_width`;
+`config check` reports one and names `width`.
 
 ### 3.1 Repo group
 
@@ -150,6 +182,26 @@ icon-set default → module preset → top-level preset → explicit key.
 
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
+
+Two payload-only additions (target state; PLAN Phase 20; from FUTURE-SPEC
+§ 7.5, A7 and A8):
+
+- `path` gets `style = "full" | "fish"`. `fish` abbreviates every
+  directory of the base part but the last to its first character
+  (`~/r/g/src`), the way the fish shell prompts; a leading `~` is not a
+  segment and stays whole, and the last segment is never abbreviated. The
+  existing `depth` (last `N` segments, `0` = all; per-preset defaults 1, 2
+  and 0) applies before the abbreviation, so `depth = 2` with `fish` gives
+  `g/src`. The subpath stays dim and untouched.
+- `branch` gets `link = false`: `true` wraps the name in an OSC 8 link to
+  the branch on the forge, built from `workspace.repo.{host,owner,name}`
+  in the payload (`https://<host>/<owner>/<name>/tree/<branch>`; GitLab
+  hosts use `/-/tree/`), no git call; nothing is linked when the payload
+  has no `repo` or the head is detached. The branch name is
+  percent-encoded into the URL (RFC 3986 unreserved characters and `/`
+  kept, everything else `%XX`), so `feature/#12` and a non-ASCII name link
+  correctly and the painter's rule (§ 5: `http(s)://`, printable ASCII)
+  is met, as for `pr`.
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
@@ -177,6 +229,20 @@ module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
 threshold. No token counter. `used_percentage` null → empty bar and `–`.
 
+`scale = "window" | "usable"` (target state; PLAN Phase 20; from
+FUTURE-SPEC § 8.3, A11): with `usable` the bar and the percentage are
+measured against the autocompact threshold of § 2.3 instead of the whole
+window, so 100 % is the point where compaction runs (`used_percentage ×
+window ÷ threshold`, capped at 100). The compaction marker then sits at
+the bar's end and is not drawn; the window tag of the `full` preset still
+names the real window. `window` (default) is today's behaviour. When the
+marker is disabled (§ 2.3: compaction off) or the threshold is below a
+tenth of the window (a large `compact_buffer_tokens` or a tiny percentage
+override), `usable` falls back to `window`, and `config check` says
+nothing either way, since the settings can change under a running
+session. `thresholds`, `warn_at` and the marker label follow the
+percentage on display, whichever scale it is.
+
 ### 3.3 Usage group
 
 | id | shows | minimal | default | full | refresh |
@@ -188,6 +254,18 @@ threshold. No token counter. `used_percentage` null → empty bar and `–`.
 
 Limit modules render nothing when their window is absent. `cost` has
 `only_without_rate_limits = true` so one usage line serves both auth modes.
+
+`reset = "countdown" | "absolute" | "both"` on `limit5h`, `limit7d` and
+`spend` (target state; PLAN Phase 20; from FUTURE-SPEC § 8.2, A10):
+`absolute` prints the local wall-clock time the window resets at, with
+the module's existing spacing (`⏱14:30`); `limit7d` always adds the
+weekday (`⏱Tue 14:30`) and `limit5h` and `spend` never do, so the width
+of the text is as steady as `durations = "fixed"` promises on a ticker
+line. `both` prints the countdown followed by the time in parentheses;
+`countdown` (default) is today's behaviour; `show_reset = false` hides
+every form. The time is formatted with jiff in the zone the `clock`
+module uses, so the two agree. The harness re-runs the line at each
+`resets_at`, so neither form is stale at the boundary.
 
 ### 3.4 Session group
 
@@ -224,7 +302,7 @@ renders dimmed with `✗` and the error is kept in the cache file for
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
 
-### 3.7 Text modules (target state; PLAN Phase 15)
+### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
 The 21 built-in modules stay the only ones that read the payload or run
 anything. **Text modules** are the one user-defined kind: a fixed string in
@@ -274,6 +352,11 @@ color = "muted"
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
 - **Escapes.** `text` is plain text: ANSI and OSC sequences are stripped,
   control characters removed, so a config cannot break the row.
+- **Links.** `url = "https://…"` (target state; PLAN Phase 20; from
+  FUTURE-SPEC § 7.5, A8) wraps the box in an OSC 8 link. The URL is a
+  string in the config, so the module stays static; the painter's rule
+  (§ 5: `http(s)://`, printable ASCII) applies, and anything else is
+  reported by `config check` and dropped.
 - **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
   reference gets one page for it; `config check` validates `justify`,
   `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
@@ -311,6 +394,7 @@ style = "rounded"         # none | rounded | square | double | heavy | powerline
 fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
 # custom: first middle last single fill_char right_first right_middle right_last right_single separator pad
+# boxes (§ 4.3): top_left top_right bottom_left bottom_right side
 # animation (§ 4.2): fill_pattern fill_step fill_direction separator_frames separator_step
 
 [[line]]
@@ -348,7 +432,15 @@ right `cache`).
 
 Layout rules: left group joined by `separator`; right group likewise; the frame
 rule fills the gap to the width `$COLUMNS − 4 − padding` (§ 2.1; never below
-10); right cap after. Overflow: drop the fill, then truncate the **left** group
+10, a floor on the box before any § 4.3 gaps); right cap after. (This
+two-group line is the one-column case of the layout model in § 4.3, where
+the config unit is a **row** (`[[row]]`; `[[line]]` stays as its alias)
+that may hold several columns, each its own modules or a stack of rows,
+with titles and boxes, one or more terminal lines tall; the rules below
+then apply inside each column, and `[[row.col]]` and `[box.<name>]` are
+listed there. A "column" in the aligned-columns paragraph is a module's
+position within its group, not a layout column. `hide_empty_lines`
+likewise becomes `hide_empty_rows` with the old name as an alias.) Overflow: drop the fill, then truncate the **left** group
 (ANSI-aware, `…`); never the right group. `preview --width` and
 `GARNISH_COLUMNS` stand in for `$COLUMNS` and get the same subtraction, so
 `preview` shows what Claude Code would show at that terminal width.
@@ -377,10 +469,9 @@ digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
 elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
 the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
 
-### 4.1 Layout keys decided on 2026-09-05 (target state; PLAN Phase 13, ticker in Phase 15)
+### 4.1 Layout keys decided on 2026-09-05 (PLAN Phases 13 and 15, shipped in v0.2.0)
 
-These came out of the live config walkthrough with Daniel. They are part of
-the target design; the implementation status is in `PLAN.md`.
+These came out of the live config walkthrough with Daniel.
 
 ```toml
 right_justify = "end"     # end | start: where a padded right-group module's text sits
@@ -411,7 +502,9 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   caps) a spacer is whitespace only; with colour off (`color = "never"`,
   `NO_COLOR`) Claude Code strips it (§ 2.1), so it shows in `preview` but
   not in the status line, while with colour on the rule's colour codes keep
-  it. `blank = true` on the spacer (decided 2026-09-06; off by default so
+  it (and, once the § 2.1 row prefix of Phase 19 lands, every row's
+  leading reset does, so with colour on no configured row is ever
+  dropped). `blank = true` on the spacer (decided 2026-09-06; off by default so
   the harness's own rule stands until the user opts in) keeps it on screen
   either way: a row that would be whitespace only gets one invisible cell,
   the braille blank U+2800, which is not whitespace to the harness's `trim`
@@ -476,7 +569,7 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   non-zero counts carry the ahead/behind colours. The fetch-age hint has a
   space between its glyph and the age like every other module.
 
-### 4.2 Animation (target state; PLAN Phase 16)
+### 4.2 Animation (PLAN Phase 16, shipped in v0.2.0)
 
 Every animation in garnish is a pure function of the tick's clock: frame
 index or scroll offset = `floor(now_secs × step) mod period`. No state is
@@ -538,6 +631,326 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
 - **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
   session) freezes everything at frame 0 and cuts a ticker line with `…`;
   the guide recommends it for screen readers and for recordings.
+  **Reduced motion** (target state; PLAN Phase 19; from FUTURE-SPEC § 8.4,
+  N6): when the Claude settings chain of § 2.3 (already read every tick for
+  the autocompact keys) resolves `prefersReducedMotion` to `true`, garnish
+  behaves as if `animate = false` unless the config sets `animate`
+  explicitly; the harness honours the same key for its own spinners, so
+  the two stay in step. Precedence, strongest first: `GARNISH_ANIMATE=0`
+  (always off), an explicit `animate` in the config, `prefersReducedMotion`
+  in the settings, the default (`true`). `config show` prints the
+  effective value.
+
+### 4.3 Layout: rows, columns and boxes (target state; PLAN Phase 21)
+
+Decided 2026-09-12 with Daniel, consolidating three ideas from that day
+(grid columns, titled rules and boxes, panels of stacked boxes) into one
+model. Today's line is kept as the base case, so every existing config is
+already a valid instance of it and nothing changes until someone adds a
+column.
+
+**Two words, kept apart** (Daniel, 2026-09-12). A **line** is one terminal
+line, the thing the harness counts and the thing `preview` prints. A
+**row** is the addressable unit of the config, `[[row]]`, one or more
+lines tall: a bare row is one line, a boxed row is three (a frame line,
+its content, a frame line), and a row whose content is itself several
+lines tall (a module drawing art or an animation frame, a direction left
+open and not designed here) would follow the same rules. Frame lines are
+drawn, never configured: nothing in a config addresses the top of a box.
+`[[line]]` stays accepted as an alias of `[[row]]` for every config
+written before this model, and `hide_empty_lines` as an alias of
+`hide_empty_rows`; `config show` writes the new names, `config check`
+says nothing about the old ones, and no config ever breaks over the
+rename.
+
+**The model in five sentences.** A config is a list of **rows**. A row is
+made of **columns** side by side; a row written with `modules`/`right` and
+no `[[row.col]]` is one column that fills the width, which is exactly
+today's line. A column holds either its own modules or a **stack** of
+rows, and columns share the width by `width`. Inside a column, `modules`
+with `right` is the flex form (the groups anchor to the column's edges and
+the rule fills between; today's rule), while `modules` alone sits where
+`justify` says. **Titles** decorate rules and **boxes** decorate rows and
+columns; the tree is two levels deep and never deeper, so `setup` (§ 14)
+can always draw it.
+
+```toml
+[[row]]                        # a row: one or more columns side by side; `[[line]]` is its alias
+gap = 1                        # empty cells between columns (default 1)
+separator = " · "              # joins the modules of every column (per-row override, § 4)
+title = "Session"              # text set into the row's rule; see Titles
+title_justify = "center"       # left | center | right (default left)
+title_pad = 1                  # spaces on each side of the title
+title_color = "accent"         # role or literal; default the frame colour
+box = "repo"                   # this row is inside box `repo`; `true` boxes it alone; see Boxes
+blank = false                  # § 4.1
+
+[[row.col]]                    # a column; a row with no [[row.col]] is one "1fr" column
+width = "1fr"                  # "<n>fr" share of the free width | "auto" its content | 24 cells
+modules = ["path", "branch"]   # the column's own modules …
+right   = ["pr"]               # … flex: `right` anchors to the column's right edge, the rule fills between
+justify = "left"               # left | center | right: where `modules` sit when there is no `right`
+valign  = "top"                # top | center | bottom: where a short stack sits in a taller row
+box = "repo"                   # the whole column is one box, the row's full height
+[[row.col.row]]                # … or a stack of rows (then no `modules` on the column)
+modules = ["context"]          # an inner row takes every row key except `gap` and [[row.col]]
+box = true
+
+[box.repo]                     # a box: rows and columns join it by name
+title = "Repository"
+title_justify = "left"
+style = "double"               # inherits [frame] style when absent (rounded if the frame has no box shape)
+fill = false                   # default inside a box
+color = "accent"               # role or literal for the box's glyphs; default the frame colour
+```
+
+- **Columns and width.** The row's width is the box of § 2.1 minus
+  `gap` cells per boundary. A column with `width = 24` takes 24 cells and
+  `"auto"` takes its content's width (its modules joined by the
+  separator; `max_width` applies); what is left is the free width, shared
+  by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
+  cells going one each to the first of them, so shares differ by at most
+  one cell and always add up. Defaults: `"1fr"`, so three bare columns
+  are thirds and six are sixths. Content wider than its column is cut
+  with `…` (`overflow = "truncate"`) or scrolled inside the column
+  (`overflow = "ticker"`) and never spills into a neighbour, which is
+  what keeps a layout's shape as the terminal is resized. Scrolling per
+  column follows § 4.1: in a flex column the left group is the window and
+  the `right` group is never scrolled; a lone group is the window; each
+  inner row of a stack is its own window; an `auto` column always fits
+  its content and so never scrolls. `truncate = false` means the last
+  (or only) column's content is not cut and may run past the box, exactly
+  § 4.1's rule for a plain row; every other column still never spills.
+  An `auto` column is re-measured every tick and moves its neighbours as
+  its content changes width, so it is for values that hold still (a
+  clock under `durations = "fixed"`, a module with `max_width`), not for
+  branch names; an `auto` flex column joins its two groups with the
+  separator and draws no rule between them, and an `auto` stack is as
+  wide as its widest inner row. With no `fr` column at all, the free
+  width is a rule after the last column. When the width runs out, the
+  row is laid out left to right, gap then column: a fixed or `auto`
+  column takes at most what remains, and a column whose gap plus one
+  cell does not fit renders nothing, as does everything to its right
+  (the row width is `max(box − gaps, 0)`; the case only arises below
+  the § 4 minimum of 10 cells or with fixed widths that exceed the box,
+  and `GARNISH_DEBUG` logs it). (Decided with Daniel 2026-09-12: one
+  `width` key taking `"<n>fr"`, `"auto"` or an integer, in preference to
+  three single-typed keys, and `gap = 1` by default so adjacent columns
+  never touch without tuning; `config check` names the three accepted
+  forms when a `width` is a quoted number or anything else.)
+- **Inside a column.** `modules` with `right`: the flex line of § 4, laid
+  out to the column's width (left group anchored left, right group
+  anchored right, the fill between, the left group cut first). `modules`
+  alone: one group placed by `justify`, whose default follows the
+  column's position (the first column left, the last right, any middle
+  column centre; a lone column left), so a three-column row reads
+  left / centre / right without writing it. `align = true` (§ 4) pads
+  the module at position *k* of column *c* to the widest module at
+  position *k* of column *c* across the rows with the same column count
+  (a position is a module's place within its group, the "column" of § 4;
+  rows with different column counts never align with each other, and
+  inner rows of a stack align only with inner rows at the same column
+  position), so separators stack; *k* counts from the left in a left- or
+  centre-justified column and from the right end in a right-justified
+  column or a `right` group, as § 4 does today; `right_justify` picks the
+  pad side for those.
+- **Stacks and height.** `[[row.col.row]]` entries make the column a
+  stack of rows, each laid out to the column's width with the rules above
+  (an inner row's `justify` overrides the column's). A row's height in
+  lines is its content's: a bare row is one line, a boxed row its lines
+  plus two; a column's height is the sum of its rows'; the outer row is
+  as tall as its tallest column. A shorter stack is padded with empty
+  lines placed by `valign` (which has no effect when every column is one
+  line tall). Inner rows take no `[[row.col]]` and no `gap`; a column
+  with both `modules` and inner rows is reported and the stack wins.
+- **Frame and fill.** The `[frame]` caps sit at both ends of every
+  terminal line that is not a box line (first/middle/last decided over
+  all the config's lines, a multi-line row counting as one block); a box
+  line carries the box's corners and sides at its ends instead, as the
+  samples show. On a one-line row, `fill` draws the rule glyph (or the
+  animated `fill_pattern`) in every empty cell inside the caps, gaps
+  included, so a centred module floats on one continuous rule:
+  `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is
+  `(cell index + frame) mod period` over the whole line, and the
+  shorter-than-one-period fallback of § 4.2 counts the line's rule cells
+  together, so the dots travel across column boundaries instead of
+  restarting at each (a one-column row is unchanged). On a multi-line
+  row it draws only inside each inner row's own cells; gap cells and
+  padding lines are spaces, since a rule running past a box's side would
+  look wrong. With colour off the harness drops a line that is spaces
+  only (§ 2.1); `blank` on the outer `[[row]]` of a multi-line row keeps
+  every one of its lines (the braille cell on any line that would be
+  whitespace only, padding lines included), while on an inner row it
+  follows the § 4.1 rule.
+- **Titles.** `title` is plain text (reduced like every config string,
+  § 5) set into the row's rule in the frame colour with `title_pad`
+  spaces on each side; `title_color` picks another role or literal.
+  `title_justify` puts it right after the left cap, centred, or right
+  before the right cap; on a line that carries modules a centred title
+  goes in the widest empty gap of the line, whichever column or `gap` it
+  lies in. A title needs no rule: with `fill = false` or `style = "none"`
+  it is the same text at the same place with `title_pad` spaces around
+  it. On a multi-line row the title goes into the first line. On a
+  `box = true` row the `title*` keys title that anonymous box (the one
+  way to title a one-row box); a row inside a named box gets no title
+  of its own (the box has one) and the key is reported and ignored. A
+  title wider than its space is cut with `…` and never widens
+  the line. A `[[row]]` with only a `title` is a titled spacer
+  (`├─ Repository ────┤`), always kept (§ 4.1).
+- **Boxes.** `[box.<name>]` (a bare key, as for text modules) carries a
+  title (the four `title*` keys), `style`, `fill` and `color` (the box's
+  glyphs; a role or literal, like a text module's `color`).
+  `style` and the colour inherit from `[frame]` when absent, so a
+  `double` box can sit in a `rounded` frame; when the frame's style has
+  no box shape (`none`, `powerline`) an unstyled box is `rounded`. `fill`
+  defaults to `false` inside a box (a clean interior is what a box is
+  for; `fill = true` draws the rule between a row's groups as § 4 does
+  outside one). A box is drawn as a corner-capped top rule with the
+  title, the style's side glyphs at both ends of each line inside (the
+  row laid out to the width between them), and a bottom rule: two extra
+  lines, so a box is at least three lines tall. Three ways to join one:
+  adjacent rows with the same `box = "<name>"` form one box spanning
+  them; `box = "<name>"` or `box = true` on a column makes the whole
+  column one box the outer row's full height, its padding lines drawn as
+  empty interior lines, so a one-box column matches a three-box
+  neighbour (a boxed one-line column is a three-line box); `box = true`
+  on a row boxes that row alone with no title, so three adjacent
+  `box = true` rows are three boxes. Boxes never nest: a row inside a
+  boxed column may not carry `box`, and a column may not carry `box` on
+  a row that has one; both are reported and the inner box ignored. A
+  name reused for a non-adjacent run is reported and the second run
+  unboxed. Lines outside every box keep the frame's caps as today. The
+  built-in styles gain their corners and side: `rounded` `╭ ╮ ╰ ╯ │`,
+  `square` `┌ ┐ └ ┘ │`, `double` `╔ ╗ ╚ ╝ ║`, `heavy` `┏ ┓ ┗ ┛ ┃`, with
+  `fill_char` as the horizontal; `none` draws an invisible box (lines
+  indented by the pad); `powerline` has no box shape and is reported and
+  drawn rounded. A `custom` frame adds `top_left`, `top_right`,
+  `bottom_left`, `bottom_right` and `side`, one cell each (reported
+  otherwise, the style's glyph stays); every glyph passes the § 4.1
+  width guard.
+- **Hiding.** A module hidden by `stale_style = "hide"` or
+  `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
+  `stale_style = "dim"` a stale value stays, dimmed); under
+  `hide_empty_rows` an inner row whose modules all rendered nothing is
+  dropped (its stack shortens and the outer row's height follows the
+  tallest column that remains), a box whose rows all went is dropped
+  with its frame lines (a title alone keeps nothing), and a row is
+  dropped when every column is empty. A column that emptied while a
+  sibling did not keeps its share and renders empty lines, so the layout
+  does not reflow when a value comes and goes (`stale_style = "hide"`
+  would otherwise move columns every `stale_after` TTLs). A column with
+  no `modules` and no inner rows, or with `modules = []`, is an empty
+  column that keeps its share; a `[[row]]` is a spacer only when every
+  column is empty.
+- **Edge cases, stated so nobody guesses.** One column has no boundary,
+  so `gap` does nothing there and is not reported. An inner row's own
+  `separator` wins over the outer row's, as a row's wins over the
+  frame's. A column that scrolls carries its `align` pads inside the
+  window (§ 4.1), so a scrolling column's separators do not stack with
+  its neighbours'. `hide_when_empty = false` on a module pins its inner
+  row, as it pins a top-level row. Text modules sit in columns like any
+  module; a text module with `overflow = "scroll"` inside an `auto`
+  column has a fixed box width, so the column holds still. A `[[row]]`
+  with `[[row.col]]` entries and also `modules` at the row level is the
+  reported case above; `right` at the row level without `modules` is
+  reported as today. `padding` (§ 4) shrinks the box before columns are
+  shared. A `[box.<name>]` nobody joins is reported as unused. `config
+  init` writes no columns or boxes into the annotated default file; they
+  appear as a commented example, as text modules do.
+- **Validation.** `config check` reports: `justify`/`valign` outside
+  their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
+  count (≤ 1024); `gap` above 16; more than 16 columns on a row or 16
+  inner rows in a column; `title_pad` above 64; `box` naming no
+  `[box.<name>]`; a row with both `modules` and `[[row.col]]` (the
+  columns win); nesting in either direction; a non-adjacent reuse; a
+  title on a row inside a named box; `[[line]]` and `[[row]]` both
+  present in one file (the arrays cannot be ordered against each other;
+  the file must use one name). `config show` writes a one-column row in
+  the plain `[[row]]` form, writes `[[row.col]]`, `[[row.col.row]]` and
+  `[box.<name>]` only where they are configured, rewrites the aliases,
+  and drops every reported key as it drops unknown ids today, so its
+  output is a fixed point that `config check` calls `ok`.
+- **Setup.** The builder (§ 14) shows a row as its columns side by side:
+  *Add a column*, its `width` and `justify`, *Stack* to turn a column
+  into rows, *Add a title*, *Wrap in a box* over a selected run of rows
+  and *Box the column*; the placement map lists every inner row, title
+  and box edge so a click lands on the right thing.
+- **Cost.** Layout is arithmetic over the segment lists the modules
+  already render; nothing new is read or spawned. Presets `grid-three`,
+  `grid-six`, `boxed-panels` and `dashboard-panels` pin the shares, the
+  titles and the stacks at two widths each.
+
+Two samples, each drawn at its box width (§ 2.1: a 40-cell box is a
+44-column terminal). A titled box around two rows, in a 40-cell box; four
+lines on screen for two rows of config:
+
+```toml
+[box.repo]
+title = "Repository"
+[[row]]
+box = "repo"
+modules = ["path", "branch", "sync"]
+right   = ["pr"]
+[[row]]
+box = "repo"
+modules = ["worktree"]
+```
+
+```text
+╭─ Repository ─────────────────────────╮
+│ ~/p/garnish  main ⇡2             #42 │
+│ wt/review                            │
+╰──────────────────────────────────────╯
+```
+
+A dashboard row of three columns in a 60-cell box with `[frame]
+style = "none"` (so the unstyled `box = true` boxes are `rounded`): a
+double box the full height, a bare centred column, three stacked boxes;
+one row of config, nine lines on screen:
+
+```toml
+[box.repo]
+style = "double"
+title = "Repository"
+
+[[row]]
+gap = 2
+[[row.col]]
+box = "repo"
+[[row.col.row]]
+modules = ["path", "branch"]
+[[row.col.row]]
+modules = ["sync", "pr"]
+
+[[row.col]]
+justify = "center"
+[[row.col.row]]
+modules = ["model", "effort"]
+
+[[row.col]]
+justify = "center"
+[[row.col.row]]
+box = true
+modules = ["context"]
+[[row.col.row]]
+box = true
+modules = ["limit5h"]
+[[row.col.row]]
+box = true
+modules = ["cost"]
+```
+
+```text
+╔═ Repository ════╗      Opus  high       ╭────────────────╮
+║ ~/garnish  main ║                       │ ████░░░░░░ 42% │
+║ ⇡2 ⇣1  #42      ║                       ╰────────────────╯
+║                 ║                       ╭────────────────╮
+║                 ║                       │   23%  2h13m   │
+║                 ║                       ╰────────────────╯
+║                 ║                       ╭────────────────╮
+║                 ║                       │     $1.23      │
+╚═════════════════╝                       ╰────────────────╯
+```
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
@@ -558,6 +971,14 @@ without an error report.
   errors carry the TOML path, syntax errors the line.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
+- **A file that fails to parse is never rewritten by any command** (target
+  state; PLAN Phase 19; from FUTURE-SPEC § 12.1 and § 13.4). `install`,
+  `config init --force` and `setup` (§ 14) refuse to touch a
+  `settings.json` or `garnish.toml` that does not parse, name the problem
+  and the file, and exit 1 quietly; the only way past is fixing or moving
+  the file by hand. A file that parses is edited through a temp file and
+  `rename`, with the backup rule `install` already has (a timestamped copy
+  that is never overwritten), which `setup` shares.
 - **Nothing but text reaches a row.** Every string that becomes part of a
   row is reduced to plain text: escape sequences (CSI, OSC, and the string
   sequences DCS/SOS/PM/APC with their payloads), control characters and the
@@ -565,7 +986,8 @@ without an error report.
   isolates, zero-width space and non-joiner, word joiner, the BOM; ZWJ and
   the emoji variation selector stay) are removed.
   The config's own strings (`label`, `prefix`, `suffix`, icon overrides,
-  frame glyphs, separators, `text`, `gap`, `ticker_gap`) are reduced at
+  frame and box glyphs, separators, `text`, `gap`, `ticker_gap`, the
+  row and box `title`) are reduced at
   config time, so width arithmetic sees the real cells; everything else (the
   payload's names and paths, git output, cache entries, the `⚠` line) is
   reduced by the `Segment` constructors, the one way onto a row. Colour and
@@ -574,7 +996,7 @@ without an error report.
   a `\n` in a session name added a row, an escape passed `--color never`,
   and a cut could split the sequence.)
 - **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`) above 1024, a
-  row string (`text`, `gap`, `ticker_gap`, `label`, `prefix`, `suffix`) above 4096 characters or
+  row string (`text`, `gap`, `ticker_gap`, `label`, `prefix`, `suffix`, `title`) above 4096 characters or
   `cost.decimals` above 8 (the money formatter allocates one byte per place)
   is reported like any bad value and the default stands in; the renderers
   clamp again, and the effective width never exceeds 4096 cells whatever
@@ -618,6 +1040,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
   Stale locks are reclaimed by an atomic rename so racing ticks cannot both
   win. A guard only unlinks a lock that still carries its own pid.
+  (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid reuse; the
+  60 s / 15 s age limit above already bounds a lock's life whatever its
+  pid, so nothing was added.)
 - Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
   `process_group(0)`, spawned without wait. On Linux the tick takes the lock
   and passes `--lock-held`; elsewhere the worker takes it itself.
@@ -642,11 +1067,12 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 
 | command | purpose |
 |---|---|
-| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand) |
+| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). Target state (§ 14): the bare `garnish` with a terminal on stdin prints one line pointing at `garnish setup` and exits 0 instead of waiting; the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out |
-| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. Target state (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5): it also reports the settings keys that change what the line can show (`statusLine.refreshInterval`, suggesting `1` when `clock`, a countdown or an animation is configured; `statusLine.hideVimModeIndicator`, suggesting `true` when the `vim` module is on so the mode is not shown twice; `disableAllHooks`; `prefersReducedMotion`) and whether the settings file parses |
+| `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
+| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins (target state, PLAN Phase 19: `--force` keeps the previous file under `install`'s backup rule, § 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
@@ -703,6 +1129,32 @@ per-module render cost.
   (`UPDATE_GOLDEN=1` regenerates).
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.
+- **Module matrix from the schema** (target state; PLAN Phase 20; from
+  FUTURE-SPEC § 15 item 11): a test generated from `ModuleSchema` renders
+  every module × every preset × every icon set × a few `max_width` values
+  against every fixture and asserts the shared invariants (never wider
+  than `max_width`, nothing rendered for a hidden state, OSC 8 wrappers
+  balanced, no escape or control byte in `Segment::text`), so a new module
+  or option gets the shared behaviour checked without a hand-written test.
+- **Layout matrix** (target state; PLAN Phase 21): the column shares add
+  up to the line width and differ by at most one cell at every width from
+  10 to 400; every line of a multi-line row is exactly the box width with
+  stacks of unequal height; the resolved tree of every fixture and preset
+  renders byte-identically before and after the model (a plain line is
+  one column) and under either name (`[[line]]`, `[[row]]`); and the
+  lines-per-row output tiles each line exactly (Phase 22's placement map
+  reads it). `tests/presets.rs` stays as it is:
+  every preset renders without `…` at its declared width at three
+  instants, so a multi-column preset must give each column room for its
+  widest fixture render.
+- **Setup snapshots** (target state; PLAN Phase 22): every `setup` screen is
+  rendered into ratatui's `TestBackend` at two terminal sizes and compared
+  with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1` regenerates);
+  key sequences are driven through the same event loop the terminal feeds,
+  so the picker, the builder and the install dialog are tested without a
+  tty. Snapshots freeze the clock with `GARNISH_NOW` and pin `TZ=UTC`,
+  like the config goldens, since the preview pane runs on the live clock
+  and the `clock` module prints the local zone.
 
 ### Test hooks (environment)
 
@@ -715,6 +1167,7 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
+| `GARNISH_STDIN_TTY` | target state (§ 14): `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish`, so the pointer path is testable without a pty |
 
 ## 10. Documentation
 
@@ -731,6 +1184,9 @@ per-module render cost.
   `CLAUDE.md`, `PLAN.md` and `SPRITE.md` are for building the project.
 - `presets/` (§ 12) holds complete, named example configs; `docs/presets.md`
   is generated from them.
+- Target state: `docs/config.md` gains generated sections for `[[row.col]]`,
+  `title` and `[box.<name>]` with samples at two widths (Phase 21), and
+  each module page lists its icon suggestions as *also try* (Phase 22).
 
 ## 11. Assumptions
 
@@ -742,9 +1198,11 @@ per-module render cost.
 - Session duration is `cost.total_duration_ms` and resets on `/clear`.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
-  small terminals.
+  small terminals. A multi-line row (§ 4.3) costs its height; whether the
+  harness caps the status line's height is Phase 19's verify item, and
+  until it is known the `setup` picker states a preset's row count.
 
-## 12. Presets gallery (target state; PLAN Phase 17)
+## 12. Presets gallery (PLAN Phase 17, shipped in v0.2.0)
 
 The four built-in top-level presets stay the only ones compiled into the
 binary. Everything else is a **gallery preset**: a complete config file under
@@ -765,15 +1223,17 @@ binary. Everything else is a **gallery preset**: a complete config file under
   file (with the header stripped of tooling lines); `garnish presets`
   lists names and summaries. The four built-in names keep working (and a
   gallery preset may not reuse one; a unit test guards it).
-- **Screenshots and website.** `presets/screenshots/<name>.png` are optional
+- **Screenshots.** `presets/screenshots/<name>.png` are optional
   real-terminal captures contributed with a preset (the submit-preset skill
-  in § 13 tells people how). A later static site is built from `docs/presets.md`
-  and those screenshots; it is out of scope for the binary, which only has
-  to keep the gallery page and the files honest.
+  in § 13 tells people how). The gallery page and `garnish setup` (§ 14)
+  are how people browse presets; a website built from them was in the
+  target design until 2026-09-12 and was dropped in favour of the
+  interactive setup (the picker shows a preset rendered at the person's
+  own width, which no screenshot can).
 - **Seed set.** The configs exercised in the 2026-09-05 walkthrough
   (`presets/` in this repository) are the first entries.
 
-## 13. Skills (target state; PLAN Phase 18)
+## 13. Skills (PLAN Phase 18, shipped in v0.2.0)
 
 Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
 in the repository, are embedded in the binary (`include_str!`) so a
@@ -783,7 +1243,10 @@ Markdown with frontmatter (`name`, `description`) and instructions; none of
 them needs network access from garnish itself, they drive `gh` and the
 `garnish` CLI.
 
-- **`garnish-statusline`.** Interactive config builder. Asks, with
+- **`garnish-statusline`.** Conversational config builder (the hands-on
+  one is `garnish setup`, § 14; both write the same file, and the skill
+  points at `setup` when the person would rather see the choices than
+  answer questions). Asks, with
   recommended defaults: terminal and font (Nerd Font? decides `icons`),
   usual terminal width (decides preset and line count), what matters most
   (repo, model/context, usage limits, timers), colour preference (theme,
@@ -812,3 +1275,198 @@ them needs network access from garnish itself, they drive `gh` and the
   environment section, prints the whole issue body, and asks the person
   explicitly before `gh issue create`. Nothing leaves the machine on an
   unanswered or negative question.
+
+## 14. Interactive setup (target state; PLAN Phase 22)
+
+Decided 2026-09-12 with Daniel, from FUTURE-SPEC § 13 (option 7.3c): a
+full-screen `garnish setup` in the terminal, the way ccstatusline's TUI
+works, with the two things garnish can do that it cannot: an **exact** live
+preview (garnish knows the harness box width, § 2.1, and renders through
+the same code as the tick) and editors **generated from the module
+schemas** (every option's type, default, choices, cap and doc string is
+already in `ModuleSchema`, as the docs are). It replaces the website idea
+of the earlier § 12: a preset rendered at the person's own width is a
+better sample than a screenshot at someone else's.
+
+**Two ways in, one file out.** The home screen offers *Pick a preset* and
+*Build a custom layout*, plus *Install* and *Quit*; when a config already
+exists it opens on that config in the builder, previewed, so `setup` is
+also the editor for an existing file. Whatever route, the result is the
+ordinary `garnish.toml` of § 4, written the way `config show` writes it
+(the round trip already exists), never anything the tick could not read.
+
+- **Preset picker.** The four built-in presets and every gallery preset
+  (§ 12) in a list; the highlighted one is rendered live on the right, at
+  the real width (`COLUMNS − 4 − padding`), with its summary, declared
+  width and `needs` line, and a warning when the terminal is narrower than
+  the preset's declared width (the `…` cut is shown as it would be on
+  screen, not hidden) or shorter than the harness allows for the preset's
+  row count (the rule Phase 19 verifies; until then the picker states the
+  row count). `Enter` applies it: the file is written with the
+  previous one kept by `install`'s backup rule (§ 5), and the install screen follows
+  if the settings file has no `statusLine` yet. `e` opens the highlighted
+  preset in the builder instead of applying it.
+- **Builder.** The preview pane stays at the top of every builder screen
+  and re-renders on every change. Below it, the `[[row]]` list: each row
+  shows its columns as chips (§ 4.3; a plain row is one column) and its
+  height in lines; keys add, insert, delete, clone and move rows, add a
+  column and set its `width` and `justify`, turn a column into a stack,
+  move a module within a column or into the next one, mark a row as a
+  spacer, give it a title, wrap a selected run of rows in a titled box
+  and box a whole column. Adding a module opens a **picker**
+  with fuzzy and initialism search over the 21 ids, the config's existing
+  `text.<name>` tables and *New text module…* (`sy` finds `sync`, `sn`
+  finds `session_name`), each with its one-line summary from
+  `garnish modules`; the new-text entry asks for a name checked by the
+  § 3.7 rule, creates the table with the schema defaults and opens its
+  editor, and removing a text module's last placement asks whether to
+  drop the table. `Enter` on a module
+  opens its **editor**: one row per schema option (`preset`, `refresh`,
+  `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then the
+  module's own options, then `icons.*` for the active icon set and
+  `colors.*`), showing the default, the current value and the doc string;
+  enums cycle, booleans toggle, integers edit with their `max` shown,
+  colours offer the theme's roles and accept a literal, icons accept any
+  string and show the cell count `doctor` would. A text module's editor is
+  the same screen over the text schema. Separate screens set the top-level
+  keys (`preset`, `icons`, `theme`, `color`, `frame` style/fill/separator,
+  `align`, `durations`, `right_justify`, `overflow`, `animate`, `padding`)
+  and the `[colors]` role overrides, each with the same row shape. Nothing
+  in the builder is hand-coded per option: a unit test walks every
+  `OptSpec` kind and every top-level key and asserts an editor exists for
+  it, so an option added to a schema appears in `setup` the next build.
+- **Selecting in the preview.** The preview is not a picture: every
+  module, separator, cap and rule in it can be selected, with the mouse
+  or the keyboard, and the selection is highlighted in place (inverse
+  video over the module's cells and a marker on its chip in the line
+  list). The renderer makes this possible with a **placement map**: an
+  optional output of `render_lines_at` that lists, for every row, the cell
+  ranges each module, separator, title, box edge and frame element
+  occupies, computed from the same segment lists the painter emits (a
+  unit test checks the ranges tile each row exactly and match the painted
+  widths, columns, stacks and the ticker included). A module may own
+  several ranges (one straddling the ticker's wrap-around), a cut module
+  owns its `…` cell, and a module that rendered nothing or lies wholly
+  outside the ticker window owns no cells and is reached from its chip in
+  the row list instead. A click (crossterm mouse capture, on while
+  `setup` runs and off when it exits, on `Ctrl+C` and on a panic, through
+  a hook chained ahead of color-eyre's so the report prints on a restored
+  terminal; the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
+  arrows move the selection; `Enter` or a click on the selected item
+  opens its editor as an **overlay panel** beside it; clicking the rule
+  opens the frame screen, a separator its picker, a cap the frame style
+  list. Everything the mouse does has a key, since tmux and some SSH
+  sessions swallow mouse events.
+- **Editing by ticking.** The overlay lists every option of the selected
+  module as a form: booleans as checkboxes (`[x] hide_when_empty`),
+  `preset` and every enum as a radio list, integers as a stepper showing
+  the `max`, colours as a swatch list of the theme's roles plus *custom*
+  (a hex or 256 index, validated as `config check` would), and strings
+  and icons as the pickers below. Every change re-renders the preview at
+  once; `Esc` always closes the innermost layer only (a picker over a
+  panel over the builder), `q` is the one way out of the builder and the
+  preset picker, and the module's chip shows a dot while it carries
+  overrides. The form is generated from `ModuleSchema` like the rest of
+  the builder, so a new option is a new row.
+- **Freeform values come with suggestions.** A string option (`label`,
+  `prefix`, `suffix`, `text`, `gap`, a line's `separator`, `ticker_gap`,
+  the frame's `fill_char` and caps) opens a picker whose first entries are
+  the distinct values the built-in presets, frame styles and the gallery
+  presets already use (gathered from `gallery::PRESETS` and the frame
+  tables at start-up, deduplicated, each drawn as it would render), then
+  *custom…*, which opens an input line that is reduced to plain text and
+  width-checked the way the config parser does (§ 5). So a separator
+  picker offers ` │ `, ` ┃ `, `  `, ` · `, the powerline glyphs, and
+  whatever a preset author found, before asking anyone to type one.
+- **Glyph picker.** An icon key opens a picker with one row per icon set
+  (the nerd, unicode, emoji and ascii glyphs for that key) followed by
+  the key's **suggested alternatives**, a short list per key declared in
+  the schema (`IconSpec.suggestions`, a few per set: a robot, a brain and
+  a sparkle for `model.icon`, three branch shapes for `branch.icon`, …),
+  then *custom…*. Every candidate is drawn in the person's own terminal
+  the way `doctor`'s glyph grid draws it, padded to two cells and followed
+  by `|` and garnish's cell count, so a glyph the font draws wider or
+  missing shows at once. Choosing one writes the per-key override
+  (`[modules.<id>.icons] <key> = "…"`) that the config already supports,
+  so sets mix freely: `icons = "nerd"` as the base with an emoji clock and
+  a unicode branch is three lines of TOML, and `config show` round-trips
+  it. The suggestions pass the same unit test as the sets (one or two
+  cells by every table, no East Asian Ambiguous character, no variation
+  selector), and the generated module pages list them under the icons
+  table as *also try*.
+- **Preview.** Rendered in-process through `render_lines_at`, exactly as
+  `garnish preview` renders a fixture: the same clock (live, so animations
+  move; `GARNISH_ANIMATE=0` freezes them as everywhere), no git discovery,
+  no cache, no settings. `f` cycles the bundled fixtures (subscription,
+  API key, before the first response, no git, the PR states, 1M at 96 %)
+  so the person sees what an absent field does to their layout; `w` sets
+  a terminal width other than the real one (the box is then
+  `w − 4 − padding`, and a `padding` edit re-shrinks the box at once).
+  ratatui does not interpret escape bytes, so the pane is drawn by a
+  second painter target in `ansi.rs` that turns the same segments into
+  ratatui spans (no new crate); a unit test paints the rows both ways and
+  checks the cell text and the styles agree, which is the "what you see
+  is what the status line prints" guarantee, the § 2.1 dim reset
+  included.
+- **Saving.** Edits live in memory as a resolved config, and `s` writes
+  it the way `config show` prints it (with the § 5 backup), so a
+  hand-written file's comments and ordering do not survive a save; the
+  status bar says so before the first save and the backup keeps the
+  original. Because the tick re-reads the config every second, a saved
+  change shows in a running Claude Code within a second, so there is no
+  apply step. `q` on an unsaved draft asks once. A file that does not
+  parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
+  says so in the status bar, and `s` refuses until the file is moved.
+- **Install.** The install screen mirrors `install --dry-run`: it lists
+  the settings path, the exact `statusLine` object it will merge, the
+  backup name, whether the skills will be written and the PATH warning if
+  any, and asks once. It runs the same code as `garnish install`; nothing
+  in `setup` writes to `settings.json` by another route.
+- **Non-interactive twin.** `garnish setup --preset <name> [--install]`
+  never opens the screen: it writes that preset and, with `--install`,
+  hooks it up, for scripts and for the `garnish-statusline` skill (§ 13),
+  which keeps its conversational path and names `setup` as the hands-on
+  one; without `--preset`, `setup` needs a terminal on stdout and exits 1
+  with one line otherwise. The bare `garnish` typed at a terminal (stdin
+  is a tty, so no payload is coming) prints one line pointing at
+  `garnish setup` and exits 0 instead of waiting for JSON; the explicit
+  `garnish render` always reads stdin, and the harness always pipes, so
+  rendering is unchanged (§ 7).
+- **Traps, decided.** `setup` honours the global `--config` flag and
+  `GARNISH_CONFIG` like every command, so it edits the file the tick
+  reads; without a home directory and without either it refuses with the
+  § 5 one-liner. The preview fixtures are embedded in the binary
+  (`include_str!` of the named files under `tests/fixtures/payloads/`, as
+  the presets and skills are), so `setup` works from a `cargo install`
+  with no repository at hand. The preview honours the config's `color`
+  and `NO_COLOR` for the rendered rows while the screen's own chrome
+  uses the terminal's default colours, so a `color = "never"` config
+  previews plain; in that case the status bar says "colours off: edits
+  are saved, not previewed" and the swatch lists show role names only.
+  A terminal smaller than 60 × 12 gets one line asking
+  for more room instead of a broken layout, and a resize redraws
+  everything at the new width (the preview's box width follows it). A
+  config that parses with problems opens on the per-key fallbacks (§ 5)
+  with the problems listed in the status bar; saving writes the resolved
+  config, which drops the bad keys for their defaults, exactly as
+  `config show` would print it, and the status bar says so before the
+  first save. If the file on disk changes while `setup` is open (another
+  session, the skill, an editor), `s` notices (a best-effort compare of
+  mtime and length; a file absent at open and present at save counts as
+  changed) and asks whether to overwrite or reload; it never merges. A
+  save or an install that fails (a read-only directory, an unwritable
+  `settings.json`; a symlinked settings file is written through the link
+  as `install` does) shows the OS error in the status bar, keeps the
+  draft and never exits. The picker and the builder never run a module's
+  worker or git: repo modules render from the fixture's fields, as in
+  `preview`.
+- **Cost and shape.** The TUI lives in its own module tree (`src/setup/`)
+  and is never entered on the render path, so the tick budget (§ 8) does
+  not move; `bench/run.sh` is the check, and a cargo feature (`setup`, on
+  by default) is the fallback if binary size ever shows in the cold
+  start. Crates: `ratatui` with the `crossterm` backend, the one new
+  dependency pair (`inquire`, a prompt wizard, was the alternative and has
+  no live pane; a WebAssembly page was the other and is the website again
+  by another name). `setup` reads the schemas, the presets, the bundled
+  fixtures and the config; it runs no command and makes no network call.
+  Every screen has a snapshot test (§ 9).
