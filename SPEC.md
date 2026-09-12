@@ -1146,7 +1146,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the real width (`COLUMNS − 4 − padding`), with its summary, declared
   width and `needs` line, and a warning when the terminal is narrower than
   the preset's declared width (the `…` cut is shown as it would be on
-  screen, not hidden). `Enter` applies it: the file is written with the
+  screen, not hidden) or shorter than the harness allows for the preset's
+  row count (the rule Phase 19 verifies; until then the picker states the
+  row count). `Enter` applies it: the file is written with the
   previous one kept as `garnish.toml.bak`, and the install screen follows
   if the settings file has no `statusLine` yet. `e` opens the highlighted
   preset in the builder instead of applying it.
