@@ -739,7 +739,9 @@ renders, at 40 columns, as
   a bottom rule row. Each box costs two terminal rows beyond its lines.
   `style`, `fill` and the box's own `colors.frame` inherit from `[frame]`
   when absent, so a `double` box can sit in a `rounded` frame. Boxes do
-  not nest and do not sit side by side (a row is the full box width);
+  not nest; boxes side by side are a panel (§ 4.5). `box = true` boxes a
+  single line on its own with the `[frame]` style and no title, so three
+  adjacent `box = true` lines are three boxes, while a name spans a run;
   the same name used for two non-adjacent runs is reported and the
   second run is unboxed. Rows outside every box keep today's caps, with
   a box counting as one block when the frame decides which row is first
@@ -763,6 +765,106 @@ renders, at 40 columns, as
 - **Cost.** Titles and boxes are arithmetic over rows already rendered;
   nothing new is read or spawned. A `boxed-panels` preset pins two boxes
   with titles at two widths.
+
+### 4.5 Panels: columns of stacked lines and boxes (target state; PLAN Phase 21)
+
+Daniel's idea, 2026-09-12. A grid column (§ 4.3) holds one row of modules.
+A **panel** is a grid line whose columns hold *stacks* instead: each
+column is a sequence of lines, with the box rules of § 4.4 applied inside
+it, so one column can be a single double-lined titled box, the next a
+bare centred module, and the next three small boxes on top of each other.
+The panel is as tall as its tallest column and the columns keep their
+shares as the terminal is resized, as in § 4.3.
+
+```toml
+[frame]
+style = "none"
+
+[box.repo]
+style = "double"
+title = "Repository"
+
+[[line]]                      # a panel: a grid line whose columns hold lines
+gap = 2
+[[line.col]]
+box = "repo"                  # the whole column is one box, the panel's full height
+[[line.col.line]]
+modules = ["path", "branch"]
+[[line.col.line]]
+modules = ["sync", "pr"]
+
+[[line.col]]                  # a bare column: no glyphs, its lines centred
+align = "center"
+valign = "top"                # top | center | bottom: where a short stack sits
+[[line.col.line]]
+modules = ["model", "effort"]
+
+[[line.col]]                  # three one-line boxes stacked
+align = "center"
+[[line.col.line]]
+box = true
+modules = ["context"]
+[[line.col.line]]
+box = true
+modules = ["limit5h"]
+[[line.col.line]]
+box = true
+modules = ["cost"]
+```
+
+renders, at 60 columns, as
+
+```text
+╔═ Repository ════╗      Opus  high       ╭────────────────╮
+║ ~/garnish  main ║                       │ ████░░░░░░ 42% │
+║ ⇡2 ⇣1  #42      ║                       ╰────────────────╯
+║                 ║                       ╭────────────────╮
+║                 ║                       │   23%  2h13m   │
+║                 ║                       ╰────────────────╯
+║                 ║                       ╭────────────────╮
+║                 ║                       │     $1.23      │
+╚═════════════════╝                       ╰────────────────╯
+```
+
+- **Shape.** A `[[line.col]]` has either `modules` (one row, § 4.3) or
+  `[[line.col.line]]` entries (a stack); both is reported and the stack
+  wins. Each inner line is an ordinary line laid out to the column's
+  share: `modules` with an optional `right` group is the flex form, and
+  `modules` alone sits by the column's `align` (an inner `align` overrides
+  it per line). Inner lines take `box`, `title`, `separator` and `blank`
+  as top-level lines do; they take no `[[line.col.line.col]]` (a panel
+  does not nest, so the config stays two levels deep and `setup` can draw
+  it).
+- **Height.** The panel spans as many terminal rows as its tallest column,
+  box rules counted. A shorter stack is padded with empty rows placed by
+  the column's `valign` (`top` by default); a padding row in a bare
+  column is spaces (with colour off the harness drops a whitespace-only
+  panel row, § 2.1, so a panel with only bare columns should set `blank`
+  on the inner lines or keep one box). A column-level `box` (the box
+  named on the `[[line.col]]`) spans the column's full height, its
+  padding rows drawn as empty interior rows, so a one-box column matches
+  the height of a three-box neighbour; a line-level box is as tall as its
+  lines.
+- **Frame.** The outer `[frame]` caps, when the style has them, sit at
+  both ends of every panel row (first/middle/last decided over all the
+  config's rows as today, the panel counting as one block); the `fill`
+  rule applies inside bare inner lines as it does to any line and never
+  to `gap` cells or padding rows. Every row of the panel is exactly the
+  box width, so `preview` and the harness show the same picture.
+- **Rules that carry over.** Overflow stays inside the column (§ 4.3);
+  `align = true` pads per column and per inner line index; a stale or
+  hidden module leaves its inner line, and `hide_empty_lines` drops an
+  inner line whose modules all rendered nothing (the stack shortens, the
+  panel's height follows the tallest column that remains) and drops the
+  panel when every column is empty. `config show` writes the nested form
+  back verbatim.
+- **Setup.** The builder (§ 14) shows a panel as its columns side by
+  side, each a small line list of its own with *Add a line*, *Wrap in a
+  box* and *Box the column*; the placement map covers every inner line,
+  so a click lands in the right column.
+- **Cost.** A panel is the same segment lists placed in two dimensions;
+  nothing new is read or spawned. Presets `dashboard-panels` (the layout
+  above) pins it at 60 and 120 columns.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
