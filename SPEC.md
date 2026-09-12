@@ -370,6 +370,7 @@ style = "rounded"         # none | rounded | square | double | heavy | powerline
 fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
 # custom: first middle last single fill_char right_first right_middle right_last right_single separator pad
+# boxes (§ 4.4): top_left top_right bottom_left bottom_right side
 # animation (§ 4.2): fill_pattern fill_step fill_direction separator_frames separator_step
 
 [[line]]
@@ -674,6 +675,94 @@ modules = ["clock"]
 - **Cost.** A grid line is the same segment lists placed by arithmetic;
   nothing new is read or spawned. The presets gallery gets a three-column
   and a six-column preset so the goldens pin the shares at three widths.
+
+### 4.4 Titles and boxes (target state; PLAN Phase 21)
+
+Daniel's idea, 2026-09-12. Every framed row is a rule with caps
+(`├─ ───…─── ┤`), so a **title** is text set into that rule, and a
+**box** is a run of lines that gets its own titled top rule, vertical
+sides and a bottom rule, so a config can group its lines into named
+panels: a *Repository* box over the repo line, a *Session* box over the
+timers, each with its own frame style if wanted.
+
+```toml
+[[line]]
+modules = []
+title = "Repository"      # a titled rule row: ├─ Repository ─────────┤
+title_align = "center"    # left | center | right (default left)
+title_pad = 1             # spaces on each side of the title inside the rule
+title_color = "accent"    # role or literal; default the frame colour
+
+[box.repo]                # a box: lines join it with `box = "repo"`
+title = "Repository"
+title_align = "left"
+style = "rounded"         # inherits [frame] style when absent; fill inherits too
+fill = false              # a box usually wants a clean interior
+
+[[line]]
+box = "repo"
+modules = ["path", "branch", "sync"]
+right   = ["pr"]
+[[line]]
+box = "repo"
+modules = ["worktree"]
+```
+
+renders, at 40 columns, as
+
+```text
+╭─ Repository ─────────────────────────╮
+│ ~/p/garnish  main ⇡2             #42 │
+│ wt/review                            │
+╰──────────────────────────────────────╯
+```
+
+- **Titles on rows.** `title` is plain text (reduced like every config
+  string, § 5), drawn in the rule in the frame colour with one space of
+  `title_pad` on each side (`╭─ Repository ──`); `title_color` picks
+  another role or literal. `title_align` places it right after the left
+  cap, centred over the row's fill, or right before the right cap. On a
+  row that carries modules a `center` title needs a gap to sit in, so it
+  goes in the widest fill gap of the row (between the groups, or between
+  two grid columns); a title wider than the space it has is cut with `…`
+  and never widens the row. A `[[line]]` with only a `title` is a spacer
+  that carries it (the § 4.1 rules: always kept, `blank` irrelevant since
+  the title makes the row non-blank).
+- **Boxes.** `[box.<name>]` declares a box (`<name>` a bare key like a
+  text module's); lines join it with `box = "<name>"`, and adjacent lines
+  with the same `box` form one box. A box is drawn as a top rule row
+  (corner caps, the title as above), its lines with the style's vertical
+  side glyphs at both edges and their modules laid out to the width
+  inside the sides (the two-group and grid rules of § 4 and § 4.3 apply
+  unchanged, with `fill` drawing the rule or spaces between the modules
+  as it does today; `fill = false` is the usual choice inside a box), and
+  a bottom rule row. Each box costs two terminal rows beyond its lines.
+  `style`, `fill` and the box's own `colors.frame` inherit from `[frame]`
+  when absent, so a `double` box can sit in a `rounded` frame. Boxes do
+  not nest and do not sit side by side (a row is the full box width);
+  the same name used for two non-adjacent runs is reported and the
+  second run is unboxed. Rows outside every box keep today's caps, with
+  a box counting as one block when the frame decides which row is first
+  or last. Under `hide_empty_lines` a box whose lines all rendered
+  nothing is dropped with its rules; a box's `title` is not a line and
+  does not keep it. `config show` writes the `[box.<name>]` tables and
+  the `box` keys back verbatim.
+- **Glyphs.** The built-in styles gain their corners and side:
+  `rounded` `╭ ╮ ╰ ╯ │`, `square` `┌ ┐ └ ┘ │`, `double` `╔ ╗ ╚ ╝ ║`,
+  `heavy` `┏ ┓ ┗ ┛ ┃`, with `fill_char` as the horizontal; `none` draws a
+  box with no visible glyphs (its lines are simply indented by the pad);
+  `powerline` has no box shape, so a powerline box is reported and drawn
+  with the `rounded` glyphs. A `custom` frame adds `top_left`,
+  `top_right`, `bottom_left`, `bottom_right` and `side`, each one cell
+  (reported otherwise, the style's glyph stays). Every glyph passes the
+  § 4.1 width guard.
+- **Setup.** The builder (§ 14) offers *Add a title* on any line and *Wrap
+  in a box* over a selected run of lines, with the title through the
+  string picker; the placement map (§ 14) lists titles and box edges so
+  a click on a box's top rule opens the box's own form.
+- **Cost.** Titles and boxes are arithmetic over rows already rendered;
+  nothing new is read or spawned. A `boxed-panels` preset pins two boxes
+  with titles at two widths.
 
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
@@ -1013,7 +1102,8 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   right groups with the rule taking the slack; *1 column* with its
   alignment; *2 columns*; *3 columns*; *N columns*, each with `align` and
   `weight`), move a module within a group or column or into the next one,
-  and mark a line as a spacer. Adding a module opens a **picker**
+  mark a line as a spacer, give it a title, and wrap a selected run of
+  lines in a titled box (§ 4.4). Adding a module opens a **picker**
   with fuzzy and initialism search over the 21 ids and the `text.<name>`
   family (`sy` finds `sync`, `sn` finds `session_name`), each with its
   one-line summary from `garnish modules`. `Enter` on a module
