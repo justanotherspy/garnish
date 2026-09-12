@@ -85,7 +85,9 @@ at reduced intensity on screen while `preview` shows it at full intensity.
 garnish prefixes every row with `ESC[0m` when colour is on, so the row
 renders as `preview` shows it; a golden pins the prefix. Phase 19 confirms
 the wrapper on screen first and records the fact in `CLAUDE.md` (from
-FUTURE-SPEC § 7.1, A1).
+FUTURE-SPEC § 7.1, A1). A side effect worth stating: with colour on, every
+row then carries a non-whitespace byte, so the harness's trim keeps every
+configured row, and `blank` (§ 4.1) matters only with colour off.
 
 ### 2.2 Payload (stdin JSON)
 
@@ -151,10 +153,12 @@ icon-set default → module preset → top-level preset → explicit key.
 `max_width` (target state; PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps
 one module's rendered width: `0` (default) is unlimited, otherwise the
 module's text is cut to that many cells with `…` through `ansi::truncate`
-(grapheme-aware, an OSC 8 wrapper kept balanced) *before* alignment, so a
-long branch name or session title cannot push the rest of the line off
-without the whole left group being cut. Capped at 1024 like every cell
-count (§ 5).
+(grapheme-aware, an OSC 8 wrapper kept balanced) *before* alignment and
+before any column or line cut (§ 4.3), so a long branch name or session
+title cannot push the rest of the line off without the whole left group
+being cut. Capped at 1024 like every cell count (§ 5). Text modules
+(§ 3.7) have `width` for the same purpose and no `max_width`;
+`config check` reports one and names `width`.
 
 ### 3.1 Repo group
 
@@ -172,17 +176,22 @@ icon; GitHub pull requests as `#42`.
 Two payload-only additions (target state; PLAN Phase 20; from FUTURE-SPEC
 § 7.5, A7 and A8):
 
-- `path` gets `style = "full" | "fish"` and `depth = 0`. `fish` abbreviates
-  every directory of the base part but the last to its first character
-  (`~/r/g/src`), the way the fish shell prompts; `depth = N` keeps only the
-  last `N` segments of the base part (`0` = all). The subpath stays dim and
-  untouched, and both keys apply to every preset.
+- `path` gets `style = "full" | "fish"`. `fish` abbreviates every
+  directory of the base part but the last to its first character
+  (`~/r/g/src`), the way the fish shell prompts; a leading `~` is not a
+  segment and stays whole, and the last segment is never abbreviated. The
+  existing `depth` (last `N` segments, `0` = all; per-preset defaults 1, 2
+  and 0) applies before the abbreviation, so `depth = 2` with `fish` gives
+  `g/src`. The subpath stays dim and untouched.
 - `branch` gets `link = false`: `true` wraps the name in an OSC 8 link to
   the branch on the forge, built from `workspace.repo.{host,owner,name}`
   in the payload (`https://<host>/<owner>/<name>/tree/<branch>`; GitLab
   hosts use `/-/tree/`), no git call; nothing is linked when the payload
-  has no `repo` or the head is detached. Only `http(s)://` URLs of
-  printable ASCII are ever emitted (§ 5), as for `pr`.
+  has no `repo` or the head is detached. The branch name is
+  percent-encoded into the URL (RFC 3986 unreserved characters and `/`
+  kept, everything else `%XX`), so `feature/#12` and a non-ASCII name link
+  correctly and the painter's rule (§ 5: `http(s)://`, printable ASCII)
+  is met, as for `pr`.
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
@@ -217,9 +226,12 @@ window, so 100 % is the point where compaction runs (`used_percentage ×
 window ÷ threshold`, capped at 100). The compaction marker then sits at
 the bar's end and is not drawn; the window tag of the `full` preset still
 names the real window. `window` (default) is today's behaviour. When the
-marker is disabled (§ 2.3: compaction off) `usable` falls back to `window`
-and `config check` says nothing, since the setting can change under a
-running session.
+marker is disabled (§ 2.3: compaction off) or the threshold is below a
+tenth of the window (a large `compact_buffer_tokens` or a tiny percentage
+override), `usable` falls back to `window`, and `config check` says
+nothing either way, since the settings can change under a running
+session. `thresholds`, `warn_at` and the marker label follow the
+percentage on display, whichever scale it is.
 
 ### 3.3 Usage group
 
@@ -235,13 +247,15 @@ Limit modules render nothing when their window is absent. `cost` has
 
 `reset = "countdown" | "absolute" | "both"` on `limit5h`, `limit7d` and
 `spend` (target state; PLAN Phase 20; from FUTURE-SPEC § 8.2, A10):
-`absolute` prints the local wall-clock time the window resets at
-(`⏱ 14:30`; `limit7d` and any reset more than a day away add the weekday,
-`⏱ Tue 14:30`), `both` prints the countdown followed by the time in
-parentheses, `countdown` (default) is today's behaviour. The time is
-formatted with jiff in the zone the `clock` module uses, so the two agree.
-The harness re-runs the line at each `resets_at`, so neither form is stale
-at the boundary.
+`absolute` prints the local wall-clock time the window resets at, with
+the module's existing spacing (`⏱14:30`); `limit7d` always adds the
+weekday (`⏱Tue 14:30`) and `limit5h` and `spend` never do, so the width
+of the text is as steady as `durations = "fixed"` promises on a ticker
+line. `both` prints the countdown followed by the time in parentheses;
+`countdown` (default) is today's behaviour; `show_reset = false` hides
+every form. The time is formatted with jiff in the zone the `clock`
+module uses, so the two agree. The harness re-runs the line at each
+`resets_at`, so neither form is stale at the boundary.
 
 ### 3.4 Session group
 
@@ -473,7 +487,9 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   caps) a spacer is whitespace only; with colour off (`color = "never"`,
   `NO_COLOR`) Claude Code strips it (§ 2.1), so it shows in `preview` but
   not in the status line, while with colour on the rule's colour codes keep
-  it. `blank = true` on the spacer (decided 2026-09-06; off by default so
+  it (and, once the § 2.1 row prefix of Phase 19 lands, every row's
+  leading reset does, so with colour on no configured row is ever
+  dropped). `blank = true` on the spacer (decided 2026-09-06; off by default so
   the harness's own rule stands until the user opts in) keeps it on screen
   either way: a row that would be whitespace only gets one invisible cell,
   the braille blank U+2800, which is not whitespace to the harness's `trim`
@@ -605,7 +621,10 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   the autocompact keys) resolves `prefersReducedMotion` to `true`, garnish
   behaves as if `animate = false` unless the config sets `animate`
   explicitly; the harness honours the same key for its own spinners, so
-  the two stay in step. `config show` prints the effective value.
+  the two stay in step. Precedence, strongest first: `GARNISH_ANIMATE=0`
+  (always off), an explicit `animate` in the config, `prefersReducedMotion`
+  in the settings, the default (`true`). `config show` prints the
+  effective value.
 
 ### 4.3 Layout: lines, columns and boxes (target state; PLAN Phase 21)
 
@@ -664,10 +683,22 @@ fill = false
   one cell and always add up. Defaults: `"1fr"`, so three bare columns
   are thirds and six are sixths. Content wider than its column is cut
   with `…` (`overflow = "truncate"`) or scrolled inside the column
-  (`overflow = "ticker"`, each over-wide column its own window under the
-  § 4.2 rule) and never spills into a neighbour, which is what keeps a
-  layout's shape as the terminal is resized. `truncate = false` still
-  hands the harness the whole row. (Decided with Daniel 2026-09-12: one
+  (`overflow = "ticker"`) and never spills into a neighbour, which is
+  what keeps a layout's shape as the terminal is resized. Scrolling per
+  column follows § 4.1: in a flex column the left group is the window and
+  the `right` group is never scrolled; a lone group is the window; each
+  inner line of a stack is its own window; an `auto` column always fits
+  its content and so never scrolls. `truncate = false` lifts only the
+  final whole-row cut; columns still never spill. An `auto` column is
+  re-measured every tick and moves its neighbours as its content changes
+  width, so it is for values that hold still (a clock under
+  `durations = "fixed"`, a module with `max_width`), not for branch
+  names. When the width runs out, columns are laid left to right: a
+  fixed or `auto` column takes at most what remains, every `fr` column
+  gets at least one cell, and a column for which nothing remains renders
+  nothing (the case only arises below the § 4 minimum of 10 cells or
+  with fixed widths that exceed the box, and `GARNISH_DEBUG` logs it).
+  (Decided with Daniel 2026-09-12: one
   `width` key taking `"<n>fr"`, `"auto"` or an integer, in preference to
   three single-typed keys, and `gap = 1` by default so adjacent columns
   never touch without tuning; `config check` names the three accepted
@@ -680,50 +711,66 @@ fill = false
   column centre; a lone column left), so a three-column line reads
   left / centre / right without writing it. `align = true` (§ 4) pads
   module *k* of column *c* to the widest module *k* of column *c* across
-  the lines that have one, so separators stack between lines with the
-  same column count; `right_justify` picks the pad side for `right`
-  groups and right-justified columns.
+  the lines with the same column count (lines with different counts never
+  align with each other, and inner lines of a stack align only with inner
+  lines at the same column position), so separators stack; *k* counts
+  from the left in a left- or centre-justified column and from the right
+  end in a right-justified column or a `right` group, as § 4 does today;
+  `right_justify` picks the pad side for those.
 - **Stacks.** `[[line.col.line]]` entries make the column a stack of
   lines, each laid out to the column's width with the rules above (an
   inner line's `justify` overrides the column's). The line is as tall as
   its tallest column, box rules counted; a shorter stack is padded with
-  empty rows placed by `valign`. Inner lines take no `[[line.col]]` and
-  no `gap`; a column with both `modules` and inner lines is reported and
-  the stack wins.
+  empty rows placed by `valign` (which has no effect on a one-row line).
+  Inner lines take no `[[line.col]]` and no `gap`; a column with both
+  `modules` and inner lines is reported and the stack wins.
 - **Frame and fill.** The `[frame]` caps sit at both ends of every
-  terminal row (first/middle/last decided over all the config's rows,
-  a multi-row line counting as one block). On a single-row line, `fill`
-  draws the rule glyph (or the animated `fill_pattern`) in every empty
-  cell inside the caps, gaps included, so a centred module floats on one
-  continuous rule: `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`. On a multi-row
-  line it draws only inside each inner line's own cells; gap cells and
-  padding rows are spaces, since a rule running past a box's side would
-  look wrong. With colour off the harness drops a row that is spaces only
-  (§ 2.1), so a multi-row line of bare columns should keep a box or set
-  `blank` on its inner lines.
+  terminal row that is not a box row (first/middle/last decided over all
+  the config's rows, a multi-row line counting as one block); a box row
+  carries the box's corners and sides at its ends instead, as the samples
+  show. On a single-row line, `fill` draws the rule glyph (or the
+  animated `fill_pattern`) in every empty cell inside the caps, gaps
+  included, so a centred module floats on one continuous rule:
+  `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`. On a multi-row line it draws
+  only inside each inner line's own cells; gap cells and padding rows are
+  spaces, since a rule running past a box's side would look wrong. With
+  colour off the harness drops a row that is spaces only (§ 2.1); `blank`
+  on the outer `[[line]]` of a multi-row line keeps every one of its rows
+  (the braille cell on any row that would be whitespace only, padding
+  rows included), while on an inner line it follows the § 4.1 rule.
 - **Titles.** `title` is plain text (reduced like every config string,
   § 5) set into the line's rule in the frame colour with `title_pad`
   spaces on each side; `title_color` picks another role or literal.
   `title_justify` puts it right after the left cap, centred, or right
   before the right cap; on a row that carries modules a centred title
-  goes in the widest fill gap. A title wider than its space is cut with
-  `…` and never widens the row. A `[[line]]` with only a `title` is a
-  titled spacer (`├─ Repository ────┤`), always kept (§ 4.1).
+  goes in the widest empty gap of the row, whichever column or `gap` it
+  lies in. A title needs no rule: with `fill = false` or `style = "none"`
+  it is the same text at the same place with `title_pad` spaces around
+  it. On a multi-row line the title goes into the first row. A line inside
+  a box gets no title of its own (the box has one); it is reported and
+  ignored. A title wider than its space is cut with `…` and never widens
+  the row. A `[[line]]` with only a `title` is a titled spacer
+  (`├─ Repository ────┤`), always kept (§ 4.1).
 - **Boxes.** `[box.<name>]` (a bare key, as for text modules) carries a
-  title (the four `title*` keys), `style`, `fill` and `colors.frame`,
-  each inheriting from `[frame]` when absent, so a `double` box can sit
-  in a `rounded` frame. A box is drawn as a corner-capped top rule with
-  the title, the style's side glyphs at both edges of each line inside
-  (the line laid out to the width between them), and a bottom rule: two
-  extra rows. Three ways to join one: adjacent lines with the same
-  `box = "<name>"` form one box spanning them; a column with
-  `box = "<name>"` is one box the line's full height, its padding rows
-  drawn as empty interior rows, so a one-box column matches a three-box
-  neighbour; `box = true` on a line boxes that line alone with the
-  `[frame]` style and no title, so three adjacent `box = true` lines are
-  three boxes. Boxes never nest (a line inside a boxed column may not
-  carry `box`; reported and ignored); a name reused for a non-adjacent
-  run is reported and the second run unboxed. Rows outside every box keep
+  title (the four `title*` keys), `style`, `fill` and `colors.frame`.
+  `style` and the colour inherit from `[frame]` when absent, so a
+  `double` box can sit in a `rounded` frame; when the frame's style has
+  no box shape (`none`, `powerline`) an unstyled box is `rounded`. `fill`
+  defaults to `false` inside a box (a clean interior is what a box is
+  for; `fill = true` draws the rule between a line's groups as § 4 does
+  outside one). A box is drawn as a corner-capped top rule with the
+  title, the style's side glyphs at both ends of each row inside (the
+  line laid out to the width between them), and a bottom rule: two extra
+  rows. Three ways to join one: adjacent lines with the same
+  `box = "<name>"` form one box spanning them; `box = "<name>"` or
+  `box = true` on a column makes the whole column one box the line's full
+  height, its padding rows drawn as empty interior rows, so a one-box
+  column matches a three-box neighbour (a boxed one-row column is a
+  three-row box); `box = true` on a line boxes that line alone with no
+  title, so three adjacent `box = true` lines are three boxes. Boxes
+  never nest (a line inside a boxed column may not carry `box`; reported
+  and ignored); a name reused for a non-adjacent run is reported and the
+  second run unboxed. Rows outside every box keep
   the frame's caps as today. The built-in styles gain their corners and
   side: `rounded` `╭ ╮ ╰ ╯ │`, `square` `┌ ┐ └ ┘ │`, `double`
   `╔ ╗ ╚ ╝ ║`, `heavy` `┏ ┓ ┗ ┛ ┃`, with `fill_char` as the horizontal;
@@ -737,13 +784,18 @@ fill = false
   nothing is dropped (its stack shortens and the line's height follows
   the tallest column that remains), a box whose lines all went is
   dropped with its rules (a title alone keeps nothing), and a line is
-  dropped when every column is empty. A `[[line]]` whose columns are all
-  `modules = []` is a spacer.
+  dropped when every column is empty. A column that emptied while a
+  sibling did not keeps its share and renders empty rows, so the layout
+  does not reflow when a value comes and goes (`stale_style = "hide"`
+  would otherwise move columns every `stale_after` TTLs). A `[[line]]`
+  whose columns are all `modules = []` is a spacer.
 - **Validation.** `config check` reports: `justify`/`valign` outside
   their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
-  count (≤ 1024); `gap` above 16; `box` naming no `[box.<name>]`; a line
-  with both `modules` and `[[line.col]]` (the columns win); nesting; a
-  non-adjacent reuse. `config show` writes every form back verbatim.
+  count (≤ 1024); `gap` above 16; more than 16 columns on a line or 16
+  inner lines in a column; `title_pad` above 64; `box` naming no
+  `[box.<name>]`; a line with both `modules` and `[[line.col]]` (the
+  columns win); nesting; a non-adjacent reuse; a title on a boxed line.
+  `config show` writes every form back verbatim.
 - **Setup.** The builder (§ 14) shows a line as its columns side by side:
   *Add a column*, its `width` and `justify`, *Stack* to turn a column
   into lines, *Add a title*, *Wrap in a box* over a selected run of
@@ -754,7 +806,8 @@ fill = false
   `grid-six`, `boxed-panels` and `dashboard-panels` pin the shares, the
   titles and the stacks at two widths each.
 
-Two samples. A titled box around two lines, at 40 columns:
+Two samples, each drawn at its box width (§ 2.1: a 40-cell box is a
+44-column terminal). A titled box around two lines, in a 40-cell box:
 
 ```toml
 [box.repo]
@@ -775,9 +828,9 @@ modules = ["worktree"]
 ╰──────────────────────────────────────╯
 ```
 
-A dashboard line of three columns, at 60 columns with `[frame]
-style = "none"`: a double box the full height, a bare centred column,
-three stacked boxes:
+A dashboard line of three columns in a 60-cell box with `[frame]
+style = "none"` (so the unstyled `box = true` boxes are `rounded`): a
+double box the full height, a bare centred column, three stacked boxes:
 
 ```toml
 [box.repo]
@@ -844,11 +897,12 @@ without an error report.
 - internal error → `⚠ garnish: <msg>`.
 - **A file that fails to parse is never rewritten by any command** (target
   state; PLAN Phase 19; from FUTURE-SPEC § 12.1 and § 13.4). `install`,
-  `config init --force`, `setup` (§ 14) and `skills install` refuse to
-  touch a `settings.json` or `garnish.toml` that does not parse, name the
-  problem and the file, and exit 1 quietly; the only way past is fixing or
-  moving the file by hand. A file that parses is edited through a temp
-  file and `rename`, with the backup rule `install` already has.
+  `config init --force` and `setup` (§ 14) refuse to touch a
+  `settings.json` or `garnish.toml` that does not parse, name the problem
+  and the file, and exit 1 quietly; the only way past is fixing or moving
+  the file by hand. A file that parses is edited through a temp file and
+  `rename`, with the backup rule `install` already has (a timestamped copy
+  that is never overwritten), which `setup` shares.
 - **Nothing but text reaches a row.** Every string that becomes part of a
   row is reduced to plain text: escape sequences (CSI, OSC, and the string
   sequences DCS/SOS/PM/APC with their payloads), control characters and the
@@ -909,9 +963,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
   Stale locks are reclaimed by an atomic rename so racing ticks cannot both
   win. A guard only unlinks a lock that still carries its own pid.
-  A lock older than 24 h is abandoned whatever its pid says (target state;
-  PLAN Phase 19; from FUTURE-SPEC § 15 item 2): a one-line safety net
-  against pid reuse, which the liveness check alone cannot see.
+  (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid reuse; the
+  60 s / 15 s age limit above already bounds a lock's life whatever its
+  pid, so nothing was added.)
 - Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
   `process_group(0)`, spawned without wait. On Linux the tick takes the lock
   and passes `--lock-held`; elsewhere the worker takes it itself.
@@ -936,11 +990,11 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 
 | command | purpose |
 |---|---|
-| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand) |
+| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). Target state (§ 14): the bare `garnish` with a terminal on stdin prints one line pointing at `garnish setup` and exits 0 instead of waiting; the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. Target state (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5): it also reports the settings keys that change what the line can show (`statusLine.refreshInterval`, suggesting `1` when `clock`, a countdown or an animation is configured; `statusLine.hideVimModeIndicator`, suggesting `true` when the `vim` module is on so the mode is not shown twice; `disableAllHooks`; `prefersReducedMotion`) and whether the settings file parses |
-| `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; with `--preset` and no terminal it writes that preset non-interactively (the same as `config init --preset P --force` plus `install` when `--install` is given), for scripts and the skill |
+| `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset (the same as `config init --preset P --force` plus `install` when `--install` is given), for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
@@ -1010,7 +1064,9 @@ per-module render cost.
   with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1` regenerates);
   key sequences are driven through the same event loop the terminal feeds,
   so the picker, the builder and the install dialog are tested without a
-  tty.
+  tty. Snapshots freeze the clock with `GARNISH_NOW` and pin `TZ=UTC`,
+  like the config goldens, since the preview pane runs on the live clock
+  and the `clock` module prints the local zone.
 
 ### Test hooks (environment)
 
@@ -1153,7 +1209,7 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   screen, not hidden) or shorter than the harness allows for the preset's
   row count (the rule Phase 19 verifies; until then the picker states the
   row count). `Enter` applies it: the file is written with the
-  previous one kept as `garnish.toml.bak`, and the install screen follows
+  previous one kept by `install`'s backup rule (§ 5), and the install screen follows
   if the settings file has no `statusLine` yet. `e` opens the highlighted
   preset in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen
@@ -1187,12 +1243,17 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   video over the module's cells and a marker on its chip in the line
   list). The renderer makes this possible with a **placement map**: an
   optional output of `render_lines_at` that lists, for every row, the cell
-  range each module, separator and frame element occupies, computed from
-  the same segment lists the painter emits (a unit test checks the ranges
-  tile each row exactly and match the painted widths, grid columns and
-  the ticker included; a scrolled module reports the cells its window
-  shows). A click (crossterm mouse capture, on while `setup` runs and off
-  when it exits, with the wheel scrolling lists) or `Tab`/`Shift-Tab`/the
+  ranges each module, separator, title, box edge and frame element
+  occupies, computed from the same segment lists the painter emits (a
+  unit test checks the ranges tile each row exactly and match the painted
+  widths, columns, stacks and the ticker included). A module may own
+  several ranges (one straddling the ticker's wrap-around), a cut module
+  owns its `…` cell, and a module that rendered nothing or lies wholly
+  outside the ticker window owns no cells and is reached from its chip in
+  the line list instead. A click (crossterm mouse capture, on while
+  `setup` runs and off when it exits, on `Ctrl+C` and on a panic, through
+  a hook chained ahead of color-eyre's so the report prints on a restored
+  terminal; the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
   arrows move the selection; `Enter` or a click on the selected item
   opens its editor as an **overlay panel** beside it; clicking the rule
   opens the frame screen, a separator its picker, a cap the frame style
@@ -1220,7 +1281,7 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
 - **Glyph picker.** An icon key opens a picker with one row per icon set
   (the nerd, unicode, emoji and ascii glyphs for that key) followed by
   the key's **suggested alternatives**, a short list per key declared in
-  the schema (`IconOpt.suggestions`, a few per set: a robot, a brain and
+  the schema (`IconSpec.suggestions`, a few per set: a robot, a brain and
   a sparkle for `model.icon`, three branch shapes for `branch.icon`, …),
   then *custom…*. Every candidate is drawn in the person's own terminal
   the way `doctor`'s glyph grid draws it, padded to two cells and followed
@@ -1243,7 +1304,7 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   a `Paragraph` of the rendered rows, so what it shows is byte for byte
   what the status line prints at that width, with the § 2.1 dim reset.
 - **Saving.** Edits live in memory until `s` writes the file (with the
-  `.bak`); because the tick re-reads the config every second, a saved
+  § 5 backup); because the tick re-reads the config every second, a saved
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
@@ -1254,12 +1315,15 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   any, and asks once. It runs the same code as `garnish install`; nothing
   in `setup` writes to `settings.json` by another route.
 - **Non-interactive twin.** `garnish setup --preset <name> [--install]`
-  without a terminal on stdout writes that preset and, with `--install`,
+  never opens the screen: it writes that preset and, with `--install`,
   hooks it up, for scripts and for the `garnish-statusline` skill (§ 13),
   which keeps its conversational path and names `setup` as the hands-on
-  one. `garnish` typed at a terminal (stdin is a tty, so no payload is
-  coming) prints one line pointing at `garnish setup` and exits 0 instead
-  of waiting for JSON; the harness always pipes, so `render` is unchanged.
+  one; without `--preset`, `setup` needs a terminal on stdout and exits 1
+  with one line otherwise. The bare `garnish` typed at a terminal (stdin
+  is a tty, so no payload is coming) prints one line pointing at
+  `garnish setup` and exits 0 instead of waiting for JSON; the explicit
+  `garnish render` always reads stdin, and the harness always pipes, so
+  rendering is unchanged (§ 7).
 - **Cost and shape.** The TUI lives in its own module tree (`src/setup/`)
   and is never entered on the render path, so the tick budget (§ 8) does
   not move; `bench/run.sh` is the check, and a cargo feature (`setup`, on
