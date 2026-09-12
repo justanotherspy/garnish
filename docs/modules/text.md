@@ -44,13 +44,13 @@ ship it befo  a rathe…       v0.2
 | `label` | string | `""` | Dim text before the value. |
 | `prefix`, `suffix` | string | `""` | Text around the module. |
 | `hide_when_empty` | bool | `true` | With an empty `text`, hide the module instead of showing a dim `–`. |
-| `text` | string | `""` | The text. ANSI/OSC sequences and control characters are stripped. |
-| `width` | integer | `0` | Box width in cells; 0 = the text's own width. |
-| `pad` | integer | `0` | Blank cells added on each side of the box. |
+| `text` | string ≤ 4096 chars | `""` | The text. ANSI/OSC sequences and control characters are stripped. |
+| `width` | integer ≤ 1024 | `0` | Box width in cells; 0 = the text's own width. |
+| `pad` | integer ≤ 1024 | `0` | Blank cells added on each side of the box. |
 | `justify` | `left` \| `right` \| `center` | `"left"` | Where text narrower than the box sits. |
 | `overflow` | `clip` \| `scroll` \| `scroll-wrap` | `"scroll"` | Text wider than the box: `clip` cuts with an ellipsis, `scroll` slides a window and restarts after the end, `scroll-wrap` flows continuously with `gap` between end and start. |
 | `step` | number | `1` | Cells scrolled per tick (> 0; 0.5 = every second tick). |
-| `gap` | string | `"   "` | `scroll-wrap` only: text between the end and the start. |
+| `gap` | string ≤ 4096 chars | `"   "` | `scroll-wrap` only: text between the end and the start. |
 
 No `preset` and no `refresh`: a text module renders every tick as configured.
 

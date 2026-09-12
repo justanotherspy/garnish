@@ -206,10 +206,15 @@ impl Style {
 }
 
 /// A run of text with one style and an optional hyperlink.
+///
+/// The text is private so the plain-text invariant of SPEC § 5 is held by
+/// the type, not by convention: every way to set it ([`Segment::plain`],
+/// [`Segment::styled`], [`Segment::with_text`], [`Segment::push_str`]) runs
+/// it through [`plain_text`], and [`Segment::text`] reads it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Segment {
     /// The text, without escape sequences.
-    pub text: String,
+    text: String,
     /// Style applied to the whole run.
     pub style: Style,
     /// OSC 8 target, if any.
@@ -237,6 +242,30 @@ impl Segment {
     pub fn with_link(mut self, url: impl Into<String>) -> Self {
         self.link = Some(url.into());
         self
+    }
+
+    /// The same style and link with other text, sanitised like
+    /// [`Segment::plain`].
+    #[must_use]
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = clean(text.into());
+        self
+    }
+
+    /// The text: plain, without escape sequences or control characters.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Append text, sanitised like [`Segment::plain`] (no allocation when
+    /// it is already plain: the bar builder appends a glyph per cell).
+    pub fn push_str(&mut self, text: &str) {
+        if text.chars().any(|c| c.is_control() || is_format_char(c)) {
+            self.text.push_str(&plain_text(text));
+        } else {
+            self.text.push_str(text);
+        }
     }
 
     /// Display width of the text.

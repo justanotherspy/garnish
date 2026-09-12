@@ -37,7 +37,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `label` | string | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` / `suffix` | string | `""` | `""` | `""` | Text around the module. |
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
-| `width` | integer | `0` | `20` | `30` | Bar width in cells; 0 hides the bar. |
+| `width` | integer ≤ 1024 | `0` | `20` | `30` | Bar width in cells; 0 hides the bar. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the context icon. |
 | `show_percent` | bool | `true` | `true` | `true` | Show the percentage after the bar. |

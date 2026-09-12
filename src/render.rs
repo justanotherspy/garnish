@@ -277,16 +277,16 @@ fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
     // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
     // which `plain_text` has already dropped): the same set as
     // `char::is_whitespace`, so this is the harness's own test.
-    if row.iter().any(|s| s.text.chars().any(|c| !c.is_whitespace())) {
+    if row.iter().any(|s| s.text().chars().any(|c| !c.is_whitespace())) {
         return row;
     }
     let one_cell = |c: char| crate::ansi::display_width(&c.to_string()) == 1;
-    let slot = row.iter().position(|s| s.text.chars().any(one_cell));
+    let slot = row.iter().position(|s| s.text().chars().any(one_cell));
     match slot.and_then(|i| row.get_mut(i)) {
         Some(seg) => {
             let mut done = false;
             let text: String = seg
-                .text
+                .text()
                 .chars()
                 .map(|c| {
                     if !done && one_cell(c) {
@@ -297,10 +297,10 @@ fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
                     }
                 })
                 .collect();
-            *seg = Segment { text, ..seg.clone() };
+            *seg = seg.clone().with_text(text);
         }
         None => {
-            if row.iter().all(|s| s.text.is_empty()) {
+            if row.iter().all(|s| s.text().is_empty()) {
                 row.push(Segment::plain(BLANK_CELL));
             }
         }
@@ -976,6 +976,37 @@ mod tests {
             assert!(display_width(l) <= 36, "{l}");
             assert!(l.is_ascii() || l.contains('─') || l.contains('╭'), "{l}");
         }
+    }
+
+    /// SPEC § 9 config matrix: every frame style, one module per line and
+    /// every module on one line render inside the box with the expected
+    /// number of rows.
+    #[test]
+    fn every_frame_style_and_line_shape_renders_inside_the_box() {
+        let payload = fixture("subscription-full");
+        let ids: Vec<&str> = SCHEMAS.iter().map(|s| s.id).collect();
+        for style in crate::frame::FrameStyle::ALL {
+            let text = format!("preset = \"full\"\n[frame]\nstyle = \"{}\"\n", style.name());
+            let out = render_plain(&payload, &loaded(&text), Some(120));
+            assert_eq!(out.lines().count(), 4, "{style:?}: {out}");
+            for l in out.lines() {
+                assert!(display_width(l) <= 116, "{style:?}: {l}");
+            }
+        }
+        let one_per_line: String = std::iter::once("hide_empty_lines = false\n".to_owned())
+            .chain(ids.iter().map(|id| format!("[[line]]\nmodules = [\"{id}\"]\n")))
+            .collect();
+        let out = render_plain(&payload, &loaded(&one_per_line), Some(120));
+        assert_eq!(out.lines().count(), ids.len(), "{out}");
+        for l in out.lines() {
+            assert_eq!(display_width(l), 116, "{l}");
+        }
+        let quoted: Vec<String> = ids.iter().map(|id| format!("\"{id}\"")).collect();
+        let all_on_one = format!("[[line]]\nmodules = [{}]\n", quoted.join(", "));
+        let out = render_plain(&payload, &loaded(&all_on_one), Some(120));
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert_eq!(display_width(out.trim_end()), 116, "{out}");
+        assert!(out.contains('…'), "twenty-one modules do not fit in 116 cells: {out}");
     }
 
     #[test]

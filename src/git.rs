@@ -443,6 +443,32 @@ mod tests {
         assert!(fetch_age(&discover(&work).unwrap(), crate::time::now_secs()).is_some());
     }
 
+    /// SPEC § 9: behind and diverged, against a commit pushed from a second
+    /// clone. The counts read the remote-tracking ref on disk, so nothing
+    /// changes until a fetch brings the other clone's commit in.
+    #[test]
+    fn behind_and_diverged_counts_follow_the_fetched_tracking_ref() {
+        let (d, work) = repo();
+        let t = Duration::from_secs(5);
+        let origin = d.path().join("origin.git");
+        let other = d.path().join("other");
+        git(d.path(), &["clone", "-q", origin.to_str().unwrap(), other.to_str().unwrap()]);
+        std::fs::write(other.join("o.txt"), "o\n").unwrap();
+        git(&other, &["add", "."]);
+        git(&other, &["commit", "-q", "-m", "theirs"]);
+        git(&other, &["push", "-q", "origin", "main"]);
+        assert_eq!(ahead_behind(&work, "refs/remotes/origin/main", t), Ok((0, 0)), "not fetched");
+        assert!(fetch(&work, "origin", t).is_ok());
+        assert_eq!(ahead_behind(&work, "refs/remotes/origin/main", t), Ok((0, 1)), "behind");
+        std::fs::write(work.join("m.txt"), "m\n").unwrap();
+        git(&work, &["add", "."]);
+        git(&work, &["commit", "-q", "-m", "mine"]);
+        assert_eq!(ahead_behind(&work, "refs/remotes/origin/main", t), Ok((1, 1)), "diverged");
+        // A branch without an upstream has no tracking ref to count against.
+        git(&work, &["checkout", "-q", "-b", "local"]);
+        assert_eq!(upstream(&discover(&work).unwrap(), "local"), None);
+    }
+
     #[test]
     fn linked_worktrees_and_detached_heads() {
         let (d, work) = repo();

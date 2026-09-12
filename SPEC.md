@@ -126,7 +126,8 @@ min(context_window_size, configured)` where `configured` comes from
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (env) > `autoCompactWindow` in settings
 (managed > `.claude/settings.local.json` > `.claude/settings.json` >
 `~/.claude/settings.json`) > model default (= window). `autoCompactEnabled =
-false` or `DISABLE_AUTO_COMPACT=1` disables the marker. The buffer constant is
+false`, `DISABLE_AUTO_COMPACT=1` or `DISABLE_COMPACT=1` (which turns off
+compaction altogether) disables the marker. The buffer constant is
 configurable (`modules.context.compact_buffer_tokens`).
 
 ## 3. Modules
@@ -143,15 +144,18 @@ icon-set default → module preset → top-level preset → explicit key.
 |---|---|---|---|---|---|
 | `path` | base dir (git toplevel, else `project_dir`) + cwd subpath | base name | `~/parent/base` + dim `/sub` | full tilde path + subpath + `added_dirs` count | 0 (toplevel cached) |
 | `branch` | branch or detached HEAD | name | icon + name | + short SHA, dirty `●` | 5 |
-| `sync` | ahead/behind vs `@{upstream}` | `⇡2⇣1` when non-zero | colored counts, dim `no upstream` | + upstream name + fetch-age hint `⇣?12m` | 5 (+ opt-in `fetch_interval`) |
+| `sync` | ahead/behind vs `@{upstream}` | `⇡2 ⇣1` when non-zero | colored counts, the `no_upstream` glyph (`⊘`) when the branch has none | + upstream name + fetch-age hint (`stale` glyph, a space, the age: `↻ 12m`, § 4.1) | 5 (+ opt-in `fetch_interval`) |
 | `worktree` | `workspace.git_worktree` / `worktree.name` | name | icon + name | + `original_branch → branch` | 0 |
 | `pr` | open PR/MR | `#123` linked | icon + `#123` linked + state glyph | + state word | 0 |
 
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
 
-PR state glyphs/colors: approved `✓` ok, pending `○` warn, changes_requested
-`✗` danger, draft `◌` muted. Link uses OSC 8 to `pr.url`.
+PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
+`✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
+the generated `docs/modules/pr.md`). Link uses OSC 8 to `pr.url`. (Changed
+in PLAN Phase 12: `○` and `◌` are East Asian Ambiguous and drew two cells
+in COSMIC Terminal.)
 
 ### 3.2 Model group
 
@@ -159,15 +163,19 @@ PR state glyphs/colors: approved `✓` ok, pending `○` warn, changes_requested
 |---|---|---|---|---|---|
 | `model` | `display_name`, `⚡` when fast | name | icon + name (+⚡) | + `model.id`, thinking glyph | 0 |
 | `effort` | `effort.level` | word | icon + scale `▁▃▅▇█` | scale + word | 0 |
-| `context` | bar (100% = window) + % + compaction marker | `42%` | bar(20) + `42%` | bar(30) + `42%` + marker label + window tag + `exceeds_200k` | 0 (settings cached 30 s) |
+| `context` | bar (100% = window) + % + compaction marker | `42%` | bar(20) + `42%` | bar(30) + `42%` + marker label + window tag + `exceeds_200k` | 0 (the settings chain of § 2.3 is read every tick; caching it for 30 s is the backlog's optional headroom, not implemented) |
 | `style` | `output_style.name` | name unless default | icon + name unless default | always | 0 |
 
 Context bar: filled cells `█` with partial blocks for sub-cell precision,
 empty `░`; the **filled part** takes the color of the current band
-(`thresholds = [50, 75, 90]`, `band_colors = [ok, warn, orange, danger]`); a
-`▏` marker at the autocompact position; `exceeds_200k = { enabled, glyph = "‼",
-color = "danger" }`; `warn_at` adds an extra badge threshold. No token counter.
-`used_percentage` null → empty bar and `–`.
+(`thresholds = [50, 75, 90]`, `band_colors = ["band1", "band2", "band3",
+"band4"]`: the theme's four band roles, overridable with any role or literal
+colour, as in the § 4 example); a `▏` marker at the autocompact position;
+`exceeds_200k = true` shows the `icons.exceeds` glyph (`‼`) in
+`colors.exceeds` (`danger`) when the payload says so (one flag plus the
+module's ordinary icon and colour tables, not a nested table: every module's
+glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
+threshold. No token counter. `used_percentage` null → empty bar and `–`.
 
 ### 3.3 Usage group
 
@@ -341,9 +349,9 @@ right `cache`).
 Layout rules: left group joined by `separator`; right group likewise; the frame
 rule fills the gap to the width `$COLUMNS − 4 − padding` (§ 2.1; never below
 10); right cap after. Overflow: drop the fill, then truncate the **left** group
-(ANSI-aware, `…`); never the right group. `--width` and `GARNISH_COLUMNS`
-stand in for `$COLUMNS` and get the same subtraction, so `preview` shows what
-Claude Code would show at that terminal width.
+(ANSI-aware, `…`); never the right group. `preview --width` and
+`GARNISH_COLUMNS` stand in for `$COLUMNS` and get the same subtraction, so
+`preview` shows what Claude Code would show at that terminal width.
 
 Aligned columns (`align = true`): module *k* of a group, counted among the
 modules that rendered something (from the left in the left group, from the
@@ -565,11 +573,16 @@ without an error report.
   an `http(s)://` URL of printable ASCII. (Whole-stack review, 2026-09-06:
   a `\n` in a session name added a row, an escape passed `--color never`,
   and a cut could split the sequence.)
-- **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`) above 1024 or
-  a row string (`text`, `gap`, `ticker_gap`) above 4096 characters is
-  reported like any bad value and the default stands in; the renderers clamp
-  again, and the effective width never exceeds 4096 cells whatever `COLUMNS`
-  says. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
+- **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`) above 1024, a
+  row string (`text`, `gap`, `ticker_gap`, `label`, `prefix`, `suffix`) above 4096 characters or
+  `cost.decimals` above 8 (the money formatter allocates one byte per place)
+  is reported like any bad value and the default stands in; the renderers
+  clamp again, and the effective width never exceeds 4096 cells whatever
+  `COLUMNS` says. Each cap is the option's `max` in its module schema, so
+  the generated reference prints it in the type column (`integer ≤ 1024`,
+  `string ≤ 4096 chars`); `ticker_gap` (top-level) and `label`/`prefix`/
+  `suffix` (common to every module) are checked by hand against the same
+  constant. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
   is no default config or settings location: `install`, `config init`,
   `config path` and `skills install` refuse with a one-line note naming the
   flag to pass, rather than writing into the current directory. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
@@ -591,7 +604,8 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   `<root>/repos/<hash(git-common-dir + worktree path)>/<module>.cache` so
   sessions in one worktree share it. Never keyed on `transcript_path`.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
-  or the error text. Malformed = miss. Written as `<file>.tmp.<pid>` + rename.
+  or the error text. Malformed = miss. Written as `.<module>.tmp.<pid>` in
+  the entry's directory + rename.
 - Tick: fresh → render; past TTL → spawn worker unless `<module>.lock` is
   live, rendering the last value unchanged; older than `stale_after` TTLs
   (or computed for another head/upstream) → dim `⟳`; `err` → dim `✗`. A failed entry is fresh for its TTL like any
@@ -628,7 +642,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 
 | command | purpose |
 |---|---|
-| `garnish` | render from stdin (default) |
+| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand) |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out |
@@ -660,19 +674,32 @@ per-module render cost.
 - **Unit**: each module × preset × icon set × theme with a frozen clock;
   absent/null fields; band edges; duration/countdown formatting; threshold
   math; ANSI width/truncation; frame assembly; preset resolution order;
-  schema completeness (every read icon/color/option key exists in the schema).
-- **Integration** (real binary): payload fixtures (subscription, API key,
-  pre-first-response nulls, no git, worktree session, git worktree, PR states,
-  MR, spend_limit, fast_mode, 1M at 3/50/80/96 %, 200k, autocompact via
-  settings/env/disabled, vim, agent, session_name, absent effort, narrow
-  COLUMNS); temp git repos with a local bare origin (ahead, behind, diverged,
-  no upstream, detached, dirty, worktree); PATH shim `git` (slow/failing)
-  proving ticks never block; cache TTL expiry; live lock; stale lock with dead
-  pid; `.tmp`/truncated entries ignored; tick killed mid-run while the worker
-  completes; 32 concurrent ticks → exactly one worker; GC bounds.
-- **Config matrix**: every preset, one-module-per-line, all-on-one-line, every
-  frame style, custom frame, each module in each preset × fixtures → no panic,
-  correct line count, width ≤ `COLUMNS − 4` (§ 2.1); golden files under `tests/golden/`
+  schema completeness (a scan of `src/modules/*.rs` checks that every
+  icon, colour and option key the render code reads by name exists in a
+  schema of a module that file defines, since `ModuleCfg` answers an
+  unknown key silently; files hold several modules, so a key of one read
+  by a sibling in the same file is not caught).
+- **Integration** (real binary): payload fixtures (the files under
+  `tests/fixtures/payloads/`: subscription, API key, pre-first-response
+  nulls, no git, worktree session, git worktree, the PR states and an MR,
+  spend_limit, fast_mode, 1M at 3/50/80/96 %, 200k, a cold cache, vim,
+  agent, no session_name, an output style, absent effort, added dirs;
+  autocompact via settings/env/disabled is driven by the environment of the
+  test, and `preview` on the whole directory renders each in name order);
+  temp git repos with a local bare origin (ahead, behind, diverged, no
+  upstream, detached, dirty, worktree; behind and diverged use a second
+  clone that pushes, `fetch_interval` end to end fetches once per interval
+  and sees that push); PATH shim `git` (slow/failing) proving ticks never
+  block; cache TTL expiry; live lock; stale lock with dead pid;
+  `.tmp`/truncated entries ignored; the tick's whole process group killed
+  after it spawned a worker whose git is slow, and the worker still writes
+  the entry (the tick runs as a process-group leader and the group is
+  killed with the `kill` binary, so the test fails if the worker is not in
+  a group of its own); 32 concurrent ticks → exactly one worker; GC bounds.
+- **Config matrix**: every preset × icon set × fixture, every frame style,
+  one-module-per-line (21 rows with `hide_empty_lines = false`) and
+  all-on-one-line (one row, cut with `…`) → no panic, correct line count,
+  width ≤ `COLUMNS − 4` (§ 2.1); golden files under `tests/golden/`
   (`UPDATE_GOLDEN=1` regenerates).
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.

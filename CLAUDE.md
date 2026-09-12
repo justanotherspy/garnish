@@ -298,7 +298,18 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   color and preset value lives in `ModuleSchema`. Adding an option means:
   schema → render → `make docs` → `UPDATE_GOLDEN=1 cargo nextest run` → commit
   the regenerated `docs/`, `examples/` and `tests/golden/`. `tests/docs_sync.rs`
-  fails CI when any of them drift.
+  fails CI when any of them drift. An option whose value sizes an
+  allocation or a loop (a cell count, a row string, decimal places) carries
+  `.max(…)` on its `OptSpec`: the parser rejects anything above it and the
+  reference prints it in the type column; the common row strings
+  (`label`/`prefix`/`suffix`, `ticker_gap`) are checked by hand against
+  `MAX_TEXT_CHARS`. A unit test scans `src/modules/*.rs` for every key read
+  by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `icon(cfg, "…", "…")`, …)
+  and fails on one that no schema defined in that file declares, so a typo
+  in a key cannot render silently as an empty icon.
+- `Segment.text` is private: `Segment::plain`/`styled`/`with_text`/`push_str`
+  reduce text to plain text on the way in and `text()` reads it, so nothing
+  can put an escape sequence on a row by assigning a field.
 - `docs/guide.md` is the only hand-written file under `docs/`; `garnish docs`
   never touches it. Keep it in step with `README.md` (install URL,
   requirements, troubleshooting).
@@ -316,7 +327,12 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `# now:` instant, so a clock-driven key is pinned at two instants and a
   test hook can be set per file. Tests that touch the cache dir or PATH
   shims are named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
-  serially (`.config/nextest.toml`).
+  serially (`.config/nextest.toml`). A test that must kill a process group
+  (the tick's, to prove the worker outlives it) spawns the tick with
+  `process_group(0)` and kills `-<pid>` through the `kill` *binary* (with
+  `LC_ALL=C`, since the test reads its error text): dash's builtin `kill`
+  takes neither `--` nor a negative pid and fails with `Illegal number`,
+  which an unchecked `sh -c 'kill …'` hides.
 - macOS differs on purpose: `/var` is a symlink to `/private/var`, so tests
   that compare paths canonicalise both sides; the lock hand-over
   (`--lock-held`) is Linux-only, so worker tests must not assert it; the two
