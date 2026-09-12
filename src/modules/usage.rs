@@ -85,7 +85,8 @@ impl Module for LimitModule {
                     "Mini bar width in cells; 0 hides it.",
                     Value::Int(0),
                 )
-                .full(Value::Int(8)),
+                .full(Value::Int(8))
+                .max(crate::config::MAX_CELLS),
                 OptSpec::new(
                     "bar",
                     Kind::Enum(BAR_STYLES),
@@ -188,7 +189,8 @@ impl Module for CostModule {
             opts: vec![
                 OptSpec::new("show_icon", Kind::Bool, "Show the cost icon.", Value::Bool(true))
                     .minimal(Value::Bool(false)),
-                OptSpec::new("decimals", Kind::Int, "Decimal places.", Value::Int(2)),
+                OptSpec::new("decimals", Kind::Int, "Decimal places.", Value::Int(2))
+                    .max(crate::config::MAX_DECIMALS),
                 OptSpec::new(
                     "only_without_rate_limits",
                     Kind::Bool,

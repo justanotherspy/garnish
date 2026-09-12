@@ -359,7 +359,7 @@ prefix = ""
 suffix = ""
 # hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
 hide_when_empty = true
-# width (integer) — Bar width in cells; 0 hides the bar. [minimal=0 default=20 full=30]
+# width (integer ≤ 1024) — Bar width in cells; 0 hides the bar. [minimal=0 default=20 full=30]
 # width = 20
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
@@ -457,7 +457,7 @@ hide_when_empty = true
 # show_icon = true
 # show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
 # show_reset = true
-# bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
+# bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
@@ -501,7 +501,7 @@ hide_when_empty = true
 # show_icon = true
 # show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
 # show_reset = true
-# bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
+# bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
@@ -545,7 +545,7 @@ hide_when_empty = true
 # show_icon = true
 # show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
 # show_reset = true
-# bar_width (integer) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
+# bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
@@ -587,7 +587,7 @@ suffix = ""
 hide_when_empty = true
 # show_icon (bool) — Show the cost icon. [minimal=false default=true full=true]
 # show_icon = true
-# decimals (integer) — Decimal places. [minimal=2 default=2 full=2]
+# decimals (integer ≤ 8) — Decimal places. [minimal=2 default=2 full=2]
 # decimals = 2
 # only_without_rate_limits (bool) — Hide when the harness reports subscription rate limits. [minimal=true default=true full=true]
 # only_without_rate_limits = true

@@ -146,13 +146,43 @@ pub struct OptSpec {
     pub minimal: Option<Value>,
     /// Override for the `full` preset.
     pub full: Option<Value>,
+    /// Upper bound: the largest integer a [`Kind::Int`] option accepts, or
+    /// the most characters a [`Kind::Str`] option may hold. A value above it
+    /// is reported at config time and the default stands in. Set on every
+    /// option whose value sizes an allocation or a loop on the tick (cell
+    /// counts, row text, decimal places), so the cap is part of the
+    /// reference docs rather than a rule buried in the parser.
+    pub max: Option<usize>,
 }
 
 impl OptSpec {
     /// Option with the same value in every preset.
     #[must_use]
     pub const fn new(key: &'static str, kind: Kind, doc: &'static str, default: Value) -> Self {
-        Self { key, kind, doc, default, minimal: None, full: None }
+        Self { key, kind, doc, default, minimal: None, full: None, max: None }
+    }
+
+    /// Bound the option (see [`OptSpec::max`]).
+    #[must_use]
+    pub const fn max(mut self, max: usize) -> Self {
+        self.max = Some(max);
+        self
+    }
+
+    /// Why `value` exceeds [`OptSpec::max`], if it does. Anything else
+    /// passes, a negative integer included: the reader treats it as 0.
+    #[must_use]
+    pub fn over_max(&self, value: &Value) -> Option<String> {
+        let max = self.max?;
+        match value {
+            Value::Int(n) if usize::try_from(*n).is_ok_and(|n| n > max) => {
+                Some(format!("must be at most {max}"))
+            }
+            Value::Str(s) if s.chars().count() > max => {
+                Some(format!("must be at most {max} characters"))
+            }
+            _ => None,
+        }
     }
 
     /// Set the `minimal` preset value.

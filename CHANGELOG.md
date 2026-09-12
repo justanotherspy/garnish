@@ -5,6 +5,16 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Fixes**
+
+- `cost.decimals` is capped at 8: the money formatter allocated one byte
+  per decimal place, so a huge value could exhaust memory on every tick.
+- The size caps (`width`, `pad`, `bar_width` ≤ 1024 cells; `text`, `gap`
+  ≤ 4096 characters; `decimals` ≤ 8) are part of each module's schema and
+  the generated reference shows them in the type column.
+- `docs/README.md` no longer says the whole `docs/` directory is generated:
+  `docs/guide.md` is hand-written.
+
 **Install**
 
 - Prebuilt binaries for Linux and macOS (x86_64 and aarch64) on every

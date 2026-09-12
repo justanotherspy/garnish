@@ -38,7 +38,7 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 | `prefix` / `suffix` | string | `""` | `""` | `""` | Text around the module. |
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
 | `show_icon` | bool | `false` | `true` | `true` | Show the cost icon. |
-| `decimals` | integer | `2` | `2` | `2` | Decimal places. |
+| `decimals` | integer ≤ 8 | `2` | `2` | `2` | Decimal places. |
 | `only_without_rate_limits` | bool | `true` | `true` | `true` | Hide when the harness reports subscription rate limits. |
 | `show_lines` | bool | `false` | `false` | `true` | Append lines added/removed. |
 

@@ -58,6 +58,31 @@ fn setup() -> Env {
     Env { _dir: dir, work, cache }
 }
 
+/// A second clone of the origin that pushes one commit to `main`, so the
+/// first clone is behind once it fetches. Returns the clone's path so the
+/// test can push again.
+fn push_from_a_second_clone(env: &Env, name: &str) -> PathBuf {
+    let root = env.work.parent().unwrap();
+    let other = root.join("other");
+    if !other.exists() {
+        let origin = root.join("origin.git");
+        git(root, &["clone", "-q", origin.to_str().unwrap(), other.to_str().unwrap()]);
+    }
+    std::fs::write(other.join(format!("{name}.txt")), format!("{name}\n")).unwrap();
+    git(&other, &["add", "."]);
+    git(&other, &["commit", "-q", "-m", name]);
+    git(&other, &["push", "-q", "origin", "main"]);
+    other
+}
+
+fn sync_entry(env: &Env) -> String {
+    std::fs::read_dir(env.cache.join("repos"))
+        .unwrap()
+        .flatten()
+        .find_map(|d| std::fs::read_to_string(d.path().join("sync.cache")).ok())
+        .expect("sync.cache written")
+}
+
 fn payload(work: &Path) -> String {
     format!(
         r#"{{"cwd":"{w}","session_id":"sess-worker","workspace":{{"current_dir":"{w}","project_dir":"{w}","added_dirs":[]}},"model":{{"id":"m","display_name":"Opus"}},"cost":{{"total_cost_usd":0.1,"total_duration_ms":1000,"total_api_duration_ms":100,"total_lines_added":0,"total_lines_removed":0}},"context_window":{{"context_window_size":1000000,"used_percentage":10}}}}"#,
@@ -347,8 +372,154 @@ fn worker_slow_git_never_blocks_a_tick_and_records_failure() {
     assert!(out.contains('✗'), "{out}");
 }
 
+/// SPEC § 9: behind, diverged and no-upstream repositories end to end. The
+/// counts come from the worker; the no-upstream glyph needs no worker at all.
 #[test]
-fn cache_tick_killed_midway_does_not_corrupt_entries() {
+fn worker_behind_diverged_and_no_upstream_render() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    push_from_a_second_clone(&env, "theirs");
+    git(&env.work, &["fetch", "-q", "origin"]);
+    // Diverged: the unpushed commit `two` against the fetched `theirs`.
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1") && out.contains("⇣1"), "{out}");
+    // Behind only: drop the local commit.
+    git(&env.work, &["reset", "-q", "--hard", "HEAD~1"]);
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇣1") && !out.contains('⇡'), "{out}");
+    // No upstream: the glyph, no counts, and nothing to refresh.
+    git(&env.work, &["checkout", "-q", "-b", "local"]);
+    let before = spawns(&env).len();
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains('\u{f127}') && !out.contains('⇣') && !out.contains('⇡'), "{out}");
+    assert_eq!(spawns(&env).len(), before, "{:?}", spawns(&env));
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    assert!(sync_entry(&env).contains("no upstream"), "{}", sync_entry(&env));
+}
+
+/// SPEC § 6: `fetch_interval` runs `git fetch` in the worker, once per
+/// interval, so a commit pushed elsewhere shows as `behind` without any
+/// fetch by hand.
+#[test]
+fn worker_fetch_interval_fetches_once_per_interval() {
+    let env = setup();
+    config(
+        &env,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\npreset = \"full\"\nfetch_interval = 300\n",
+    );
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    push_from_a_second_clone(&env, "theirs");
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains("fetch_attempt=1738425600"), "{entry}");
+    assert!(!entry.contains("fetch_error="), "{entry}");
+    assert!(entry.contains("ahead=1") && entry.contains("behind=1"), "{entry}");
+    assert!(env.work.join(".git").join("FETCH_HEAD").exists());
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1") && out.contains("⇣1"), "{out}");
+    // Inside the interval the worker does not fetch: a second push stays unseen.
+    push_from_a_second_clone(&env, "again");
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    assert!(sync_entry(&env).contains("behind=1"), "{}", sync_entry(&env));
+    // Past the interval (measured from the attempt and from FETCH_HEAD's
+    // wall-clock mtime) it fetches again.
+    let wall =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let later = (wall + 400).to_string();
+    let (_, err, ok) = garnish(&env, refresh, None, &[("GARNISH_NOW", later.as_str())]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains(&format!("fetch_attempt={later}")), "{entry}");
+    assert!(entry.contains("behind=2"), "{entry}");
+}
+
+/// The first executable `git` on `PATH`.
+fn real_git() -> PathBuf {
+    std::env::var("PATH")
+        .unwrap()
+        .split(':')
+        .map(|d| Path::new(d).join("git"))
+        .find(|p| p.is_file())
+        .expect("git on PATH")
+}
+
+/// SPEC § 2.1 / § 9: Claude Code cancels an in-flight status line script,
+/// and the worker the tick spawned must complete regardless. The tick runs
+/// as the leader of its own process group and the whole group is killed
+/// once it has spawned the worker; the worker, in a group of its own with a
+/// slow git, still writes the entry.
+#[test]
+fn spawn_worker_outlives_the_ticks_process_group() {
+    use std::os::unix::process::CommandExt as _;
+    let env = setup();
+    config(
+        &env,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\npreset = \"full\"\n",
+    );
+    let shim = env.work.parent().unwrap().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    let fake = shim.join("git");
+    std::fs::write(&fake, format!("#!/bin/sh\nsleep 1\nexec {} \"$@\"\n", real_git().display()))
+        .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+
+    let mut child = Command::new(bin())
+        .env("GARNISH_CACHE_DIR", &env.cache)
+        .env("GARNISH_NOW", NOW)
+        .env("GARNISH_CONFIG", env.work.join("garnish.toml"))
+        .env("COLUMNS", "120")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path)
+        .env_remove("GARNISH_NO_SPAWN")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pgid = child.id();
+    child.stdin.take().unwrap().write_all(payload(&env.work).as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("main"));
+    assert!(repo_cache_files(&env).iter().all(|f| f != "sync.cache"), "no entry yet");
+
+    // The tick has exited with its worker still in git's sleep; kill
+    // everything left in the tick's process group, as a cancelled script's
+    // process tree would be. A worker in that group dies here. (The `kill`
+    // binary: dash's builtin takes no `--` and no negative pid.)
+    let killed = Command::new("kill").args(["-KILL", "--", &format!("-{pgid}")]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&killed.stderr);
+    assert!(
+        killed.status.success() || stderr.contains("No such process"),
+        "kill the tick's group: {stderr}"
+    );
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(20) {
+        if repo_cache_files(&env).iter().any(|f| f == "sync.cache") {
+            let entry = sync_entry(&env);
+            assert!(entry.lines().next().unwrap().ends_with(" ok"), "{entry}");
+            assert!(entry.contains("ahead=1"), "{entry}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("the worker never wrote sync.cache: {:?}", repo_cache_files(&env));
+}
+
+#[test]
+fn cache_leftover_temp_and_truncated_entries_are_ignored() {
     let env = setup();
     config(&env, ONE_LINE);
     let w = env.work.to_str().unwrap().to_owned();

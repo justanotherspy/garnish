@@ -53,7 +53,7 @@ phase closed goes in the **Backlog**; host trouble does not belong here.
 - [x] `spawn.rs`: detached worker (`process_group(0)`), lock files, `GARNISH_NO_SPAWN`
 - [x] `garnish refresh --module|--all` (rayon for `--all`)
 - [x] Tests (serial group): TTL expiry, live lock, stale lock/dead pid, tmp/truncated ignored, 32 concurrent ticks → one worker, GC bounds
-- [ ] Test: tick killed mid-run while the worker completes (needs a harness that can kill a process group deterministically; backlog)
+- [x] Test: tick killed mid-run while the worker completes (`spawn_worker_outlives_the_ticks_process_group`, 2026-09-12: the tick runs as a process-group leader, the group is killed with the `kill` binary once the tick has spawned a worker whose git sleeps, and the worker still writes the entry; verified to fail with the worker's `process_group(0)` removed)
 
 ## Phase 5 — Repo modules
 
@@ -61,7 +61,7 @@ phase closed goes in the **Backlog**; host trouble does not belong here.
 - [x] Worker: ahead/behind (`rev-list --left-right --count`), dirty (`status --porcelain=v2`, 2 s timeout), opt-in `git fetch` with `fetch_interval`
 - [x] `path`, `branch`, `sync`, `worktree`, `pr`
 - [x] Temp-repo tests (ahead/behind/no-upstream/detached/worktree in `git.rs`; ahead+dirty end to end in `tests/worker.rs`) + PATH shim test (hanging git never blocks a tick)
-- [ ] Temp-repo tests still missing: behind, diverged, `fetch_interval` end to end (backlog)
+- [x] Temp-repo tests for behind, diverged and no upstream (`git.rs` and `tests/worker.rs`, against a second clone that pushes) and `fetch_interval` end to end (a successful fetch sees the other clone's push, none within the interval, one again past it; the failed-fetch case was already covered) (2026-09-12)
 
 ## Phase 6 — Docs
 
@@ -213,14 +213,14 @@ and user feedback. Pick from here when no phase is in progress.
 - [x] Phase 2: TOML config fixtures under `tests/fixtures/configs/` and a golden test over them (`tests/config_golden.rs`, 2026-09-05)
 - [x] Sanitise every string that reaches a row (Phase 15 review; done in the whole-stack review layer, 2026-09-06). The full sink list was: `label`/`prefix`/`suffix`, every static `icons.<key>` override, the frame glyphs (`first`…`right_single`, `pad`, `separator`, `fill_char`), per-line `separator`, the `⚠ config:` line's own `e.path`, and the payload strings (`model.display_name`/`id`, `output_style.name`, `session_name`, `agent.name`, `cwd`/`project_dir`, `worktree.name`/`branch`, `pr.url`). Now `Segment::plain`/`styled` reduce everything to plain text (`ansi::plain_text`, extended to bidi/format characters) and the config strings are reduced at parse time as well, so width arithmetic sees real cells; `Painter` emits OSC 8 only for `http(s)://` printable-ASCII URLs. Backlog note: a schema-level `max` on `OptSpec` would make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md`; today they live in `config::bounded`
 - [x] Question for Daniel: with `GARNISH_ANIMATE=0` a ticker was frozen at offset 0, a silent cut with no `…` (Phase 15 review). Decided 2026-09-06: a frozen ticker line is truncated with `…` (layer `phase-16/frozen-ticker`, SPEC § 4.1/§ 4.2)
-- [ ] Phase 4: test a tick killed mid-run while the worker completes (needs a harness that can kill a process group deterministically)
-- [ ] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end
+- [x] Phase 4: test a tick killed mid-run while the worker completes (2026-09-12, see Phase 4)
+- [x] Phase 5: temp-repo tests for behind, diverged, and `fetch_interval` end to end (2026-09-12, see Phase 5)
 - [x] Right-side `…` truncation reported by Daniel (2026-09-04): root cause found 2026-09-05 in the 2.1.261 binary, the status line box is `COLUMNS − 4 − 2 × statusLine.padding`; `Config::width` now subtracts the 4 (SPEC § 2.1)
-- [ ] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fix the wording in `docs.rs` and regenerate
+- [x] `docs/README.md` (generated) says "do not edit by hand" without excepting `docs/guide.md`; fixed in `docs::index_page` and regenerated (2026-09-12)
 - [x] `Cargo.toml` said `repository = "local"`; it points at the GitHub URL (Phase 17, 2026-09-06)
-- [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened
-- [ ] `Segment.text` is `pub`, so the plain-text invariant (SPEC § 5) holds by convention; a private field with an accessor would let the compiler hold it (whole-stack review, 2026-09-06)
-- [ ] A schema-level `max` on `OptSpec` would replace the key-name match in `config::bounded` and make the size caps (`MAX_CELLS`, `MAX_TEXT_CHARS`) self-documenting in `docs/config.md` (whole-stack review, 2026-09-06)
+- [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened (SPEC § 3.2 says the settings chain is read every tick)
+- [x] `Segment.text` is private with `text()`, `with_text` and `push_str` (each sanitising), so the plain-text invariant (SPEC § 5) is held by the type (2026-09-12)
+- [x] `OptSpec::max` replaces the key-name match in `config::bounded`; the caps are declared on `context.width`, the three `bar_width`s, `text.{text,width,pad,gap}` and, new, `cost.decimals` (≤ 8: `format!("{:.N$}")` allocated N bytes, so `decimals = 4000000000` was a 4 GB allocation on every tick), and the reference prints them in the type column (2026-09-12)
 - [x] Release pipeline with the Homebrew tap (2026-09-11): `.github/workflows/release.yml` on a `vX.Y.Z` tag builds four archives, publishes a pre-release from the CHANGELOG section, waits for Daniel's approval in the `release` environment, pushes `Casks/garnish.rb` to `justanotherspy/homebrew-tap` (octo-sts token, `brew fetch` check first), then marks the release Latest (CLAUDE.md § Release process)
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
 
@@ -637,3 +637,28 @@ and user feedback. Pick from here when no phase is in progress.
   does not push; `brew audit || true` so style still runs; `verify` rejects
   a leftover `## Unreleased`; the docs say a code fix is a new version, not
   a re-run.
+- **2026-09-12 (open items and spec drift)** — Daniel asked for whatever
+  the plan and spec still left open to be built. Every unchecked codebase
+  item closed: the Phase 4 killed-tick test (the tick as a process-group
+  leader, the group killed with the `kill` binary after the spawn; dash's
+  builtin `kill` accepts neither `--` nor a negative pid, which made the
+  first cut pass with the worker in the tick's group), the Phase 5 behind /
+  diverged / no-upstream tests against a second clone and a successful
+  `fetch_interval` end to end, `Segment.text` private behind sanitising
+  setters, `OptSpec::max` replacing `config::bounded`'s key-name match (and
+  catching `cost.decimals`, whose formatter allocated one byte per place),
+  the `docs/README.md` wording. An audit of SPEC against the code then
+  fixed the spec's drift: `garnish render` is a visible subcommand,
+  `--width` belongs to `preview`, the context bar's `band_colors` default is
+  the four band roles and `exceeds_200k` is a flag plus `icons`/`colors`
+  keys, `sync` shows a glyph rather than the words `no upstream` and the
+  fetch-age hint uses the `stale` icon, the unicode PR glyphs are `❍`/`❏`
+  since Phase 12, `DISABLE_COMPACT` is honoured, temp entries are
+  `.<module>.tmp.<pid>`, the settings chain is read every tick (no 30 s
+  cache), and § 9 now names the fixtures that exist. Three § 9 promises
+  that had no test got one: schema completeness (a source scan of every key
+  read by name), the frame-style / one-per-line / all-on-one-line matrix,
+  and `preview <dir>`. `cache_tick_killed_midway_does_not_corrupt_entries`
+  was renamed to what it tests (leftover temp and truncated entries).
+  Still open, by design: the website pointer, the first release through the
+  pipeline (repository state), and the optional headroom.

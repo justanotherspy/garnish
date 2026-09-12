@@ -55,7 +55,7 @@ pub fn bar(
 
     let mut segs: Vec<Segment> = Vec::new();
     let mut push = |text: &str, style: Style| match segs.last_mut() {
-        Some(last) if last.style == style => last.text.push_str(text),
+        Some(last) if last.style == style => last.push_str(text),
         _ => segs.push(Segment::styled(text, style)),
     };
     let filled_style = Style::fg(fill_color);
@@ -115,6 +115,9 @@ pub fn dollars(usd: f64, decimals: usize) -> String {
     if usd >= 1000.0 {
         return format!("${:.1}k", usd / 1000.0);
     }
+    // Capped at config time (`cost.decimals` has a schema `max`) and again
+    // here: the formatter allocates one byte per place.
+    let decimals = decimals.min(crate::config::MAX_DECIMALS);
     format!("${usd:.decimals$}")
 }
 

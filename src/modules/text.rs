@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 
 use crate::ansi::{Segment, display_width, scroll, truncate};
 use crate::config::schema::{ColorSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::{MAX_CELLS, MAX_TEXT_CHARS};
 use crate::icons::IconSet;
 
 use super::{Ctx, Rendered, seg};
@@ -40,19 +41,22 @@ fn schema() -> ModuleSchema {
                 Kind::Str,
                 "The text. ANSI/OSC sequences and control characters are stripped.",
                 Value::Str(String::new()),
-            ),
+            )
+            .max(MAX_TEXT_CHARS),
             OptSpec::new(
                 "width",
                 Kind::Int,
                 "Box width in cells; 0 = the text's own width.",
                 Value::Int(0),
-            ),
+            )
+            .max(MAX_CELLS),
             OptSpec::new(
                 "pad",
                 Kind::Int,
                 "Blank cells added on each side of the box.",
                 Value::Int(0),
-            ),
+            )
+            .max(MAX_CELLS),
             OptSpec::new(
                 "justify",
                 Kind::Enum(JUSTIFIES),
@@ -76,7 +80,8 @@ fn schema() -> ModuleSchema {
                 Kind::Str,
                 "`scroll-wrap` only: text between the end and the start.",
                 Value::Str("   ".into()),
-            ),
+            )
+            .max(MAX_TEXT_CHARS),
         ],
         icons: Vec::new(),
         colors: vec![ColorSpec { key: "text", doc: "The text.", default: "accent" }],

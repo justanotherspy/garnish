@@ -127,7 +127,8 @@ fn opts() -> Vec<OptSpec> {
     vec![
         OptSpec::new("width", Kind::Int, "Bar width in cells; 0 hides the bar.", Value::Int(20))
             .minimal(Value::Int(0))
-            .full(Value::Int(30)),
+            .full(Value::Int(30))
+            .max(crate::config::MAX_CELLS),
         OptSpec::new(
             "bar",
             Kind::Enum(BAR_STYLES),

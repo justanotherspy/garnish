@@ -16,7 +16,7 @@ pub mod presets;
 pub mod schema;
 
 use presets::TopPreset;
-use schema::{COMMON_KEYS, Kind, ModuleCfg, ModuleSchema, Overrides, Preset, Value};
+use schema::{COMMON_KEYS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value};
 
 /// Environment variable naming the config file.
 pub const CONFIG_ENV: &str = "GARNISH_CONFIG";
@@ -219,12 +219,19 @@ pub const MAX_WIDTH: usize = 4096;
 /// Largest cell count a config may ask for in one module (`width`, `pad`, a bar).
 ///
 /// More than a whole row cannot be shown and would only size an allocation.
-/// Reported at config time, clamped again at render time.
+/// The schema of every such option carries it as its `max`
+/// ([`schema::OptSpec::max`]), so it is reported at config time and shown in
+/// the reference; the renderers clamp again.
 pub const MAX_CELLS: usize = 1024;
 
 /// Longest string a config may put on a row (`text`, `gap`, `ticker_gap`),
-/// in characters: a status line, not a document. Reported at config time.
+/// in characters: a status line, not a document. The schema `max` of the
+/// module options; `ticker_gap` is checked by hand.
 pub const MAX_TEXT_CHARS: usize = 4096;
+
+/// Most decimal places a money amount prints with (`cost.decimals`): the
+/// formatter allocates that many digits, so it is bounded like a width.
+pub const MAX_DECIMALS: usize = 8;
 
 /// The fully resolved configuration.
 // Four independent switches that mirror config keys one to one; a bitset
@@ -1265,7 +1272,7 @@ fn parse_overrides(
                 None => err(key, "expected a table of color overrides".into()),
             },
             other => match schema.opt(other) {
-                Some(spec) => match coerce(spec.kind, value).and_then(|v| bounded(other, v)) {
+                Some(spec) => match coerce(spec.kind, value).and_then(|v| bounded(spec, v)) {
                     Ok(v) => {
                         ov.opts.insert(other.to_owned(), v);
                     }
@@ -1278,23 +1285,13 @@ fn parse_overrides(
     ov
 }
 
-/// The size limits a module option must respect: cell counts (`width`,
-/// `pad`) at most [`MAX_CELLS`], row text (`text`, `gap`) at most
-/// [`MAX_TEXT_CHARS`] characters. A row is a fixed, small thing; a number
-/// beyond these is a mistake, and honouring it would size an allocation or a
-/// loop on every tick.
-fn bounded(key: &str, value: Value) -> Result<Value, String> {
-    match (key, &value) {
-        ("width" | "pad" | "bar_width", Value::Int(n))
-            if usize::try_from(*n).is_ok_and(|n| n > MAX_CELLS) =>
-        {
-            Err(format!("must be at most {MAX_CELLS} cells"))
-        }
-        ("text" | "gap", Value::Str(s)) if s.chars().count() > MAX_TEXT_CHARS => {
-            Err(format!("must be at most {MAX_TEXT_CHARS} characters"))
-        }
-        _ => Ok(value),
-    }
+/// The size limit a module option must respect, from its schema
+/// ([`OptSpec::max`]): cell counts at most [`MAX_CELLS`], row text at most
+/// [`MAX_TEXT_CHARS`] characters, and so on. A row is a fixed, small thing;
+/// a number beyond the cap is a mistake, and honouring it would size an
+/// allocation or a loop on every tick.
+fn bounded(spec: &OptSpec, value: Value) -> Result<Value, String> {
+    spec.over_max(&value).map_or(Ok(value), Err)
 }
 
 fn unknown_option_message(schema: &ModuleSchema) -> String {
@@ -2032,10 +2029,40 @@ x = 1
             ],
             "{errs:?}"
         );
-        assert!(errs.iter().all(|e| e.message == "must be at most 1024 cells"), "{errs:?}");
+        assert!(errs.iter().all(|e| e.message == "must be at most 1024"), "{errs:?}");
         assert_eq!(c.modules.get("context").unwrap().size("width"), 20, "default stands in");
         let a = c.texts.get("a").unwrap();
         assert_eq!((a.size("width"), a.size("pad")), (0, 0));
+        // `decimals` sizes the money formatter's buffer: capped the same way.
+        let (c, errs) = parse("[modules.cost]\ndecimals = 4000000000\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(
+            (errs[0].path.as_str(), errs[0].message.as_str()),
+            ("modules.cost.decimals", "must be at most 8")
+        );
+        assert_eq!(c.modules.get("cost").unwrap().size("decimals"), 2);
+        // Every cap lives in the schema, so the reference can print it.
+        let capped: std::collections::BTreeSet<(&str, &str, usize)> = crate::modules::SCHEMAS
+            .iter()
+            .chain(std::iter::once(&*crate::modules::text::SCHEMA))
+            .flat_map(|s| s.opts.iter().filter_map(|o| Some((s.id, o.key, o.max?))))
+            .collect();
+        assert_eq!(
+            capped,
+            [
+                ("context", "width", MAX_CELLS),
+                ("cost", "decimals", MAX_DECIMALS),
+                ("limit5h", "bar_width", MAX_CELLS),
+                ("limit7d", "bar_width", MAX_CELLS),
+                ("spend", "bar_width", MAX_CELLS),
+                ("text", "gap", MAX_TEXT_CHARS),
+                ("text", "pad", MAX_CELLS),
+                ("text", "text", MAX_TEXT_CHARS),
+                ("text", "width", MAX_CELLS),
+            ]
+            .into_iter()
+            .collect()
+        );
         let (ok, errs) = parse("[modules.context]\nwidth = 1024\n", &crate::modules::SCHEMAS);
         assert_eq!(errs, Vec::new());
         assert_eq!(ok.modules.get("context").unwrap().size("width"), 1024);

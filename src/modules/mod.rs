@@ -77,7 +77,7 @@ impl Rendered {
     /// True when there is nothing to show.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.segments.iter().all(|s| s.text.is_empty())
+        self.segments.iter().all(|s| s.text().is_empty())
     }
 }
 
@@ -361,6 +361,13 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
     }
 }
 
+/// The segment with its style dimmed (an overdue or failed value).
+#[must_use]
+pub const fn dimmed(mut segment: Segment) -> Segment {
+    segment.style = segment.style.dimmed();
+    segment
+}
+
 /// Dim, muted text.
 #[must_use]
 pub fn muted(theme: &Theme, text: impl Into<String>) -> Segment {
@@ -402,17 +409,13 @@ pub fn decorate(
     match &rendered.freshness {
         Freshness::Fresh => out.extend(rendered.segments),
         Freshness::Stale => {
-            out.extend(
-                rendered.segments.into_iter().map(|s| Segment { style: s.style.dimmed(), ..s }),
-            );
+            out.extend(rendered.segments.into_iter().map(dimmed));
             if !stale_glyphs.0.is_empty() {
                 out.push(muted(theme, format!(" {}", stale_glyphs.0)));
             }
         }
         Freshness::Failed(_) => {
-            out.extend(
-                rendered.segments.into_iter().map(|s| Segment { style: s.style.dimmed(), ..s }),
-            );
+            out.extend(rendered.segments.into_iter().map(dimmed));
             if !stale_glyphs.1.is_empty() {
                 out.push(Segment::styled(
                     format!(" {}", stale_glyphs.1),
@@ -437,6 +440,124 @@ pub fn colored(text: impl Into<String>, color: Color) -> Segment {
 mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    /// The string literal that ends the call starting at `open` (the byte
+    /// after the `(`), or `None` when the last argument is not a literal.
+    fn last_literal_argument(src: &str, open: usize) -> Option<String> {
+        let mut depth = 1_usize;
+        let mut in_str = false;
+        let mut last = None;
+        let mut current = String::new();
+        let mut chars = src.get(open..)?.chars();
+        while let Some(c) = chars.next() {
+            if in_str {
+                match c {
+                    '\\' => {
+                        chars.next();
+                    }
+                    '"' => {
+                        in_str = false;
+                        last = Some(std::mem::take(&mut current));
+                    }
+                    _ => current.push(c),
+                }
+                continue;
+            }
+            match c {
+                '"' => in_str = true,
+                '(' | '[' | '{' => depth = depth.saturating_add(1),
+                ')' | ']' | '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return last;
+                    }
+                }
+                // An identifier or number after the literal means the
+                // literal was not the last argument (`"x", y)`).
+                c if c.is_alphanumeric() || c == '_' || c == '.' => last = None,
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// SPEC § 9 schema completeness: every icon, colour and option key the
+    /// render code reads by name (`cfg.icon("…")`, `seg(cfg, …, "…")`,
+    /// `icon(cfg, "…")`, `cfg.str("…")` and the other typed readers) exists
+    /// in some module schema. `ModuleCfg` answers an unknown key with an
+    /// empty icon or the default colour, so a typo would render silently;
+    /// this scan of the module sources is what catches it.
+    #[test]
+    fn every_key_the_modules_read_is_in_a_schema() {
+        let known: std::collections::BTreeSet<&str> = SCHEMAS
+            .iter()
+            .chain(std::iter::once(&*text::SCHEMA))
+            .flat_map(|s| {
+                s.opts
+                    .iter()
+                    .map(|o| o.key)
+                    .chain(s.icons.iter().map(|i| i.key))
+                    .chain(s.colors.iter().map(|c| c.key))
+            })
+            .collect();
+        let readers = [
+            ".icon(\"",
+            ".color(\"",
+            ".str(\"",
+            ".int(\"",
+            ".size(\"",
+            ".bool(\"",
+            ".float(\"",
+            ".nums(\"",
+            ".strs(\"",
+            ".value(\"",
+            ".color_list(\"",
+            ".icon_frames(\"",
+        ];
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/modules");
+        let mut seen = 0_usize;
+        let mut unknown = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).unwrap();
+            let file = path.file_name().unwrap().to_string_lossy().into_owned();
+            // A read quoted in a comment (this test's own doc, say) is not one.
+            let in_comment = |at: usize| {
+                let line_start = src.get(..at).and_then(|s| s.rfind('\n')).map_or(0, |i| i + 1);
+                src.get(line_start..).is_some_and(|l| l.trim_start().starts_with("//"))
+            };
+            let mut check = |key: &str, at: usize| {
+                if in_comment(at) {
+                    return;
+                }
+                seen += 1;
+                if !known.contains(key) {
+                    unknown.push(format!("{file}: {key:?} at byte {at}"));
+                }
+            };
+            for reader in readers {
+                for (at, _) in src.match_indices(reader) {
+                    let rest = src.get(at + reader.len()..).unwrap();
+                    let key = rest.split('"').next().unwrap();
+                    check(key, at);
+                }
+            }
+            // `seg(cfg, text, "color")` and `icon(cfg, "icon")`: the key is
+            // the last argument.
+            for call in ["seg(", " icon(", "(icon("] {
+                for (at, _) in src.match_indices(call) {
+                    if let Some(key) = last_literal_argument(&src, at + call.len()) {
+                        check(&key, at);
+                    }
+                }
+            }
+        }
+        assert!(unknown.is_empty(), "keys read but not in any schema: {unknown:#?}");
+        assert!(seen > 150, "the scan found only {seen} reads; are the patterns stale?");
+    }
 
     /// Why a glyph is unsafe for a built-in icon set, if it is.
     fn glyph_problem(g: &str) -> Option<&'static str> {

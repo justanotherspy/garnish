@@ -266,6 +266,28 @@ fn preview_typos_are_one_line_not_a_report() {
     }
 }
 
+/// SPEC § 7: `preview <dir>` renders every `*.json` in the directory, in
+/// name order, each under a dim `── <name>` heading.
+#[test]
+fn preview_of_a_directory_renders_every_fixture_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads");
+    let (out, err, ok) = run(&["preview", fixtures, "--width", "100"], dir.path(), &[]);
+    assert!(ok, "{err}");
+    let mut names: Vec<String> = std::fs::read_dir(fixtures)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let headings: Vec<&str> =
+        out.lines().filter_map(|l| l.strip_prefix("\x1b[2m── ")?.strip_suffix("\x1b[0m")).collect();
+    assert_eq!(headings, names, "{out}");
+    assert!(!out.contains("⚠ garnish"), "{out}");
+}
+
 #[test]
 fn config_show_round_trips_every_fixture_and_preset() {
     // `show` prints the resolved config: what it prints must pass `check`

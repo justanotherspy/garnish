@@ -711,7 +711,7 @@ mod tests {
         let both = count_segments(&cfg, &theme, 0, 0, true);
         assert_eq!(text(&both), "⇡0 ⇣0");
         assert!(
-            both.iter().filter(|s| s.text != " ").all(|s| s.style.fg == theme.role(Role::Muted))
+            both.iter().filter(|s| s.text() != " ").all(|s| s.style.fg == theme.role(Role::Muted))
         );
     }
 
