@@ -194,7 +194,7 @@ README/guide, adversarial review, tests for every bug found.
 - [x] `garnish docs` renders `docs/presets.md` (`docs::presets_page`: a table, then per preset the sample at the declared width from `subscription-full` at frame 0 and the file in a collapsed block); `docs_sync` covers it, the index and README link to it
 - [x] `garnish presets` lists names, summaries, widths and needs; `garnish config init --preset <gallery name>` writes the file with the tooling header lines stripped (a built-in name still gets the annotated default file; an unknown name lists both kinds); end-to-end test in `tests/cli.rs`
 - [x] `presets/screenshots/<name>.png` convention, named in README, `presets/README.md` and the gallery page intro (the `garnish-submit-preset` skill of Phase 18 asks for one)
-- [x] ~~Website: a static page built from `docs/presets.md` and the screenshots~~ dropped 2026-09-12 with Daniel: the interactive setup (Phase 21) shows every preset rendered at the person's own width, which a page of screenshots cannot; SPEC § 12 records the decision
+- [x] ~~Website: a static page built from `docs/presets.md` and the screenshots~~ dropped 2026-09-12 with Daniel: the interactive setup (Phase 22) shows every preset rendered at the person's own width, which a page of screenshots cannot; SPEC § 12 records the decision
 
 ## Phase 18 — Bundled skills (SPEC § 13)
 
@@ -205,13 +205,15 @@ README/guide, adversarial review, tests for every bug found.
 - [x] Issue templates under `.github/ISSUE_TEMPLATE/` matching the two skills (`feedback.md`, `preset.md`, same sections and commands as the skills, labels in the frontmatter); the `feedback`, `alignment`, `preset` labels are repository state and are created by Daniel (`gh label create …`, listed in the PR)
 - [x] Release chores: `Cargo.toml`/`Cargo.lock` at `0.2.0`, `CHANGELOG.md` (new; the `v0.2.0` tag message is its section); the stack merged 2026-09-06 and `v0.2.0` was tagged the same day from `main` after the heading was dated in one small PR
 
-Phases 19–21 are the 2026-09-12 review of `FUTURE-SPEC.md` (PR #27) with
+Phases 19–22 are the 2026-09-12 review of `FUTURE-SPEC.md` (PR #27) with
 Daniel: the cheap, invariant-safe ideas moved into `SPEC.md` (each
-paragraph there names its FUTURE-SPEC section and proposal id), and the
-interactive setup he chose in place of the website. **Order: 19 → 20 → 21.**
+paragraph there names its FUTURE-SPEC section and proposal id), his grid
+lines, and the interactive setup he chose in place of the website.
+**Order: 19 → 20 → 21 → 22.**
 Phase 19 first because the dim reset changes what every golden and every
 `setup` preview shows; Phase 20's `max_width` and the schema-generated
-matrix test are what the builder's module editor is built on; Phase 21 is
+matrix test are what the builder's module editor is built on; Phase 21's
+grid lines are a line shape the builder must know; Phase 22 is
 the one that adds crates. Each phase is its own `gh stack` chain of
 `phase-N/<concern>` layers, as before; one release per phase is fine,
 `v0.3.0` being whichever lands first through the pipeline. Nothing here
@@ -239,19 +241,30 @@ module set stays at 21.
 - [ ] `limit5h`/`limit7d`/`spend`: `reset = "countdown" | "absolute" | "both"` (A10) formatted with jiff in the `clock` zone, weekday past a day; unit tests at two instants, config golden `reset-absolute` pinned at two `# now:` values
 - [ ] Schema → render → `make docs` → `UPDATE_GOLDEN=1`; guide § 5 gains the three presentation keys; CHANGELOG; adversarial review; session log
 
-## Phase 21 — Interactive setup (SPEC § 14)
+## Phase 21 — Grid lines (SPEC § 4.3)
+
+Daniel's idea, 2026-09-12: a line divided into N equal columns, each
+aligning its own modules left, centre or right, so the layout keeps its
+shape as the terminal is resized. Supersedes FUTURE-SPEC A2.
+
+- [ ] `phase-21/grid-config`: `LineCfg` gains `cols: Vec<ColCfg { modules, align, weight }>` and `gap`, parsed from `[[line.col]]` with the per-key fallback (default alignments first left / last right / middle centre; `weight` in `1..=64`, `gap ≤ 16`); a line with both forms is reported and the grid kept; all-empty columns make a spacer; `config show` round-trips the form (test over a fixture config); `config check` messages with TOML paths
+- [ ] `phase-21/grid-render`: `render::compose_grid`: shares by weight with the remainder to the first columns (unit test that shares add up to the width at every width from 10 to 400 and differ by at most one cell), placement by `align`, the fill glyph or pattern in every empty cell, `gap` boundaries, `…` cut or a per-column ticker window for over-wide content (the § 4.2 rule with the share as the window), `align = true` per column, `right_justify` on right-aligned columns; config goldens `grid-one` (each alignment), `grid-three`, `grid-six`, `grid-weights`, `grid-ticker` at two instants, each at 80 and 160 columns (one file per width, the header takes one)
+- [ ] Presets `grid-three-centered` and `grid-six-dashboard` (declared widths, `tests/presets.rs` covers them); `docs/config.md` gains a `[[line.col]]` section with a sample at two widths; README layout paragraph and guide § 5; CHANGELOG
+- [ ] Bench: `tick_in_process_grid` (a six-column line); the placement is arithmetic over the rendered segments, so the warm default tick is untouched; adversarial review (a column narrower than a module, `weight` totals overflowing `usize`, zero width after `gap`, a grid line under `hide_empty_lines` and `stale_style = "hide"`); session log
+
+## Phase 22 — Interactive setup (SPEC § 14)
 
 Decided 2026-09-12 with Daniel: a full-screen `garnish setup` in the
 terminal, ccstatusline's shape with garnish's exact preview and
 schema-generated editors. `ratatui` + `crossterm` are the one new
 dependency pair (crate map row in `CLAUDE.md` when the first layer lands).
 
-- [ ] `phase-21/setup-shell`: the crates, `src/setup/` module tree, `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly, terminal restored on panic and on `Ctrl+C`; `garnish` with a tty on stdin prints the one-line pointer and exits 0 (`tests/cli.rs`); `bench/run.sh` unchanged (note the cold-start delta in the commit)
-- [ ] `phase-21/setup-preview`: the preview pane through `render_lines_at` at `COLUMNS − 4 − padding` with the live clock and the bundled fixtures (`f` cycles, `w` sets a width); the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`), key sequences driven through the event loop
-- [ ] `phase-21/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs` and the narrower-than-declared warning; `Enter` writes with `.bak` and offers install; `e` opens the builder; `setup --preset <name> [--install]` non-interactive twin (`tests/cli.rs`)
-- [ ] `phase-21/setup-builder`: the line list (add, insert, delete, clone, move, spacer), group moves, the module picker with fuzzy and initialism search over the 21 ids and `text.<name>` (unit tests on the matcher), the top-level and `[colors]` screens; `s` saves through the `config show` writer with `.bak`, `q` asks once on a dirty draft, an unparsable file is never overwritten
-- [ ] `phase-21/setup-module-editor`: the per-module editor generated from `ModuleSchema` (enum cycle, bool toggle, integer with `max`, colour with the theme's roles, icon with `doctor`'s cell count, text-module schema on the same screen); the unit test that every `OptSpec` kind and every top-level key has an editor
-- [ ] `phase-21/setup-install`: the install screen through `install`'s own code (`--dry-run` summary, one confirmation), the doctor's settings report in the status bar; `garnish-statusline` skill names `setup`; README "Set up" section and guide § 2 rewritten around it; CHANGELOG
+- [ ] `phase-22/setup-shell`: the crates, `src/setup/` module tree, `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly, terminal restored on panic and on `Ctrl+C`; `garnish` with a tty on stdin prints the one-line pointer and exits 0 (`tests/cli.rs`); `bench/run.sh` unchanged (note the cold-start delta in the commit)
+- [ ] `phase-22/setup-preview`: the preview pane through `render_lines_at` at `COLUMNS − 4 − padding` with the live clock and the bundled fixtures (`f` cycles, `w` sets a width); the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`), key sequences driven through the event loop
+- [ ] `phase-22/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs` and the narrower-than-declared warning; `Enter` writes with `.bak` and offers install; `e` opens the builder; `setup --preset <name> [--install]` non-interactive twin (`tests/cli.rs`)
+- [ ] `phase-22/setup-builder`: the line list (add, insert, delete, clone, move, spacer), the line shape choice (flex, 1 / 2 / 3 / N columns with `align` and `weight` per column, SPEC § 4.3), moves within and between groups or columns, the module picker with fuzzy and initialism search over the 21 ids and `text.<name>` (unit tests on the matcher), the top-level and `[colors]` screens; `s` saves through the `config show` writer with `.bak`, `q` asks once on a dirty draft, an unparsable file is never overwritten
+- [ ] `phase-22/setup-module-editor`: the per-module editor generated from `ModuleSchema` (enum cycle, bool toggle, integer with `max`, colour with the theme's roles, icon with `doctor`'s cell count, text-module schema on the same screen); the unit test that every `OptSpec` kind and every top-level key has an editor
+- [ ] `phase-22/setup-install`: the install screen through `install`'s own code (`--dry-run` summary, one confirmation), the doctor's settings report in the status bar; `garnish-statusline` skill names `setup`; README "Set up" section and guide § 2 rewritten around it; CHANGELOG
 - [ ] Adversarial review of the phase (terminal left raw, a draft that `config check` would reject, a preset applied at a width where the terminal cuts it, `Ctrl+C` mid-save), tests for every bug found; session log
 
 ## Backlog (open after v0.1.0)
@@ -272,7 +285,7 @@ and user feedback. Pick from here when no phase is in progress.
 - [x] `OptSpec::max` replaces the key-name match in `config::bounded`; the caps are declared on `context.width`, the three `bar_width`s, `text.{text,width,pad,gap}` and, new, `cost.decimals` (≤ 8: `format!("{:.N$}")` allocated N bytes, so `decimals = 4000000000` was a 4 GB allocation on every tick), and the reference prints them in the type column (2026-09-12)
 - [x] Release pipeline with the Homebrew tap (2026-09-11): `.github/workflows/release.yml` on a `vX.Y.Z` tag builds four archives, publishes a pre-release from the CHANGELOG section, waits for Daniel's approval in the `release` environment, pushes `Casks/garnish.rb` to `justanotherspy/homebrew-tap` (octo-sts token, `brew fetch` check first), then marks the release Latest (CLAUDE.md § Release process)
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
-- [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for: a `center` group (A2), `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched
+- [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 grid): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched
 
 ## Session log
 
@@ -739,7 +752,15 @@ and user feedback. Pick from here when no phase is in progress.
   is live because the tick re-reads the file, the install screen through
   `install`'s own code, `setup --preset` as the scriptable twin, a
   one-line pointer when `garnish` is typed at a terminal. The crates are
-  named in SPEC and join the crate map when Phase 21's first layer lands.
+  named in SPEC and join the crate map when Phase 22's first layer lands.
+  Daniel then added grid lines (SPEC § 4.3, Phase 21, before the setup so
+  the builder knows the shape): a `[[line]]` split into N columns of equal
+  share (`[[line.col]]`, `weight` in fr units, `gap` between), each
+  aligning its own modules left, centre or right with the natural defaults
+  (first left, last right, middle centre), overflow cut or scrolled inside
+  the column so nothing spills into a neighbour, the frame fill in every
+  empty cell; the two-group line stays as the *flex* shape. It answers
+  FUTURE-SPEC A2 in the general form.
   Chosen from the rest, by the rule "Tier A, no crate, no non-goal, no
   tick-side write, module set unchanged": the per-row dim reset (A1),
   reduced motion (N6), doctor's settings report (N5), the never-rewrite

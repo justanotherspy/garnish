@@ -604,6 +604,77 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   explicitly; the harness honours the same key for its own spinners, so
   the two stay in step. `config show` prints the effective value.
 
+### 4.3 Grid lines (target state; PLAN Phase 21)
+
+Daniel's idea, 2026-09-12. A line today is two groups, left and right,
+with the frame rule filling whatever gap is left between them, and the
+left group is the one that gives way. A **grid line** divides the box into
+*N* columns of equal share instead, and each column aligns its own modules
+left, centre or right inside that share. The columns keep their places as
+the terminal is resized, the way a three-column layout keeps its title in
+the middle, so a layout that reads well at 100 columns reads the same way
+at 200. It answers FUTURE-SPEC § 6.2 (A2, a `center` group and flex
+points) in the general form.
+
+```toml
+[[line]]                  # a grid line: one [[line.col]] per column, in order
+gap = 1                   # cells kept empty at every boundary between columns (default 1)
+[[line.col]]
+modules = ["path", "branch", "sync"]
+align   = "left"          # left | center | right; default: first column left, last right, the rest center
+weight  = 2               # this column's share of the width in fr units (default 1): 2/4 of the box here
+[[line.col]]
+modules = ["session_name"]
+[[line.col]]
+modules = ["clock"]
+```
+
+- **One column, two, three, six.** With one column the whole box is the
+  column and `align` is where its modules sit; two columns are the familiar
+  left and right, but as halves; three give left, centre, right; any number
+  works and each takes its share. The defaults follow that pattern (first
+  left, last right, every middle column centre), so `align` is only
+  written to change it.
+- **Shares.** The width is the box of § 2.1 minus `gap` per internal
+  boundary. Column *i* gets `floor(width × weight_i ÷ Σ weight)` cells and
+  the leftover cells go one each to the first columns, so the shares differ
+  by at most one cell and add up exactly. A column's modules are joined
+  by the line's `separator`, then placed inside the share by `align`
+  (centre splits the slack with the extra cell on the right).
+- **Overflow stays inside the column.** Content wider than its share is
+  cut with `…` (`overflow = "truncate"`) or scrolled inside the share
+  (`overflow = "ticker"`, each over-wide column its own window under the
+  § 4.2 rule), never spilled into a neighbour. That is the guarantee the
+  grid is for: a growing branch name moves nothing outside its own column.
+  `truncate = false` still hands the harness the whole row.
+- **Frame.** The caps and the fill are the frame's as today: with
+  `fill = true` every empty cell of the row inside the caps carries the
+  rule glyph (or the animated `fill_pattern`), so a centred module floats
+  on the rule, `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; with `fill = false`
+  the empty cells are spaces. `gap` cells are always empty of modules;
+  they carry the fill like any other empty cell.
+- **Aligned columns.** `align = true` (§ 4) works per grid column: module
+  *k* of column *c* is padded to the widest module *k* of column *c*
+  across the lines that have a column *c* with a module after it, so
+  separators stack between grid lines with the same column count.
+  `right_justify` chooses the pad side for a right-aligned column as it
+  does for the right group.
+- **Mixing.** A `[[line]]` has either `modules`/`right` (the two-group
+  line) or `[[line.col]]` (a grid); both on one line is reported and the
+  grid wins. Grid and two-group lines mix freely across a config. A grid
+  line whose every column rendered nothing is empty for
+  `hide_empty_lines`; a `[[line]]` with `[[line.col]]` entries that are
+  all `modules = []` is a spacer. `config show` writes the `[[line.col]]`
+  form back verbatim; `config check` reports an `align` outside the three
+  words, a `weight` of 0 (or above 64) and a `gap` above 16.
+- **Setup.** The builder (§ 14) offers a line as *1 column* (pick its
+  alignment), *2 columns* (left, right), *3 columns* (left, centre, right)
+  or *N columns*, each column editable, and the two-group line as the
+  *flex* choice for people who want the rule to take the slack instead.
+- **Cost.** A grid line is the same segment lists placed by arithmetic;
+  nothing new is read or spawned. The presets gallery gets a three-column
+  and a six-column preset so the goldens pin the shares at three widths.
+
 Validation (`garnish config check`): unknown keys, wrong types, unknown module
 ids, unknown presets, bad colors, animation frames of unequal width, all
 reported with TOML paths; on problems the command lists them and exits 1
@@ -786,7 +857,7 @@ per-module render cost.
   than `max_width`, nothing rendered for a hidden state, OSC 8 wrappers
   balanced, no escape or control byte in `Segment::text`), so a new module
   or option gets the shared behaviour checked without a hand-written test.
-- **Setup snapshots** (target state; PLAN Phase 21): every `setup` screen is
+- **Setup snapshots** (target state; PLAN Phase 22): every `setup` screen is
   rendered into ratatui's `TestBackend` at two terminal sizes and compared
   with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1` regenerates);
   key sequences are driven through the same event loop the terminal feeds,
@@ -907,7 +978,7 @@ them needs network access from garnish itself, they drive `gh` and the
   explicitly before `gh issue create`. Nothing leaves the machine on an
   unanswered or negative question.
 
-## 14. Interactive setup (target state; PLAN Phase 21)
+## 14. Interactive setup (target state; PLAN Phase 22)
 
 Decided 2026-09-12 with Daniel, from FUTURE-SPEC § 13 (option 7.3c): a
 full-screen `garnish setup` in the terminal, the way ccstatusline's TUI
@@ -937,9 +1008,12 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   preset in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen
   and re-renders on every change. Below it, the `[[line]]` list: each line
-  shows its left and right groups as chips; keys add, insert, delete, clone
-  and move lines, move a module within its group or between `modules` and
-  `right`, and mark a line as a spacer. Adding a module opens a **picker**
+  shows its groups or grid columns (§ 4.3) as chips; keys add, insert,
+  delete, clone and move lines, choose a line's shape (*flex*: left and
+  right groups with the rule taking the slack; *1 column* with its
+  alignment; *2 columns*; *3 columns*; *N columns*, each with `align` and
+  `weight`), move a module within a group or column or into the next one,
+  and mark a line as a spacer. Adding a module opens a **picker**
   with fuzzy and initialism search over the 21 ids and the `text.<name>`
   family (`sy` finds `sync`, `sn` finds `session_name`), each with its
   one-line summary from `garnish modules`. `Enter` on a module
