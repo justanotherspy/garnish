@@ -82,24 +82,40 @@ pub fn managed_settings_path() -> std::path::PathBuf {
     }
 }
 
-/// Settings files in precedence order (highest first) for a project directory:
-/// managed > `.claude/settings.local.json` > `.claude/settings.json` > user.
+/// Settings files in precedence order (highest first) for a project
+/// directory, each with the name `doctor` labels it by.
+///
+/// `managed` > `local` (`.claude/settings.local.json`) > `project`
+/// (`.claude/settings.json`) > `user` (`~/.claude/settings.json`).
 #[must_use]
-pub fn settings_files(project_dir: Option<&Path>, home: Option<&Path>) -> Vec<std::path::PathBuf> {
-    let mut files = vec![managed_settings_path()];
+pub fn settings_chain(
+    project_dir: Option<&Path>,
+    home: Option<&Path>,
+) -> Vec<(&'static str, std::path::PathBuf)> {
+    let mut files = vec![("managed", managed_settings_path())];
     if let Some(dir) = project_dir {
-        files.push(dir.join(".claude").join("settings.local.json"));
-        files.push(dir.join(".claude").join("settings.json"));
+        files.push(("local", dir.join(".claude").join("settings.local.json")));
+        files.push(("project", dir.join(".claude").join("settings.json")));
     }
     if let Some(h) = home {
-        files.push(h.join(".claude").join("settings.json"));
+        files.push(("user", h.join(".claude").join("settings.json")));
     }
     files
 }
 
-/// The keys garnish reads from one settings file (SPEC § 2.3, § 4.2); each
-/// is `None` when the file does not set it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The paths of [`settings_chain`], highest precedence first.
+#[must_use]
+pub fn settings_files(project_dir: Option<&Path>, home: Option<&Path>) -> Vec<std::path::PathBuf> {
+    settings_chain(project_dir, home).into_iter().map(|(_, path)| path).collect()
+}
+
+/// The keys garnish reads from one settings file (SPEC § 2.3, § 4.2 and
+/// the `doctor` report of § 7); each is `None` when the file does not set
+/// it.
+///
+/// Claude Code merges settings objects key by key, so the `statusLine`
+/// keys are tracked one by one.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FileKeys {
     /// `autoCompactWindow`.
     pub auto_compact_window: Option<u64>,
@@ -107,17 +123,74 @@ pub struct FileKeys {
     pub auto_compact_enabled: Option<bool>,
     /// `prefersReducedMotion`.
     pub reduced_motion: Option<bool>,
+    /// `statusLine.command`.
+    pub status_line_command: Option<String>,
+    /// `statusLine.refreshInterval`, in seconds (Claude Code ignores a
+    /// value below 1).
+    pub refresh_interval: Option<f64>,
+    /// `statusLine.hideVimModeIndicator`.
+    pub hide_vim_mode: Option<bool>,
+    /// `disableAllHooks`.
+    pub disable_all_hooks: Option<bool>,
+}
+
+/// Parse one settings file's text into the keys garnish reads.
+///
+/// # Errors
+/// When the text is not valid JSON or not a JSON object, with the problem.
+pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Object(v)) => {
+            let status = v.get("statusLine").and_then(serde_json::Value::as_object);
+            let status_key = |key: &str| status.and_then(|s| s.get(key));
+            Ok(FileKeys {
+                auto_compact_window: v.get("autoCompactWindow").and_then(serde_json::Value::as_u64),
+                auto_compact_enabled: v
+                    .get("autoCompactEnabled")
+                    .and_then(serde_json::Value::as_bool),
+                reduced_motion: v.get("prefersReducedMotion").and_then(serde_json::Value::as_bool),
+                status_line_command: status_key("command")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                refresh_interval: status_key("refreshInterval").and_then(serde_json::Value::as_f64),
+                hide_vim_mode: status_key("hideVimModeIndicator")
+                    .and_then(serde_json::Value::as_bool),
+                disable_all_hooks: v.get("disableAllHooks").and_then(serde_json::Value::as_bool),
+            })
+        }
+        Ok(_) => Err("not a JSON object".to_owned()),
+        Err(e) => Err(format!("not valid JSON: {e}")),
+    }
 }
 
 /// Extract the keys garnish reads from one settings JSON text; a text that
-/// is not a JSON object sets none of them.
+/// does not parse sets none of them.
 #[must_use]
 pub fn from_settings_json(text: &str) -> FileKeys {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return FileKeys::default() };
-    FileKeys {
-        auto_compact_window: v.get("autoCompactWindow").and_then(serde_json::Value::as_u64),
-        auto_compact_enabled: v.get("autoCompactEnabled").and_then(serde_json::Value::as_bool),
-        reduced_motion: v.get("prefersReducedMotion").and_then(serde_json::Value::as_bool),
+    parse_settings_json(text).unwrap_or_default()
+}
+
+/// What one file of the settings chain holds.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileState {
+    /// No file there.
+    Absent,
+    /// The file is there but cannot be read (permissions, a directory).
+    Unreadable(String),
+    /// The file does not parse: the problem.
+    Invalid(String),
+    /// The keys the file sets.
+    Keys(FileKeys),
+}
+
+/// Read one settings file of the chain.
+#[must_use]
+pub fn read_file(path: &Path) -> FileState {
+    match std::fs::read_to_string(path) {
+        Ok(text) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => FileState::Absent,
+        Err(e) => FileState::Unreadable(e.to_string()),
     }
 }
 
@@ -189,6 +262,29 @@ mod tests {
         assert_eq!(from_settings_json(r#"{"prefersReducedMotion": "yes"}"#), FileKeys::default());
         assert_eq!(from_settings_json("nope"), FileKeys::default());
         assert_eq!(from_settings_json("[1]"), FileKeys::default());
+        // The doctor's keys, a BOM tolerated as `install` tolerates it, and
+        // the two ways a file fails, named.
+        let keys = parse_settings_json(
+            "\u{feff}{\"statusLine\": {\"type\": \"command\", \"command\": \"garnish\", \"refreshInterval\": 2, \"hideVimModeIndicator\": true}, \"disableAllHooks\": false}",
+        )
+        .unwrap();
+        assert_eq!(keys.status_line_command.as_deref(), Some("garnish"));
+        assert_eq!(keys.refresh_interval, Some(2.0));
+        assert_eq!(keys.hide_vim_mode, Some(true));
+        assert_eq!(keys.disable_all_hooks, Some(false));
+        assert!(parse_settings_json("{ broken").unwrap_err().starts_with("not valid JSON: "));
+        assert_eq!(parse_settings_json("[1]").unwrap_err(), "not a JSON object");
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_file(&dir.path().join("none.json")), FileState::Absent);
+        assert!(matches!(read_file(dir.path()), FileState::Unreadable(_)));
+        std::fs::write(dir.path().join("bad.json"), "{").unwrap();
+        assert!(matches!(read_file(&dir.path().join("bad.json")), FileState::Invalid(_)));
+        std::fs::write(dir.path().join("ok.json"), "{}").unwrap();
+        assert_eq!(read_file(&dir.path().join("ok.json")), FileState::Keys(FileKeys::default()));
+        let chain = settings_chain(Some(Path::new("/p")), Some(Path::new("/h")));
+        let labels: Vec<&str> = chain.iter().map(|(l, _)| *l).collect();
+        assert_eq!(labels, ["managed", "local", "project", "user"]);
+        assert_eq!(chain[3].1, Path::new("/h/.claude/settings.json"));
     }
 
     /// SPEC § 4.2: `prefersReducedMotion` follows the file order of the

@@ -1,24 +1,38 @@
 //! `garnish doctor`: a diagnostic report for "why does my status line look like that".
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::ansi::display_width;
 use crate::cache::{Cache, Entry, Status};
-use crate::config;
+use crate::claude_settings::{self, FileKeys, FileState};
+use crate::config::{self, Config};
 use crate::icons::IconSet;
 use crate::modules::SCHEMAS;
 
-/// Build the report from the process environment.
+/// Build the report from the process environment: the settings chain of
+/// the current directory (Claude Code's project directory when `doctor`
+/// runs where the session was started) and the home.
 #[must_use]
 pub fn report(config_path: Option<&Path>) -> String {
-    report_with(config_path, &Cache::from_env(), crate::install::default_settings_path().as_deref())
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
+    report_with(
+        config_path,
+        &Cache::from_env(),
+        std::env::current_dir().ok().as_deref(),
+        home.as_deref(),
+    )
 }
 
-/// Build the report against explicit cache and settings locations
-/// (`settings` is `None` when there is no home directory to look in).
+/// Build the report against explicit cache, project and home locations
+/// (`home` is `None` when there is no home directory to look in).
 #[must_use]
-pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: Option<&Path>) -> String {
+pub fn report_with(
+    config_path: Option<&Path>,
+    cache: &Cache,
+    project: Option<&Path>,
+    home: Option<&Path>,
+) -> String {
     let mut o = String::new();
     let _ = writeln!(o, "garnish {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(
@@ -35,7 +49,10 @@ pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: Option<&
     let _ = writeln!(o, "git      {}", git_version());
     let _ = writeln!(o);
     let loaded = config::load(config_path, &SCHEMAS);
-    settings_section(&mut o, settings);
+    for row in settings_rows(&settings_chain(project, home), &loaded.config) {
+        let _ = writeln!(o, "{row}");
+    }
+    let _ = writeln!(o);
     config_section(&mut o, &loaded);
     cache_section(&mut o, cache);
     environment_section(&mut o);
@@ -43,37 +60,138 @@ pub fn report_with(config_path: Option<&Path>, cache: &Cache, settings: Option<&
     o
 }
 
-fn settings_section(o: &mut String, settings: Option<&Path>) {
-    let Some(settings) = settings else {
-        let _ = writeln!(o, "claude settings  unknown: HOME is not set\n");
-        return;
-    };
-    let _ = writeln!(o, "claude settings  {}", tilde(settings));
-    match std::fs::read_to_string(settings) {
-        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(v) => match v.get("statusLine") {
-                Some(sl) => {
-                    let _ = writeln!(
-                        o,
-                        "statusLine       command={} refreshInterval={}",
-                        tilde(Path::new(sl.get("command").and_then(|c| c.as_str()).unwrap_or("?"))),
-                        sl.get("refreshInterval")
-                            .map_or_else(|| "unset".to_owned(), ToString::to_string)
-                    );
-                }
-                None => {
-                    let _ = writeln!(o, "statusLine       not configured (run `garnish install`)");
-                }
-            },
-            Err(e) => {
-                let _ = writeln!(o, "statusLine       settings are not valid JSON: {e}");
-            }
-        },
-        Err(_) => {
-            let _ = writeln!(o, "statusLine       settings file not found");
-        }
+/// One file of the settings chain as `doctor` reads it: its label
+/// (`managed`, `local`, `project`, `user`), its path and what it holds.
+pub type ChainEntry = (&'static str, PathBuf, FileState);
+
+/// The settings chain of a project directory and a home, read.
+#[must_use]
+pub fn settings_chain(project: Option<&Path>, home: Option<&Path>) -> Vec<ChainEntry> {
+    claude_settings::settings_chain(project, home)
+        .into_iter()
+        .map(|(label, path)| {
+            let state = claude_settings::read_file(&path);
+            (label, path, state)
+        })
+        .collect()
+}
+
+/// The `claude settings` rows of the report (SPEC § 7).
+///
+/// One row per file of the chain, saying whether it is there and parses,
+/// then the keys that change what the line can show, each with the file it
+/// comes from and, where the config calls for another value, the
+/// suggestion.
+#[must_use]
+pub fn settings_rows(chain: &[ChainEntry], config: &Config) -> Vec<String> {
+    let row = |key: &str, text: &str| format!("{key:<24}{text}");
+    let mut rows = vec![row("claude settings", "(the first file that sets a key wins)")];
+    for (label, path, state) in chain {
+        let status = match state {
+            FileState::Absent => "absent".to_owned(),
+            FileState::Unreadable(e) => format!("unreadable: {e}"),
+            FileState::Invalid(e) => format!("{e}; garnish reads none of it"),
+            FileState::Keys(_) => "ok".to_owned(),
+        };
+        rows.push(format!("  {label:<8} {}  {status}", tilde(path)));
     }
-    let _ = writeln!(o);
+    if !chain.iter().any(|(label, _, _)| *label == "user") {
+        rows.push("  user     unknown: HOME is not set".to_owned());
+    }
+    match resolved(chain, |k| k.status_line_command.clone()) {
+        Some((command, from)) => {
+            rows.push(row(
+                "statusLine",
+                &format!("command={} ({from})", tilde(Path::new(&command))),
+            ));
+        }
+        None => rows.push(row("statusLine", "not configured (run `garnish install`)")),
+    }
+    let interval = resolved(chain, |k| k.refresh_interval);
+    let mut text = interval
+        .as_ref()
+        .map_or_else(|| "unset".to_owned(), |(secs, from)| format!("{secs} ({from})"));
+    if ticks_every_second(config) && interval.as_ref().is_none_or(|(secs, _)| *secs > 1.0) {
+        text.push_str(
+            "; set 1 so the clock, the countdowns and the animations move every second (`garnish install` writes it)",
+        );
+    }
+    rows.push(row("  refreshInterval", &text));
+    let hide_vim = resolved(chain, |k| k.hide_vim_mode);
+    let mut text = hide_vim
+        .as_ref()
+        .map_or_else(|| "unset".to_owned(), |(hide, from)| format!("{hide} ({from})"));
+    if placed(config, "vim") && hide_vim.as_ref().is_none_or(|(hide, _)| !hide) {
+        text.push_str(
+            "; set true: the vim module shows the mode, so Claude Code's own indicator shows it twice",
+        );
+    }
+    rows.push(row("  hideVimModeIndicator", &text));
+    let text = match resolved(chain, |k| k.disable_all_hooks) {
+        Some((true, from)) => {
+            format!(
+                "true ({from}): Claude Code does not run the status line command while it is set"
+            )
+        }
+        Some((false, from)) => format!("false ({from})"),
+        None => "unset".to_owned(),
+    };
+    rows.push(row("disableAllHooks", &text));
+    let reduced = resolved(chain, |k| k.reduced_motion);
+    let mut text =
+        reduced.as_ref().map_or_else(|| "unset".to_owned(), |(on, from)| format!("{on} ({from})"));
+    if reduced.as_ref().is_some_and(|(on, _)| *on) {
+        text.push_str(match config.animate {
+            None => ": animations are frozen (`animate` in the config would decide instead)",
+            Some(true) => ", overridden by `animate = true` in the config",
+            Some(false) => "; `animate = false` in the config freezes them anyway",
+        });
+    }
+    rows.push(row("prefersReducedMotion", &text));
+    rows
+}
+
+/// The first file of the chain that sets a key, with the file's label:
+/// Claude Code's own precedence for one key (managed > local > project >
+/// user).
+fn resolved<T>(
+    chain: &[ChainEntry],
+    pick: impl Fn(&FileKeys) -> Option<T>,
+) -> Option<(T, &'static str)> {
+    chain.iter().find_map(|(label, _, state)| match state {
+        FileState::Keys(keys) => pick(keys).map(|value| (value, *label)),
+        _ => None,
+    })
+}
+
+/// Whether a module id is on a line and enabled.
+fn placed(config: &Config, id: &str) -> bool {
+    let enabled = id.strip_prefix(crate::modules::text::PREFIX).map_or_else(
+        || config.modules.get(id).is_some_and(|m| m.enabled),
+        |name| config.texts.get(name).is_some_and(|m| m.enabled),
+    );
+    enabled && config.lines.iter().any(|l| l.left.iter().chain(&l.right).any(|m| m == id))
+}
+
+/// Whether the config shows something that changes every second, which is
+/// what `statusLine.refreshInterval = 1` is for: a module whose value ticks
+/// (the clock, the elapsed times, the countdowns) or an animation (SPEC
+/// § 4.2: the ticker, a rule pattern, separator or icon frames, a scrolling
+/// text module).
+fn ticks_every_second(config: &Config) -> bool {
+    const TICKING: [&str; 7] = ["clock", "session", "api", "cache", "limit5h", "limit7d", "spend"];
+    TICKING.iter().any(|id| placed(config, id))
+        || config.overflow == config::Overflow::Ticker
+        || !config.frame.fill_pattern.is_empty()
+        || !config.frame.separator_frames.is_empty()
+        || config
+            .modules
+            .iter()
+            .any(|(id, m)| placed(config, id) && !m.all_icon_frames().is_empty())
+        || config.texts.iter().any(|(name, m)| {
+            placed(config, &format!("{}{name}", crate::modules::text::PREFIX))
+                && m.str("overflow") != "clip"
+        })
 }
 
 fn config_section(o: &mut String, loaded: &config::Loaded) {
@@ -437,15 +555,117 @@ mod tests {
         );
     }
 
+    /// SPEC § 7: the settings rows list every file of the chain with
+    /// whether it parses, resolve each key by Claude Code's precedence
+    /// (the first file that sets it), and suggest `refreshInterval = 1`
+    /// and `hideVimModeIndicator = true` only when the config calls for
+    /// them.
+    #[test]
+    fn settings_rows_follow_the_chain_and_suggest_from_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let proj = dir.path().join("proj");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        let user = home.join(".claude/settings.json");
+        let project = proj.join(".claude/settings.json");
+        let local = proj.join(".claude/settings.local.json");
+        std::fs::write(
+            &user,
+            r#"{"statusLine": {"type": "command", "command": "garnish", "refreshInterval": 5}, "prefersReducedMotion": true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &project,
+            r#"{"statusLine": {"hideVimModeIndicator": false}, "disableAllHooks": true}"#,
+        )
+        .unwrap();
+        std::fs::write(&local, "{ broken").unwrap();
+        let chain = settings_chain(Some(&proj), Some(&home));
+        let labels: Vec<&str> = chain.iter().map(|(l, _, _)| *l).collect();
+        assert_eq!(labels, ["managed", "local", "project", "user"]);
+        assert!(matches!(chain[1].2, FileState::Invalid(_)), "{:?}", chain[1]);
+        let (cfg, errs) = config::parse("[[line]]\nmodules = [\"vim\", \"clock\"]\n", &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        // A row is its key in the first column and the text after it.
+        let row = |rows: &[String], key: &str, text: &str| {
+            rows.iter().any(|r| {
+                r.trim_start().starts_with(key)
+                    && r.get(24..).is_some_and(|value| value.starts_with(text))
+            })
+        };
+        let rows = settings_rows(&chain, &cfg);
+        let text = rows.join("\n");
+        assert!(text.starts_with("claude settings"), "{text}");
+        assert!(text.contains("  local    ") && text.contains("not valid JSON"), "{text}");
+        assert!(text.contains("  project  ") && text.contains("  ok"), "{text}");
+        assert!(row(&rows, "statusLine", "command=garnish (user)"), "{text}");
+        assert!(row(&rows, "refreshInterval", "5 (user); set 1 so the clock"), "{text}");
+        assert!(row(&rows, "hideVimModeIndicator", "false (project); set true"), "{text}");
+        assert!(
+            row(&rows, "disableAllHooks", "true (project): Claude Code does not run"),
+            "{text}"
+        );
+        assert!(row(&rows, "prefersReducedMotion", "true (user): animations are frozen"), "{text}");
+        // The key column is one width, so the values line up.
+        assert!(rows.iter().skip(5).all(|r| r.get(23..24) == Some(" ")), "{text}");
+        // No ticking module and no vim: no suggestion; an explicit `animate`
+        // changes the reduced-motion note.
+        let (quiet, _) =
+            config::parse("animate = true\n[[line]]\nmodules = [\"model\"]\n", &SCHEMAS);
+        let text = settings_rows(&chain, &quiet).join("\n");
+        assert!(!text.contains("set 1") && !text.contains("set true"), "{text}");
+        assert!(text.contains("overridden by `animate = true`"), "{text}");
+        // An animation alone wants the one-second tick; a scrolling text
+        // module counts, a clipped one does not.
+        let (dots, _) = config::parse(
+            "[frame]\nfill_pattern = \"·  \"\n[[line]]\nmodules = [\"model\"]\n",
+            &SCHEMAS,
+        );
+        assert!(settings_rows(&chain, &dots).join("\n").contains("set 1"));
+        let (scroll, _) = config::parse(
+            "[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = \"hi\"\nwidth = 1\n",
+            &SCHEMAS,
+        );
+        assert!(settings_rows(&chain, &scroll).join("\n").contains("set 1"));
+        let (clip, _) = config::parse(
+            "[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = \"hi\"\noverflow = \"clip\"\n",
+            &SCHEMAS,
+        );
+        assert!(!settings_rows(&chain, &clip).join("\n").contains("set 1"));
+        // Values that already fit get no suggestion, and `false` is a value.
+        std::fs::write(&user, r#"{"statusLine": {"refreshInterval": 1, "hideVimModeIndicator": true}, "disableAllHooks": false, "prefersReducedMotion": false}"#).unwrap();
+        std::fs::remove_file(&project).unwrap();
+        std::fs::remove_file(&local).unwrap();
+        let rows = settings_rows(&settings_chain(Some(&proj), Some(&home)), &cfg);
+        let text = rows.join("\n");
+        for (key, value) in [
+            ("refreshInterval", "1 (user)"),
+            ("hideVimModeIndicator", "true (user)"),
+            ("disableAllHooks", "false (user)"),
+            ("prefersReducedMotion", "false (user)"),
+        ] {
+            let exact = rows.iter().any(|r| r.trim_start().starts_with(key) && r.ends_with(value));
+            assert!(exact, "{key}: {text}");
+        }
+        assert!(row(&rows, "statusLine", "not configured"), "{text}");
+        // Without a home the user file is unknown and the managed file is
+        // still listed first.
+        let rows = settings_rows(&settings_chain(None, None), &cfg);
+        let text = rows.join("\n");
+        assert!(text.contains("  managed  ") && text.contains("HOME is not set"), "{text}");
+        assert!(row(&rows, "refreshInterval", "unset; set 1"), "{text}");
+    }
+
     #[test]
     fn report_mentions_every_section() {
         let dir = tempfile::tempdir().unwrap();
         let cache = Cache::at(dir.path().join("cache"));
         std::fs::create_dir_all(cache.root()).unwrap();
         std::fs::write(cache.root().join("debug.log"), "1 pid=1 spawn sync failed: x\n").unwrap();
-        let settings = dir.path().join("settings.json");
-        let r = report_with(Some(&dir.path().join("none.toml")), &cache, Some(&settings));
-        assert!(r.contains("settings file not found"), "{r}");
+        let r = report_with(Some(&dir.path().join("none.toml")), &cache, None, Some(dir.path()));
+        assert!(r.contains("  user     ") && r.contains("  absent"), "{r}");
+        assert!(r.contains("not configured (run `garnish install`)"), "{r}");
         assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");
         assert!(r.contains("(writable)"), "{r}");
         for needle in [
