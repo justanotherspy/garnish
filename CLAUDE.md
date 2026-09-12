@@ -12,7 +12,7 @@ where things stand.
 |---|---|
 | `CLAUDE.md` | how Claude builds this project: protocol, toolchain, style, invariants |
 | `SPEC.md` | what the tool does: the target design and the Claude Code contract; changes here first, with the reason |
-| `PLAN.md` | what is done, what is open, and a dated session log about the codebase |
+| `PLAN.md` | the drift between `SPEC.md` and the code (open phases), a compact table of what is done, the backlog, and a dated work log about the codebase |
 | `CHANGELOG.md` | user-visible changes per release; a release's section is its tag message |
 | `SPRITE.md` | working notes for a Sprite VM; loaded into context only when the session runs on one |
 | `README.md` | what a user needs: install, configure, try, troubleshoot |
@@ -50,7 +50,9 @@ What goes where:
 2. Work in small commits; run `make check` before every commit. If a tool is
    missing, run `make setup` (it is idempotent).
 3. Before ending a session: tick checkboxes in `PLAN.md`, append a dated entry
-   to its **Session log**, commit, push. Never leave the tree red.
+   to its **Work log** (one compact entry per date: what was built, what
+   reviews found, what was decided), commit, push. Never leave the tree
+   red.
 4. **Push early and often**: after every phase, after every review-fix batch,
    and after any hour of work. Unpushed work is not backed up.
 5. **Branches and PRs.** `main` is protected: pull requests only, signed
@@ -99,7 +101,7 @@ goal without a documented reason.
 
 1. Validate the phase goals in `PLAN.md` are met (tests, `make check`, manual
    `preview` when rendering changed).
-2. Update `PLAN.md` (checkboxes, session log) and `SPEC.md` (anything that
+2. Update `PLAN.md` (checkboxes, the done table, work log) and `SPEC.md` (anything that
    changed in the target design, with why).
 3. Update `CLAUDE.md` with anything learned about *how to do things* in this
    codebase (toolchain quirks, lint workarounds, testing tricks), and
