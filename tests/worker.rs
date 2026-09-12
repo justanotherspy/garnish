@@ -393,12 +393,16 @@ fn worker_behind_diverged_and_no_upstream_render() {
     assert!(ok, "{err}");
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert!(out.contains("⇣1") && !out.contains('⇡'), "{out}");
-    // No upstream: the glyph, no counts, and nothing to refresh.
+    // No upstream: the glyph, no counts, and nothing for `sync` to refresh.
+    // (`branch` was never refreshed here, and without the Linux lock
+    // hand-over it spawns on every tick, so only `sync` spawns are counted.)
     git(&env.work, &["checkout", "-q", "-b", "local"]);
-    let before = spawns(&env).len();
+    let sync_spawns =
+        |env: &Env| spawns(env).iter().filter(|l| l.contains("--module sync")).count();
+    let before = sync_spawns(&env);
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert!(out.contains('\u{f127}') && !out.contains('⇣') && !out.contains('⇡'), "{out}");
-    assert_eq!(spawns(&env).len(), before, "{:?}", spawns(&env));
+    assert_eq!(sync_spawns(&env), before, "{:?}", spawns(&env));
     let (_, err, ok) = garnish(&env, refresh, None, &[]);
     assert!(ok, "{err}");
     assert!(sync_entry(&env).contains("no upstream"), "{}", sync_entry(&env));

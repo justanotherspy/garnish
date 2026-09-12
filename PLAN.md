@@ -670,6 +670,9 @@ and user feedback. Pick from here when no phase is in progress.
   dependent error (`LC_ALL=C`), the shim did not quote git's path, and the
   `preview <dir>` test pinned the heading's escape codes under `NO_COLOR`
   (it compares the plain heading; whether the heading should honour
-  `--color never` is Daniel's call, SPEC § 7 does not say).
+  `--color never` is Daniel's call, SPEC § 7 does not say). macOS CI then
+  failed the no-upstream step: it counted every logged spawn, and without
+  the Linux lock hand-over an unrefreshed `branch` spawns on every tick, so
+  the test counts `sync` spawns only.
   Still open, by design: the website pointer, the first release through the
   pipeline (repository state), and the optional headroom.
