@@ -249,6 +249,45 @@ fn config_show_prints_the_durations_a_ticker_implies() {
     assert!(session.contains("durations = \"inherit\""), "{session}");
 }
 
+/// SPEC § 4.2: `config show` prints the animation switch in effect, which
+/// with `animate` unset follows Claude Code's `prefersReducedMotion` in the
+/// settings chain of the current directory and the home; an explicit key
+/// in the file wins over the setting.
+#[test]
+fn config_show_prints_the_animate_switch_in_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "preset = \"minimal\"\n").unwrap();
+    let show = |extra: &str| {
+        std::fs::write(&cfg, format!("preset = \"minimal\"\n{extra}")).unwrap();
+        let (shown, _, ok) = run(&["--config", cfg.to_str().unwrap(), "config", "show"], home, &[]);
+        assert!(ok, "{shown}");
+        shown
+    };
+    assert!(show("").contains("\nanimate = true\n"), "no settings: on");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
+        .unwrap();
+    assert!(show("").contains("\nanimate = false\n"), "the user setting freezes an unset key");
+    assert!(show("animate = true\n").contains("\nanimate = true\n"), "an explicit key wins");
+    // What `show` prints is what the tick uses: the shown config renders
+    // the same frozen spinner as the original under the same settings.
+    let payload =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    let shown = show("");
+    let copy = home.join("shown.toml");
+    std::fs::write(&copy, &shown).unwrap();
+    let render = |file: &Path| {
+        let args = ["--config", file.to_str().unwrap(), "preview", payload, "--width", "80"];
+        let (out, _, ok) =
+            run(&args, home, &[("GARNISH_NO_SPAWN", "1"), ("GARNISH_NOW", "1738425601")]);
+        assert!(ok, "{out}");
+        out
+    };
+    assert_eq!(render(&cfg), render(&copy));
+}
+
 #[test]
 fn preview_typos_are_one_line_not_a_report() {
     let dir = tempfile::tempdir().unwrap();

@@ -592,7 +592,20 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         }
         ConfigAction::Show => {
             let loaded = config::load(config_path, &SCHEMAS);
-            stdout.write_all(crate::docs::config_toml(&loaded.config, false).as_bytes())?;
+            let mut cfg = loaded.config;
+            // The animation switch a tick run from here would use (SPEC
+            // § 4.2): the session variable, then the file, then Claude
+            // Code's prefersReducedMotion for this directory.
+            cfg.animate = Some(
+                crate::time::animate_from_env()
+                    && cfg.animate.unwrap_or_else(|| {
+                        let cwd = std::env::current_dir().ok();
+                        let home =
+                            std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
+                        !crate::claude_settings::reduced_motion(cwd.as_deref(), home.as_deref())
+                    }),
+            );
+            stdout.write_all(crate::docs::config_toml(&cfg, false).as_bytes())?;
         }
         ConfigAction::Init { force, preset } => {
             // A built-in name gets the annotated default file for that preset;

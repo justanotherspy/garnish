@@ -13,7 +13,7 @@
 //! | `columns` | terminal width (`--width`) | `100` |
 //! | `now` | comma-separated `GARNISH_NOW` instants, one golden each | `1738425600` |
 //! | `icons` | icon set override (`--icons`) | none |
-//! | `env` | `KEY=VALUE` added to the environment; repeatable | none |
+//! | `env` | `KEY=VALUE` added to the environment; repeatable; `$ROOT` in the value is the repository root | none |
 //! | `expect` | `config-warning` when the render is meant to end in a `⚠ config:` row | none |
 //!
 //! A render that carries `⚠ garnish:` (an internal error), or a `⚠ config:`
@@ -117,7 +117,10 @@ fn cases() -> Vec<Case> {
                 let (k, v) = kv
                     .split_once('=')
                     .unwrap_or_else(|| panic!("{name}: `# env:` needs KEY=VALUE"));
-                (k.trim().to_owned(), v.trim().to_owned())
+                // A fixture may point a path-valued variable (`HOME`) at a
+                // directory under the repository.
+                let v = v.trim().replace("$ROOT", root().to_str().unwrap());
+                (k.trim().to_owned(), v)
             })
             .collect();
         let nows: Vec<&str> = header

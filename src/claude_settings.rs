@@ -1,5 +1,6 @@
-//! Reading the few Claude Code settings garnish needs (auto-compaction), with
-//! the same precedence Claude Code uses: env > local > project > user.
+//! Reading the few Claude Code settings garnish needs (auto-compaction and
+//! reduced motion), with the same precedence Claude Code uses: env >
+//! managed > local > project > user.
 
 use std::path::Path;
 
@@ -96,13 +97,40 @@ pub fn settings_files(project_dir: Option<&Path>, home: Option<&Path>) -> Vec<st
     files
 }
 
-/// Extract `autoCompactWindow` / `autoCompactEnabled` from one settings JSON text.
+/// The keys garnish reads from one settings file (SPEC § 2.3, § 4.2); each
+/// is `None` when the file does not set it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileKeys {
+    /// `autoCompactWindow`.
+    pub auto_compact_window: Option<u64>,
+    /// `autoCompactEnabled`.
+    pub auto_compact_enabled: Option<bool>,
+    /// `prefersReducedMotion`.
+    pub reduced_motion: Option<bool>,
+}
+
+/// Extract the keys garnish reads from one settings JSON text; a text that
+/// is not a JSON object sets none of them.
 #[must_use]
-pub fn from_settings_json(text: &str) -> (Option<u64>, Option<bool>) {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return (None, None) };
-    let window = v.get("autoCompactWindow").and_then(serde_json::Value::as_u64);
-    let enabled = v.get("autoCompactEnabled").and_then(serde_json::Value::as_bool);
-    (window, enabled)
+pub fn from_settings_json(text: &str) -> FileKeys {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return FileKeys::default() };
+    FileKeys {
+        auto_compact_window: v.get("autoCompactWindow").and_then(serde_json::Value::as_u64),
+        auto_compact_enabled: v.get("autoCompactEnabled").and_then(serde_json::Value::as_bool),
+        reduced_motion: v.get("prefersReducedMotion").and_then(serde_json::Value::as_bool),
+    }
+}
+
+/// `prefersReducedMotion` over the settings chain of [`settings_files`]:
+/// the first file that sets it wins, as for the auto-compaction keys, and
+/// no file setting it means `false` (SPEC § 4.2).
+#[must_use]
+pub fn reduced_motion(cwd: Option<&Path>, home: Option<&Path>) -> bool {
+    settings_files(cwd, home)
+        .iter()
+        .filter_map(|file| std::fs::read_to_string(file).ok())
+        .find_map(|text| from_settings_json(&text).reduced_motion)
+        .unwrap_or(false)
 }
 
 /// Resolve auto-compaction for a working directory.
@@ -115,9 +143,9 @@ pub fn resolve(env: &Env, cwd: Option<&Path>, home: Option<&Path>) -> AutoCompac
             break;
         }
         let Ok(text) = std::fs::read_to_string(&file) else { continue };
-        let (w, e) = from_settings_json(&text);
-        window = window.or(w);
-        enabled = enabled.or(e);
+        let keys = from_settings_json(&text);
+        window = window.or(keys.auto_compact_window);
+        enabled = enabled.or(keys.auto_compact_enabled);
     }
     let env_window = env.window.as_deref().and_then(|s| s.trim().parse::<u64>().ok());
     AutoCompact {
@@ -152,9 +180,47 @@ mod tests {
 
     #[test]
     fn settings_json_extraction() {
-        assert_eq!(from_settings_json(r#"{"autoCompactWindow": 500000}"#), (Some(500_000), None));
-        assert_eq!(from_settings_json(r#"{"autoCompactEnabled": false}"#), (None, Some(false)));
-        assert_eq!(from_settings_json("nope"), (None, None));
+        let keys = from_settings_json(r#"{"autoCompactWindow": 500000}"#);
+        assert_eq!(keys, FileKeys { auto_compact_window: Some(500_000), ..Default::default() });
+        let keys = from_settings_json(r#"{"autoCompactEnabled": false}"#);
+        assert_eq!(keys, FileKeys { auto_compact_enabled: Some(false), ..Default::default() });
+        let keys = from_settings_json(r#"{"prefersReducedMotion": true, "theme": "dark"}"#);
+        assert_eq!(keys, FileKeys { reduced_motion: Some(true), ..Default::default() });
+        assert_eq!(from_settings_json(r#"{"prefersReducedMotion": "yes"}"#), FileKeys::default());
+        assert_eq!(from_settings_json("nope"), FileKeys::default());
+        assert_eq!(from_settings_json("[1]"), FileKeys::default());
+    }
+
+    /// SPEC § 4.2: `prefersReducedMotion` follows the file order of the
+    /// auto-compaction keys (local > project > user), the first file that
+    /// sets it wins, and an unparsable file is skipped rather than read as
+    /// "off".
+    #[test]
+    fn reduced_motion_follows_the_settings_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let proj = dir.path().join("proj");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        assert!(!reduced_motion(Some(&proj), Some(&home)), "no file: off");
+        std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
+            .unwrap();
+        assert!(reduced_motion(Some(&proj), Some(&home)));
+        assert!(reduced_motion(None, Some(&home)));
+        assert!(!reduced_motion(Some(&proj), None), "the user file needs a home");
+        std::fs::write(proj.join(".claude/settings.json"), r#"{"prefersReducedMotion": false}"#)
+            .unwrap();
+        assert!(!reduced_motion(Some(&proj), Some(&home)), "the project file wins");
+        std::fs::write(
+            proj.join(".claude/settings.local.json"),
+            r#"{"prefersReducedMotion": true}"#,
+        )
+        .unwrap();
+        assert!(reduced_motion(Some(&proj), Some(&home)), "the local file wins over both");
+        std::fs::write(proj.join(".claude/settings.local.json"), "{ broken").unwrap();
+        assert!(!reduced_motion(Some(&proj), Some(&home)), "a broken file is skipped");
+        std::fs::write(proj.join(".claude/settings.json"), r#"{"theme": "dark"}"#).unwrap();
+        assert!(reduced_motion(Some(&proj), Some(&home)), "a file without the key is skipped");
     }
 
     #[test]

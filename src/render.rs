@@ -105,6 +105,10 @@ pub struct Clock {
     /// index and text-module offset at 0 and cuts a ticker line with the
     /// ellipsis (`GARNISH_ANIMATE=0`, SPEC § 4.2).
     pub animate: bool,
+    /// Whether Claude Code's settings chain may be read for
+    /// `prefersReducedMotion` (SPEC § 4.2). Off for docs and goldens, which
+    /// must not depend on the settings of the machine rendering them.
+    pub settings: bool,
 }
 
 impl Clock {
@@ -119,13 +123,14 @@ impl Clock {
             settings_env: crate::claude_settings::Env::from_process(),
             git: true,
             animate: crate::time::animate_from_env(),
+            settings: true,
         }
     }
 
     /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev`, no
-    /// auto-compaction overrides, no repository discovery and animations
-    /// frozen at frame 0 — what the generated docs use, so they come out
-    /// identical on every machine.
+    /// auto-compaction overrides, no repository discovery, no settings
+    /// files and animations frozen at frame 0 — what the generated docs
+    /// use, so they come out identical on every machine.
     #[must_use]
     pub fn fixed() -> Self {
         Self {
@@ -135,7 +140,23 @@ impl Clock {
             settings_env: crate::claude_settings::Env::default(),
             git: false,
             animate: false,
+            settings: false,
         }
+    }
+
+    /// Whether animations run for this render (SPEC § 4.2), strongest
+    /// first: `GARNISH_ANIMATE=0` freezes them, an explicit `animate` in the
+    /// config decides, else Claude Code's `prefersReducedMotion` for the
+    /// payload's project directory freezes them, else they run. The
+    /// settings chain is read only when the answer depends on it.
+    #[must_use]
+    pub fn animate_for(&self, config: &Config, payload: &Payload) -> bool {
+        self.animate
+            && config.animate.unwrap_or_else(|| {
+                let project = payload.project_dir().map(Path::new);
+                let home = self.home.as_deref().map(Path::new);
+                !(self.settings && crate::claude_settings::reduced_motion(project, home))
+            })
     }
 }
 
@@ -172,7 +193,7 @@ pub fn render_lines_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
-        animate: clock.animate && config.animate.unwrap_or(true),
+        animate: clock.animate_for(config, payload),
         dirs: std::cell::OnceCell::new(),
     };
     let stale = stale_glyphs(config.icons);
@@ -708,6 +729,73 @@ mod tests {
         assert!(s1.lines().nth(1).unwrap().contains(" · "), "per-line separator wins: {s1}");
         let frozen = render(frames, 1_738_425_601, false);
         assert!(frozen.contains(" │ ") && !frozen.contains(" ┃ "), "frozen at frame 0: {frozen}");
+    }
+
+    /// SPEC § 4.2 reduced motion: with `animate` unset, Claude Code's
+    /// `prefersReducedMotion` freezes every animation; an explicit `animate`
+    /// wins over the setting, the session switch (`GARNISH_ANIMATE=0`) wins
+    /// over both, and a clock that may not read the settings chain (docs,
+    /// goldens) never sees the setting.
+    #[test]
+    fn reduced_motion_freezes_animations_unless_the_config_decides() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("proj");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(project.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let project_settings = project.join(".claude/settings.json");
+        std::fs::write(&project_settings, r#"{"prefersReducedMotion": true}"#).unwrap();
+        let path = format!(
+            "{}/tests/fixtures/payloads/subscription-full.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        json["workspace"]["project_dir"] = serde_json::json!(project.to_str().unwrap());
+        let payload = Payload::parse(&json.to_string()).unwrap();
+        let clock = |animate: bool, settings: bool| Clock {
+            now: jiff::Timestamp::from_second(1_738_425_601).unwrap(),
+            home: Some(home.to_str().unwrap().to_owned()),
+            animate,
+            settings,
+            ..Clock::fixed()
+        };
+        let cfg = |text: &str| {
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            config
+        };
+        let base = "icons = \"unicode\"\noverflow = \"ticker\"\n[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"model\", \"effort\", \"context\", \"session\", \"api\", \"cache\", \"lines\"]\nright = [\"clock\"]\n";
+        // At 1738425601 the clock's spinner (in the right group, which a
+        // ticker never scrolls) is on frame 1 (`⠙`) when it turns and on
+        // `⠋` when frozen; frozen, the over-wide left group is cut with `…`
+        // instead of scrolled.
+        let render = |c: &Config, k: &Clock| strip_ansi(&render_plain_at(&payload, c, Some(50), k));
+        let frozen = |out: &str| out.contains("⠋ 16:00:01") && out.contains('…');
+        let moving = |out: &str| out.contains("⠙ 16:00:01") && !out.contains('…');
+        assert!(frozen(&render(&cfg(base), &clock(true, true))), "unset + setting: frozen");
+        assert!(
+            moving(&render(&cfg(&format!("animate = true\n{base}")), &clock(true, true))),
+            "an explicit key wins over the setting"
+        );
+        assert!(
+            frozen(&render(&cfg(&format!("animate = true\n{base}")), &clock(false, true))),
+            "the session switch wins over both"
+        );
+        assert!(
+            moving(&render(&cfg(base), &clock(true, false))),
+            "a clock without settings access never sees the setting"
+        );
+        assert!(!clock(true, true).animate_for(&cfg(base), &payload));
+        assert!(clock(true, false).animate_for(&cfg(base), &payload));
+        // The user file is read when the project files do not decide.
+        std::fs::remove_file(&project_settings).unwrap();
+        assert!(moving(&render(&cfg(base), &clock(true, true))), "no file: on");
+        std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
+            .unwrap();
+        assert!(frozen(&render(&cfg(base), &clock(true, true))), "the user file counts");
+        std::fs::write(&project_settings, r#"{"prefersReducedMotion": false}"#).unwrap();
+        assert!(moving(&render(&cfg(base), &clock(true, true))), "the project file wins");
     }
 
     /// A spacer takes whatever cap its position calls for: first, last or,
