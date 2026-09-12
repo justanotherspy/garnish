@@ -408,7 +408,9 @@ right `cache`).
 
 Layout rules: left group joined by `separator`; right group likewise; the frame
 rule fills the gap to the width `$COLUMNS − 4 − padding` (§ 2.1; never below
-10); right cap after. Overflow: drop the fill, then truncate the **left** group
+10); right cap after. (This two-group line is the one-column case of the
+layout model in § 4.3, where a line may hold several columns, each a row of
+modules or a stack of lines, with titles and boxes; nothing here changes.) Overflow: drop the fill, then truncate the **left** group
 (ANSI-aware, `…`); never the right group. `preview --width` and
 `GARNISH_COLUMNS` stand in for `$COLUMNS` and get the same subtraction, so
 `preview` shows what Claude Code would show at that terminal width.
