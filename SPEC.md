@@ -1,9 +1,13 @@
 # garnish — Product Requirements & Technical Specification
 
-Status: approved 2026-09-04; `v0.1.0` tagged the same day. Owner: Daniel
-Schwartz. Builder: Claude. This document is the target design of the whole
-system; when the design changes, it changes here first, with the reason
-(`CLAUDE.md` § Phase protocol). Progress lives in `PLAN.md`.
+Status: approved 2026-09-04 (`v0.1.0` the same day, `v0.2.0` on
+2026-09-06); revised 2026-09-12 with the layout model (§ 4.3), the
+interactive setup (§ 14) and the Phase 19–20 keys. Owner: Daniel Schwartz.
+Builder: Claude. This document is the target design of the whole system;
+when the design changes, it changes here first, with the reason
+(`CLAUDE.md` § Phase protocol). Everything without a "target state" mark
+is implemented; a section marked "target state; PLAN Phase N" is designed
+and not yet built. Progress lives in `PLAN.md`.
 
 ## 1. Purpose
 
@@ -19,8 +23,9 @@ sessions on one host do not notice it running.
 - **Fast**: a warm tick averages < 3 ms (p99 < 8 ms) in release; cold < 30 ms.
 - **Never blocks**: anything slow (git ahead/behind, dirty state, optional
   `git fetch`) runs in a detached worker; the tick renders cached data.
-- **Composable**: 21 granular modules, any of them on any line, left or right
-  aligned, each with `minimal` / `default` / `full` presets.
+- **Composable**: 21 granular modules plus static text modules, any of them
+  on any line, each with `minimal` / `default` / `full` presets; lines are
+  columns of modules or stacks, with titles and boxes (§ 4.3).
 - **Beautiful**: Nerd Font glyphs, smooth gradient bars, framed lines, named
   color themes, OSC 8 links.
 - **Documented from code**: module docs are generated from each module's
@@ -28,12 +33,16 @@ sessions on one host do not notice it running.
 - **Tested exhaustively**: real-binary integration tests over payload fixtures,
   temp git repos, PATH shims, a frozen clock, and a hyperfine latency gate.
 
-### Non-goals (v0.1)
+### Non-goals
 
-- No generic/plugin modules; the module set is fixed.
+- No generic/plugin modules; the module set is fixed (text modules are
+  static strings, never commands or files, § 3.7).
 - No network calls (PR state comes from the harness payload).
 - No Windows support. Linux and macOS only.
 - No daemon. Workers are one-shot detached processes.
+- The tick never writes anything but its own cache and debug log; nothing
+  reads the transcript. (FUTURE-SPEC lists the proposals that would lift
+  these; each is a decision for Daniel, none is taken.)
 
 ## 2. Claude Code contract
 
@@ -292,7 +301,7 @@ renders dimmed with `✗` and the error is kept in the cache file for
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
 
-### 3.7 Text modules (target state; PLAN Phase 15)
+### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
 The 21 built-in modules stay the only ones that read the payload or run
 anything. **Text modules** are the one user-defined kind: a fixed string in
@@ -453,10 +462,9 @@ digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
 elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
 the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
 
-### 4.1 Layout keys decided on 2026-09-05 (target state; PLAN Phase 13, ticker in Phase 15)
+### 4.1 Layout keys decided on 2026-09-05 (PLAN Phases 13 and 15, shipped in v0.2.0)
 
-These came out of the live config walkthrough with Daniel. They are part of
-the target design; the implementation status is in `PLAN.md`.
+These came out of the live config walkthrough with Daniel.
 
 ```toml
 right_justify = "end"     # end | start: where a padded right-group module's text sits
@@ -554,7 +562,7 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   non-zero counts carry the ahead/behind colours. The fetch-age hint has a
   space between its glyph and the age like every other module.
 
-### 4.2 Animation (target state; PLAN Phase 16)
+### 4.2 Animation (PLAN Phase 16, shipped in v0.2.0)
 
 Every animation in garnish is a pure function of the tick's clock: frame
 index or scroll offset = `floor(now_secs × step) mod period`. No state is
@@ -670,8 +678,9 @@ box = true
 [box.repo]                     # a box: lines and columns join it by name
 title = "Repository"
 title_justify = "left"
-style = "double"               # inherits [frame] style, fill and colour when absent
-fill = false
+style = "double"               # inherits [frame] style when absent (rounded if the frame has no box shape)
+fill = false                   # default inside a box
+color = "accent"               # role or literal for the box's glyphs; default the frame colour
 ```
 
 - **Columns and width.** The line's width is the box of § 2.1 minus
@@ -752,7 +761,8 @@ fill = false
   the row. A `[[line]]` with only a `title` is a titled spacer
   (`├─ Repository ────┤`), always kept (§ 4.1).
 - **Boxes.** `[box.<name>]` (a bare key, as for text modules) carries a
-  title (the four `title*` keys), `style`, `fill` and `colors.frame`.
+  title (the four `title*` keys), `style`, `fill` and `color` (the box's
+  glyphs; a role or literal, like a text module's `color`).
   `style` and the colour inherit from `[frame]` when absent, so a
   `double` box can sit in a `rounded` frame; when the frame's style has
   no box shape (`none`, `powerline`) an unstyled box is `rounded`. `fill`
@@ -789,6 +799,21 @@ fill = false
   does not reflow when a value comes and goes (`stale_style = "hide"`
   would otherwise move columns every `stale_after` TTLs). A `[[line]]`
   whose columns are all `modules = []` is a spacer.
+- **Edge cases, stated so nobody guesses.** One column has no boundary,
+  so `gap` does nothing there and is not reported. An inner line's own
+  `separator` wins over the outer line's, as a line's wins over the
+  frame's. A column that scrolls carries its `align` pads inside the
+  window (§ 4.1), so a scrolling column's separators do not stack with
+  its neighbours'. `hide_when_empty = false` on a module pins its inner
+  line, as it pins a top-level line. Text modules sit in columns like any
+  module; a text module with `overflow = "scroll"` inside an `auto`
+  column has a fixed box width, so the column holds still. A `[[line]]`
+  with `[[line.col]]` entries and also `modules` at the line level is the
+  reported case above; `right` at the line level without `modules` is
+  reported as today. `padding` (§ 4) shrinks the box before columns are
+  shared. A `[box.<name>]` nobody joins is reported as unused. `config
+  init` writes no columns or boxes into the annotated default file; they
+  appear as a commented example, as text modules do.
 - **Validation.** `config check` reports: `justify`/`valign` outside
   their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
   count (≤ 1024); `gap` above 16; more than 16 columns on a line or 16
@@ -1106,9 +1131,11 @@ per-module render cost.
 - Session duration is `cost.total_duration_ms` and resets on `/clear`.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
-  small terminals.
+  small terminals. A multi-row line (§ 4.3) costs its height; whether the
+  harness caps the status line's height is Phase 19's verify item, and
+  until it is known the `setup` picker states a preset's row count.
 
-## 12. Presets gallery (target state; PLAN Phase 17)
+## 12. Presets gallery (PLAN Phase 17, shipped in v0.2.0)
 
 The four built-in top-level presets stay the only ones compiled into the
 binary. Everything else is a **gallery preset**: a complete config file under
@@ -1139,7 +1166,7 @@ binary. Everything else is a **gallery preset**: a complete config file under
 - **Seed set.** The configs exercised in the 2026-09-05 walkthrough
   (`presets/` in this repository) are the first entries.
 
-## 13. Skills (target state; PLAN Phase 18)
+## 13. Skills (PLAN Phase 18, shipped in v0.2.0)
 
 Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
 in the repository, are embedded in the binary (`include_str!`) so a
@@ -1324,6 +1351,27 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   `garnish setup` and exits 0 instead of waiting for JSON; the explicit
   `garnish render` always reads stdin, and the harness always pipes, so
   rendering is unchanged (§ 7).
+- **Traps, decided.** `setup` honours the global `--config` flag and
+  `GARNISH_CONFIG` like every command, so it edits the file the tick
+  reads; without a home directory and without either it refuses with the
+  § 5 one-liner. The preview fixtures are embedded in the binary
+  (`include_str!` of the named files under `tests/fixtures/payloads/`, as
+  the presets and skills are), so `setup` works from a `cargo install`
+  with no repository at hand. The preview honours the config's `color`
+  and `NO_COLOR` for the rendered rows while the screen's own chrome
+  uses the terminal's default colours, so a `color = "never"` config
+  previews plain. A terminal smaller than 60 × 12 gets one line asking
+  for more room instead of a broken layout, and a resize redraws
+  everything at the new width (the preview's box width follows it). A
+  config that parses with problems opens on the per-key fallbacks (§ 5)
+  with the problems listed in the status bar; saving writes the resolved
+  config, which drops the bad keys for their defaults, exactly as
+  `config show` would print it, and the status bar says so before the
+  first save. If the file on disk changes while `setup` is open (another
+  session, the skill, an editor), `s` notices the mtime and asks whether
+  to overwrite or reload; it never merges. The picker and the builder
+  never run a module's worker or git: repo modules render from the
+  fixture's fields, as in `preview`.
 - **Cost and shape.** The TUI lives in its own module tree (`src/setup/`)
   and is never entered on the render path, so the tick budget (§ 8) does
   not move; `bench/run.sh` is the check, and a cargo feature (`setup`, on
