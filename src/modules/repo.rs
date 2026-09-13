@@ -89,11 +89,12 @@ pub fn fish(path: &str) -> String {
     }
 }
 
-/// The abbreviation of one directory name: its first character, or the dot
-/// and the character after it for a dot-directory.
+/// The abbreviation of one directory name: its first character (a terminal
+/// cluster, so a combining mark stays with its base), or the dot and the
+/// character after it for a dot-directory.
 fn initial(segment: &str) -> String {
     let keep = if segment.starts_with('.') { 2 } else { 1 };
-    segment.chars().take(keep).collect()
+    crate::ansi::clusters(segment).into_iter().take(keep).collect()
 }
 
 /// The path of `cwd` relative to `base`, if `cwd` is inside `base`.
@@ -492,7 +493,7 @@ impl Module for BranchModule {
         let url = (cfg.bool("link") && !detached)
             .then(|| ctx.payload.workspace.as_ref()?.repo.as_ref())
             .flatten()
-            .and_then(|repo| branch_url(repo, &head_key));
+            .and_then(|repo| branch_url(repo, &head_key, is_gitlab(repo, ctx.payload)));
         let mut name_seg = Segment::styled(
             shown,
             Style::fg(cfg.color("name")).bolded().underline_if(url.is_some()),
@@ -697,15 +698,23 @@ impl Module for SyncModule {
     }
 }
 
+/// Whether the forge is GitLab, whose tree URLs carry `/-/` (SPEC § 3.1):
+/// a host named after it, or an open merge request (`pr.kind = "mr"`, the
+/// payload's other GitLab signal, which covers a self-hosted name).
+fn is_gitlab(repo: &crate::payload::Repo, payload: &crate::payload::Payload) -> bool {
+    repo.host.as_deref().is_some_and(|h| h.to_ascii_lowercase().contains("gitlab"))
+        || payload.pr.as_ref().and_then(|p| p.kind.as_deref()) == Some("mr")
+}
+
 /// The page of `branch` on the forge (SPEC § 3.1): `https://<host>/<owner>/
-/// <name>/tree/<branch>`, GitLab hosts with `/-/tree/`; `None` when the
-/// payload's repo identity is incomplete. Every part is percent-encoded so
-/// the painter's rule (SPEC § 5: printable ASCII) holds for any name.
-fn branch_url(repo: &crate::payload::Repo, branch: &str) -> Option<String> {
+/// <name>/tree/<branch>`, `/-/tree/` on GitLab; `None` when the payload's
+/// repo identity is incomplete. Every part is percent-encoded so the
+/// painter's rule (SPEC § 5: printable ASCII) holds for any name.
+fn branch_url(repo: &crate::payload::Repo, branch: &str, gitlab: bool) -> Option<String> {
     let host = repo.host.as_deref().filter(|s| !s.is_empty())?;
     let owner = repo.owner.as_deref().filter(|s| !s.is_empty())?;
     let name = repo.name.as_deref().filter(|s| !s.is_empty())?;
-    let tree = if host.to_ascii_lowercase().contains("gitlab") { "/-/tree/" } else { "/tree/" };
+    let tree = if gitlab { "/-/tree/" } else { "/tree/" };
     Some(format!(
         "https://{}/{}/{}{tree}{}",
         percent_encode(host),
@@ -850,22 +859,33 @@ mod tests {
             name: Some("garnish".into()),
         };
         assert_eq!(
-            branch_url(&repo("github.com"), "feature/#12").as_deref(),
+            branch_url(&repo("github.com"), "feature/#12", false).as_deref(),
             Some("https://github.com/dschwartz/garnish/tree/feature/%2312")
         );
         assert_eq!(
-            branch_url(&repo("gitlab.example.org"), "main").as_deref(),
+            branch_url(&repo("gitlab.example.org"), "main", true).as_deref(),
             Some("https://gitlab.example.org/dschwartz/garnish/-/tree/main")
         );
-        assert_eq!(branch_url(&crate::payload::Repo::default(), "main"), None);
+        assert_eq!(branch_url(&crate::payload::Repo::default(), "main", false), None);
         let mut half = repo("github.com");
         half.name = Some(String::new());
-        assert_eq!(branch_url(&half, "main"), None);
+        assert_eq!(branch_url(&half, "main", false), None);
         // Every URL built passes the painter's rule, whatever the name.
         for name in ["feature/#12", "ünïcode", "a b", "tab\tname", "\u{202e}rtl"] {
-            let url = branch_url(&repo("github.com"), name).unwrap();
+            let url = branch_url(&repo("github.com"), name, false).unwrap();
             assert!(crate::ansi::safe_link(&url), "{url}");
         }
+        // GitLab: the host's name, or an open merge request on any host.
+        let with_pr = |kind: Option<&str>| crate::payload::Payload {
+            pr: Some(crate::payload::Pr { kind: kind.map(str::to_owned), ..Default::default() }),
+            ..Default::default()
+        };
+        assert!(is_gitlab(&repo("gitlab.com"), &crate::payload::Payload::default()));
+        assert!(is_gitlab(&repo("GitLab.example.org"), &crate::payload::Payload::default()));
+        assert!(!is_gitlab(&repo("git.example.com"), &crate::payload::Payload::default()));
+        assert!(is_gitlab(&repo("git.example.com"), &with_pr(Some("mr"))));
+        assert!(!is_gitlab(&repo("git.example.com"), &with_pr(Some("pr"))));
+        assert!(!is_gitlab(&repo("github.com"), &with_pr(None)));
         // Through the module: the fixture's worktree branch, linked and
         // underlined only with `link = true`.
         let render = |extra: &str, fixture: &str| {
@@ -893,6 +913,14 @@ mod tests {
         let name = plain.iter().find(|s| s.text() == "worktree-feature-x").unwrap();
         assert_eq!(name.link, None);
         assert!(!name.style.underline);
+        // A name cut by `max_length` still links to the whole branch.
+        let cut = render("link = true\nmax_length = 5\n", "worktree-session");
+        let name = cut.iter().find(|s| s.link.is_some()).unwrap();
+        assert_eq!(name.text(), "work…");
+        assert_eq!(
+            name.link.as_deref(),
+            Some("https://github.com/dschwartz/garnish/tree/worktree-feature-x")
+        );
     }
 
     /// SPEC § 3.1 `style = "fish"`: every directory but the last to its
@@ -910,6 +938,7 @@ mod tests {
         assert_eq!(fish("projects/garnish"), "p/garnish");
         assert_eq!(fish("/home/dev/.config/garnish"), "/h/d/.c/garnish");
         assert_eq!(fish("~/Übung/ü/x"), "~/Ü/ü/x", "the first character, not the first byte");
+        assert_eq!(fish("/e\u{301}tude/x"), "/e\u{301}/x", "a combining mark stays with its base");
         assert_eq!(fish(&shorten("~/repos/garnish/src", 2)), "~/g/src");
         assert_eq!(fish(&shorten("/srv/repos/garnish/src", 2)), "g/src");
         assert_eq!(fish(&shorten("~/repos/garnish/src", 0)), "~/r/g/src");

@@ -299,8 +299,14 @@ mod tests {
         let tenth =
             crate::claude_settings::Env { window: Some("113000".into()), ..Default::default() };
         assert_eq!(render(5.0, "scale = \"usable\"\n", tenth), "⊞ █████░░░░░ 50%");
-        // Bands and `warn_at` follow the displayed percentage.
+        // `compaction_marker` governs drawing alone: off, the scale still
+        // measures against the threshold (SPEC § 3.2 keys the fallback on
+        // § 2.3's enabled state).
         let env = crate::claude_settings::Env::default();
+        let no_marker = "scale = \"usable\"\ncompaction_marker = false\n";
+        assert_eq!(render(50.0, no_marker, env.clone()), "⊞ █████░░░░░ 51%");
+        assert_eq!(render(50.0, "compaction_marker = false\n", env.clone()), "⊞ █████░░░░░ 50%");
+        // Bands and `warn_at` follow the displayed percentage.
         let warn = "scale = \"usable\"\nwarn_at = 90\n";
         assert_eq!(render(89.0, warn, env.clone()), "⊞ █████████░ 90% ⚠");
         assert_eq!(render(88.0, warn, env), "⊞ ████████▉░ 89%");
