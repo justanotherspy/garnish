@@ -575,7 +575,10 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
 #[test]
 fn managed_settings_hook_names_the_first_file_of_the_chain() {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path();
+    // Canonical, so the home, the working directory `doctor` reports and
+    // the hook's path agree on macOS (`/var` is a link to `/private/var`).
+    let home = dir.path().canonicalize().unwrap();
+    let home = home.as_path();
     let cfg = home.join("garnish.toml");
     std::fs::write(&cfg, "[[line]]\nmodules = [\"context\"]\n").unwrap();
     let managed = home.join("managed.json");
