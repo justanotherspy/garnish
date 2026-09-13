@@ -1107,6 +1107,18 @@ fn resolve_texts(
                 *s = crate::ansi::plain_text(s);
             }
         }
+        // `url` (SPEC § 3.7) must meet the painter's rule (§ 5), or the
+        // link would vanish on screen with `config check` saying nothing.
+        if let Some(Value::Str(url)) = ov.opts.get("url")
+            && !url.is_empty()
+            && !crate::ansi::safe_link(url)
+        {
+            errors.push(problem(
+                &format!("{base}.url"),
+                "must be an http:// or https:// URL of printable ASCII (percent-encode anything else)",
+            ));
+            ov.opts.remove("url");
+        }
         texts.insert(name.clone(), ModuleCfg::resolve(schema, Preset::Default, icons, theme, &ov));
     }
     texts
@@ -1849,6 +1861,18 @@ x = 1
         assert_eq!(x.color("text"), Color::Ansi(1), "explicit colors.text wins");
         assert_eq!(x.str("text"), "rednote");
         assert_eq!(x.str("gap"), " · ");
+
+        // `url` (SPEC § 3.7) must meet the painter's rule, else it is
+        // reported and dropped; an empty one is no link at all.
+        let text = "[modules.text.a]\ntext = \"a\"\nurl = \"https://example.com/x?y=1\"\n[modules.text.b]\ntext = \"b\"\nurl = \"ftp://example.com\"\n[modules.text.c]\ntext = \"c\"\nurl = \"https://ex ample.com\"\n[modules.text.d]\ntext = \"d\"\nurl = \"\"\n";
+        let (c, errs) = parse(text, &schemas);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["modules.text.b.url", "modules.text.c.url"], "{errs:?}");
+        assert!(errs[0].message.contains("http:// or https://"), "{errs:?}");
+        assert_eq!(c.texts.get("a").unwrap().str("url"), "https://example.com/x?y=1");
+        assert_eq!(c.texts.get("b").unwrap().str("url"), "", "dropped");
+        assert_eq!(c.texts.get("c").unwrap().str("url"), "", "dropped");
+        assert_eq!(c.texts.get("d").unwrap().str("url"), "");
     }
 
     /// SPEC § 4.2: a rule pattern is one-cell glyphs, separator frames share
@@ -2098,6 +2122,7 @@ x = 1
                 ("text", "gap", MAX_TEXT_CHARS),
                 ("text", "pad", MAX_CELLS),
                 ("text", "text", MAX_TEXT_CHARS),
+                ("text", "url", MAX_TEXT_CHARS),
                 ("text", "width", MAX_CELLS),
             ]
             .into_iter()

@@ -1,0 +1,1 @@
+[2;38;2;125;211;160m⎇ [0m]8;;https://github.com/dschwartz/garnish/tree/worktree-feature-x\[1;2;4;38;2;205;214;244mworktree-feature-x[0m]8;;\[2;38;2;108;112;134m  [0m[2;38;2;125;211;160m⇄ [0m]8;;https://github.com/dschwartz/garnish/pull/42\[1;2;4;38;2;205;214;244m#42[0m]8;;\[2;38;2;249;226;175m ❍[0m

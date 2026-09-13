@@ -52,6 +52,7 @@ ship it befo  a rathe…       v0.2
 | `overflow` | `clip` \| `scroll` \| `scroll-wrap` | `"scroll"` | Text wider than the box: `clip` cuts with an ellipsis, `scroll` slides a window and restarts after the end, `scroll-wrap` flows continuously with `gap` between end and start. |
 | `step` | number | `1` | Cells scrolled per tick (> 0; 0.5 = every second tick). |
 | `gap` | string ≤ 4096 chars | `"   "` | `scroll-wrap` only: text between the end and the start. |
+| `url` | string ≤ 4096 chars | `""` | Wrap the box in a clickable OSC 8 link to this `http(s)://` URL (printable ASCII only; anything else is reported and dropped). |
 
 No `preset`, no `refresh` and no `max_width` (the box is sized by `width`): a text module renders every tick as configured.
 
