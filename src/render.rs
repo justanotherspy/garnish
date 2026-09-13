@@ -1232,4 +1232,115 @@ mod tests {
             }
         });
     }
+
+    /// One module alone on an unframed line with a preset, an icon set and
+    /// a `max_width`, for the schema matrix.
+    fn matrix_config(
+        id: &str,
+        preset: crate::config::schema::Preset,
+        icons: IconSet,
+        max: usize,
+        hide_when_empty: bool,
+    ) -> Config {
+        let text = format!(
+            "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"{id}\"]\n[modules.{id}]\npreset = \"{}\"\nmax_width = {max}\nhide_when_empty = {hide_when_empty}\n",
+            icons.name(),
+            preset.name()
+        );
+        let (config, errs) = config::parse(&text, &SCHEMAS);
+        assert!(errs.is_empty(), "{id} {errs:?}");
+        config
+    }
+
+    /// SPEC § 9 module matrix from the schema: every module × every preset
+    /// × every icon set × a few `max_width` values, alone on an unframed
+    /// line, against every payload fixture, holds the invariants every
+    /// module shares. A new module or option gets them checked without a
+    /// hand-written test. Per case and fixture: the module as configured,
+    /// with `hide_when_empty = false`, uncapped for comparison, and painted
+    /// with links on.
+    #[test]
+    fn schema_matrix_holds_the_shared_invariants() {
+        use rayon::prelude::*;
+        let dir = format!("{}/tests/fixtures/payloads", env!("CARGO_MANIFEST_DIR"));
+        let payloads: Vec<(String, Payload)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .map(|p| {
+                let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+                (name, Payload::parse(&std::fs::read_to_string(&p).unwrap()).unwrap())
+            })
+            .collect();
+        assert!(payloads.len() > 20, "the fixture directory moved");
+        let cases: Vec<(&str, crate::config::schema::Preset, IconSet, usize)> = SCHEMAS
+            .iter()
+            .flat_map(|s| {
+                crate::config::schema::Preset::ALL.into_iter().flat_map(move |preset| {
+                    IconSet::ALL.into_iter().flat_map(move |icons| {
+                        [0_usize, 1, 4, 12].into_iter().map(move |max| (s.id, preset, icons, max))
+                    })
+                })
+            })
+            .collect();
+        let painter = Painter { mode: ColorMode::TrueColor, links: true, dim: false };
+        let is_escape = |c: char| c.is_control() || c == '\u{7}';
+        cases.par_iter().for_each(|&(id, preset, icons, max)| {
+            let hidden = matrix_config(id, preset, icons, max, true);
+            let shown = matrix_config(id, preset, icons, max, false);
+            let uncapped = matrix_config(id, preset, icons, 0, true);
+            // The ellipsis a cut ends in: `…`, or as much of `..` as fits.
+            let ellipsis = if icons == IconSet::Ascii { ".." } else { "…" };
+            let cut_mark: String = ellipsis.chars().take(max.max(1)).collect();
+            let clock = Clock::fixed();
+            for (name, payload) in &payloads {
+                let label =
+                    format!("{id} {} {} max_width={max} {name}", preset.name(), icons.name());
+                let lines = render_lines_at(payload, &hidden, Some(200), &clock);
+                // A hidden state renders nothing at all: the line is dropped
+                // rather than left blank, and a shown one has visible text.
+                assert!(lines.len() <= 1, "{label}: {lines:?}");
+                for line in &lines {
+                    assert!(line.iter().any(|s| !s.text().trim().is_empty()), "{label}: blank row");
+                }
+                // With the placeholder the module always shows something,
+                // and the placeholder obeys the cap like a value.
+                let placeholder = render_lines_at(payload, &shown, Some(200), &clock);
+                assert_eq!(placeholder.len(), 1, "{label}: no placeholder row");
+                // Wider than the cap without it means the module was cut,
+                // and a cut ends in the ellipsis.
+                let free = render_lines_at(payload, &uncapped, Some(200), &clock);
+                let was_cut = max > 0 && free.first().is_some_and(|l| segments_width(l) > max);
+                for (i, line) in lines.iter().chain(placeholder.iter()).enumerate() {
+                    let width = segments_width(line);
+                    if max > 0 {
+                        assert!(width <= max, "{label}: {width} cells > {max}: {line:?}");
+                    }
+                    let text = Painter::PLAIN.paint(line);
+                    if was_cut && i == 0 && !lines.is_empty() {
+                        assert!(
+                            text.ends_with(&cut_mark),
+                            "{label}: {text:?} was cut without a mark"
+                        );
+                    }
+                    for seg in line {
+                        assert!(
+                            !seg.text().chars().any(is_escape),
+                            "{label}: escape or control byte in {:?}",
+                            seg.text()
+                        );
+                    }
+                    let styled = painter.paint(line);
+                    // OSC 8 wrappers stay balanced: every open (`ESC ] 8 ; ;
+                    // <url> ESC \`) is followed by its close before the next.
+                    let mut open = false;
+                    for part in styled.split("\x1b]8;;").skip(1) {
+                        let closes = part.starts_with("\x1b\\");
+                        assert_ne!(open, !closes, "{label}: unbalanced OSC 8 in {styled:?}");
+                        open = !closes;
+                    }
+                    assert!(!open, "{label}: OSC 8 left open in {styled:?}");
+                }
+            }
+        });
+    }
 }
