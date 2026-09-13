@@ -1,0 +1,24 @@
+# fixture: ctx-1m-80
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# env: CLAUDE_CODE_AUTO_COMPACT_WINDOW=900000
+# `scale = "usable"` measures the bar and the percentage against the
+# auto-compaction threshold instead of the whole window (SPEC § 3.2): with
+# a 900k configured window on a 1M model the threshold is 887k (88.7 %),
+# so 80 % of the window reads 90 % of what is usable, the marker is not
+# drawn (compaction is the bar's end) and the `full` preset's window tag
+# still names the real window. Compare `context-usable-96`, where the same
+# setup is past the threshold and reads 100 %.
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["context"]
+
+[modules.context]
+preset = "full"
+width  = 20
+scale  = "usable"

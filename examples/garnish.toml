@@ -408,6 +408,8 @@ max_width = 0
 # thresholds = [50, 75, 90]
 # band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
+# scale (`window` | `usable`) — What 100 % means: `window` the whole context window; `usable` the auto-compaction threshold, so the bar and the percentage say how close compaction is (the marker and its percentage are then implied and not drawn; the window tag still names the real window). `usable` falls back to `window` when compaction is disabled or the threshold is under a tenth of the window. [minimal="window" default="window" full="window"]
+# scale = "window"
 # compaction_marker (bool) — Mark the auto-compaction threshold on the bar. [minimal=true default=true full=true]
 # compaction_marker = true
 # compact_buffer_tokens (integer) — Tokens Claude Code reserves below the window for the compaction summary. [minimal=13000 default=13000 full=13000]
