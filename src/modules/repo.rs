@@ -23,6 +23,9 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long the worker lets `git fetch` run (network; opt-in only).
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The `path` module's `style` choices (SPEC § 3.1).
+pub const PATH_STYLES: &[&str] = &["full", "fish"];
+
 /// Cache scope for a checkout: shared by every session in the same worktree.
 fn repo_scope(session: &str, cwd: &Path) -> Scope {
     git::discover(cwd)
@@ -57,6 +60,40 @@ pub fn shorten(path: &str, depth: usize) -> String {
     let skip = parts.len().saturating_sub(depth);
     let tail = parts.iter().skip(skip).copied().collect::<Vec<_>>().join("/");
     if home.is_empty() { tail } else { format!("{home}/{tail}") }
+}
+
+/// `style = "fish"` (SPEC § 3.1): every directory of the base but the last
+/// abbreviated to its first character, the way the fish shell prompts.
+///
+/// `~/projects/garnish` reads `~/p/garnish`; a dot-directory keeps its dot
+/// and its first letter (`.config` → `.c`), as fish does. A leading `~` is
+/// not a segment and stays whole, the last segment is never abbreviated,
+/// and a root or one-segment path is returned as is. Runs after
+/// [`shorten`], so `depth` applies first.
+#[must_use]
+pub fn fish(path: &str) -> String {
+    let (home, rest) = path.strip_prefix('~').map_or(("", path), |r| ("~", r));
+    let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+    let last = parts.len().saturating_sub(1);
+    let body = parts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| if i == last { (*p).to_owned() } else { initial(p) })
+        .collect::<Vec<_>>()
+        .join("/");
+    match (home, rest.starts_with('/'), body.is_empty()) {
+        ("~", _, true) => "~".to_owned(),
+        ("~", _, false) => format!("~/{body}"),
+        (_, true, _) => format!("/{body}"),
+        _ => body,
+    }
+}
+
+/// The abbreviation of one directory name: its first character, or the dot
+/// and the character after it for a dot-directory.
+fn initial(segment: &str) -> String {
+    let keep = if segment.starts_with('.') { 2 } else { 1 };
+    segment.chars().take(keep).collect()
 }
 
 /// The path of `cwd` relative to `base`, if `cwd` is inside `base`.
@@ -100,6 +137,12 @@ impl Module for PathModule {
                 )
                 .minimal(Value::Int(1))
                 .full(Value::Int(0)),
+                OptSpec::new(
+                    "style",
+                    Kind::Enum(PATH_STYLES),
+                    "How the base prints: `full` as is; `fish` abbreviates every directory but the last to its first character (`~/p/garnish`; a dot-directory to `.c`), as the fish shell prompts. `depth` applies first; the subpath is untouched.",
+                    Value::Str("full".into()),
+                ),
                 OptSpec::new(
                     "show_subpath",
                     Kind::Bool,
@@ -149,6 +192,7 @@ impl Module for PathModule {
             return Rendered::empty();
         }
         let shown = shorten(&tildify(base, ctx.home.as_deref()), cfg.size("depth"));
+        let shown = if cfg.str("style") == "fish" { fish(&shown) } else { shown };
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "folder", "icon"));
@@ -730,5 +774,45 @@ mod tests {
         assert_eq!(subpath("/a/b", "/a/b/c/d"), Some("c/d".into()));
         assert_eq!(subpath("/a/b", "/a/b"), None);
         assert_eq!(subpath("/a/b", "/a/c"), None);
+    }
+
+    /// SPEC § 3.1 `style = "fish"`: every directory but the last to its
+    /// first character, `~` and the last segment whole, a dot-directory to
+    /// its dot and first letter, root and one-segment paths untouched, and
+    /// `depth` (which keeps the `~`) applied first.
+    #[test]
+    fn fish_abbreviates_every_directory_but_the_last() {
+        assert_eq!(fish("~/projects/garnish"), "~/p/garnish");
+        assert_eq!(fish("~"), "~");
+        assert_eq!(fish("~/garnish"), "~/garnish");
+        assert_eq!(fish("/"), "/");
+        assert_eq!(fish("/srv/a/b/c"), "/s/a/b/c");
+        assert_eq!(fish("garnish"), "garnish");
+        assert_eq!(fish("projects/garnish"), "p/garnish");
+        assert_eq!(fish("/home/dev/.config/garnish"), "/h/d/.c/garnish");
+        assert_eq!(fish("~/Übung/ü/x"), "~/Ü/ü/x", "the first character, not the first byte");
+        assert_eq!(fish(&shorten("~/repos/garnish/src", 2)), "~/g/src");
+        assert_eq!(fish(&shorten("/srv/repos/garnish/src", 2)), "g/src");
+        assert_eq!(fish(&shorten("~/repos/garnish/src", 0)), "~/r/g/src");
+        // Through the module: the base is abbreviated after `depth`, the
+        // subpath below it stays whole.
+        let payload = crate::payload::Payload::parse(
+            "{\"cwd\": \"/home/dev/projects/garnish/src/modules\", \"workspace\": {\"current_dir\": \"/home/dev/projects/garnish/src/modules\", \"project_dir\": \"/home/dev/projects/garnish\"}}",
+        )
+        .unwrap();
+        let render = |depth: u8| {
+            let text = format!(
+                "icons = \"ascii\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"path\"]\n[modules.path]\nstyle = \"fish\"\ndepth = {depth}\n"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = crate::render::Clock::fixed();
+            crate::render::render_plain_at(&payload, &config, Some(80), &clock)
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(render(0), "~/p/garnish/src/modules");
+        assert_eq!(render(2), "~/p/garnish/src/modules");
+        assert_eq!(render(1), "~/garnish/src/modules");
     }
 }

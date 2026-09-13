@@ -100,6 +100,8 @@ max_width = 0
 # show_icon = true
 # depth (integer) — Path components of the base to keep (0 = all). [minimal=1 default=2 full=0]
 # depth = 2
+# style (`full` | `fish`) — How the base prints: `full` as is; `fish` abbreviates every directory but the last to its first character (`~/p/garnish`; a dot-directory to `.c`), as the fish shell prompts. `depth` applies first; the subpath is untouched. [minimal="full" default="full" full="full"]
+# style = "full"
 # show_subpath (bool) — Show the path below the base. [minimal=false default=true full=true]
 # show_subpath = true
 # show_added (bool) — Show the count of added directories. [minimal=false default=false full=true]
