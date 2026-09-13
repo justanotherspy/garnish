@@ -386,7 +386,7 @@ impl Module for BranchModule {
                 OptSpec::new(
                     "max_length",
                     Kind::Int,
-                    "Truncate longer names (0 = no limit).",
+                    "Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead.",
                     Value::Int(40),
                 ),
             ],

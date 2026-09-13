@@ -142,7 +142,7 @@ max_width = 0
 # show_sha = false
 # dirty (bool) — Show a marker when the tree has changes. [minimal=false default=false full=true]
 # dirty = false
-# max_length (integer) — Truncate longer names (0 = no limit). [minimal=40 default=40 full=40]
+# max_length (integer) — Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
 # max_length = 40
 [modules.branch.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
