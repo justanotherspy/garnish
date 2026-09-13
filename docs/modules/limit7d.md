@@ -40,7 +40,8 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the window icon. |
-| `show_reset` | bool | `false` | `true` | `true` | Show the countdown to the reset. |
+| `show_reset` | bool | `false` | `true` | `true` | Show when the window resets, in the form `reset` picks. |
+| `reset` | `countdown` \| `absolute` \| `both` | `"countdown"` | `"countdown"` | `"countdown"` | How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form. |
 | `bar_width` | integer ≤ 1024 | `0` | `0` | `8` | Mini bar width in cells; 0 hides it. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
 | `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the color changes. |

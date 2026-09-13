@@ -19,6 +19,24 @@ pub enum Window {
     Spend,
 }
 
+/// The `reset` choices (SPEC § 3.3): how the time a window resets at shows.
+pub const RESET_STYLES: &[&str] = &["countdown", "absolute", "both"];
+
+/// The `reset` option's doc per window: the seven-day window is the one
+/// whose reset is days away, so its absolute time carries the weekday; the
+/// others never do, so the width of the text stays as steady as
+/// `durations = "fixed"` (SPEC § 3.3).
+const fn reset_doc(window: Window) -> &'static str {
+    match window {
+        Window::SevenDay => {
+            "How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form."
+        }
+        Window::FiveHour | Window::Spend => {
+            "How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, never a weekday, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form."
+        }
+    }
+}
+
 /// A rate-limit window module.
 pub struct LimitModule(pub Window);
 
@@ -75,10 +93,16 @@ impl Module for LimitModule {
                 OptSpec::new(
                     "show_reset",
                     Kind::Bool,
-                    "Show the countdown to the reset.",
+                    "Show when the window resets, in the form `reset` picks.",
                     Value::Bool(true),
                 )
                 .minimal(Value::Bool(false)),
+                OptSpec::new(
+                    "reset",
+                    Kind::Enum(RESET_STYLES),
+                    reset_doc(self.0),
+                    Value::Str("countdown".into()),
+                ),
                 OptSpec::new(
                     "bar_width",
                     Kind::Int,
@@ -160,13 +184,28 @@ impl Module for LimitModule {
         let text = if self.0 == Window::Spend { percent_unclamped(used) } else { percent(used) };
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
         if cfg.bool("show_reset")
-            && let Some(cd) = w.resets_at.and_then(|t| ctx.countdown(cfg, t))
+            && let Some(at) = w.resets_at
+            && let Some(reset) = reset_text(ctx, cfg, at, self.0 == Window::SevenDay)
         {
             let g = cfg.icon("reset");
             let glyph_txt = if g.is_empty() { String::new() } else { format!("{g} ") };
-            segs.push(seg(cfg, format!(" {glyph_txt}{cd}"), "reset"));
+            segs.push(seg(cfg, format!(" {glyph_txt}{reset}"), "reset"));
         }
         Rendered::fresh(segs)
+    }
+}
+
+/// The reset in the module's `reset` form (SPEC § 3.3): the countdown, the
+/// wall-clock time in the tick's zone (with the weekday on `limit7d` only),
+/// or the countdown followed by the time in parentheses. `None` once the
+/// instant has passed, whichever the form.
+fn reset_text(ctx: &Ctx<'_>, cfg: &ModuleCfg, at: i64, weekday: bool) -> Option<String> {
+    let countdown = ctx.countdown(cfg, at);
+    let clock = ctx.wall_clock(at, weekday);
+    match cfg.str("reset") {
+        "absolute" => clock,
+        "both" => countdown.zip(clock).map(|(c, t)| format!("{c} ({t})")),
+        _ => countdown,
     }
 }
 
@@ -250,5 +289,79 @@ impl Module for CostModule {
             segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
         }
         Rendered::fresh(segs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::tz::{Offset, TimeZone};
+
+    use crate::ansi::strip_ansi;
+    use crate::render::{Clock, render_plain_at};
+
+    /// The three limit modules on one unframed line from the `spend-limit`
+    /// fixture, at an instant and in a zone.
+    fn render(extra: &str, now: i64, tz: TimeZone) -> String {
+        let path =
+            format!("{}/tests/fixtures/payloads/spend-limit.json", env!("CARGO_MANIFEST_DIR"));
+        let payload =
+            crate::payload::Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let text = format!(
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"limit5h\", \"limit7d\", \"spend\"]\n{extra}"
+        );
+        let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let clock = Clock { now: jiff::Timestamp::from_second(now).unwrap(), tz, ..Clock::fixed() };
+        strip_ansi(&render_plain_at(&payload, &config, Some(120), &clock)).trim_end().to_owned()
+    }
+
+    /// SPEC § 3.3 `reset`: `absolute` prints the wall-clock time in the
+    /// tick's zone, with the weekday on `limit7d` only; `both` puts it in
+    /// parentheses after the countdown; `countdown` is the default. The
+    /// instants come from the fixture: 18:13:40 Sat (5h), Tue 20:00 (7d)
+    /// and Sat 1 March 00:00 (spend), all UTC; the spend window is over
+    /// its limit, which `spend` prints unclamped.
+    #[test]
+    fn reset_forms_follow_the_zone_and_the_weekday_rule() {
+        let all = |form: &str| {
+            format!(
+                "[modules.limit5h]\nreset = \"{form}\"\n[modules.limit7d]\nreset = \"{form}\"\n[modules.spend]\nreset = \"{form}\"\n"
+            )
+        };
+        let at = 1_738_425_600;
+        assert_eq!(render("", at, TimeZone::UTC), "⏳ 24% ⏱ 2h13m  ≣ 41% ⏱ 3d4h  $ 112% ⏱ 27d8h");
+        assert_eq!(render(&all("countdown"), at, TimeZone::UTC), render("", at, TimeZone::UTC));
+        assert_eq!(
+            render(&all("absolute"), at, TimeZone::UTC),
+            "⏳ 24% ⏱ 18:13  ≣ 41% ⏱ Tue 20:00  $ 112% ⏱ 00:00"
+        );
+        assert_eq!(
+            render(&all("both"), at, TimeZone::UTC),
+            "⏳ 24% ⏱ 2h13m (18:13)  ≣ 41% ⏱ 3d4h (Tue 20:00)  $ 112% ⏱ 27d8h (00:00)"
+        );
+        // Another instant: the countdown moves, the absolute time does not.
+        let later = at + 3_600;
+        assert_eq!(
+            render(&all("both"), later, TimeZone::UTC),
+            "⏳ 24% ⏱ 1h13m (18:13)  ≣ 41% ⏱ 3d3h (Tue 20:00)  $ 112% ⏱ 27d7h (00:00)"
+        );
+        // Another zone: the times shift with it, the weekday too.
+        let plus_five = TimeZone::fixed(Offset::constant(5));
+        assert_eq!(
+            render(&all("absolute"), at, plus_five),
+            "⏳ 24% ⏱ 23:13  ≣ 41% ⏱ Wed 01:00  $ 112% ⏱ 05:00"
+        );
+        // Past the instant nothing shows in any form; `show_reset = false`
+        // hides every form; the module's own `durations` shapes `both`.
+        let past = 1_738_699_201;
+        assert_eq!(render(&all("absolute"), past, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112% ⏱ 00:00");
+        assert_eq!(
+            render(&all("both"), past, TimeZone::UTC),
+            "⏳ 24%  ≣ 41%  $ 112% ⏱ 24d3h (00:00)"
+        );
+        let hidden = "[modules.limit5h]\nreset = \"absolute\"\nshow_reset = false\n[modules.limit7d]\nreset = \"both\"\nshow_reset = false\n[modules.spend]\nshow_reset = false\n";
+        assert_eq!(render(hidden, at, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112%");
+        let fixed = "[modules.limit7d]\nreset = \"both\"\ndurations = \"fixed\"\n";
+        assert!(render(fixed, at, TimeZone::UTC).contains("⏱ 3d04h (Tue 20:00)"));
     }
 }

@@ -196,6 +196,15 @@ fn countdown_at(until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
     DurationStyle::Compact.countdown_at(until_epoch_secs, now_epoch_secs)
 }
 
+/// The wall-clock time of an instant in a zone, `14:30`, or `Tue 14:30`
+/// with the weekday (SPEC § 3.3: the absolute form of a reset time, in the
+/// zone the `clock` module uses so the two agree).
+#[must_use]
+pub fn wall_clock(at: Timestamp, tz: &TimeZone, weekday: bool) -> String {
+    let zoned = at.to_zoned(tz.clone());
+    zoned.strftime(if weekday { "%a %H:%M" } else { "%H:%M" }).to_string()
+}
+
 /// Seconds elapsed since an epoch-seconds instant (zero when in the future).
 #[must_use]
 pub fn elapsed_since(epoch_secs: i64) -> u64 {
@@ -265,6 +274,23 @@ mod tests {
         assert_eq!(frame(at(-5), 1.0, 10), 0, "before the epoch counts as 0");
         // year 9999 with a huge step: the tick count saturates and still reduces
         assert!(frame(at(253_402_207_200), f64::MAX, 3) < 3);
+    }
+
+    #[test]
+    fn wall_clock_prints_the_zone_and_optionally_the_weekday() {
+        use jiff::tz::{Offset, TimeZone};
+        let at = |secs: i64| Timestamp::from_second(secs).unwrap();
+        // 2025-02-01T18:13:40Z is a Saturday; 2025-02-04T20:00:00Z a Tuesday.
+        assert_eq!(wall_clock(at(1_738_433_620), &TimeZone::UTC, false), "18:13");
+        assert_eq!(wall_clock(at(1_738_433_620), &TimeZone::UTC, true), "Sat 18:13");
+        assert_eq!(wall_clock(at(1_738_699_200), &TimeZone::UTC, true), "Tue 20:00");
+        let plus_two = TimeZone::fixed(Offset::constant(2));
+        assert_eq!(wall_clock(at(1_738_433_620), &plus_two, false), "20:13");
+        let minus_five = TimeZone::fixed(Offset::constant(-5));
+        assert_eq!(wall_clock(at(1_738_699_200), &minus_five, true), "Tue 15:00");
+        // A zone shift across midnight moves the weekday with it.
+        let plus_five = TimeZone::fixed(Offset::constant(5));
+        assert_eq!(wall_clock(at(1_738_699_200), &plus_five, true), "Wed 01:00");
     }
 
     #[test]
