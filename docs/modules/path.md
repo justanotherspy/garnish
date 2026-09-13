@@ -41,6 +41,7 @@ The base directory is the git top level when inside a repository, otherwise `wor
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the folder icon. |
 | `depth` | integer | `1` | `2` | `0` | Path components of the base to keep (0 = all). |
+| `style` | `full` \| `fish` | `"full"` | `"full"` | `"full"` | How the base prints: `full` as is; `fish` abbreviates every directory but the last to its first character (`~/p/garnish`; a dot-directory to `.c`), as the fish shell prompts. `depth` applies first; the subpath is untouched. |
 | `show_subpath` | bool | `false` | `true` | `true` | Show the path below the base. |
 | `show_added` | bool | `false` | `false` | `true` | Show the count of added directories. |
 
