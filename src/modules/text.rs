@@ -82,6 +82,13 @@ fn schema() -> ModuleSchema {
                 Value::Str("   ".into()),
             )
             .max(MAX_TEXT_CHARS),
+            OptSpec::new(
+                "url",
+                Kind::Str,
+                "Wrap the box in a clickable OSC 8 link to this `http(s)://` URL (printable ASCII only; anything else is reported and dropped).",
+                Value::Str(String::new()),
+            )
+            .max(MAX_TEXT_CHARS),
         ],
         icons: Vec::new(),
         colors: vec![ColorSpec { key: "text", doc: "The text.", default: "accent" }],
@@ -142,6 +149,11 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
             _ => scroll(&styled, box_w, ctx.frame(step, text_w), "", false),
         }
     };
+    // `url` (SPEC § 3.7) links the box, padding cells excluded; the config
+    // already checked it against the painter's rule, which applies again.
+    let url = cfg.str("url");
+    let body: Vec<Segment> =
+        if url.is_empty() { body } else { body.into_iter().map(|s| s.with_link(url)).collect() };
     let pad = cfg.size("pad").min(ctx.width);
     if pad == 0 {
         return Rendered::fresh(body);

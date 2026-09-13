@@ -433,6 +433,12 @@ impl Module for BranchModule {
                     "Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead.",
                     Value::Int(40),
                 ),
+                OptSpec::new(
+                    "link",
+                    Kind::Bool,
+                    "Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD.",
+                    Value::Bool(false),
+                ),
             ],
             icons: vec![
                 IconSpec {
@@ -481,7 +487,20 @@ impl Module for BranchModule {
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, if detached { "detached" } else { "branch" }, "icon"));
         }
-        segs.push(Segment::styled(shown, Style::fg(cfg.color("name")).bolded()));
+        // SPEC § 3.1 `link`: the branch on the forge, from the payload's
+        // repo identity alone (no git call); a detached head has no page.
+        let url = (cfg.bool("link") && !detached)
+            .then(|| ctx.payload.workspace.as_ref()?.repo.as_ref())
+            .flatten()
+            .and_then(|repo| branch_url(repo, &head_key));
+        let mut name_seg = Segment::styled(
+            shown,
+            Style::fg(cfg.color("name")).bolded().underline_if(url.is_some()),
+        );
+        if let Some(url) = url {
+            name_seg = name_seg.with_link(url);
+        }
+        segs.push(name_seg);
         if cfg.bool("show_sha")
             && !detached
             && let Some(sha) = dirs.and_then(git::head_commit)
@@ -678,6 +697,46 @@ impl Module for SyncModule {
     }
 }
 
+/// The page of `branch` on the forge (SPEC § 3.1): `https://<host>/<owner>/
+/// <name>/tree/<branch>`, GitLab hosts with `/-/tree/`; `None` when the
+/// payload's repo identity is incomplete. Every part is percent-encoded so
+/// the painter's rule (SPEC § 5: printable ASCII) holds for any name.
+fn branch_url(repo: &crate::payload::Repo, branch: &str) -> Option<String> {
+    let host = repo.host.as_deref().filter(|s| !s.is_empty())?;
+    let owner = repo.owner.as_deref().filter(|s| !s.is_empty())?;
+    let name = repo.name.as_deref().filter(|s| !s.is_empty())?;
+    let tree = if host.to_ascii_lowercase().contains("gitlab") { "/-/tree/" } else { "/tree/" };
+    Some(format!(
+        "https://{}/{}/{}{tree}{}",
+        percent_encode(host),
+        percent_encode(owner),
+        percent_encode(name),
+        percent_encode(branch)
+    ))
+}
+
+/// Percent-encode a URL path.
+///
+/// The RFC 3986 unreserved characters and `/` are kept; every other byte
+/// of the UTF-8 encoding becomes `%XX`, so `feature/#12` and a non-ASCII
+/// name make a valid, printable-ASCII link.
+#[must_use]
+pub fn percent_encode(s: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(char::from(b));
+            }
+            _ => {
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
+}
+
 /// The `⇡N ⇣M` counts.
 ///
 /// A non-zero count carries its `ahead`/`behind` colour; a zero shown because
@@ -774,6 +833,66 @@ mod tests {
         assert_eq!(subpath("/a/b", "/a/b/c/d"), Some("c/d".into()));
         assert_eq!(subpath("/a/b", "/a/b"), None);
         assert_eq!(subpath("/a/b", "/a/c"), None);
+    }
+
+    /// SPEC § 3.1 `link`: the forge URL from the payload's repo identity,
+    /// percent-encoded, `/-/tree/` on GitLab, nothing without a repo or
+    /// on a detached head; the link is off by default.
+    #[test]
+    fn branch_link_is_built_from_the_payload_repo() {
+        assert_eq!(percent_encode("feature/#12"), "feature/%2312");
+        assert_eq!(percent_encode("fix ünï"), "fix%20%C3%BCn%C3%AF");
+        assert_eq!(percent_encode("a-b.c_d~e"), "a-b.c_d~e");
+        assert_eq!(percent_encode("x?y&z=1"), "x%3Fy%26z%3D1");
+        let repo = |host: &str| crate::payload::Repo {
+            host: Some(host.into()),
+            owner: Some("dschwartz".into()),
+            name: Some("garnish".into()),
+        };
+        assert_eq!(
+            branch_url(&repo("github.com"), "feature/#12").as_deref(),
+            Some("https://github.com/dschwartz/garnish/tree/feature/%2312")
+        );
+        assert_eq!(
+            branch_url(&repo("gitlab.example.org"), "main").as_deref(),
+            Some("https://gitlab.example.org/dschwartz/garnish/-/tree/main")
+        );
+        assert_eq!(branch_url(&crate::payload::Repo::default(), "main"), None);
+        let mut half = repo("github.com");
+        half.name = Some(String::new());
+        assert_eq!(branch_url(&half, "main"), None);
+        // Every URL built passes the painter's rule, whatever the name.
+        for name in ["feature/#12", "ünïcode", "a b", "tab\tname", "\u{202e}rtl"] {
+            let url = branch_url(&repo("github.com"), name).unwrap();
+            assert!(crate::ansi::safe_link(&url), "{url}");
+        }
+        // Through the module: the fixture's worktree branch, linked and
+        // underlined only with `link = true`.
+        let render = |extra: &str, fixture: &str| {
+            let path =
+                format!("{}/tests/fixtures/payloads/{fixture}.json", env!("CARGO_MANIFEST_DIR"));
+            let payload =
+                crate::payload::Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let text = format!(
+                "icons = \"unicode\"\ncolor = \"always\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"branch\"]\n[modules.branch]\n{extra}"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = crate::render::Clock::fixed();
+            let lines = crate::render::render_lines_at(&payload, &config, Some(80), &clock);
+            lines.into_iter().next().unwrap_or_default()
+        };
+        let linked = render("link = true\n", "worktree-session");
+        let name = linked.iter().find(|s| s.text() == "worktree-feature-x").unwrap();
+        assert_eq!(
+            name.link.as_deref(),
+            Some("https://github.com/dschwartz/garnish/tree/worktree-feature-x")
+        );
+        assert!(name.style.underline);
+        let plain = render("", "worktree-session");
+        let name = plain.iter().find(|s| s.text() == "worktree-feature-x").unwrap();
+        assert_eq!(name.link, None);
+        assert!(!name.style.underline);
     }
 
     /// SPEC § 3.1 `style = "fish"`: every directory but the last to its
