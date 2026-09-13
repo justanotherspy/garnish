@@ -145,6 +145,19 @@ text  = "v0.2"
 color = "muted"
 ```
 
+Every module also takes `label` (dim text before the value), `prefix` and
+`suffix` (text around it), `hide_when_empty` and `max_width`, which cuts
+the whole module to that many cells with `…` before the columns are
+aligned, so one long branch name or session title cannot push the rest of
+the line off (`[modules.branch] max_width = 24`; text modules size their
+box with `width` instead). A few modules have a presentation key of their
+own: `path.style = "fish"` abbreviates the directories above the last one
+(`~/p/garnish`), `branch.link = true` and a text module's `url` make them
+clickable, `context.scale = "usable"` makes the bar say how close
+auto-compaction is, and `reset = "absolute"` (or `"both"`) on the limit
+modules prints the time a window resets at instead of, or after, the
+countdown. Each module page under [modules/](modules/) lists its keys.
+
 Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is
 open, `vim` only with vim mode on. A line whose modules all have nothing to

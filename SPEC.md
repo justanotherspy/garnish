@@ -3,7 +3,8 @@
 Status: approved 2026-09-04 (`v0.1.0` the same day, `v0.2.0` on
 2026-09-06); revised 2026-09-12 with the layout model (§ 4.3), the
 interactive setup (§ 14) and the Phase 19–20 keys, and the same day with
-what Phase 19 found in the harness (§ 2.1). Owner: Daniel Schwartz.
+what Phase 19 found in the harness (§ 2.1); the Phase 20 keys (§ 3)
+shipped on 2026-09-13. Owner: Daniel Schwartz.
 Builder: Claude. This document is the target design of the whole system;
 when the design changes, it changes here first, with the reason
 (`CLAUDE.md` § Phase protocol). Everything without a "target state" mark
@@ -222,15 +223,19 @@ that TTL and refreshed by a worker), `icons.<key>`, `colors.<key>`, `label`,
 `prefix`, `suffix`, `hide_when_empty`, `max_width`. Option resolution: built-in default →
 icon-set default → module preset → top-level preset → explicit key.
 
-`max_width` (target state; PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps
-one module's rendered width: `0` (default) is unlimited, otherwise the
-module's text is cut to that many cells with `…` through `ansi::truncate`
-(grapheme-aware, an OSC 8 wrapper kept balanced) *before* alignment and
-before any column or line cut (§ 4.3), so a long branch name or session
-title cannot push the rest of the line off without the whole left group
-being cut. Capped at 1024 like every cell count (§ 5). Text modules
-(§ 3.7) have `width` for the same purpose and no `max_width`;
-`config check` reports one and names `width`.
+`max_width` (PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps one module's
+rendered width: `0` (default) is unlimited, otherwise the decorated module
+(`label`, `prefix` and `suffix` included, the stale marker too) is cut to
+that many cells with `…` through `ansi::truncate` (grapheme-aware; a cut
+link is still opened and closed around what is left of its text when
+painted) *before* alignment and before any column or line cut (§ 4.3), so
+a long branch name or session title cannot push the rest of the line off
+without the whole left group being cut. Capped at 1024 like every cell
+count (§ 5); `0` skips the measurement, so the default tick pays nothing.
+Text modules (§ 3.7) have `width` for the same purpose and no `max_width`;
+`config check` reports one and names `width`. The common options (this
+one, `label`, `prefix`, `suffix`, `hide_when_empty`) are specs in
+`config::schema::COMMON_OPTS`, bounded and documented like a module's own.
 
 ### 3.1 Repo group
 
@@ -245,25 +250,34 @@ being cut. Capped at 1024 like every cell count (§ 5). Text modules
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
 
-Two payload-only additions (target state; PLAN Phase 20; from FUTURE-SPEC
-§ 7.5, A7 and A8):
+Two payload-only additions (PLAN Phase 20; from FUTURE-SPEC § 7.5, A7 and
+A8):
 
-- `path` gets `style = "full" | "fish"`. `fish` abbreviates every
+- `path` has `style = "full" | "fish"`. `fish` abbreviates every
   directory of the base part but the last to its first character
-  (`~/r/g/src`), the way the fish shell prompts; a leading `~` is not a
-  segment and stays whole, and the last segment is never abbreviated. The
+  (`~/r/g/src`), the way the fish shell prompts: a leading `~` is not a
+  segment and stays whole, the last segment is never abbreviated, a
+  dot-directory keeps its dot and first letter (`.config` → `.c`, as fish
+  does), the first character is a terminal cluster (a combining mark stays
+  with its base), and a root or one-segment path is untouched. The
   existing `depth` (last `N` segments, `0` = all; per-preset defaults 1, 2
-  and 0) applies before the abbreviation, so `depth = 2` with `fish` gives
-  `g/src`. The subpath stays dim and untouched.
-- `branch` gets `link = false`: `true` wraps the name in an OSC 8 link to
+  and 0) applies before the abbreviation and keeps the `~` as it always
+  has, so `depth = 2` with `fish` on `~/repos/garnish/src` gives `~/g/src`
+  (corrected 2026-09-13 from `g/src`: `shorten` never drops the `~`). The
+  subpath stays dim and untouched.
+- `branch` has `link = false`: `true` wraps the name in an OSC 8 link to
   the branch on the forge, built from `workspace.repo.{host,owner,name}`
-  in the payload (`https://<host>/<owner>/<name>/tree/<branch>`; GitLab
-  hosts use `/-/tree/`), no git call; nothing is linked when the payload
-  has no `repo` or the head is detached. The branch name is
-  percent-encoded into the URL (RFC 3986 unreserved characters and `/`
-  kept, everything else `%XX`), so `feature/#12` and a non-ASCII name link
-  correctly and the painter's rule (§ 5: `http(s)://`, printable ASCII)
-  is met, as for `pr`.
+  in the payload (`https://<host>/<owner>/<name>/tree/<branch>`; `/-/tree/`
+  when the host is named after GitLab or the payload's open request is a
+  merge request, `pr.kind = "mr"`, which covers a self-hosted name), no
+  git call; nothing is linked when the payload has no `repo` (or an
+  incomplete one) or the head is detached, and the name is underlined
+  only when it is linked, as `pr` does. Every part is percent-encoded
+  into the URL (RFC 3986 unreserved characters and `/` kept, everything
+  else `%XX` of its UTF-8 bytes), so `feature/#12` and a non-ASCII name
+  link correctly and the painter's rule (§ 5: `http(s)://`, printable
+  ASCII) is met; the URL carries the whole name even when `max_length`
+  cut the one on screen.
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
@@ -291,19 +305,22 @@ module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
 threshold. No token counter. `used_percentage` null → empty bar and `–`.
 
-`scale = "window" | "usable"` (target state; PLAN Phase 20; from
-FUTURE-SPEC § 8.3, A11): with `usable` the bar and the percentage are
-measured against the autocompact threshold of § 2.3 instead of the whole
-window, so 100 % is the point where compaction runs (`used_percentage ×
-window ÷ threshold`, capped at 100). The compaction marker then sits at
-the bar's end and is not drawn; the window tag of the `full` preset still
-names the real window. `window` (default) is today's behaviour. When the
-marker is disabled (§ 2.3: compaction off) or the threshold is below a
-tenth of the window (a large `compact_buffer_tokens` or a tiny percentage
-override), `usable` falls back to `window`, and `config check` says
-nothing either way, since the settings can change under a running
-session. `thresholds`, `warn_at` and the marker label follow the
-percentage on display, whichever scale it is.
+`scale = "window" | "usable"` (PLAN Phase 20; from FUTURE-SPEC § 8.3,
+A11): with `usable` the bar and the percentage are measured against the
+autocompact threshold of § 2.3 instead of the whole window, so 100 % is
+the point where compaction runs (`used_percentage × window ÷ threshold`,
+capped at 100). The compaction marker then sits at the bar's end and is
+not drawn, and neither is its `⤓` percentage (`show_compaction_percent`):
+on that scale it would read a constant `⤓100%` (decided 2026-09-13). The
+window tag of the `full` preset still names the real window. `window`
+(default) is today's behaviour, byte for byte. When compaction is
+disabled (§ 2.3: `autoCompactEnabled = false`, `DISABLE_AUTO_COMPACT`,
+`DISABLE_COMPACT`) or the threshold is below a tenth of the window (a
+large `compact_buffer_tokens` or a tiny percentage override), `usable`
+falls back to `window`, and `config check` says nothing either way, since
+the settings can change under a running session; `compaction_marker`
+governs drawing alone and never the scale. `thresholds` and `warn_at`
+follow the percentage on display, whichever scale it is.
 
 ### 3.3 Usage group
 
@@ -318,16 +335,19 @@ Limit modules render nothing when their window is absent. `cost` has
 `only_without_rate_limits = true` so one usage line serves both auth modes.
 
 `reset = "countdown" | "absolute" | "both"` on `limit5h`, `limit7d` and
-`spend` (target state; PLAN Phase 20; from FUTURE-SPEC § 8.2, A10):
-`absolute` prints the local wall-clock time the window resets at, with
-the module's existing spacing (`⏱14:30`); `limit7d` always adds the
-weekday (`⏱Tue 14:30`) and `limit5h` and `spend` never do, so the width
-of the text is as steady as `durations = "fixed"` promises on a ticker
-line. `both` prints the countdown followed by the time in parentheses;
+`spend` (PLAN Phase 20; from FUTURE-SPEC § 8.2, A10): `absolute` prints
+the local wall-clock time the window resets at, with the module's
+existing spacing (`⏱14:30`); `limit7d` always adds the weekday
+(`⏱Tue 14:30`) and `limit5h` and `spend` never do, so the width of the
+text is as steady as `durations = "fixed"` promises on a ticker line.
+`both` prints the countdown followed by the time in parentheses
+(`2h13m (14:30)`, the countdown in the module's `durations` style);
 `countdown` (default) is today's behaviour; `show_reset = false` hides
-every form. The time is formatted with jiff in the zone the `clock`
-module uses, so the two agree. The harness re-runs the line at each
-`resets_at`, so neither form is stale at the boundary.
+every form, and so does an instant that has passed, as the countdown
+always did. The time is formatted with jiff in the tick's local zone,
+the one the `clock` module uses unless it sets its own `tz`, so the two
+agree. The harness re-runs the line at each `resets_at`, so neither form
+is stale at the boundary.
 
 ### 3.4 Session group
 
@@ -414,11 +434,14 @@ color = "muted"
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
 - **Escapes.** `text` is plain text: ANSI and OSC sequences are stripped,
   control characters removed, so a config cannot break the row.
-- **Links.** `url = "https://…"` (target state; PLAN Phase 20; from
-  FUTURE-SPEC § 7.5, A8) wraps the box in an OSC 8 link. The URL is a
-  string in the config, so the module stays static; the painter's rule
-  (§ 5: `http(s)://`, printable ASCII) applies, and anything else is
-  reported by `config check` and dropped.
+- **Links.** `url = "https://…"` (PLAN Phase 20; from FUTURE-SPEC § 7.5,
+  A8) wraps the box in an OSC 8 link: every segment of the finished box
+  (a scrolled window's cut cells, a clipped box's ellipsis, the `justify`
+  fill) carries it, the `pad` cells around it never. The URL is a string
+  in the config, so the module stays static; the painter's rule (§ 5:
+  `http(s)://`, printable ASCII) is checked at config time, and anything
+  else is reported by `config check` and dropped rather than vanishing on
+  screen.
 - **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
   reference gets one page for it; `config check` validates `justify`,
   `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
@@ -1071,16 +1094,17 @@ without an error report.
   an `http(s)://` URL of printable ASCII. (Whole-stack review, 2026-09-06:
   a `\n` in a session name added a row, an escape passed `--color never`,
   and a cut could split the sequence.)
-- **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`) above 1024, a
-  row string (`text`, `gap`, `ticker_gap`, `label`, `prefix`, `suffix`, `title`) above 4096 characters or
+- **Sizes are bounded.** A module cell count (`width`, `pad`, `bar_width`, `max_width`) above 1024, a
+  row string (`text`, `gap`, `ticker_gap`, `label`, `prefix`, `suffix`, `title`) or a text module's `url` above 4096 characters or
   `cost.decimals` above 8 (the money formatter allocates one byte per place)
   is reported like any bad value and the default stands in; the renderers
   clamp again, and the effective width never exceeds 4096 cells whatever
   `COLUMNS` says. Each cap is the option's `max` in its module schema, so
   the generated reference prints it in the type column (`integer ≤ 1024`,
-  `string ≤ 4096 chars`); `ticker_gap` (top-level) and `label`/`prefix`/
-  `suffix` (common to every module) are checked by hand against the same
-  constant. A Claude settings file of the § 2.3 chain (which a cloned
+  `string ≤ 4096 chars`); the common options (`label`/`prefix`/`suffix`,
+  `hide_when_empty`, `max_width`) are specs in `COMMON_OPTS` and go
+  through the same code path, and `ticker_gap` (top-level) is checked by
+  hand against the same constant. A Claude settings file of the § 2.3 chain (which a cloned
   repository can contribute to) is read up to 1 MiB and skipped past
   that; `doctor` shows a `statusLine.command` from any of them as plain
   text, cut to 200 characters. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
@@ -1218,13 +1242,17 @@ per-module render cost.
   a golden; one CLI test points the hook at a fixture instead.
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.
-- **Module matrix from the schema** (target state; PLAN Phase 20; from
-  FUTURE-SPEC § 15 item 11): a test generated from `ModuleSchema` renders
-  every module × every preset × every icon set × a few `max_width` values
-  against every fixture and asserts the shared invariants (never wider
-  than `max_width`, nothing rendered for a hidden state, OSC 8 wrappers
-  balanced, no escape or control byte in `Segment::text`), so a new module
-  or option gets the shared behaviour checked without a hand-written test.
+- **Module matrix from the schema** (PLAN Phase 20; from FUTURE-SPEC § 15
+  item 11): an in-crate rayon test generated from `ModuleSchema` renders
+  every module × every preset × every icon set × `max_width ∈ {0, 1, 4,
+  12}`, alone on an unframed line, against every payload fixture and
+  asserts the shared invariants (never wider than `max_width`, a cut
+  ending in the ellipsis and an uncut module byte-identical to its
+  uncapped render, a hidden state dropping the line rather than leaving a
+  blank row while `hide_when_empty = false` always shows the placeholder,
+  no escape or control byte in `Segment::text`, OSC 8 wrappers balanced
+  in the painted output), so a new module or option gets the shared
+  behaviour checked without a hand-written test.
 - **Layout matrix** (target state; PLAN Phase 21): the column shares add
   up to the line width and differ by at most one cell at every width from
   10 to 400; every line of a multi-line row is exactly the box width with
