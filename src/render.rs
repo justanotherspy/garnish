@@ -242,8 +242,8 @@ pub fn render_lines_at(
         .iter()
         .map(|line| {
             (
-                render_group(&ctx, config, &line.left, stale),
-                render_group(&ctx, config, &line.right, stale),
+                render_group(&ctx, config, &line.left, stale, &layout.ellipsis),
+                render_group(&ctx, config, &line.right, stale, &layout.ellipsis),
             )
         })
         .unzip();
@@ -403,15 +403,19 @@ fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool, pad_left: b
     }
 }
 
+/// Every module of a group rendered and decorated, each cut to its
+/// `max_width` (SPEC § 3); a module that rendered nothing is left out.
 fn render_group(
     ctx: &Ctx<'_>,
     config: &Config,
     ids: &[String],
     stale: (&str, &str),
+    ellipsis: &str,
 ) -> Vec<Vec<Segment>> {
     ids.iter()
         .filter_map(|id| {
-            // `text.<name>` comes from the config, not the fixed registry (SPEC § 3.7).
+            // `text.<name>` comes from the config, not the fixed registry
+            // (SPEC § 3.7); it has `width`, never a `max_width` to cap.
             if let Some(name) = id.strip_prefix(modules::text::PREFIX) {
                 let cfg = config.texts.get(name).filter(|c| c.enabled)?;
                 let rendered = modules::text::render(ctx, cfg);
@@ -430,11 +434,26 @@ fn render_group(
                 (StaleStyle::Plain, _) => Rendered::fresh(rendered.segments),
                 _ => rendered,
             };
-            Some(decorate(rendered, cfg, &config.theme, stale))
+            let module = decorate(rendered, cfg, &config.theme, stale);
+            Some(cap_width(module, cfg.max_width, ellipsis))
         })
         // A module that rendered nothing is not a column (SPEC § 4).
         .filter(|module| !module.is_empty())
         .collect()
+}
+
+/// `max_width` (SPEC § 3): the decorated module cut to `max` cells with the
+/// ellipsis, before alignment and before the line is cut, so one long value
+/// cannot push the rest of its line off. `0` leaves the module alone without
+/// measuring it, so the default tick pays nothing. [`crate::ansi::truncate`]
+/// keeps each segment's link, so a cut link is still opened and closed
+/// around its remaining text when painted.
+fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
+    if max == 0 || segments_width(&module) <= max {
+        module
+    } else {
+        crate::ansi::truncate(&module, max, ellipsis)
+    }
 }
 
 const fn stale_glyphs(icons: IconSet) -> (&'static str, &'static str) {
@@ -625,6 +644,68 @@ mod tests {
         assert_eq!(errs, Vec::new());
         let out = render_plain_at(&payload, &config, Some(80), &Clock::fixed());
         assert!(out.starts_with(".  ..  "), "{out:?}");
+    }
+
+    /// SPEC § 3 `max_width`: the decorated module is cut to N cells with the
+    /// ellipsis before the columns are aligned, a cut link is still opened
+    /// and closed around what is left of its text when painted, and
+    /// `branch.max_length` keeps cutting the name by characters first.
+    #[test]
+    fn max_width_caps_a_module_before_alignment_and_keeps_links_balanced() {
+        let payload = fixture("worktree-session");
+        let base =
+            "icons = \"unicode\"\ncolor = \"always\"\n[frame]\nstyle = \"none\"\nfill = false\n";
+        let render = |extra: &str| {
+            let (config, errs) = config::parse(&format!("{base}{extra}"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            render_lines_at(&payload, &config, Some(80), &Clock::fixed())
+        };
+        // A linked `pr` cut inside its number: one OSC 8 open, one close,
+        // around the `#` that survived; the ellipsis sits outside the link.
+        let lines = render("[[line]]\nmodules = [\"pr\"]\n[modules.pr]\nmax_width = 4\n");
+        let painter = Painter { mode: ColorMode::TrueColor, links: true, dim: false };
+        let out = painter.paint(&lines[0]);
+        assert_eq!(strip_ansi(&out), "⇄ #…");
+        let parts: Vec<&str> = out.split("\x1b]8;;").collect();
+        assert_eq!(parts.len(), 3, "one open and one close: {out:?}");
+        assert!(
+            parts[1].starts_with("https://github.com/dschwartz/garnish/pull/42\x1b\\"),
+            "{out:?}"
+        );
+        assert!(parts[1].ends_with("#\x1b[0m"), "the link closes right after the `#`: {out:?}");
+        assert!(parts[2].starts_with("\x1b\\") && parts[2].contains('…'), "{out:?}");
+        // A wide branch name: `max_width` counts cells of the whole module
+        // (icon and space included), `max_length` characters of the name.
+        let plain = |lines: &[Vec<Segment>]| Painter::PLAIN.paint(&lines[0]);
+        let out =
+            plain(&render("[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nmax_width = 10\n"));
+        assert_eq!(out, "⎇ worktre…");
+        assert_eq!(display_width(&out), 10);
+        let out =
+            plain(&render("[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nmax_length = 5\n"));
+        assert_eq!(out, "⎇ work…");
+        let out = plain(&render(
+            "[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nmax_length = 5\nmax_width = 4\n",
+        ));
+        assert_eq!(out, "⎇ w…");
+        // The cap runs before alignment: the capped module is padded to the
+        // column, so the bars still stack, and a placeholder is capped too.
+        let (config, errs) = config::parse(
+            "icons = \"unicode\"\nalign = true\n[[line]]\nmodules = [\"session_name\", \"clock\"]\n[[line]]\nmodules = [\"vim\", \"clock\"]\n[modules.session_name]\nmax_width = 5\n[modules.vim]\nhide_when_empty = false\nlabel = \"vim\"\nmax_width = 3\n",
+            &SCHEMAS,
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        let out = strip_ansi(&render_plain_at(&payload, &config, Some(60), &Clock::fixed()));
+        let rows: Vec<&str> = out.lines().collect();
+        assert!(rows[0].contains("❯ ga…") && !rows[0].contains("garnish"), "{out}");
+        assert!(rows[1].contains("vi…") && !rows[1].contains("vim –"), "{out}");
+        let bar = |row: &str| row.chars().position(|c| c == '│');
+        assert_eq!(bar(rows[0]), bar(rows[1]), "{out}");
+        // `max_width = 0` is the default and changes nothing.
+        assert_eq!(
+            render("[[line]]\nmodules = [\"path\", \"branch\"]\n[modules.path]\nmax_width = 0\n"),
+            render("[[line]]\nmodules = [\"path\", \"branch\"]\n")
+        );
     }
 
     #[test]

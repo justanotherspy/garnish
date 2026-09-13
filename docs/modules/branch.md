@@ -42,7 +42,7 @@ The current branch read from the repository without spawning git; a detached HEA
 | `show_icon` | bool | `false` | `true` | `true` | Show the branch icon. |
 | `show_sha` | bool | `false` | `false` | `true` | Append the short commit SHA. |
 | `dirty` | bool | `false` | `false` | `true` | Show a marker when the tree has changes. |
-| `max_length` | integer | `40` | `40` | `40` | Truncate longer names (0 = no limit). |
+| `max_length` | integer | `40` | `40` | `40` | Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead. |
 
 ## Icons
 
