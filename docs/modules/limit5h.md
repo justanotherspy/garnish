@@ -34,9 +34,11 @@ Percentage of the rolling five-hour window consumed and a countdown to `resets_a
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
 | `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
-| `label` | string | `""` | `""` | `""` | Dim text before the value. |
-| `prefix` / `suffix` | string | `""` | `""` | `""` | Text around the module. |
+| `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
+| `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
+| `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the window icon. |
 | `show_reset` | bool | `false` | `true` | `true` | Show the countdown to the reset. |
 | `bar_width` | integer ≤ 1024 | `0` | `0` | `8` | Mini bar width in cells; 0 hides it. |

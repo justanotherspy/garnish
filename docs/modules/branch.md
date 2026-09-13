@@ -34,9 +34,11 @@ The current branch read from the repository without spawning git; a detached HEA
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
 | `refresh` | integer | `5` | `5` | `5` | Seconds between background refreshes; 0 = every tick. |
-| `label` | string | `""` | `""` | `""` | Dim text before the value. |
-| `prefix` / `suffix` | string | `""` | `""` | `""` | Text around the module. |
+| `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
+| `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
+| `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the branch icon. |
 | `show_sha` | bool | `false` | `false` | `true` | Append the short commit SHA. |
 | `dirty` | bool | `false` | `false` | `true` | Show a marker when the tree has changes. |
