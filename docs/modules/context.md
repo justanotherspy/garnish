@@ -45,6 +45,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `show_percent` | bool | `true` | `true` | `true` | Show the percentage after the bar. |
 | `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the band color changes. |
 | `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band (roles or literal colors). |
+| `scale` | `window` \| `usable` | `"window"` | `"window"` | `"window"` | What 100 % means: `window` the whole context window; `usable` the auto-compaction threshold, so the bar and the percentage say how close compaction is (the marker and its percentage are then implied and not drawn; the window tag still names the real window). `usable` falls back to `window` when compaction is disabled or the threshold is under a tenth of the window. |
 | `compaction_marker` | bool | `true` | `true` | `true` | Mark the auto-compaction threshold on the bar. |
 | `compact_buffer_tokens` | integer | `13000` | `13000` | `13000` | Tokens Claude Code reserves below the window for the compaction summary. |
 | `show_compaction_percent` | bool | `false` | `false` | `true` | Also print the compaction threshold as a percentage. |
