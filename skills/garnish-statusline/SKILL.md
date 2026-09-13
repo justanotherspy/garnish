@@ -15,13 +15,14 @@ never edit `~/.claude/settings.json` yourself (`garnish install` owns it).
 ## 1. Check the tools
 
 ```sh
-garnish --version && garnish doctor | head -12
+garnish --version && garnish doctor | head -20
 ```
 
 If `garnish` is missing, stop and point at the install section of the README.
-If the doctor's `statusLine` line is anything but `command=…` (not
-configured, settings missing or not valid JSON), offer `garnish install`
-after the config is written.
+If the doctor's `statusLine` row says `not configured`, offer `garnish
+install` after the config is written; if one of its settings file rows says
+the file does not parse, say so and stop there (`garnish install` refuses to
+rewrite such a file, so it must be fixed by hand first).
 
 ## 2. Ask, with recommended defaults
 
@@ -43,8 +44,10 @@ otherwise start from a built-in preset and add `[[line]]` blocks.
 
 ## 3. Draft, preview, validate, then write
 
-Never overwrite the config before the person has seen the result: `config
-init --force` keeps no backup, and a hand-tuned file is easy to lose. Draft
+Never overwrite the config before the person has seen the result: a
+hand-tuned file is easy to lose (`config init --force` keeps a timestamped
+backup next to the file and refuses one that does not parse; a plain `cp`
+keeps nothing, so back the existing file up before the copy below). Draft
 into a temp file first (`--config` selects it for any subcommand):
 
 ```sh
@@ -71,8 +74,10 @@ creating the directory if needed) and say that the previous file, if any,
 was replaced. Explain each key you set in one line so the person can tweak
 it later (point at `docs/config.md` and the module pages). Finish with
 `garnish config check` reporting `ok`, and remind them that `preview` runs
-with the live clock, so animations move between runs; `GARNISH_ANIMATE=0`
-freezes them (and cuts a ticker line with `…`) for a still picture.
+with the live clock, so animations move between runs (`GARNISH_ANIMATE=0`
+freezes them and cuts a ticker line with `…` for a still picture), and
+that its rows are faint on purpose: Claude Code draws every status line
+row dim, and the preview shows that intensity.
 
 ## 4. Hook it up (only if asked or not yet done)
 

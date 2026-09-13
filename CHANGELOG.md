@@ -5,6 +5,44 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Harness fidelity** (PLAN Phase 19)
+
+- `animate` left unset now follows Claude Code's *Reduce motion* setting
+  (`prefersReducedMotion`, read from the same settings files as the
+  autocompact keys); an explicit `animate` wins over it and
+  `GARNISH_ANIMATE=0` over both. `config init` writes the key as a comment
+  and `config show` prints the value in effect.
+- `garnish install` and `config init --force` never rewrite a
+  `settings.json` or `garnish.toml` that does not parse: one line names the
+  file and the problem and nothing is written. `config init --force` keeps
+  a backup of the file it replaces, as `install` does. Every rewrite goes
+  through a symlink even before its target exists (a dotfiles link made
+  ahead of the file stays a link), the new file is born with the old one's
+  permissions, and no temp file survives a failure.
+- Claude Code's settings files are read at most 1 MiB deep and an empty
+  file counts as `{}` everywhere (`doctor` no longer calls it invalid).
+- `garnish doctor` lists Claude Code's settings files for the current
+  directory (managed, local, project, user) and whether each parses, then
+  the keys that change what the line can show, resolved as Claude Code
+  resolves them: it suggests `refreshInterval = 1` when the config shows a
+  clock, a timer or a running animation and `hideVimModeIndicator = true`
+  when the `vim` module is on, says when a `refreshInterval` below 1 is
+  being ignored by Claude Code, and says when `disableAllHooks` or
+  `prefersReducedMotion` is in effect. A `statusLine.command` from any of
+  those files is shown as plain text, and the project's files relative to
+  the project directory, so the report stays safe to paste into an issue.
+- Verified against Claude Code 2.1.270 (and 2.1.261): every status line
+  row is drawn dim by Claude Code and nothing the command prints can undo
+  it, so the planned per-row reset was dropped. `garnish preview` now
+  draws its rows faint the same way, so a theme is judged at the
+  intensity the screen will give it (`--color never` stays plain; the
+  status line itself is unchanged). The 13 000-token autocompact buffer
+  is unchanged.
+- `GARNISH_MANAGED_SETTINGS` names the managed settings file garnish reads
+  first in Claude Code's chain, or, empty, says there is none; `doctor`
+  lists it with the other hooks. The test suite sets it, so a managed
+  file on the machine running `cargo test` no longer changes a golden.
+
 **Fixes**
 
 - `cost.decimals` is capped at 8: the money formatter allocated one byte

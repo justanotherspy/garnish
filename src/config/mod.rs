@@ -272,10 +272,12 @@ pub struct Config {
     pub ticker_step: f64,
     /// Text between the end of a scrolled group and its wrapped-around start.
     pub ticker_gap: String,
-    /// Master switch for every animation; `false` freezes them at frame 0
-    /// and cuts a ticker line with the ellipsis (SPEC § 4.2).
-    /// `GARNISH_ANIMATE=0` does the same for a session.
-    pub animate: bool,
+    /// Master switch for every animation, when the file sets it: `false`
+    /// freezes them at frame 0 and cuts a ticker line with the ellipsis
+    /// (SPEC § 4.2). `None` leaves the decision to Claude Code's
+    /// `prefersReducedMotion` setting, then the default (`true`);
+    /// `GARNISH_ANIMATE=0` freezes a session whatever the file says.
+    pub animate: Option<bool>,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
     /// Frame.
@@ -788,6 +790,21 @@ fn line_of(text: &str, byte: usize) -> usize {
     text.bytes().take(byte).filter(|&b| b == b'\n').count().saturating_add(1)
 }
 
+/// The TOML syntax error of `text` as `line N: message`, when it has one.
+///
+/// A syntax error is the one problem that makes a file unreadable rather
+/// than fixable per key (SPEC § 5), and so the one a writing command must
+/// refuse to paper over.
+#[must_use]
+pub fn syntax_error(text: &str) -> Option<String> {
+    toml::from_str::<toml::Table>(text).err().map(|e| {
+        e.span().map_or_else(
+            || e.message().to_owned(),
+            |s| format!("line {}: {}", line_of(text, s.start), e.message()),
+        )
+    })
+}
+
 impl Config {
     /// Built-in defaults.
     #[must_use]
@@ -964,7 +981,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             Some(gap) => gap,
             None => DEFAULT_TICKER_GAP,
         }),
-        animate: raw.animate.unwrap_or(true),
+        animate: raw.animate,
         // A ticker's period follows the scrolled group's width, so timers
         // that change width would make the window jump (SPEC § 4.1): the
         // smooth style is the default there, compact an explicit opt-in.
@@ -1755,6 +1772,19 @@ x = 1
         let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = true\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\nfill_pattern = \"-=\"\nfill_step = 2\nfill_direction = \"left\"\nseparator_frames = [\" | \", \" : \"]\nseparator_step = 0.5\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
         let (_, errs) = parse(text, &schemas());
         assert_eq!(errs, Vec::new());
+    }
+
+    /// SPEC § 4.2: whether the file sets `animate` is knowable, since an
+    /// unset key defers to Claude Code's `prefersReducedMotion` setting.
+    #[test]
+    fn animate_records_whether_the_file_set_it() {
+        assert_eq!(parse("", &schemas()).0.animate, None);
+        assert_eq!(parse("animate = false", &schemas()).0.animate, Some(false));
+        assert_eq!(parse("animate = true", &schemas()).0.animate, Some(true));
+        let (c, errs) = parse("animate = \"yes\"", &schemas());
+        assert_eq!(c.animate, None, "a bad value is reported and left unset");
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs.first().map(|e| e.path.as_str()), Some("animate"));
     }
 
     /// SPEC § 3.7: `[modules.text.<name>]` tables are validated against the

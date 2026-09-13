@@ -5,18 +5,30 @@
 // allowances do not apply; panicking on setup failure is the right behaviour here.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::io::Write as _;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, bool) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    // The working directory is the test's own, not the checkout: `config
+    // show` and `doctor` read the settings chain of the current directory,
+    // and the checkout's `.claude/` must not leak into a test. Every
+    // argument a test passes is an absolute path.
     cmd.args(args)
+        .current_dir(home)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("GARNISH_CACHE_DIR", home.join("cache"))
         .env("GARNISH_NOW", "1738425600")
         .env("NO_COLOR", "1")
-        .env_remove("GARNISH_CONFIG");
+        .env_remove("GARNISH_CONFIG")
+        // A developer running with animations off must not turn the
+        // suite red; a test that wants the switch sets it through `extra`.
+        .env_remove("GARNISH_ANIMATE")
+        // No managed settings file (SPEC § 9); a test that wants one
+        // points the hook at its own through `extra`.
+        .env("GARNISH_MANAGED_SETTINGS", "");
     for (k, v) in extra {
         cmd.env(k, v);
     }
@@ -125,6 +137,9 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     assert!(ok && out.contains("no config file"), "{out}");
     let (out, _, ok) = run(&["config", "init", "--preset", "compact"], home, &[]);
     assert!(ok && out.starts_with("wrote "), "{out}");
+    // `init` leaves `animate` to Claude Code's prefersReducedMotion (SPEC § 4.2).
+    let written = std::fs::read_to_string(home.join(".config/garnish/garnish.toml")).unwrap();
+    assert!(written.contains("\n# animate = true\n"), "{written}");
     let (out, err, ok) = run(&["config", "init"], home, &[]);
     assert!(!ok, "refuses to overwrite without --force");
     // A refusal is one line on stderr, not an error report (walkthrough bug 7).
@@ -213,6 +228,7 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
             .env("GARNISH_NOW", "1738425600")
             .env("GARNISH_NO_SPAWN", "1")
             .env("CLICOLOR_FORCE", "1")
+            .env("GARNISH_MANAGED_SETTINGS", "")
             .env_remove("NO_COLOR")
             .env_remove("GARNISH_CONFIG");
         let out = cmd.output().unwrap();
@@ -247,6 +263,138 @@ fn config_show_prints_the_durations_a_ticker_implies() {
     let session = shown.split("[modules.session]").nth(1).unwrap();
     let session = session.split("\n[").next().unwrap();
     assert!(session.contains("durations = \"inherit\""), "{session}");
+}
+
+/// SPEC § 5: a `settings.json` or `garnish.toml` that does not parse is
+/// never rewritten by `install` or `config init --force`; the command names
+/// the file and the problem on one line and exits 1 without a report. A
+/// file that parses is replaced with a never-clobbered backup next to it.
+#[test]
+fn unparsable_files_are_never_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let broken_json = "{\"statusLine\": {\"type\": \"command\",\n";
+    std::fs::write(&settings, broken_json).unwrap();
+    for args in [&["install", "--absolute"][..], &["install", "--absolute", "--dry-run"]] {
+        let (out, err, ok) = run(args, home, &[]);
+        assert!(!ok, "{args:?}: {out}");
+        assert_eq!(err.lines().count(), 1, "{args:?}: {err}");
+        assert!(err.contains("settings.json") && err.contains("JSON"), "{args:?}: {err}");
+        assert!(!err.contains("Location:") && !err.contains("Error:"), "{args:?}: {err}");
+        assert!(out.is_empty(), "{args:?}: {out}");
+    }
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), broken_json, "untouched");
+    assert!(!home.join(".config/garnish/garnish.toml").exists(), "nothing else is written");
+    let entries = |dir: &Path| -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect()
+    };
+    assert_eq!(entries(settings.parent().unwrap()), vec!["settings.json"], "no backup, no temp");
+    std::fs::write(&settings, "[1, 2]\n").unwrap();
+    let (_, err, ok) = run(&["install", "--absolute"], home, &[]);
+    assert!(!ok && err.contains("object"), "{err}");
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), "[1, 2]\n");
+
+    // A TOML syntax error is refused with its line; a bad value still
+    // parses, so the file is replaced and kept as a backup.
+    let cfg = home.join(".config").join("garnish").join("garnish.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, "preset = \"full\"\n[frame\n").unwrap();
+    let (out, err, ok) = run(&["config", "init", "--force"], home, &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("garnish.toml") && err.contains("line 2"), "{err}");
+    assert!(!err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "preset = \"full\"\n[frame\n");
+    assert_eq!(entries(cfg.parent().unwrap()), vec!["garnish.toml"]);
+    std::fs::write(&cfg, "theme = \"nope\"\n").unwrap();
+    let (out, _, ok) = run(&["config", "init", "--force"], home, &[]);
+    assert!(ok && out.starts_with("wrote ") && out.contains("(backup: "), "{out}");
+    let names = entries(cfg.parent().unwrap());
+    let backups: Vec<&String> =
+        names.iter().filter(|n| n.starts_with("garnish.toml.bak-")).collect();
+    assert_eq!(backups.len(), 1, "{names:?}");
+    assert_eq!(
+        std::fs::read_to_string(cfg.parent().unwrap().join(backups[0])).unwrap(),
+        "theme = \"nope\"\n"
+    );
+    assert!(std::fs::read_to_string(&cfg).unwrap().contains("[modules.context]"));
+    assert!(names.iter().all(|n| !n.contains(".tmp.")), "{names:?}");
+    // A gallery preset goes through the same probe and backup.
+    let (out, _, ok) = run(&["config", "init", "--force", "--preset", "minimal-clean"], home, &[]);
+    assert!(ok && out.contains("(backup: "), "{out}");
+    assert_eq!(
+        entries(cfg.parent().unwrap())
+            .iter()
+            .filter(|n| n.starts_with("garnish.toml.bak-"))
+            .count(),
+        2
+    );
+    // A first write needs no backup and says so by omission.
+    let fresh = home.join("fresh").join("garnish.toml");
+    let (out, _, ok) = run(&["--config", fresh.to_str().unwrap(), "config", "init"], home, &[]);
+    assert!(ok && out.trim_end().ends_with("fresh/garnish.toml"), "{out}");
+    assert_eq!(entries(fresh.parent().unwrap()), vec!["garnish.toml"]);
+}
+
+/// SPEC § 4.2: `config show` prints the animation switch in effect, which
+/// with `animate` unset follows Claude Code's `prefersReducedMotion` in the
+/// settings chain of the current directory and the home; an explicit key
+/// in the file wins over the setting.
+#[test]
+fn config_show_prints_the_animate_switch_in_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "preset = \"minimal\"\n").unwrap();
+    let show = |extra: &str| {
+        std::fs::write(&cfg, format!("preset = \"minimal\"\n{extra}")).unwrap();
+        let (shown, _, ok) = run(&["--config", cfg.to_str().unwrap(), "config", "show"], home, &[]);
+        assert!(ok, "{shown}");
+        shown
+    };
+    assert!(show("").contains("\nanimate = true\n"), "no settings: on");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
+        .unwrap();
+    assert!(show("").contains("\nanimate = false\n"), "the user setting freezes an unset key");
+    assert!(show("animate = true\n").contains("\nanimate = true\n"), "an explicit key wins");
+    // The project chain of the current directory (the test's home) outranks
+    // the user file; the session switch is not part of a config and stays out.
+    std::fs::write(home.join(".claude/settings.local.json"), r#"{"prefersReducedMotion": false}"#)
+        .unwrap();
+    assert!(show("").contains("\nanimate = true\n"), "the local file wins");
+    std::fs::remove_file(home.join(".claude/settings.local.json")).unwrap();
+    std::fs::write(&cfg, "preset = \"minimal\"\nanimate = true\n").unwrap();
+    let (shown, _, ok) = run(
+        &["--config", cfg.to_str().unwrap(), "config", "show"],
+        home,
+        &[("GARNISH_ANIMATE", "0")],
+    );
+    assert!(
+        ok && shown.contains("\nanimate = true\n"),
+        "GARNISH_ANIMATE is a session switch: {shown}"
+    );
+    // What `show` prints is what the tick uses: the shown config renders
+    // the same frozen spinner as the original under the same settings.
+    let payload =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    let shown = show("");
+    let copy = home.join("shown.toml");
+    std::fs::write(&copy, &shown).unwrap();
+    let render = |file: &Path| {
+        let args = ["--config", file.to_str().unwrap(), "preview", payload, "--width", "80"];
+        let (out, _, ok) =
+            run(&args, home, &[("GARNISH_NO_SPAWN", "1"), ("GARNISH_NOW", "1738425601")]);
+        assert!(ok, "{out}");
+        out
+    };
+    assert_eq!(render(&cfg), render(&copy));
 }
 
 #[test]
@@ -345,6 +493,7 @@ fn writing_commands_refuse_to_guess_a_home_directory() {
             .current_dir(dir.path())
             .env_remove("HOME")
             .env_remove("XDG_CONFIG_HOME")
+            .env("GARNISH_MANAGED_SETTINGS", "")
             .env_remove("GARNISH_CONFIG");
         let out = cmd.output().unwrap();
         let err = String::from_utf8_lossy(&out.stderr);
@@ -361,6 +510,7 @@ fn writing_commands_refuse_to_guess_a_home_directory() {
         .current_dir(dir.path())
         .env_remove("HOME")
         .env_remove("XDG_CONFIG_HOME")
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .env_remove("GARNISH_CONFIG");
     let out = cmd.output().unwrap();
     let err = String::from_utf8_lossy(&out.stderr);
@@ -372,6 +522,7 @@ fn writing_commands_refuse_to_guess_a_home_directory() {
         .current_dir(dir.path())
         .env_remove("HOME")
         .env_remove("XDG_CONFIG_HOME")
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .env("GARNISH_CONFIG", &via_env);
     assert!(cmd.output().unwrap().status.success());
     assert!(via_env.exists() && !dir.path().join("garnish").exists());
@@ -381,7 +532,130 @@ fn writing_commands_refuse_to_guess_a_home_directory() {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
     cmd.args(["--config", target.to_str().unwrap(), "config", "init"])
         .env_remove("HOME")
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .env_remove("XDG_CONFIG_HOME");
     assert!(cmd.output().unwrap().status.success());
     assert!(target.exists());
+}
+
+/// One tick of `config` over `payload` on stdin, as the harness runs it:
+/// the same hermetic environment as [`run`], colour left to the config.
+fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> String {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.args(["--config", config.to_str().unwrap()])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NOW", "1738425600")
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env("COLUMNS", "84")
+        .env_remove("NO_COLOR")
+        .env_remove("GARNISH_ANIMATE")
+        .env_remove("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+        .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
+        .env_remove("DISABLE_AUTO_COMPACT")
+        .env_remove("DISABLE_COMPACT")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// SPEC § 9: `GARNISH_MANAGED_SETTINGS` names the managed settings file,
+/// first in Claude Code's chain, or, empty, says there is none; `config
+/// show`, `doctor` and the tick read the chain through it.
+#[test]
+fn managed_settings_hook_names_the_first_file_of_the_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    // Canonical, so the home, the working directory `doctor` reports and
+    // the hook's path agree on macOS (`/var` is a link to `/private/var`).
+    let home = dir.path().canonicalize().unwrap();
+    let home = home.as_path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "[[line]]\nmodules = [\"context\"]\n").unwrap();
+    let managed = home.join("managed.json");
+    std::fs::write(
+        &managed,
+        r#"{"prefersReducedMotion": true, "autoCompactEnabled": false, "statusLine": {"command": "org-garnish"}}"#,
+    )
+    .unwrap();
+    // The user file says the opposite on every key; the managed file wins.
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(
+        home.join(".claude/settings.json"),
+        r#"{"prefersReducedMotion": false, "autoCompactEnabled": true}"#,
+    )
+    .unwrap();
+    let hook = [("GARNISH_MANAGED_SETTINGS", managed.to_str().unwrap())];
+    let show = |extra: &[(&str, &str)]| {
+        let (shown, _, ok) =
+            run(&["--config", cfg.to_str().unwrap(), "config", "show"], home, extra);
+        assert!(ok, "{shown}");
+        shown
+    };
+    assert!(show(&hook).contains("\nanimate = false\n"), "the managed file freezes");
+    assert!(show(&[]).contains("\nanimate = true\n"), "the hook left empty: no managed file");
+    let (report, _, ok) = run(&["--config", cfg.to_str().unwrap(), "doctor"], home, &hook);
+    assert!(ok, "{report}");
+    // The file sits under the project directory (the test's home), so the
+    // report names it relative to that, as it does the project's own files.
+    assert!(report.contains("  managed  managed.json  ok"), "{report}");
+    assert!(report.contains("command=org-garnish (managed)"), "{report}");
+    assert!(report.contains("true (managed)"), "{report}");
+    assert!(report.contains("GARNISH_MANAGED_SETTINGS=~/managed.json"), "{report}");
+    let (report, _, ok) = run(&["--config", cfg.to_str().unwrap(), "doctor"], home, &[]);
+    assert!(ok, "{report}");
+    assert!(!report.lines().any(|l| l.starts_with("  managed")), "{report}");
+    // The home is the project directory here, so the one settings file is
+    // both the project's and the user's, and the project entry names it.
+    assert!(report.contains("not configured") && report.contains("false (project)"), "{report}");
+    // The tick reads the same chain: the managed file switches the
+    // compaction marker off, the user file alone leaves it on.
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    let plain = |extra: &[(&str, &str)]| tick(&cfg, home, payload, extra);
+    assert_ne!(plain(&hook), plain(&[]), "the managed file changes the tick");
+}
+
+/// SPEC § 2.1: `preview` paints every row faint, as Claude Code draws the
+/// status line on screen; the tick does not, since the harness adds it.
+#[test]
+fn preview_draws_every_row_faint_and_the_tick_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    // 256-colour mode keeps a `2` parameter unambiguous (truecolor carries
+    // `38;2;r;g;b`), and `model` has no faint styling of its own.
+    std::fs::write(
+        &cfg,
+        "color = \"256\"\n[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"model\"]\n",
+    )
+    .unwrap();
+    let payload =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    // Every SGR parameter list in `text` but the reset.
+    let sgr = |text: &str| -> Vec<String> {
+        text.split("\x1b[")
+            .skip(1)
+            .filter_map(|rest| rest.split_once('m').map(|(params, _)| params.to_owned()))
+            .filter(|params| params != "0")
+            .collect()
+    };
+    let faint = |params: &str| params.split(';').take_while(|p| *p != "38").any(|p| p == "2");
+    let args = ["--config", cfg.to_str().unwrap(), "preview", payload, "--width", "84"];
+    let (out, _, ok) = run(&args, home, &[]);
+    assert!(ok, "{out}");
+    // The first line is preview's own `── name` heading.
+    let params: Vec<String> = out.lines().skip(1).flat_map(sgr).collect();
+    assert!(!params.is_empty() && params.iter().all(|p| faint(p)), "{out:?}");
+    let out = tick(&cfg, home, include_str!("fixtures/payloads/subscription-full.json"), &[]);
+    let params = sgr(&out);
+    assert!(!params.is_empty() && !params.iter().any(|p| faint(p)), "{out:?}");
 }

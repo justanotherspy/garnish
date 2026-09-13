@@ -244,7 +244,10 @@ mod tests {
         assert!(shown.contains("fill = \"━\""), "{shown}");
         let (again, errs) = crate::config::parse(&shown, &SCHEMAS);
         assert_eq!(errs, Vec::new());
-        assert_eq!(again, unicode);
+        // `show` pins the animation switch in effect (SPEC § 4.2).
+        let mut expected = unicode.clone();
+        expected.animate = Some(unicode.animate.unwrap_or(true));
+        assert_eq!(again, expected);
     }
 
     fn icon_pair(cfg: &crate::config::schema::ModuleCfg) -> (&str, &str) {

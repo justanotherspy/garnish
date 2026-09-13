@@ -39,6 +39,7 @@ fn render(fixture: &Path, preset: &str, icons: &str) -> String {
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
         .env_remove("GARNISH_ANIMATE")
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .env("TZ", "UTC")
         .stdin(Stdio::null())
         .output()
@@ -79,8 +80,10 @@ fn golden_renders_match() {
             let name = fixture.file_stem().unwrap().to_str().unwrap();
             let actual = render(fixture, preset, icons);
             let golden = golden_dir.join(format!("{name}--{preset}--{icons}.txt"));
-            // An internal error row would otherwise be baked in by UPDATE_GOLDEN.
-            if actual.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
+            // An internal error row would otherwise be baked in by UPDATE_GOLDEN;
+            // the guard looks past any escape sequence a row may start with.
+            let plain = garnish::ansi::strip_ansi(&actual);
+            if plain.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
             {
                 return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
             }

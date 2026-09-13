@@ -225,6 +225,13 @@ None of them needs network access from garnish itself; they drive the
   unit of `statusLine.padding`. garnish subtracts the 4 by itself; if you set
   `statusLine.padding` in `settings.json`, set `padding` in the config to
   twice that value.
+- **The line looks faint**: Claude Code draws every status line row dim,
+  and nothing a command prints can undo it; `garnish preview` draws its
+  rows the same way, so pick brighter roles under `[colors]` if it reads
+  too faint there.
+- **Nothing moves**: `garnish doctor` reports whether `refreshInterval` is
+  set and whether Claude Code's *Reduce motion* setting is freezing the
+  animations (`animate = true` in the config overrides it).
 
 More in the guide's [troubleshooting section](docs/guide.md#7-troubleshooting).
 

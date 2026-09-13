@@ -52,6 +52,8 @@ empty_cfg="$work/empty.toml"
 
 export GARNISH_NOW=1738425600 GARNISH_NO_SPAWN=1 COLUMNS=120 HOME="$work"
 export GARNISH_CACHE_DIR="$cache"
+# No managed settings file: the gate measures garnish, not the machine's.
+export GARNISH_MANAGED_SETTINGS=
 
 # Seed the cache with a real refresh so warm ticks read entries within TTL.
 "$BIN" --config "$empty_cfg" refresh --all --session sess-bench --cwd "$repo" >/dev/null

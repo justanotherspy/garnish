@@ -321,13 +321,18 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - Every time read goes through `time::now()`. Every path goes through
   `paths::*`. Every env hook is documented in `SPEC.md` § Test hooks:
   `GARNISH_NOW`, `GARNISH_CACHE_DIR`, `GARNISH_CONFIG`, `GARNISH_NO_SPAWN`,
-  `GARNISH_COLUMNS`, `GARNISH_DEBUG`.
+  `GARNISH_COLUMNS`, `GARNISH_DEBUG`, `GARNISH_ANIMATE`,
+  `GARNISH_MANAGED_SETTINGS`; `doctor` lists every one that is set.
 - Fixtures: `tests/fixtures/payloads/*.json`, `tests/fixtures/configs/*.toml`;
   golden renders in `tests/golden/`. Payload goldens (`tests/golden.rs`) vary
   fixture × preset × icon set; config goldens (`tests/config_golden.rs`) render
-  one config file per `# fixture/columns/now/icons/env` header, one golden per
+  one config file per `# fixture/columns/now/icons/color/env` header, one golden per
   `# now:` instant, so a clock-driven key is pinned at two instants and a
-  test hook can be set per file. Tests that touch the cache dir or PATH
+  test hook can be set per file (`$ROOT` in a `# env:` value is the
+  repository root, which is how `HOME` points at a settings fixture under
+  `tests/fixtures/settings/`); `# color: always` renders one with colour
+  on (the row-start guards of both suites strip escape sequences first;
+  `colour-on` is the one such golden). Tests that touch the cache dir or PATH
   shims are named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
   serially (`.config/nextest.toml`). A test that must kill a process group
   (the tick's, to prove the worker outlives it) spawns the tick with
@@ -343,7 +348,7 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `bench/run.sh` enforces it. If a change costs more than 0.2 ms, justify it in
   the commit message.
 
-## Claude Code facts we depend on (verified 2026-09-05, v2.1.261)
+## Claude Code facts we depend on (verified 2026-09-05 on 2.1.261, re-read 2026-09-12 on 2.1.270)
 
 - Payload fields and absence rules: see `SPEC.md` § Payload. `rate_limits`
   present ⇒ subscription; absent ⇒ show `cost`.
@@ -351,7 +356,35 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   debounces at 300 ms; `refreshInterval` minimum is 1 s.
 - Autocompact fires at `effective_window − 13_000` tokens
   (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers it). Constant observed in the
-  2.1.260 binary; configurable as `modules.context.compact_buffer_tokens`.
+  2.1.260 binary and unchanged in 2.1.261 and 2.1.270 (`let r=e-13000` in
+  the threshold function next to `testPctOverride`); configurable as
+  `modules.context.compact_buffer_tokens`.
+- **Every row is drawn dim, and nothing garnish prints can undo it**
+  (2.1.261 and 2.1.270). The status line component renders each row as
+  `<Text dimColor wrap="truncate">` around a child that parses the row's
+  escape sequences into per-piece style props and re-emits them; the Ink
+  fork merges the parent's `dim` into every piece (the text-tree walk
+  `h=n.textStyles?{...s,...n.textStyles}:s`) and a piece can only add
+  styles, so a reset (`ESC[0m`) is parsed away. `preview` therefore paints
+  every segment faint too (`Painter.dim`, decided 2026-09-13) so that it
+  shows the screen's intensity; the tick never does (the harness adds it,
+  and the goldens pin the tick's bytes). SPEC § 2.1 records why the
+  FUTURE-SPEC A1 prefix was dropped. To re-verify after an upgrade:
+  `grep -a -o` the binary (a Bun
+  executable holding minified JS) for `dimColor:!0,wrap:"truncate",children:e(`
+  next to the function that splits the stdout on newlines and carries the
+  previous rows' escape sequences onto the next row; follow its child to a
+  `memo` over a function destructuring `children`, `dimColor`, `italic`,
+  `wrap` that feeds the text to a tokenizer (`.feed(`) and collects
+  `{text, props}` pieces; then find the `textStyles` merge in the Ink
+  core. The 2.1.261 binary is the `@anthropic-ai/claude-code-linux-x64`
+  npm package of that version (`npm pack`), handy for a before/after.
+- `LINES` is the full terminal height (2.1.270: the hook runner copies
+  `process.stdout.rows` next to `columns`), and the status line component
+  draws every row of the output with no cap of its own (`lines.map(…)`
+  into a column) inside a footer column with `flexShrink: 1`. What the
+  screen does when the status line is taller than the terminal allows is
+  unverified (PLAN § Backlog).
 - `COLUMNS`/`LINES` are `process.stdout.columns`/`rows` (the full terminal);
   OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
   ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is
@@ -405,6 +438,21 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - `refresh = 0` is only legal for payload-only modules; config validation
   rejects it for cached ones.
 - GC compares file mtimes with the wall clock, not `GARNISH_NOW`.
-- Docs and goldens render with `Clock::fixed()`: no git discovery, no
-  settings env, no cache. Tests that run the binary must set
-  `GARNISH_CACHE_DIR` and `GARNISH_NO_SPAWN` and clear `CLAUDE_*`/`DISABLE_*`.
+- Docs and in-process tests render with `Clock::fixed()`: no git
+  discovery, no settings env, no settings files (`Clock.settings = false`,
+  `Clock.managed = None`), no cache. On the render path the settings chain
+  is read through `Ctx::settings()` alone, once per tick and only when
+  something needs it (the context module's marker, `prefersReducedMotion`
+  when `animate` is unset with the session switch on); `config show` and
+  `doctor` read the chain of the current directory on their own. Tests
+  that run the binary must set `GARNISH_CACHE_DIR`, `GARNISH_NO_SPAWN` and
+  `GARNISH_MANAGED_SETTINGS=` (empty: no managed settings file, whatever
+  the machine has) and clear `CLAUDE_*`/`DISABLE_*`/`GARNISH_ANIMATE`, and
+  `tests/cli.rs` runs the binary in the test's own directory so the
+  checkout's `.claude/` never leaks into a test (a unit test that must not
+  see the managed file passes `managed: None` or a chain without it).
+- Every file a command rewrites goes through `install::replace_file` (a
+  never-clobbered backup next to the target, a temp file in the same
+  directory, `rename`), and a file that does not parse is refused before
+  that (`install::merge` for JSON, `config::syntax_error` for TOML) with
+  one stderr line and `Quiet` (SPEC § 5).

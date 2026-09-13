@@ -2,7 +2,8 @@
 
 Status: approved 2026-09-04 (`v0.1.0` the same day, `v0.2.0` on
 2026-09-06); revised 2026-09-12 with the layout model (§ 4.3), the
-interactive setup (§ 14) and the Phase 19–20 keys. Owner: Daniel Schwartz.
+interactive setup (§ 14) and the Phase 19–20 keys, and the same day with
+what Phase 19 found in the harness (§ 2.1). Owner: Daniel Schwartz.
 Builder: Claude. This document is the target design of the whole system;
 when the design changes, it changes here first, with the reason
 (`CLAUDE.md` § Phase protocol). Everything without a "target state" mark
@@ -86,18 +87,43 @@ colour codes around the spaces keep it (verified in the 2.1.263 binary:
 no ANSI strip before the trim). `preview --color never` shows the row the
 screen drops; § 4.1 `blank = true` keeps it in both cases.
 
-**Every row is drawn dim by the harness** (target state; PLAN Phase 19).
-The 2.1.261 binary renders each status line row as `<Text dimColor
-wrap="truncate">`, so the whole row sits inside SGR 2 and anything garnish
-leaves unpainted (the first plain segment, separators, frame glyphs) shows
-at reduced intensity on screen while `preview` shows it at full intensity.
-garnish prefixes every row with `ESC[0m` when colour is on, so the row
-renders as `preview` shows it; a golden pins the prefix. Phase 19 confirms
-the wrapper on screen first and records the fact in `CLAUDE.md` (from
-FUTURE-SPEC § 7.1, A1); the goldens render with `--color never`, so a
-colour-on golden mode (§ 9) is what pins it. A side effect worth stating: with colour on, every
-row then carries a non-whitespace byte, so the harness's trim keeps every
-configured row, and `blank` (§ 4.1) matters only with colour off.
+**Every row is drawn dim by the harness, and nothing in the output can
+undo it** (read in the 2.1.261 and 2.1.270 binaries on 2026-09-12, PLAN
+Phase 19). The status line component renders each row as `<Text dimColor
+wrap="truncate">` around a child that parses the row's escape sequences
+into per-piece style props (colour, bold, dim, italic, underline,
+strikethrough, inverse, an OSC 8 link) and re-emits them through Ink; the
+parent's `dim` is merged into every piece's styles, and a piece can add a
+style but never clear one (a reset, `ESC[0m`, only clears the styles the
+parser tracks for the text after it). So the whole row, garnish's colours
+included, shows at reduced intensity on screen. **`preview` and the
+`setup` pane (§ 14) draw their rows the same way** (decided 2026-09-13):
+the painter folds SGR 2 into every segment it paints (`Painter.dim`; the
+pane's ratatui twin sets the `DIM` modifier on every span), so what you
+see there is what the screen shows, colour for colour, and a theme is
+judged at the intensity it will have. `--color never` stays plain, and
+the tick never adds the dim itself: the harness does, and the bytes of a
+tick are what the goldens pin. FUTURE-SPEC § 7.1's A1 (a leading
+`ESC[0m` on every row) assumed the raw bytes reached the terminal inside
+SGR 2 and was dropped when Phase 19 read the component: the prefix would
+be parsed away in every supported version. What remains is the fact, in
+`CLAUDE.md` with how to re-verify it and in the guide's troubleshooting.
+The harness's trim keeps every row that carries a non-whitespace
+byte, so with colour on the painter's escape sequences keep a filled
+spacer, and `blank` (§ 4.1) matters only with colour off or for a row
+that is empty in both modes.
+
+**Height.** `LINES` in the script's environment is the whole terminal's
+row count (2.1.270: the hook runner copies `process.stdout.rows` next to
+`columns`), and the status line component draws every row of the output,
+one `<Text>` per row in a column with no cap of its own, inside a footer
+column that may shrink (`flexShrink: 1`). Whether a tall status line
+squeezes the transcript or scrolls the screen is decided above that
+component and was not verified on screen (the Phase 19 session had no
+interactive terminal; the on-screen check stays in PLAN § Backlog), so
+the § 14 picker states a preset's row count and warns on width only, and
+a multi-line row (§ 4.3) gets no height cap of its own until the rule is
+known.
 
 ### 2.2 Payload (stdin JSON)
 
@@ -140,8 +166,9 @@ API key/gateway (show `cost`).
 
 ### 2.3 Autocompact threshold (approximation)
 
-Not in the payload. From the 2.1.260 binary:
-`threshold = effective_window − 13_000`, or
+Not in the payload. From the 2.1.260 binary (unchanged in 2.1.261 and
+2.1.270, re-read 2026-09-12: `window − 13000`, lowered by the percentage
+override): `threshold = effective_window − 13_000`, or
 `min(floor(window × pct / 100), window − 13_000)` when
 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is set. `effective_window =
 min(context_window_size, configured)` where `configured` comes from
@@ -383,7 +410,7 @@ hide_empty_lines = true   # drop a line whose modules all rendered nothing; `mod
 overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider than the box (§ 4.1)
 ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
 ticker_gap = "   "        # text between the end and the wrapped-around start
-animate = true            # master switch for every animation; false freezes them at frame 0 and cuts a ticker line with … (§ 4.2)
+# animate = true          # master switch for every animation; false freezes them at frame 0 and cuts a ticker line with …; unset, follows Claude Code's prefersReducedMotion (§ 4.2)
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print; fixed by default with overflow = "ticker", and each timer module has its own (§ 4.1)
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
@@ -502,9 +529,8 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   caps) a spacer is whitespace only; with colour off (`color = "never"`,
   `NO_COLOR`) Claude Code strips it (§ 2.1), so it shows in `preview` but
   not in the status line, while with colour on the rule's colour codes keep
-  it (and, once the § 2.1 row prefix of Phase 19 lands, every row's
-  leading reset does, so with colour on no configured row is ever
-  dropped). `blank = true` on the spacer (decided 2026-09-06; off by default so
+  it (an unframed spacer with `fill = false` is an empty row in both
+  modes and needs `blank`). `blank = true` on the spacer (decided 2026-09-06; off by default so
   the harness's own rule stands until the user opts in) keeps it on screen
   either way: a row that would be whitespace only gets one invisible cell,
   the braille blank U+2800, which is not whitespace to the harness's `trim`
@@ -579,7 +605,7 @@ The cadence is whatever the harness ticks at (`refreshInterval`, minimum
 1 s); `step` below 1 slows an animation down (0.5 = every second tick).
 
 ```toml
-animate = true            # master switch; false freezes every animation at frame 0 (a ticker line is cut with … instead)
+# animate = true          # master switch; false freezes every animation at frame 0 (a ticker line is cut with … instead); unset, follows Claude Code's prefersReducedMotion
 
 [frame]
 fill_pattern   = "·  "    # repeated across the rule instead of fill_char
@@ -631,15 +657,26 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
 - **Accessibility.** `animate = false` (or `GARNISH_ANIMATE=0` for a
   session) freezes everything at frame 0 and cuts a ticker line with `…`;
   the guide recommends it for screen readers and for recordings.
-  **Reduced motion** (target state; PLAN Phase 19; from FUTURE-SPEC § 8.4,
-  N6): when the Claude settings chain of § 2.3 (already read every tick for
-  the autocompact keys) resolves `prefersReducedMotion` to `true`, garnish
-  behaves as if `animate = false` unless the config sets `animate`
-  explicitly; the harness honours the same key for its own spinners, so
-  the two stay in step. Precedence, strongest first: `GARNISH_ANIMATE=0`
-  (always off), an explicit `animate` in the config, `prefersReducedMotion`
-  in the settings, the default (`true`). `config show` prints the
-  effective value.
+  **Reduced motion** (PLAN Phase 19; from FUTURE-SPEC § 8.4, N6): when
+  the Claude settings chain of § 2.3 (the same files, in the same order,
+  the first file that sets the key winning) resolves `prefersReducedMotion`
+  to `true`, garnish behaves as if `animate = false` unless the config
+  sets `animate` explicitly; the harness honours the same key for its own
+  spinners, so the two stay in step. Precedence, strongest first:
+  `GARNISH_ANIMATE=0` (always off), an explicit `animate` in the config,
+  `prefersReducedMotion` in the settings, the default (`true`). The chain
+  is read only when the answer depends on it (no explicit key, the
+  session switch on), once per tick (the context module shares the read),
+  and never under the pinned clock of the docs and the in-process tests;
+  the goldens run the binary and so read the chain like a real tick, with
+  `GARNISH_MANAGED_SETTINGS` (§ 9) set to nothing so that no machine's
+  managed file reaches them, exactly as the autocompact keys are read. A
+  settings file is read up to 1 MiB and skipped past
+  that, like one that does not parse (§ 5). `config show` prints the value
+  the file or the settings decide for the current directory (the session
+  switch is not part of a config and stays out of it); `config init`
+  writes the key as a comment, like `durations`, so the setting keeps
+  deciding after `init`.
 
 ### 4.3 Layout: rows, columns and boxes (target state; PLAN Phase 21)
 
@@ -971,14 +1008,18 @@ without an error report.
   errors carry the TOML path, syntax errors the line.)
 - malformed stdin → `⚠ garnish: bad payload`;
 - internal error → `⚠ garnish: <msg>`.
-- **A file that fails to parse is never rewritten by any command** (target
-  state; PLAN Phase 19; from FUTURE-SPEC § 12.1 and § 13.4). `install`,
-  `config init --force` and `setup` (§ 14) refuse to touch a
-  `settings.json` or `garnish.toml` that does not parse, name the problem
-  and the file, and exit 1 quietly; the only way past is fixing or moving
-  the file by hand. A file that parses is edited through a temp file and
-  `rename`, with the backup rule `install` already has (a timestamped copy
-  that is never overwritten), which `setup` shares.
+- **A file that fails to parse is never rewritten by any command** (PLAN
+  Phase 19 for `install` and `config init --force`, Phase 22 for `setup`;
+  from FUTURE-SPEC § 12.1 and § 13.4). `install`, `config init --force`
+  and `setup` (§ 14) refuse to touch a `settings.json` that is not a JSON
+  object or a `garnish.toml` with a TOML syntax error (a file with bad
+  values parses and is replaced), name the problem and the file on one
+  stderr line, and exit 1 quietly, a dry run included; the only way past
+  is fixing or moving the file by hand. A file that parses is replaced
+  through one function (`install::replace_file`): through a symlink,
+  keeping the old file's permissions, after a timestamped backup next to
+  it that is never overwritten, via a temp file in the same directory and
+  a `rename`; `config init` names the backup it kept.
 - **Nothing but text reaches a row.** Every string that becomes part of a
   row is reduced to plain text: escape sequences (CSI, OSC, and the string
   sequences DCS/SOS/PM/APC with their payloads), control characters and the
@@ -1004,7 +1045,10 @@ without an error report.
   the generated reference prints it in the type column (`integer ≤ 1024`,
   `string ≤ 4096 chars`); `ticker_gap` (top-level) and `label`/`prefix`/
   `suffix` (common to every module) are checked by hand against the same
-  constant. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
+  constant. A Claude settings file of the § 2.3 chain (which a cloned
+  repository can contribute to) is read up to 1 MiB and skipped past
+  that; `doctor` shows a `statusLine.command` from any of them as plain
+  text, cut to 200 characters. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
   is no default config or settings location: `install`, `config init`,
   `config path` and `skills install` refuse with a one-line note naming the
   flag to pass, rather than writing into the current directory. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
@@ -1070,11 +1114,11 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). Target state (§ 14): the bare `garnish` with a terminal on stdin prints one line pointing at `garnish setup` and exits 0 instead of waiting; the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. Target state (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5): it also reports the settings keys that change what the line can show (`statusLine.refreshInterval`, suggesting `1` when `clock`, a countdown or an animation is configured; `statusLine.hideVimModeIndicator`, suggesting `true` when the `vim` module is on so the mode is not shown twice; `disableAllHooks`; `prefersReducedMotion`) and whether the settings file parses |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command) and `prefersReducedMotion` (with how the config's `animate` interacts) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
-| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins (target state, PLAN Phase 19: `--force` keeps the previous file under `install`'s backup rule, § 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config |
+| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
-| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
+| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain) |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
 | `garnish presets` | list the gallery presets (§ 12): name, summary, declared width, requirement |
@@ -1126,7 +1170,17 @@ per-module render cost.
   one-module-per-line (21 rows with `hide_empty_lines = false`) and
   all-on-one-line (one row, cut with `…`) → no panic, correct line count,
   width ≤ `COLUMNS − 4` (§ 2.1); golden files under `tests/golden/`
-  (`UPDATE_GOLDEN=1` regenerates).
+  (`UPDATE_GOLDEN=1` regenerates). The goldens render with `--color
+  never` except where a config fixture's `# color:` header says
+  otherwise: `colour-on` pins the painter's escape sequences (with the
+  faint `preview` folds into every segment, § 2.1) and the OSC 8 link
+  (Phase 20's link goldens and Phase 22's snapshots use the same mode),
+  and the row-start guards of both suites look past escape sequences. A
+  `# env:` value may name the repository root as `$ROOT`, which is how
+  `reduced-motion` points `HOME` at a settings fixture. Every test that
+  runs the binary sets `GARNISH_MANAGED_SETTINGS` to nothing, so a
+  managed settings file on the machine running `cargo test` never reaches
+  a golden; one CLI test points the hook at a fixture instead.
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.
 - **Module matrix from the schema** (target state; PLAN Phase 20; from
@@ -1167,6 +1221,7 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
+| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets |
 | `GARNISH_STDIN_TTY` | target state (§ 14): `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish`, so the pointer path is testable without a pty |
 
 ## 10. Documentation
@@ -1199,8 +1254,10 @@ per-module render cost.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
   small terminals. A multi-line row (§ 4.3) costs its height; whether the
-  harness caps the status line's height is Phase 19's verify item, and
-  until it is known the `setup` picker states a preset's row count.
+  harness caps the status line's height is an open backlog item (§ 2.1:
+  Phase 19 could read the binary only, which draws every row and caps
+  nothing itself), and until it is known the `setup` picker states a
+  preset's row count.
 
 ## 12. Presets gallery (PLAN Phase 17, shipped in v0.2.0)
 
@@ -1301,8 +1358,8 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   width and `needs` line, and a warning when the terminal is narrower than
   the preset's declared width (the `…` cut is shown as it would be on
   screen, not hidden) or shorter than the harness allows for the preset's
-  row count (the rule Phase 19 verifies; until then the picker states the
-  row count). `Enter` applies it: the file is written with the
+  row count (a rule still to be verified on screen, PLAN § Backlog; until
+  then the picker states the row count). `Enter` applies it: the file is written with the
   previous one kept by `install`'s backup rule (§ 5), and the install screen follows
   if the settings file has no `statusLine` yet. `e` opens the highlighted
   preset in the builder instead of applying it.
@@ -1406,8 +1463,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   second painter target in `ansi.rs` that turns the same segments into
   ratatui spans (no new crate); a unit test paints the rows both ways and
   checks the cell text and the styles agree, which is the "what you see
-  is what the status line prints" guarantee, the § 2.1 dim reset
-  included.
+  is what the status line prints" guarantee. The pane dims every row as
+  the harness does (§ 2.1: the `DIM` modifier on every span, the twin of
+  `Painter.dim`), so it also shows the intensity the screen will have.
 - **Saving.** Edits live in memory as a resolved config, and `s` writes
   it the way `config show` prints it (with the § 5 backup), so a
   hand-written file's comments and ordering do not survive a save; the

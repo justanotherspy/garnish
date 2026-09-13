@@ -68,7 +68,14 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         out,
         "Master switch for every animation (spinner, scrolling text, rule pattern, separator and icon frames); false freezes them at frame 0 and cuts a ticker line with …",
     );
-    let _ = writeln!(out, "animate = {}", cfg.animate);
+    c(
+        out,
+        "Unset, animations follow Claude Code's prefersReducedMotion setting; GARNISH_ANIMATE=0 freezes a session either way",
+    );
+    // Left as a comment in an annotated file so the settings rule keeps
+    // working after `config init`; `show` prints the value in effect.
+    let prefix = if annotated { "# " } else { "" };
+    let _ = writeln!(out, "{prefix}animate = {}", cfg.animate.unwrap_or(true));
     c(
         out,
         "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m); unset, it is fixed under overflow = \"ticker\" and compact otherwise, and each timer module can pin its own",
@@ -684,7 +691,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick (must be > 0; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. `GARNISH_ANIMATE=0` does the same for one session; recommended for screen readers and recordings. |"
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick (must be > 0; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |"
     );
     let _ = writeln!(
         o,
@@ -1000,7 +1007,11 @@ mod tests {
         assert!(text.contains("first = \">>\""), "{text}");
         let (again, errs) = config::parse(&text, &SCHEMAS);
         assert!(errs.is_empty(), "{errs:?}\n{text}");
-        assert_eq!(again, cfg);
+        // `show` prints the animation switch in effect, so an unset one
+        // comes back explicit (SPEC § 4.2); everything else is identical.
+        let mut expected = cfg.clone();
+        expected.animate = Some(cfg.animate.unwrap_or(true));
+        assert_eq!(again, expected);
         let model = again.modules.get("model").unwrap();
         assert_eq!(model.color("name"), cfg.theme.role(Role::Danger));
         assert!(!model.hide_when_empty);
@@ -1074,12 +1085,17 @@ mod tests {
         );
         let (again, errs) = config::parse(&shown, &SCHEMAS);
         assert_eq!(errs, Vec::new(), "{shown}");
-        assert_eq!(again, cfg);
+        let mut expected = cfg.clone();
+        expected.animate = Some(cfg.animate.unwrap_or(true));
+        assert_eq!(again, expected);
         assert_eq!(config_toml(&again, false), shown, "show is idempotent");
         // The annotated form carries the tables too and still parses.
         let (from_init, errs) = config::parse(&config_toml(&cfg, true), &SCHEMAS);
         assert_eq!(errs, Vec::new());
         assert_eq!(from_init.texts.len(), 2);
+        // `init` leaves `animate` to Claude Code's prefersReducedMotion (SPEC § 4.2).
+        assert_eq!(from_init.animate, None);
+        assert!(config_toml(&cfg, true).contains("\n# animate = true\n"));
     }
 
     #[test]

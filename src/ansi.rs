@@ -484,11 +484,16 @@ pub struct Painter {
     pub mode: ColorMode,
     /// Emit OSC 8 hyperlinks.
     pub links: bool,
+    /// Fold SGR 2 (faint) into every segment, the way Claude Code draws
+    /// every status line row on screen (SPEC § 2.1). `preview` sets it so
+    /// that it shows the intensity the screen will have; the tick never
+    /// does, the harness adds it. Nothing under [`ColorMode::Never`].
+    pub dim: bool,
 }
 
 impl Painter {
     /// Painter that emits nothing but text.
-    pub const PLAIN: Self = Self { mode: ColorMode::Never, links: false };
+    pub const PLAIN: Self = Self { mode: ColorMode::Never, links: false, dim: false };
 
     /// Render segments to a single line (no trailing newline).
     #[must_use]
@@ -498,7 +503,8 @@ impl Painter {
             if seg.text.is_empty() {
                 continue;
             }
-            let sgr = seg.style.sgr(self.mode);
+            let style = if self.dim { seg.style.dimmed() } else { seg.style };
+            let sgr = style.sgr(self.mode);
             let link = seg.link.as_deref().filter(|u| self.links && safe_link(u));
             if let Some(url) = link {
                 let _ = write!(out, "\x1b]8;;{url}\x1b\\");
@@ -775,18 +781,36 @@ mod tests {
     fn painter_emits_sgr_and_osc8() {
         let seg =
             Segment::styled("PR", Style::fg(Color::Rgb(1, 2, 3)).bolded()).with_link("https://x");
-        let painter = Painter { mode: ColorMode::TrueColor, links: true };
+        let painter = Painter { mode: ColorMode::TrueColor, links: true, dim: false };
         let s = painter.paint(std::slice::from_ref(&seg));
         assert_eq!(s, "\x1b]8;;https://x\x1b\\\x1b[1;38;2;1;2;3mPR\x1b[0m\x1b]8;;\x1b\\");
         assert_eq!(strip_ansi(&s), "PR");
-        let p256 = Painter { mode: ColorMode::Ansi256, links: false };
+        let p256 = Painter { mode: ColorMode::Ansi256, links: false, dim: false };
         assert_eq!(p256.paint(&[seg]), "\x1b[1;38;5;16mPR\x1b[0m");
         assert_eq!(Painter::PLAIN.paint(&[Segment::styled("x", Style::PLAIN.dimmed())]), "x");
     }
 
+    /// SPEC § 2.1: `preview` paints every segment faint, plain runs
+    /// included, so it shows what the screen shows; a segment garnish
+    /// already dims is dimmed once; the tick's painter adds nothing; colour
+    /// off stays plain.
+    #[test]
+    fn painter_dim_folds_faint_into_every_segment() {
+        let screen = Painter { mode: ColorMode::Ansi256, links: false, dim: true };
+        let row = [
+            Segment::plain("a b"),
+            Segment::styled("x", Style::fg(Color::Rgb(1, 2, 3)).bolded()),
+            Segment::styled("y", Style::PLAIN.dimmed()),
+        ];
+        assert_eq!(screen.paint(&row), "\x1b[2ma b\x1b[0m\x1b[1;2;38;5;16mx\x1b[0m\x1b[2my\x1b[0m");
+        let tick = Painter { dim: false, ..screen };
+        assert_eq!(tick.paint(&row), "a b\x1b[1;38;5;16mx\x1b[0m\x1b[2my\x1b[0m");
+        assert_eq!(Painter { dim: true, ..Painter::PLAIN }.paint(&row), "a bxy");
+    }
+
     #[test]
     fn painter_drops_unsafe_links() {
-        let painter = Painter { mode: ColorMode::Never, links: true };
+        let painter = Painter { mode: ColorMode::Never, links: true, dim: false };
         let paint = |url: &str| painter.paint(&[Segment::plain("#42").with_link(url)]);
         assert_eq!(
             paint("https://github.com/o/r/pull/42"),

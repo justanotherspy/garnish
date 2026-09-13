@@ -90,7 +90,7 @@ impl RenderArgs {
 pub enum Command {
     /// Render the status line from the JSON payload on stdin (the default).
     Render,
-    /// Render a payload fixture file (or every fixture in a directory).
+    /// Render a payload fixture file (or every fixture in a directory), drawn faint as Claude Code draws the status line.
     Preview {
         /// Fixture file, or a directory of `*.json` fixtures.
         path: PathBuf,
@@ -194,7 +194,8 @@ pub enum ConfigAction {
     Show,
     /// Write a fully annotated default config file.
     Init {
-        /// Overwrite an existing file.
+        /// Replace an existing file, keeping a timestamped backup next to
+        /// it; a file that does not parse is refused.
         #[arg(long)]
         force: bool,
         /// A built-in preset (default | minimal | full | compact) or a gallery
@@ -262,6 +263,7 @@ fn run_command() -> Result<()> {
                 overlay: Overlay::default(),
                 columns: env_columns(),
                 no_color: std::env::var_os("NO_COLOR").is_some(),
+                dim: false,
             };
             let out = render::render(&req);
             let mut stdout = std::io::stdout().lock();
@@ -432,7 +434,18 @@ fn install(
         eprintln!("warning: `garnish` is not on PATH; run `make install` first or use --absolute");
     }
     let existing = inst::read_existing(&plan.settings).map_err(|e| eyre!(e))?;
-    let merged = inst::merge(existing.as_deref().unwrap_or(""), &plan).map_err(|e| eyre!(e))?;
+    let merged = match inst::merge(existing.as_deref().unwrap_or(""), &plan) {
+        Ok(merged) => merged,
+        Err(problem) => {
+            // A settings file that does not parse is never rewritten (SPEC
+            // § 5): the file and the problem on one line, exit 1, no report.
+            eprintln!(
+                "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+                plan.settings.display()
+            );
+            return Err(Quiet.into());
+        }
+    };
     if dry_run {
         writeln!(stdout, "would write {}:", plan.settings.display())?;
         stdout.write_all(merged.as_bytes())?;
@@ -495,13 +508,10 @@ fn install_default_config(
     } else if dry_run {
         writeln!(stdout, "would write a default config to {}{seeded}", target.display())?;
     } else {
-        if let Some(dir) = target.parent() {
-            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        }
         let seed = config_padding.map_or_else(String::new, |p| format!("padding = {p}\n"));
         let (cfg, _) = config::parse(&seed, &SCHEMAS);
-        std::fs::write(&target, crate::docs::config_toml(&cfg, true))
-            .with_context(|| format!("writing {}", target.display()))?;
+        crate::install::replace_file(&target, &crate::docs::config_toml(&cfg, true), false)
+            .map_err(|e| eyre!(e))?;
         writeln!(stdout, "wrote default config to {}{seeded}", target.display())?;
     }
     Ok(())
@@ -557,6 +567,8 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
             overlay: overlay.clone(),
             columns,
             no_color: std::env::var_os("NO_COLOR").is_some(),
+            // Drawn as the screen draws it: every row faint (SPEC § 2.1).
+            dim: true,
         };
         stdout.write_all(render::render(&req).as_bytes())?;
     }
@@ -592,7 +604,20 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         }
         ConfigAction::Show => {
             let loaded = config::load(config_path, &SCHEMAS);
-            stdout.write_all(crate::docs::config_toml(&loaded.config, false).as_bytes())?;
+            let mut cfg = loaded.config;
+            // The animation switch in effect for this directory (SPEC
+            // § 4.2): the file, else Claude Code's prefersReducedMotion.
+            // The session variable stays out of it: `show` prints a config,
+            // and GARNISH_ANIMATE=0 belongs to a session, not a file.
+            cfg.animate = Some(cfg.animate.unwrap_or_else(|| {
+                let cwd = std::env::current_dir().ok();
+                let home = crate::claude_settings::home_dir();
+                !crate::claude_settings::reduced_motion(&crate::claude_settings::keys_for(
+                    cwd.as_deref(),
+                    home.as_deref(),
+                ))
+            }));
+            stdout.write_all(crate::docs::config_toml(&cfg, false).as_bytes())?;
         }
         ConfigAction::Init { force, preset } => {
             // A built-in name gets the annotated default file for that preset;
@@ -624,17 +649,33 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             let Some(target) = config_target(config_path) else {
                 return Err(no_home("--config <FILE>", "the config goes"));
             };
-            if target.exists() && !force {
+            let existed = target.exists();
+            if existed && !force {
                 eprintln!("{} exists; pass --force to overwrite", target.display());
                 return Err(Quiet.into());
             }
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("creating {}", dir.display()))?;
+            if existed {
+                // A file that does not parse is never rewritten (SPEC § 5):
+                // the only way past is fixing or moving it by hand. A file
+                // with bad values parses, and is replaced under its backup.
+                let current = std::fs::read_to_string(&target)
+                    .with_context(|| format!("reading {}", target.display()))?;
+                if let Some(problem) = config::syntax_error(&current) {
+                    eprintln!(
+                        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+                        target.display()
+                    );
+                    return Err(Quiet.into());
+                }
             }
-            std::fs::write(&target, text)
-                .with_context(|| format!("writing {}", target.display()))?;
-            writeln!(stdout, "wrote {}", target.display())?;
+            let backup =
+                crate::install::replace_file(&target, &text, existed).map_err(|e| eyre!(e))?;
+            match backup {
+                Some(b) => {
+                    writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?;
+                }
+                None => writeln!(stdout, "wrote {}", target.display())?,
+            }
         }
     }
     Ok(())

@@ -13,12 +13,15 @@
 //! | `columns` | terminal width (`--width`) | `100` |
 //! | `now` | comma-separated `GARNISH_NOW` instants, one golden each | `1738425600` |
 //! | `icons` | icon set override (`--icons`) | none |
-//! | `env` | `KEY=VALUE` added to the environment; repeatable | none |
+//! | `color` | colour mode (`--color`); `always` pins the painter's escape sequences and OSC 8 links | `never` |
+//! | `env` | `KEY=VALUE` added to the environment; repeatable; `$ROOT` in the value is the repository root | none |
 //! | `expect` | `config-warning` when the render is meant to end in a `⚠ config:` row | none |
 //!
 //! A render that carries `⚠ garnish:` (an internal error), or a `⚠ config:`
 //! row the header did not ask for, fails in both modes: `UPDATE_GOLDEN=1`
-//! must never bake a broken render into a golden.
+//! must never bake a broken render into a golden. The row-start guards look
+//! at the rows with their escape sequences stripped, so a colour-on golden
+//! is guarded like a plain one.
 
 // Integration tests are not `#[cfg(test)]` modules, so the clippy.toml test
 // allowances do not apply; panicking on setup failure is the right behaviour here.
@@ -27,13 +30,14 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use garnish::ansi::strip_ansi;
 use rayon::prelude::*;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-const HEADER_KEYS: [&str; 6] = ["fixture", "columns", "now", "icons", "env", "expect"];
+const HEADER_KEYS: [&str; 7] = ["fixture", "columns", "now", "icons", "color", "env", "expect"];
 
 /// The header lines of one fixture, validated: a comment that names a header
 /// key must be exactly `# key: value` with a non-empty value (a typo would
@@ -82,6 +86,8 @@ struct Case {
     fixture: PathBuf,
     columns: String,
     icons: Option<String>,
+    /// `--color`; `never` unless the header says otherwise.
+    color: String,
     now: String,
     env: Vec<(String, String)>,
     /// `# expect: config-warning`: the render ends in a `⚠ config:` row.
@@ -110,6 +116,7 @@ fn cases() -> Vec<Case> {
             .parse::<usize>()
             .unwrap_or_else(|_| panic!("{name}: `# columns:` must be an integer"));
         let icons = header.get("icons").map(str::to_owned);
+        let color = header.get("color").unwrap_or("never").to_owned();
         let env: Vec<(String, String)> = header
             .all("env")
             .iter()
@@ -117,7 +124,10 @@ fn cases() -> Vec<Case> {
                 let (k, v) = kv
                     .split_once('=')
                     .unwrap_or_else(|| panic!("{name}: `# env:` needs KEY=VALUE"));
-                (k.trim().to_owned(), v.trim().to_owned())
+                // A fixture may point a path-valued variable (`HOME`) at a
+                // directory under the repository.
+                let v = v.trim().replace("$ROOT", root().to_str().unwrap());
+                (k.trim().to_owned(), v)
             })
             .collect();
         let nows: Vec<&str> = header
@@ -136,6 +146,7 @@ fn cases() -> Vec<Case> {
                 fixture: fixture.clone(),
                 columns: columns.clone(),
                 icons: icons.clone(),
+                color: color.clone(),
                 now: now.to_owned(),
                 env: env.clone(),
                 expect_warning: header.get("expect") == Some("config-warning"),
@@ -152,7 +163,7 @@ fn render(case: &Case, cache: &Path) -> String {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
     cmd.current_dir(root())
         .args(["--config", &rel(&case.config), "preview", &rel(&case.fixture)])
-        .args(["--color", "never", "--width", &case.columns]);
+        .args(["--color", &case.color, "--width", &case.columns]);
     if let Some(icons) = &case.icons {
         cmd.args(["--icons", icons]);
     }
@@ -169,6 +180,8 @@ fn render(case: &Case, cache: &Path) -> String {
         // A developer running with animations off must not turn the ticker
         // goldens red; a fixture opts in through its own `# env:` line.
         .env_remove("GARNISH_ANIMATE")
+        // Nor a managed settings file on the machine (SPEC § 9).
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .stdin(Stdio::null());
     for (k, v) in &case.env {
         cmd.env(k, v);
@@ -194,13 +207,15 @@ fn config_goldens_match() {
             let actual = render(case, &cache);
             let golden = golden_dir.join(format!("config--{}--{}.txt", case.name, case.now));
             // Anchored at a row start (`⚠` or the ascii `!`), so a text module
-            // saying "config: x" cannot trip them.
-            if actual.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
+            // saying "config: x" cannot trip them; a colour-on row starts with
+            // the painter's escape sequence, so the guards look past them.
+            let plain = strip_ansi(&actual);
+            if plain.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
             {
                 return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
             }
             let warns =
-                actual.lines().any(|l| l.starts_with("⚠ config: ") || l.starts_with("! config: "));
+                plain.lines().any(|l| l.starts_with("⚠ config: ") || l.starts_with("! config: "));
             if warns != case.expect_warning {
                 return Some(format!(
                     "{}: {} a `⚠ config:` row (header says `# expect: {}`):\n{actual}",

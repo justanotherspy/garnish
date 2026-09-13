@@ -23,6 +23,9 @@ pub struct Request<'a> {
     pub columns: Option<usize>,
     /// `NO_COLOR` is set.
     pub no_color: bool,
+    /// Draw every row faint, as Claude Code draws the status line on screen
+    /// (`preview`, SPEC § 2.1); the tick leaves that to the harness.
+    pub dim: bool,
 }
 
 /// Render a full tick. Never fails and never prints nothing.
@@ -32,20 +35,22 @@ pub fn render(req: &Request<'_>) -> String {
         return "⚠ garnish: bad payload\n".to_owned();
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
-    render_loaded(&payload, &loaded, req.columns, req.no_color)
+    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim)
 }
 
-/// Render with an already loaded config (used by tests, previews and benches).
+/// Render with an already loaded config (used by tests, previews and
+/// benches). `dim` is [`Request::dim`].
 #[must_use]
 pub fn render_loaded(
     payload: &Payload,
     loaded: &Loaded,
     columns: Option<usize>,
     no_color: bool,
+    dim: bool,
 ) -> String {
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
-    let painter = Painter { mode, links: mode != ColorMode::Never };
+    let painter = Painter { mode, links: mode != ColorMode::Never, dim };
     let mut lines = render_lines(payload, config, columns);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
@@ -105,27 +110,39 @@ pub struct Clock {
     /// index and text-module offset at 0 and cuts a ticker line with the
     /// ellipsis (`GARNISH_ANIMATE=0`, SPEC § 4.2).
     pub animate: bool,
+    /// Whether Claude Code's settings chain may be read at all (the
+    /// autocompact keys of SPEC § 2.3, `prefersReducedMotion` of § 4.2).
+    /// Off for docs and goldens, which must not depend on the settings of
+    /// the machine rendering them.
+    pub settings: bool,
+    /// The organisation's managed settings file, first in the chain: the
+    /// platform path (or the `GARNISH_MANAGED_SETTINGS` hook's) for a real
+    /// run, `None` for a pinned one (and for tests that must not see the
+    /// machine's).
+    pub managed: Option<std::path::PathBuf>,
 }
 
 impl Clock {
-    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME`, `GARNISH_ANIMATE`
-    /// and the process environment.
+    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME`, `GARNISH_ANIMATE`,
+    /// `GARNISH_MANAGED_SETTINGS` and the process environment.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
             now: crate::time::now(),
             tz: crate::time::local_zone(),
-            home: std::env::var("HOME").ok().filter(|h| !h.is_empty()),
+            home: crate::claude_settings::home_dir().map(|h| h.display().to_string()),
             settings_env: crate::claude_settings::Env::from_process(),
             git: true,
             animate: crate::time::animate_from_env(),
+            settings: true,
+            managed: crate::claude_settings::managed_settings_path(),
         }
     }
 
     /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev`, no
-    /// auto-compaction overrides, no repository discovery and animations
-    /// frozen at frame 0 — what the generated docs use, so they come out
-    /// identical on every machine.
+    /// auto-compaction overrides, no repository discovery, no settings
+    /// files and animations frozen at frame 0 — what the generated docs
+    /// use, so they come out identical on every machine.
     #[must_use]
     pub fn fixed() -> Self {
         Self {
@@ -135,7 +152,22 @@ impl Clock {
             settings_env: crate::claude_settings::Env::default(),
             git: false,
             animate: false,
+            settings: false,
+            managed: None,
         }
+    }
+
+    /// The settings files a render of `payload` may read, highest
+    /// precedence first: the managed file, the chain of the directory Claude
+    /// Code was launched in, the home; none under a pinned clock.
+    #[must_use]
+    pub fn settings_files(&self, payload: &Payload) -> Vec<std::path::PathBuf> {
+        if !self.settings {
+            return Vec::new();
+        }
+        let project = payload.project_dir().map(Path::new);
+        let home = self.home.as_deref().map(Path::new);
+        crate::claude_settings::settings_files(self.managed.as_deref(), project, home)
     }
 }
 
@@ -159,7 +191,7 @@ pub fn render_lines_at(
 ) -> Vec<Vec<Segment>> {
     let width = config.width(columns);
     let cache = crate::cache::Cache::from_env();
-    let ctx = Ctx {
+    let mut ctx = Ctx {
         payload,
         theme: &config.theme,
         icons: config.icons,
@@ -172,9 +204,19 @@ pub fn render_lines_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
-        animate: clock.animate && config.animate,
+        animate: false,
         dirs: std::cell::OnceCell::new(),
+        settings_files: clock.settings_files(payload),
+        settings: std::cell::OnceCell::new(),
     };
+    // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
+    // `animate` decides, else Claude Code's prefersReducedMotion freezes,
+    // else animations run. The chain is read only when the answer depends
+    // on it, and once for the tick (the context module shares the keys).
+    ctx.animate = clock.animate
+        && config
+            .animate
+            .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
     let stale = stale_glyphs(config.icons);
     let layout = Layout {
         chars: config.frame.chars.clone(),
@@ -405,7 +447,7 @@ const fn stale_glyphs(icons: IconSet) -> (&'static str, &'static str) {
 /// Plain-text render (no escapes), for tests and docs.
 #[must_use]
 pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
-    strip_ansi(&render_loaded(payload, loaded, columns, true))
+    strip_ansi(&render_loaded(payload, loaded, columns, true, false))
 }
 
 /// Plain-text render of the configured lines with a pinned clock (docs).
@@ -541,7 +583,7 @@ mod tests {
         assert!(!json.contains('\x1b'), "escaped on the wire");
         let payload = Payload::parse(&json).unwrap();
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
-        let out = render_loaded(&payload, &loaded, Some(160), false);
+        let out = render_loaded(&payload, &loaded, Some(160), false, false);
         let plain = render_plain(&payload, &loaded, Some(160));
         assert_eq!(plain.lines().count(), loaded.config.lines.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
@@ -710,6 +752,82 @@ mod tests {
         assert!(frozen.contains(" │ ") && !frozen.contains(" ┃ "), "frozen at frame 0: {frozen}");
     }
 
+    /// SPEC § 4.2 reduced motion: with `animate` unset, Claude Code's
+    /// `prefersReducedMotion` freezes every animation; an explicit `animate`
+    /// wins over the setting, the session switch (`GARNISH_ANIMATE=0`) wins
+    /// over both, and a clock that may not read the settings chain (docs,
+    /// goldens) never sees the setting.
+    #[test]
+    fn reduced_motion_freezes_animations_unless_the_config_decides() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("proj");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(project.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let project_settings = project.join(".claude/settings.json");
+        std::fs::write(&project_settings, r#"{"prefersReducedMotion": true}"#).unwrap();
+        let path = format!(
+            "{}/tests/fixtures/payloads/subscription-full.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        json["workspace"]["project_dir"] = serde_json::json!(project.to_str().unwrap());
+        let payload = Payload::parse(&json.to_string()).unwrap();
+        // No managed file: the test must not see the machine's.
+        let clock = |animate: bool, settings: bool| Clock {
+            now: jiff::Timestamp::from_second(1_738_425_601).unwrap(),
+            home: Some(home.to_str().unwrap().to_owned()),
+            animate,
+            settings,
+            managed: None,
+            ..Clock::fixed()
+        };
+        // The docs and goldens render with the fixed clock: no settings file.
+        assert!(!Clock::fixed().settings && Clock::fixed().managed.is_none());
+        assert_eq!(Clock::fixed().settings_files(&payload), Vec::<std::path::PathBuf>::new());
+        assert_eq!(clock(true, true).settings_files(&payload).len(), 3, "local, project, user");
+        let cfg = |text: &str| {
+            let (config, errs) = config::parse(text, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            config
+        };
+        let base = "icons = \"unicode\"\noverflow = \"ticker\"\n[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"model\", \"effort\", \"context\", \"session\", \"api\", \"cache\", \"lines\"]\nright = [\"clock\"]\n";
+        // At 1738425601 the clock's spinner (in the right group, which a
+        // ticker never scrolls) is on frame 1 (`⠙`) when it turns and on
+        // `⠋` when frozen; frozen, the over-wide left group is cut with `…`
+        // instead of scrolled.
+        let render = |c: &Config, k: &Clock| strip_ansi(&render_plain_at(&payload, c, Some(50), k));
+        let frozen = |out: &str| out.contains("⠋ 16:00:01") && out.contains('…');
+        let moving = |out: &str| out.contains("⠙ 16:00:01") && !out.contains('…');
+        assert!(frozen(&render(&cfg(base), &clock(true, true))), "unset + setting: frozen");
+        assert!(
+            moving(&render(&cfg(&format!("animate = true\n{base}")), &clock(true, true))),
+            "an explicit key wins over the setting"
+        );
+        assert!(
+            frozen(&render(&cfg(&format!("animate = true\n{base}")), &clock(false, true))),
+            "the session switch wins over both"
+        );
+        assert!(
+            moving(&render(&cfg(base), &clock(true, false))),
+            "a clock without settings access never sees the setting"
+        );
+        // A managed file outranks the project's.
+        let managed = dir.path().join("managed.json");
+        std::fs::write(&managed, r#"{"prefersReducedMotion": false}"#).unwrap();
+        let with_managed = Clock { managed: Some(managed), ..clock(true, true) };
+        assert!(moving(&render(&cfg(base), &with_managed)), "the managed file wins");
+        // The user file is read when the project files do not decide.
+        std::fs::remove_file(&project_settings).unwrap();
+        assert!(moving(&render(&cfg(base), &clock(true, true))), "no file: on");
+        std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
+            .unwrap();
+        assert!(frozen(&render(&cfg(base), &clock(true, true))), "the user file counts");
+        std::fs::write(&project_settings, r#"{"prefersReducedMotion": false}"#).unwrap();
+        assert!(moving(&render(&cfg(base), &clock(true, true))), "the project file wins");
+    }
+
     /// A spacer takes whatever cap its position calls for: first, last or,
     /// alone, the single-line caps.
     #[test]
@@ -777,8 +895,11 @@ mod tests {
         let (config, _) =
             config::parse("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n", &SCHEMAS);
         let rows = render_lines_at(&payload, &config, Some(40), &Clock::fixed());
-        let painter =
-            crate::ansi::Painter { mode: crate::ansi::ColorMode::TrueColor, links: false };
+        let painter = crate::ansi::Painter {
+            mode: crate::ansi::ColorMode::TrueColor,
+            links: false,
+            dim: false,
+        };
         let bytes = painter.paint(rows.first().unwrap());
         assert!(bytes.contains('\u{1b}') && !bytes.trim().is_empty(), "{bytes:?}");
         // Two blank spacers around a module row: only the spacers change.

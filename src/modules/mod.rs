@@ -115,9 +115,23 @@ pub struct Ctx<'a> {
     pub animate: bool,
     /// The repository for the payload's directory, discovered at most once.
     pub dirs: std::cell::OnceCell<Option<crate::git::Dirs>>,
+    /// Claude Code's settings files this tick may read (SPEC § 2.3, § 4.2),
+    /// highest precedence first: the chain of the directory Claude Code was
+    /// launched in (not whatever subdirectory the session moved to) and the
+    /// home; empty for a pinned render, which reads no settings file.
+    pub settings_files: Vec<std::path::PathBuf>,
+    /// The keys of those files, read at most once per tick.
+    pub settings: std::cell::OnceCell<Vec<crate::claude_settings::FileKeys>>,
 }
 
 impl Ctx<'_> {
+    /// The keys of the settings chain, read on first use and shared by
+    /// every reader on the tick (the autocompact marker, reduced motion).
+    #[must_use]
+    pub fn settings(&self) -> &[crate::claude_settings::FileKeys] {
+        self.settings.get_or_init(|| crate::claude_settings::read_keys(&self.settings_files))
+    }
+
     /// The session id the payload reports (or a placeholder).
     #[must_use]
     pub fn session_id(&self) -> &str {

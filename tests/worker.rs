@@ -105,6 +105,7 @@ fn garnish(
         .env("COLUMNS", "120")
         .env("NO_COLOR", "1")
         .env("HOME", env.work.parent().unwrap())
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     for (k, v) in extra_env {
