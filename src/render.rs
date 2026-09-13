@@ -1316,6 +1316,13 @@ mod tests {
                         assert!(width <= max, "{label}: {width} cells > {max}: {line:?}");
                     }
                     let text = Painter::PLAIN.paint(line);
+                    if i == 0 && !lines.is_empty() && !was_cut {
+                        assert_eq!(
+                            Some(line),
+                            free.first(),
+                            "{label}: the cap changed an uncut module"
+                        );
+                    }
                     if was_cut && i == 0 && !lines.is_empty() {
                         assert!(
                             text.ends_with(&cut_mark),

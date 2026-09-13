@@ -1039,6 +1039,17 @@ fn check_line_ids(
     }
 }
 
+/// The common keys a `[modules.text.<name>]` table may not carry (SPEC
+/// § 3.7), each with why: reported and removed before the shared parser
+/// sees the table, and left out of the "expected one of" list for a text
+/// module so the message never recommends one of them.
+const TEXT_REJECTED_KEYS: [(&str, &str); 4] = [
+    ("refresh", "text modules render every tick; remove this key"),
+    ("preset", "text modules have no presets; remove this key"),
+    ("icons", "text modules have no icons; remove this table"),
+    ("max_width", "a text module's box is sized by `width`; remove this key"),
+];
+
 /// A text module name is a bare TOML key, so `text.<name>` is unambiguous on
 /// a line and `config show` can write `[modules.text.<name>]` back verbatim.
 fn is_bare_key(name: &str) -> bool {
@@ -1334,11 +1345,13 @@ fn bounded(spec: &OptSpec, value: Value) -> Result<Value, String> {
 }
 
 fn unknown_option_message(schema: &ModuleSchema) -> String {
+    let is_text = schema.id == crate::modules::text::SCHEMA.id;
     format!(
         "unknown option; expected one of {}",
         COMMON_KEYS
             .iter()
             .copied()
+            .filter(|k| !is_text || !TEXT_REJECTED_KEYS.iter().any(|(r, _)| r == k))
             .chain(std::iter::once("colors"))
             .chain(schema.opts.iter().map(|o| o.key))
             .collect::<Vec<_>>()
@@ -2191,9 +2204,17 @@ x = 1
         assert_eq!(c.modules.get("model").unwrap().max_width, 0, "the default stands in");
         assert_eq!(c.modules.get("pr").unwrap().max_width, 0);
         assert_eq!(c.texts.get("a").unwrap().max_width, 0);
-        // An unknown key names it among the common keys.
+        // An unknown key names it among the common keys, except on a text
+        // module, where the message never recommends a key it would reject.
         let (_, errs) = parse("[modules.model]\nmax_widht = 1\n", &crate::modules::SCHEMAS);
         assert!(errs[0].message.contains("max_width"), "{errs:?}");
+        let (_, errs) =
+            parse("[modules.text.a]\ntext = \"x\"\nmax_widht = 1\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        for rejected in ["max_width", "preset", "refresh", "icons"] {
+            assert!(!errs[0].message.contains(rejected), "{rejected}: {}", errs[0].message);
+        }
+        assert!(errs[0].message.contains("hide_when_empty, colors, text, width"), "{errs:?}");
         // The common strings are still reduced to plain text on the way in.
         let (c, errs) = parse(
             "[modules.model]\nlabel = \"a\\u001b[31mb\"\nhide_when_empty = false\n",
