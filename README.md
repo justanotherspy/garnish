@@ -232,6 +232,10 @@ None of them needs network access from garnish itself; they drive the
 - **Nothing moves**: `garnish doctor` reports whether `refreshInterval` is
   set and whether Claude Code's *Reduce motion* setting is freezing the
   animations (`animate = true` in the config overrides it).
+- **The bottom rows are missing**: Claude Code's fullscreen renderer
+  (`/tui`) gives the prompt box and the status line together at most half
+  the terminal's rows and cuts a taller status line from the bottom; keep
+  the line count under `LINES / 2 − 5` or use the classic renderer.
 
 More in the guide's [troubleshooting section](docs/guide.md#7-troubleshooting).
 

@@ -380,11 +380,23 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   core. The 2.1.261 binary is the `@anthropic-ai/claude-code-linux-x64`
   npm package of that version (`npm pack`), handy for a before/after.
 - `LINES` is the full terminal height (2.1.270: the hook runner copies
-  `process.stdout.rows` next to `columns`), and the status line component
-  draws every row of the output with no cap of its own (`lines.map(…)`
-  into a column) inside a footer column with `flexShrink: 1`. What the
-  screen does when the status line is taller than the terminal allows is
-  unverified (PLAN § Backlog).
+  `process.stdout.rows` next to `columns`), the status line component
+  draws every row with no cap of its own, and nothing up to the REPL root
+  bounds the footer's height. What a tall status line does is the
+  renderer's business (SPEC § 2.1, read 2026-09-13, not watched on a
+  screen): the classic inline renderer lays the frame out with a width
+  constraint only (`calculateYogaLayout` passes just the width) and lets
+  the terminal scroll the frame's top into scrollback (on a full reset
+  `function ts(n,s,c,f,h,p){let b=f?0:Math.min(h,Math.max(0,n.screen.height-n.viewport.height+1))`
+  draws the bottom rows); the fullscreen renderer (`function Xa(`: the
+  `tui` setting, `CLAUDE_CODE_NO_FLICKER`, fresh installs, the
+  `tengu_pewter_brook`/`tengu_amber_creek` gates) puts the composer in a
+  box `maxHeight:rz` with `rz=…?lI-sfe:Math.floor(lI/2)` under a root
+  `height:rows` whose alternate-screen buffer clips overflow; the DECSTBM
+  split renderer (`function hoe(){`, off unless `CLAUDE_CODE_DECSTBM` or
+  `tengu_marlin_porch`) bounds its bottom box with `minHeight:QN,maxHeight:xZe`
+  where `xZe=My-2`. To re-verify after an upgrade, `grep -a` the binary
+  for those literals.
 - `COLUMNS`/`LINES` are `process.stdout.columns`/`rows` (the full terminal);
   OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
   ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is

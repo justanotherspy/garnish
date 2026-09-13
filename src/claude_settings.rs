@@ -175,6 +175,9 @@ pub struct FileKeys {
     pub hide_vim_mode: Option<bool>,
     /// `disableAllHooks`.
     pub disable_all_hooks: Option<bool>,
+    /// `tui`: which renderer draws the screen (`"fullscreen"` or
+    /// `"default"`), which decides what a tall status line does (SPEC § 2.1).
+    pub tui: Option<String>,
 }
 
 /// Parse one settings file's text into the keys garnish reads. An empty
@@ -205,6 +208,7 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                 hide_vim_mode: status_key("hideVimModeIndicator")
                     .and_then(serde_json::Value::as_bool),
                 disable_all_hooks: v.get("disableAllHooks").and_then(serde_json::Value::as_bool),
+                tui: v.get("tui").and_then(serde_json::Value::as_str).map(str::to_owned),
             })
         }
         Ok(_) => Err("not a JSON object".to_owned()),
@@ -332,13 +336,15 @@ mod tests {
         // The doctor's keys, a BOM tolerated as `install` tolerates it, and
         // the two ways a file fails, named.
         let keys = parse_settings_json(
-            "\u{feff}{\"statusLine\": {\"type\": \"command\", \"command\": \"garnish\", \"refreshInterval\": 2, \"hideVimModeIndicator\": true}, \"disableAllHooks\": false}",
+            "\u{feff}{\"statusLine\": {\"type\": \"command\", \"command\": \"garnish\", \"refreshInterval\": 2, \"hideVimModeIndicator\": true}, \"disableAllHooks\": false, \"tui\": \"fullscreen\"}",
         )
         .unwrap();
         assert_eq!(keys.status_line_command.as_deref(), Some("garnish"));
         assert_eq!(keys.refresh_interval, Some(2.0));
         assert_eq!(keys.hide_vim_mode, Some(true));
         assert_eq!(keys.disable_all_hooks, Some(false));
+        assert_eq!(keys.tui.as_deref(), Some("fullscreen"));
+        assert_eq!(from_settings_json(r#"{"tui": 1}"#).tui, None);
         assert!(parse_settings_json("{ broken").unwrap_err().starts_with("not valid JSON: "));
         assert_eq!(parse_settings_json("[1]").unwrap_err(), "not a JSON object");
         // An empty file is what a fresh `touch` leaves and what `install`
