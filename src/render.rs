@@ -23,6 +23,9 @@ pub struct Request<'a> {
     pub columns: Option<usize>,
     /// `NO_COLOR` is set.
     pub no_color: bool,
+    /// Draw every row faint, as Claude Code draws the status line on screen
+    /// (`preview`, SPEC § 2.1); the tick leaves that to the harness.
+    pub dim: bool,
 }
 
 /// Render a full tick. Never fails and never prints nothing.
@@ -32,20 +35,22 @@ pub fn render(req: &Request<'_>) -> String {
         return "⚠ garnish: bad payload\n".to_owned();
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
-    render_loaded(&payload, &loaded, req.columns, req.no_color)
+    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim)
 }
 
-/// Render with an already loaded config (used by tests, previews and benches).
+/// Render with an already loaded config (used by tests, previews and
+/// benches). `dim` is [`Request::dim`].
 #[must_use]
 pub fn render_loaded(
     payload: &Payload,
     loaded: &Loaded,
     columns: Option<usize>,
     no_color: bool,
+    dim: bool,
 ) -> String {
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
-    let painter = Painter { mode, links: mode != ColorMode::Never };
+    let painter = Painter { mode, links: mode != ColorMode::Never, dim };
     let mut lines = render_lines(payload, config, columns);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
@@ -111,14 +116,15 @@ pub struct Clock {
     /// the machine rendering them.
     pub settings: bool,
     /// The organisation's managed settings file, first in the chain: the
-    /// platform path for a real run, `None` for a pinned one (and for tests
-    /// that must not see the machine's).
+    /// platform path (or the `GARNISH_MANAGED_SETTINGS` hook's) for a real
+    /// run, `None` for a pinned one (and for tests that must not see the
+    /// machine's).
     pub managed: Option<std::path::PathBuf>,
 }
 
 impl Clock {
-    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME`, `GARNISH_ANIMATE`
-    /// and the process environment.
+    /// From `GARNISH_NOW`, `TZ`/`/etc/localtime`, `HOME`, `GARNISH_ANIMATE`,
+    /// `GARNISH_MANAGED_SETTINGS` and the process environment.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
@@ -129,7 +135,7 @@ impl Clock {
             git: true,
             animate: crate::time::animate_from_env(),
             settings: true,
-            managed: Some(crate::claude_settings::managed_settings_path()),
+            managed: crate::claude_settings::managed_settings_path(),
         }
     }
 
@@ -441,7 +447,7 @@ const fn stale_glyphs(icons: IconSet) -> (&'static str, &'static str) {
 /// Plain-text render (no escapes), for tests and docs.
 #[must_use]
 pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
-    strip_ansi(&render_loaded(payload, loaded, columns, true))
+    strip_ansi(&render_loaded(payload, loaded, columns, true, false))
 }
 
 /// Plain-text render of the configured lines with a pinned clock (docs).
@@ -577,7 +583,7 @@ mod tests {
         assert!(!json.contains('\x1b'), "escaped on the wire");
         let payload = Payload::parse(&json).unwrap();
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
-        let out = render_loaded(&payload, &loaded, Some(160), false);
+        let out = render_loaded(&payload, &loaded, Some(160), false, false);
         let plain = render_plain(&payload, &loaded, Some(160));
         assert_eq!(plain.lines().count(), loaded.config.lines.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
@@ -889,8 +895,11 @@ mod tests {
         let (config, _) =
             config::parse("[frame]\nstyle = \"none\"\n[[line]]\nmodules = []\n", &SCHEMAS);
         let rows = render_lines_at(&payload, &config, Some(40), &Clock::fixed());
-        let painter =
-            crate::ansi::Painter { mode: crate::ansi::ColorMode::TrueColor, links: false };
+        let painter = crate::ansi::Painter {
+            mode: crate::ansi::ColorMode::TrueColor,
+            links: false,
+            dim: false,
+        };
         let bytes = painter.paint(rows.first().unwrap());
         assert!(bytes.contains('\u{1b}') && !bytes.trim().is_empty(), "{bytes:?}");
         // Two blank spacers around a module row: only the spacers change.

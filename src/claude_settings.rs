@@ -72,13 +72,34 @@ pub fn env_truthy(v: Option<&String>) -> bool {
     v.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
-/// The managed (organisation-deployed) settings file for this platform.
+/// The test hook that stands in for the platform's managed settings file
+/// (SPEC § 9): a path, or empty for no managed file at all.
+pub const MANAGED_SETTINGS_ENV: &str = "GARNISH_MANAGED_SETTINGS";
+
+/// The managed (organisation-deployed) settings file: the platform's,
+/// unless [`MANAGED_SETTINGS_ENV`] names another or is empty (then there
+/// is none).
 #[must_use]
-pub fn managed_settings_path() -> std::path::PathBuf {
+pub fn managed_settings_path() -> Option<PathBuf> {
+    managed_settings_from(std::env::var_os(MANAGED_SETTINGS_ENV).as_deref())
+}
+
+/// [`managed_settings_path`] for an explicit value of the hook.
+#[must_use]
+pub fn managed_settings_from(hook: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    match hook {
+        Some(v) if v.is_empty() => None,
+        Some(v) => Some(PathBuf::from(v)),
+        None => Some(platform_managed_settings()),
+    }
+}
+
+/// Where Claude Code reads the managed settings file on this platform.
+fn platform_managed_settings() -> PathBuf {
     if cfg!(target_os = "macos") {
-        std::path::PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json")
+        PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json")
     } else {
-        std::path::PathBuf::from("/etc/claude-code/managed-settings.json")
+        PathBuf::from("/etc/claude-code/managed-settings.json")
     }
 }
 
@@ -246,11 +267,11 @@ pub fn read_keys(files: &[PathBuf]) -> Vec<FileKeys> {
 }
 
 /// The keys a command run in `project` reads: the whole chain, the
-/// platform's managed file included (a render goes through
-/// `Clock` instead, which may forbid the read).
+/// managed file ([`managed_settings_path`]) included (a render goes
+/// through `Clock` instead, which may forbid the read).
 #[must_use]
 pub fn keys_for(project: Option<&Path>, home: Option<&Path>) -> Vec<FileKeys> {
-    read_keys(&settings_files(Some(&managed_settings_path()), project, home))
+    read_keys(&settings_files(managed_settings_path().as_deref(), project, home))
 }
 
 /// `prefersReducedMotion` over a chain's keys: the first file that sets
@@ -453,9 +474,15 @@ mod tests {
             let env = Env { disable: Some(off.into()), ..Default::default() };
             assert!(resolve(&env, &[]).enabled, "{off}");
         }
+        // The managed file: the platform's, the hook's, or none at all.
+        let platform = managed_settings_from(None).unwrap();
+        assert!(platform.ends_with("managed-settings.json"), "{}", platform.display());
+        assert_eq!(managed_settings_from(Some(std::ffi::OsStr::new(""))), None);
         assert_eq!(
-            settings_files(Some(&managed_settings_path()), None, None),
-            vec![managed_settings_path()]
+            managed_settings_from(Some(std::ffi::OsStr::new("/tmp/m.json"))),
+            Some(PathBuf::from("/tmp/m.json"))
         );
+        assert_eq!(settings_files(Some(&platform), None, None), vec![platform]);
+        assert_eq!(settings_files(None, None, None), Vec::<PathBuf>::new());
     }
 }

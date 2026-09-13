@@ -14,14 +14,16 @@ use crate::modules::SCHEMAS;
 ///
 /// The settings chain is the current directory's (Claude Code's project
 /// directory when `doctor` runs where the session was started) and the
-/// home's, the platform's managed file first.
+/// home's, the managed file first (the platform's, or what
+/// `GARNISH_MANAGED_SETTINGS` says).
 #[must_use]
 pub fn report(config_path: Option<&Path>) -> String {
     let home = claude_settings::home_dir();
+    let managed = claude_settings::managed_settings_path();
     report_with(
         config_path,
         &Cache::from_env(),
-        Some(&claude_settings::managed_settings_path()),
+        managed.as_deref(),
         std::env::current_dir().ok().as_deref(),
         home.as_deref(),
     )
@@ -347,14 +349,18 @@ fn environment_section(o: &mut String) {
         "GARNISH_COLUMNS",
         "GARNISH_DEBUG",
         "GARNISH_ANIMATE",
+        "GARNISH_MANAGED_SETTINGS",
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         "DISABLE_AUTO_COMPACT",
         "DISABLE_COMPACT",
     ] {
         if let Ok(v) = std::env::var(key) {
-            // The two path-valued hooks may carry the home directory.
-            let v = if key.ends_with("_CONFIG") || key.ends_with("_DIR") {
+            // The path-valued hooks may carry the home directory.
+            let v = if key.ends_with("_CONFIG")
+                || key.ends_with("_DIR")
+                || key.ends_with("_SETTINGS")
+            {
                 tilde(Path::new(&v))
             } else {
                 v

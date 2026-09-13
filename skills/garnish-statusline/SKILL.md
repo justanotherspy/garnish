@@ -74,8 +74,10 @@ creating the directory if needed) and say that the previous file, if any,
 was replaced. Explain each key you set in one line so the person can tweak
 it later (point at `docs/config.md` and the module pages). Finish with
 `garnish config check` reporting `ok`, and remind them that `preview` runs
-with the live clock, so animations move between runs; `GARNISH_ANIMATE=0`
-freezes them (and cuts a ticker line with `…`) for a still picture.
+with the live clock, so animations move between runs (`GARNISH_ANIMATE=0`
+freezes them and cuts a ticker line with `…` for a still picture), and
+that its rows are faint on purpose: Claude Code draws every status line
+row dim, and the preview shows that intensity.
 
 ## 4. Hook it up (only if asked or not yet done)
 

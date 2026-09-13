@@ -131,6 +131,7 @@ fn every_preset_has_a_header_validates_and_renders() {
                 // The movement promises need animations on whatever the
                 // developer's shell says.
                 .env_remove("GARNISH_ANIMATE")
+                .env("GARNISH_MANAGED_SETTINGS", "")
                 .output()
                 .unwrap();
             let out = String::from_utf8_lossy(&render.stdout).into_owned();

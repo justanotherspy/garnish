@@ -96,15 +96,19 @@ strikethrough, inverse, an OSC 8 link) and re-emits them through Ink; the
 parent's `dim` is merged into every piece's styles, and a piece can add a
 style but never clear one (a reset, `ESC[0m`, only clears the styles the
 parser tracks for the text after it). So the whole row, garnish's colours
-included, shows at reduced intensity on screen while `preview` shows it at
-full intensity. FUTURE-SPEC § 7.1's A1 (a leading `ESC[0m` on every row)
-assumed the raw bytes reached the terminal inside SGR 2 and was dropped
-when Phase 19 read the component: the prefix would be parsed away in
-every supported version. What remains is the fact, in `CLAUDE.md` with
-how to re-verify it and in the guide's troubleshooting, and an open
-question for Daniel (PLAN § Backlog): whether `preview` and the `setup`
-pane (§ 14) should draw their rows dim so that they show what the screen
-shows. The harness's trim keeps every row that carries a non-whitespace
+included, shows at reduced intensity on screen. **`preview` and the
+`setup` pane (§ 14) draw their rows the same way** (decided 2026-09-13):
+the painter folds SGR 2 into every segment it paints (`Painter.dim`; the
+pane's ratatui twin sets the `DIM` modifier on every span), so what you
+see there is what the screen shows, colour for colour, and a theme is
+judged at the intensity it will have. `--color never` stays plain, and
+the tick never adds the dim itself: the harness does, and the bytes of a
+tick are what the goldens pin. FUTURE-SPEC § 7.1's A1 (a leading
+`ESC[0m` on every row) assumed the raw bytes reached the terminal inside
+SGR 2 and was dropped when Phase 19 read the component: the prefix would
+be parsed away in every supported version. What remains is the fact, in
+`CLAUDE.md` with how to re-verify it and in the guide's troubleshooting.
+The harness's trim keeps every row that carries a non-whitespace
 byte, so with colour on the painter's escape sequences keep a filled
 spacer, and `blank` (§ 4.1) matters only with colour off or for a row
 that is empty in both modes.
@@ -664,10 +668,10 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   is read only when the answer depends on it (no explicit key, the
   session switch on), once per tick (the context module shares the read),
   and never under the pinned clock of the docs and the in-process tests;
-  the goldens run the binary and so read the machine's chain like a real
-  tick, hermetic up to the managed settings file, exactly as the
-  autocompact keys already are (a test hook for that file is an open
-  backlog question). A settings file is read up to 1 MiB and skipped past
+  the goldens run the binary and so read the chain like a real tick, with
+  `GARNISH_MANAGED_SETTINGS` (§ 9) set to nothing so that no machine's
+  managed file reaches them, exactly as the autocompact keys are read. A
+  settings file is read up to 1 MiB and skipped past
   that, like one that does not parse (§ 5). `config show` prints the value
   the file or the settings decide for the current directory (the session
   switch is not part of a config and stays out of it); `config init`
@@ -1114,7 +1118,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
-| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
+| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain) |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
 | `garnish presets` | list the gallery presets (§ 12): name, summary, declared width, requirement |
@@ -1168,11 +1172,15 @@ per-module render cost.
   width ≤ `COLUMNS − 4` (§ 2.1); golden files under `tests/golden/`
   (`UPDATE_GOLDEN=1` regenerates). The goldens render with `--color
   never` except where a config fixture's `# color:` header says
-  otherwise: `colour-on` pins the painter's escape sequences and the OSC 8
-  link (Phase 20's link goldens and Phase 22's snapshots use the same
-  mode), and the row-start guards of both suites look past escape
-  sequences. A `# env:` value may name the repository root as `$ROOT`,
-  which is how `reduced-motion` points `HOME` at a settings fixture.
+  otherwise: `colour-on` pins the painter's escape sequences (with the
+  faint `preview` folds into every segment, § 2.1) and the OSC 8 link
+  (Phase 20's link goldens and Phase 22's snapshots use the same mode),
+  and the row-start guards of both suites look past escape sequences. A
+  `# env:` value may name the repository root as `$ROOT`, which is how
+  `reduced-motion` points `HOME` at a settings fixture. Every test that
+  runs the binary sets `GARNISH_MANAGED_SETTINGS` to nothing, so a
+  managed settings file on the machine running `cargo test` never reaches
+  a golden; one CLI test points the hook at a fixture instead.
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.
 - **Module matrix from the schema** (target state; PLAN Phase 20; from
@@ -1213,6 +1221,7 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
+| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets |
 | `GARNISH_STDIN_TTY` | target state (§ 14): `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish`, so the pointer path is testable without a pty |
 
 ## 10. Documentation
@@ -1454,8 +1463,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   second painter target in `ansi.rs` that turns the same segments into
   ratatui spans (no new crate); a unit test paints the rows both ways and
   checks the cell text and the styles agree, which is the "what you see
-  is what the status line prints" guarantee (whether the pane also dims
-  its rows as the harness does, § 2.1, is the open question there).
+  is what the status line prints" guarantee. The pane dims every row as
+  the harness does (§ 2.1: the `DIM` modifier on every span, the twin of
+  `Painter.dim`), so it also shows the intensity the screen will have.
 - **Saving.** Edits live in memory as a resolved config, and `s` writes
   it the way `config show` prints it (with the § 5 backup), so a
   hand-written file's comments and ordering do not survive a save; the

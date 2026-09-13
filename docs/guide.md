@@ -67,7 +67,9 @@ COLUMNS=80 garnish preview tests/fixtures/payloads/api-key.json --width 80
 ```
 
 `preview` renders a saved payload with any preset, icon set, theme and width,
-so you can see a change without waiting for a real session.
+so you can see a change without waiting for a real session. The rows come
+out faint on purpose: Claude Code draws every status line row dim, so the
+preview shows the intensity the screen will have.
 
 ## 4. Write a config
 
@@ -228,10 +230,10 @@ so the two stay in step; an explicit `animate` wins over the setting, and
   `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
   refresh failed. `garnish doctor` shows the error.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
-- **The line looks dimmer than `preview`** → Claude Code draws every
-  status line row dim and folds that into every coloured piece of it;
-  nothing a status line command prints can undo it, so `preview` shows the
-  same colours at full intensity. If the line reads too faint, pick
+- **The line looks faint** → Claude Code draws every status line row dim
+  and folds that into every coloured piece of it; nothing a status line
+  command prints can undo it, and `preview` draws its rows the same way so
+  that it shows what the screen shows. If the line reads too faint, pick
   brighter roles under `[colors]` or a theme with more contrast.
 - **Nothing moves** → `garnish doctor` says whether `refreshInterval` is
   set (Claude Code re-runs the line every second only with `refreshInterval:

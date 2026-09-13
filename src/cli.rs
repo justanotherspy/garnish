@@ -90,7 +90,7 @@ impl RenderArgs {
 pub enum Command {
     /// Render the status line from the JSON payload on stdin (the default).
     Render,
-    /// Render a payload fixture file (or every fixture in a directory).
+    /// Render a payload fixture file (or every fixture in a directory), drawn faint as Claude Code draws the status line.
     Preview {
         /// Fixture file, or a directory of `*.json` fixtures.
         path: PathBuf,
@@ -263,6 +263,7 @@ fn run_command() -> Result<()> {
                 overlay: Overlay::default(),
                 columns: env_columns(),
                 no_color: std::env::var_os("NO_COLOR").is_some(),
+                dim: false,
             };
             let out = render::render(&req);
             let mut stdout = std::io::stdout().lock();
@@ -566,6 +567,8 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
             overlay: overlay.clone(),
             columns,
             no_color: std::env::var_os("NO_COLOR").is_some(),
+            // Drawn as the screen draws it: every row faint (SPEC § 2.1).
+            dim: true,
         };
         stdout.write_all(render::render(&req).as_bytes())?;
     }

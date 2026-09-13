@@ -39,6 +39,7 @@ fn render(fixture: &Path, preset: &str, icons: &str) -> String {
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
         .env_remove("GARNISH_ANIMATE")
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .env("TZ", "UTC")
         .stdin(Stdio::null())
         .output()

@@ -180,6 +180,8 @@ fn render(case: &Case, cache: &Path) -> String {
         // A developer running with animations off must not turn the ticker
         // goldens red; a fixture opts in through its own `# env:` line.
         .env_remove("GARNISH_ANIMATE")
+        // Nor a managed settings file on the machine (SPEC § 9).
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .stdin(Stdio::null());
     for (k, v) in &case.env {
         cmd.env(k, v);

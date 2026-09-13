@@ -21,6 +21,7 @@ fn tick(stdin: &[u8], env: &[(&str, &str)], home: &Path) -> (String, String, boo
         .env("GARNISH_NOW", "1738425600")
         .env("NO_COLOR", "1")
         .env("COLUMNS", "100")
+        .env("GARNISH_MANAGED_SETTINGS", "")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

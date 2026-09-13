@@ -33,9 +33,15 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   the project directory, so the report stays safe to paste into an issue.
 - Verified against Claude Code 2.1.270 (and 2.1.261): every status line
   row is drawn dim by Claude Code and nothing the command prints can undo
-  it, so the planned per-row reset was dropped and the guide explains the
-  difference from `preview`. The 13 000-token autocompact buffer is
-  unchanged.
+  it, so the planned per-row reset was dropped. `garnish preview` now
+  draws its rows faint the same way, so a theme is judged at the
+  intensity the screen will give it (`--color never` stays plain; the
+  status line itself is unchanged). The 13 000-token autocompact buffer
+  is unchanged.
+- `GARNISH_MANAGED_SETTINGS` names the managed settings file garnish reads
+  first in Claude Code's chain, or, empty, says there is none; `doctor`
+  lists it with the other hooks. The test suite sets it, so a managed
+  file on the machine running `cargo test` no longer changes a golden.
 
 **Fixes**
 
