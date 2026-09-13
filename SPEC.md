@@ -406,7 +406,7 @@ hide_empty_lines = true   # drop a line whose modules all rendered nothing; `mod
 overflow = "truncate"     # truncate | ticker: cut or scroll a left group wider than the box (§ 4.1)
 ticker_step = 1           # cells the ticker advances per tick (0.5 = every second tick)
 ticker_gap = "   "        # text between the end and the wrapped-around start
-animate = true            # master switch for every animation; false freezes them at frame 0 and cuts a ticker line with … (§ 4.2)
+# animate = true          # master switch for every animation; false freezes them at frame 0 and cuts a ticker line with …; unset, follows Claude Code's prefersReducedMotion (§ 4.2)
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print; fixed by default with overflow = "ticker", and each timer module has its own (§ 4.1)
 
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
@@ -601,7 +601,7 @@ The cadence is whatever the harness ticks at (`refreshInterval`, minimum
 1 s); `step` below 1 slows an animation down (0.5 = every second tick).
 
 ```toml
-animate = true            # master switch; false freezes every animation at frame 0 (a ticker line is cut with … instead)
+# animate = true          # master switch; false freezes every animation at frame 0 (a ticker line is cut with … instead); unset, follows Claude Code's prefersReducedMotion
 
 [frame]
 fill_pattern   = "·  "    # repeated across the rule instead of fill_char
@@ -662,10 +662,17 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   `GARNISH_ANIMATE=0` (always off), an explicit `animate` in the config,
   `prefersReducedMotion` in the settings, the default (`true`). The chain
   is read only when the answer depends on it (no explicit key, the
-  session switch on) and never under the pinned clock of the docs and
-  goldens, so those stay hermetic. `config show` prints the effective
-  value for the current directory; `config init` writes the key as a
-  comment, like `durations`, so the setting keeps deciding after `init`.
+  session switch on), once per tick (the context module shares the read),
+  and never under the pinned clock of the docs and the in-process tests;
+  the goldens run the binary and so read the machine's chain like a real
+  tick, hermetic up to the managed settings file, exactly as the
+  autocompact keys already are (a test hook for that file is an open
+  backlog question). A settings file is read up to 1 MiB and skipped past
+  that, like one that does not parse (§ 5). `config show` prints the value
+  the file or the settings decide for the current directory (the session
+  switch is not part of a config and stays out of it); `config init`
+  writes the key as a comment, like `durations`, so the setting keeps
+  deciding after `init`.
 
 ### 4.3 Layout: rows, columns and boxes (target state; PLAN Phase 21)
 
@@ -1034,7 +1041,10 @@ without an error report.
   the generated reference prints it in the type column (`integer ≤ 1024`,
   `string ≤ 4096 chars`); `ticker_gap` (top-level) and `label`/`prefix`/
   `suffix` (common to every module) are checked by hand against the same
-  constant. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
+  constant. A Claude settings file of the § 2.3 chain (which a cloned
+  repository can contribute to) is read up to 1 MiB and skipped past
+  that; `doctor` shows a `statusLine.command` from any of them as plain
+  text, cut to 200 characters. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
   is no default config or settings location: `install`, `config init`,
   `config path` and `skills install` refuse with a one-line note naming the
   flag to pass, rather than writing into the current directory. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
@@ -1102,7 +1112,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command) and `prefersReducedMotion` (with how the config's `animate` interacts) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
-| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the current directory's settings decide it (§ 4.2) |
+| `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |

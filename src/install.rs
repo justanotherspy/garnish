@@ -26,9 +26,7 @@ pub struct Plan {
 #[must_use]
 pub fn default_settings_path() -> Option<PathBuf> {
     // No HOME, no default: never guess the current directory.
-    std::env::var_os("HOME")
-        .filter(|v| !v.is_empty())
-        .map(|h| PathBuf::from(h).join(".claude").join("settings.json"))
+    crate::claude_settings::home_dir().map(|h| h.join(".claude").join("settings.json"))
 }
 
 /// Whether an executable named `name` is on `PATH`.
@@ -62,10 +60,12 @@ pub fn merge(existing: &str, plan: &Plan) -> Result<String, String> {
     let mut root: Map<String, Value> = if existing.trim().is_empty() {
         Map::new()
     } else {
+        // The same two problems, worded as `doctor` words them, so every
+        // caller can prefix the file's path once.
         match serde_json::from_str::<Value>(existing) {
             Ok(Value::Object(m)) => m,
-            Ok(_) => return Err("settings file is not a JSON object".to_owned()),
-            Err(e) => return Err(format!("settings file is not valid JSON: {e}")),
+            Ok(_) => return Err("not a JSON object".to_owned()),
+            Err(e) => return Err(format!("not valid JSON: {e}")),
         }
     };
     let mut status = match root.remove("statusLine") {
@@ -132,11 +132,10 @@ pub fn replace_file(
     contents: &str,
     existed: bool,
 ) -> Result<Option<PathBuf>, String> {
-    let target = if existed {
-        std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf())
-    } else {
-        target.to_path_buf()
-    };
+    // Through the link whether or not its target exists yet: a dotfiles
+    // link made before the file is filled in must stay a link.
+    let target = follow_links(target)?;
+    let target = std::fs::canonicalize(&target).unwrap_or(target);
     let backup = if existed { Some(write_backup(&target)?) } else { None };
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
@@ -144,9 +143,19 @@ pub fn replace_file(
     let name =
         target.file_name().map_or_else(|| "file".to_owned(), |n| n.to_string_lossy().into_owned());
     let tmp = target.with_file_name(format!("{name}.tmp.{}", std::process::id()));
-    std::fs::write(&tmp, contents).map_err(|e| format!("writing {}: {e}", tmp.display()))?;
-    if let Ok(meta) = std::fs::metadata(&target) {
-        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    let permissions = std::fs::metadata(&target).ok().map(|m| m.permissions());
+    // The temp file is born with the old file's mode, so a 0600 settings
+    // file is never readable by others even for a moment; a failed write
+    // leaves nothing behind.
+    let written = create_with(&tmp, permissions.as_ref())
+        .and_then(|mut file| file.write_all(contents.as_bytes()))
+        .map_err(|e| format!("writing {}: {e}", tmp.display()));
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Some(p) = permissions {
+        let _ = std::fs::set_permissions(&tmp, p);
     }
     std::fs::rename(&tmp, &target).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -155,12 +164,54 @@ pub fn replace_file(
     Ok(backup)
 }
 
+/// Where a path leads once every symlink on it is followed, a dangling
+/// link included (the file the bytes must go to). A relative link target
+/// is taken from the link's directory; a loop (or a chain past 40 links)
+/// is refused rather than written into.
+fn follow_links(path: &Path) -> Result<PathBuf, String> {
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    let mut here = path.to_path_buf();
+    for _ in 0..40 {
+        if !is_link(&here) {
+            return Ok(here);
+        }
+        let link = std::fs::read_link(&here)
+            .map_err(|e| format!("following the link {}: {e}", here.display()))?;
+        here = if link.is_absolute() {
+            link
+        } else {
+            here.parent().map_or_else(|| link.clone(), |dir| dir.join(&link))
+        };
+    }
+    Err(format!("{}: too many levels of symbolic links", path.display()))
+}
+
+/// Create `path` afresh with `permissions` (the old file's) when known.
+#[cfg(unix)]
+fn create_with(
+    path: &Path,
+    permissions: Option<&std::fs::Permissions>,
+) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    if let Some(p) = permissions {
+        options.mode(p.mode());
+    }
+    options.open(path)
+}
+
+#[cfg(not(unix))]
+fn create_with(
+    path: &Path,
+    _permissions: Option<&std::fs::Permissions>,
+) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().write(true).create_new(true).open(path)
+}
+
 /// Copy `target` to `<name>.bak-<epoch>[-n]` next to it, never clobbering
 /// an existing backup. Uses the wall clock (not `GARNISH_NOW`).
-///
-/// # Errors
-/// When the file cannot be read or the copy cannot be written.
-pub fn write_backup(target: &Path) -> Result<PathBuf, String> {
+fn write_backup(target: &Path) -> Result<PathBuf, String> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -324,11 +375,59 @@ mod tests {
             .collect();
         assert!(names.iter().all(|n| !n.contains(".tmp.")), "{names:?}");
         assert_eq!(names.len(), 2, "{names:?}");
-        // A directory in the way is an error naming it, not a panic.
+        // A directory in the way is an error naming it, not a panic, and
+        // the temp file does not survive the failed rename.
         let blocked = dir.path().join("blocked");
         std::fs::create_dir_all(blocked.join("garnish.toml")).unwrap();
         let err = replace_file(&blocked.join("garnish.toml"), "x", false).unwrap_err();
         assert!(err.contains("garnish.toml"), "{err}");
+        let left: Vec<String> = std::fs::read_dir(&blocked)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["garnish.toml"], "no temp file left behind");
+    }
+
+    /// SPEC § 5: a rewrite goes through a symlink even before its target
+    /// exists (a dotfiles link made ahead of the file), so the link stays
+    /// a link and the bytes land where it points; a relative link resolves
+    /// from the link's own directory.
+    #[test]
+    fn replace_file_fills_a_dangling_symlink_instead_of_replacing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let dotfiles = dir.path().join("dotfiles");
+        std::fs::create_dir_all(&dotfiles).unwrap();
+        let link = dir.path().join("config").join("garnish.toml");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(dotfiles.join("garnish.toml"), &link).unwrap();
+        assert!(!link.exists(), "dangling to start with");
+        assert_eq!(replace_file(&link, "a = 1\n", false).unwrap(), None);
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "link kept");
+        assert_eq!(std::fs::read_to_string(dotfiles.join("garnish.toml")).unwrap(), "a = 1\n");
+        // Now it exists: the backup lands next to the target, the link stays.
+        let backup = replace_file(&link, "a = 2\n", true).unwrap().unwrap();
+        assert!(backup.starts_with(std::fs::canonicalize(&dotfiles).unwrap()), "{backup:?}");
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "a = 2\n");
+        // A relative link, and a chain of two.
+        let rel = dir.path().join("config").join("rel.toml");
+        std::os::unix::fs::symlink("../dotfiles/rel.toml", &rel).unwrap();
+        let hop = dir.path().join("hop.toml");
+        std::os::unix::fs::symlink(&rel, &hop).unwrap();
+        assert_eq!(replace_file(&hop, "r = 1\n", false).unwrap(), None);
+        assert_eq!(std::fs::read_to_string(dotfiles.join("rel.toml")).unwrap(), "r = 1\n");
+        assert!(std::fs::symlink_metadata(&hop).unwrap().file_type().is_symlink());
+        assert!(std::fs::symlink_metadata(&rel).unwrap().file_type().is_symlink());
+        // A loop is refused, naming the file, and both links stay links.
+        let a = dir.path().join("a.toml");
+        let b = dir.path().join("b.toml");
+        std::os::unix::fs::symlink(&b, &a).unwrap();
+        std::os::unix::fs::symlink(&a, &b).unwrap();
+        let err = replace_file(&a, "x", false).unwrap_err();
+        assert!(err.contains("a.toml") && err.contains("symbolic links"), "{err}");
+        assert!(std::fs::symlink_metadata(&a).unwrap().file_type().is_symlink());
+        assert!(std::fs::symlink_metadata(&b).unwrap().file_type().is_symlink());
     }
 
     #[test]

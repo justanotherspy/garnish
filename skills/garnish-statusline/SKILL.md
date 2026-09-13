@@ -44,8 +44,10 @@ otherwise start from a built-in preset and add `[[line]]` blocks.
 
 ## 3. Draft, preview, validate, then write
 
-Never overwrite the config before the person has seen the result: `config
-init --force` keeps no backup, and a hand-tuned file is easy to lose. Draft
+Never overwrite the config before the person has seen the result: a
+hand-tuned file is easy to lose (`config init --force` keeps a timestamped
+backup next to the file and refuses one that does not parse; a plain `cp`
+keeps nothing, so back the existing file up before the copy below). Draft
 into a temp file first (`--config` selects it for any subcommand):
 
 ```sh

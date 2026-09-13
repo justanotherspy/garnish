@@ -1093,6 +1093,9 @@ mod tests {
         let (from_init, errs) = config::parse(&config_toml(&cfg, true), &SCHEMAS);
         assert_eq!(errs, Vec::new());
         assert_eq!(from_init.texts.len(), 2);
+        // `init` leaves `animate` to Claude Code's prefersReducedMotion (SPEC § 4.2).
+        assert_eq!(from_init.animate, None);
+        assert!(config_toml(&cfg, true).contains("\n# animate = true\n"));
     }
 
     #[test]

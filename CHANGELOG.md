@@ -15,14 +15,22 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 - `garnish install` and `config init --force` never rewrite a
   `settings.json` or `garnish.toml` that does not parse: one line names the
   file and the problem and nothing is written. `config init --force` keeps
-  a backup of the file it replaces, as `install` does.
+  a backup of the file it replaces, as `install` does. Every rewrite goes
+  through a symlink even before its target exists (a dotfiles link made
+  ahead of the file stays a link), the new file is born with the old one's
+  permissions, and no temp file survives a failure.
+- Claude Code's settings files are read at most 1 MiB deep and an empty
+  file counts as `{}` everywhere (`doctor` no longer calls it invalid).
 - `garnish doctor` lists Claude Code's settings files for the current
   directory (managed, local, project, user) and whether each parses, then
   the keys that change what the line can show, resolved as Claude Code
   resolves them: it suggests `refreshInterval = 1` when the config shows a
-  clock, a timer or an animation and `hideVimModeIndicator = true` when the
-  `vim` module is on, and says when `disableAllHooks` or
-  `prefersReducedMotion` is in effect.
+  clock, a timer or a running animation and `hideVimModeIndicator = true`
+  when the `vim` module is on, says when a `refreshInterval` below 1 is
+  being ignored by Claude Code, and says when `disableAllHooks` or
+  `prefersReducedMotion` is in effect. A `statusLine.command` from any of
+  those files is shown as plain text, and the project's files relative to
+  the project directory, so the report stays safe to paste into an issue.
 - Verified against Claude Code 2.1.270 (and 2.1.261): every status line
   row is drawn dim by Claude Code and nothing the command prints can undo
   it, so the planned per-row reset was dropped and the guide explains the

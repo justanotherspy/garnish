@@ -194,7 +194,8 @@ pub enum ConfigAction {
     Show,
     /// Write a fully annotated default config file.
     Init {
-        /// Overwrite an existing file.
+        /// Replace an existing file, keeping a timestamped backup next to
+        /// it; a file that does not parse is refused.
         #[arg(long)]
         force: bool,
         /// A built-in preset (default | minimal | full | compact) or a gallery
@@ -601,18 +602,18 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         ConfigAction::Show => {
             let loaded = config::load(config_path, &SCHEMAS);
             let mut cfg = loaded.config;
-            // The animation switch a tick run from here would use (SPEC
-            // § 4.2): the session variable, then the file, then Claude
-            // Code's prefersReducedMotion for this directory.
-            cfg.animate = Some(
-                crate::time::animate_from_env()
-                    && cfg.animate.unwrap_or_else(|| {
-                        let cwd = std::env::current_dir().ok();
-                        let home =
-                            std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
-                        !crate::claude_settings::reduced_motion(cwd.as_deref(), home.as_deref())
-                    }),
-            );
+            // The animation switch in effect for this directory (SPEC
+            // § 4.2): the file, else Claude Code's prefersReducedMotion.
+            // The session variable stays out of it: `show` prints a config,
+            // and GARNISH_ANIMATE=0 belongs to a session, not a file.
+            cfg.animate = Some(cfg.animate.unwrap_or_else(|| {
+                let cwd = std::env::current_dir().ok();
+                let home = crate::claude_settings::home_dir();
+                !crate::claude_settings::reduced_motion(&crate::claude_settings::keys_for(
+                    cwd.as_deref(),
+                    home.as_deref(),
+                ))
+            }));
             stdout.write_all(crate::docs::config_toml(&cfg, false).as_bytes())?;
         }
         ConfigAction::Init { force, preset } => {

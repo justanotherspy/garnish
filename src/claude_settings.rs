@@ -2,7 +2,7 @@
 //! reduced motion), with the same precedence Claude Code uses: env >
 //! managed > local > project > user.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Tokens Claude Code reserves for the compaction summary (observed in 2.1.260).
 pub const DEFAULT_COMPACT_BUFFER: u64 = 13_000;
@@ -82,17 +82,30 @@ pub fn managed_settings_path() -> std::path::PathBuf {
     }
 }
 
+/// The home directory every command agrees on: `HOME`, unless it is unset
+/// or empty (then there is none, and nothing guesses one; SPEC § 5).
+#[must_use]
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
+}
+
 /// Settings files in precedence order (highest first) for a project
 /// directory, each with the name `doctor` labels it by.
 ///
-/// `managed` > `local` (`.claude/settings.local.json`) > `project`
-/// (`.claude/settings.json`) > `user` (`~/.claude/settings.json`).
+/// `managed` (the organisation file, [`managed_settings_path`] for a real
+/// run and `None` for a pinned one) > `local`
+/// (`.claude/settings.local.json`) > `project` (`.claude/settings.json`) >
+/// `user` (`~/.claude/settings.json`).
 #[must_use]
 pub fn settings_chain(
+    managed: Option<&Path>,
     project_dir: Option<&Path>,
     home: Option<&Path>,
-) -> Vec<(&'static str, std::path::PathBuf)> {
-    let mut files = vec![("managed", managed_settings_path())];
+) -> Vec<(&'static str, PathBuf)> {
+    let mut files = Vec::with_capacity(4);
+    if let Some(m) = managed {
+        files.push(("managed", m.to_path_buf()));
+    }
     if let Some(dir) = project_dir {
         files.push(("local", dir.join(".claude").join("settings.local.json")));
         files.push(("project", dir.join(".claude").join("settings.json")));
@@ -105,9 +118,18 @@ pub fn settings_chain(
 
 /// The paths of [`settings_chain`], highest precedence first.
 #[must_use]
-pub fn settings_files(project_dir: Option<&Path>, home: Option<&Path>) -> Vec<std::path::PathBuf> {
-    settings_chain(project_dir, home).into_iter().map(|(_, path)| path).collect()
+pub fn settings_files(
+    managed: Option<&Path>,
+    project_dir: Option<&Path>,
+    home: Option<&Path>,
+) -> Vec<PathBuf> {
+    settings_chain(managed, project_dir, home).into_iter().map(|(_, path)| path).collect()
 }
+
+/// Most bytes garnish reads from one settings file (SPEC § 5: sizes are
+/// bounded); a larger file is skipped like one that does not parse, so a
+/// file nobody controls cannot make a tick slow.
+pub const MAX_SETTINGS_BYTES: u64 = 1 << 20;
 
 /// The keys garnish reads from one settings file (SPEC § 2.3, § 4.2 and
 /// the `doctor` report of § 7); each is `None` when the file does not set
@@ -134,12 +156,17 @@ pub struct FileKeys {
     pub disable_all_hooks: Option<bool>,
 }
 
-/// Parse one settings file's text into the keys garnish reads.
+/// Parse one settings file's text into the keys garnish reads. An empty
+/// (or whitespace-only) file sets none of them and is not a problem: a
+/// fresh `touch`ed file is what Claude Code and `install` treat as `{}`.
 ///
 /// # Errors
 /// When the text is not valid JSON or not a JSON object, with the problem.
 pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if text.trim().is_empty() {
+        return Ok(FileKeys::default());
+    }
     match serde_json::from_str::<serde_json::Value>(text) {
         Ok(serde_json::Value::Object(v)) => {
             let status = v.get("statusLine").and_then(serde_json::Value::as_object);
@@ -184,42 +211,61 @@ pub enum FileState {
     Keys(FileKeys),
 }
 
-/// Read one settings file of the chain.
+/// Read one settings file of the chain, at most [`MAX_SETTINGS_BYTES`] of it.
 #[must_use]
 pub fn read_file(path: &Path) -> FileState {
-    match std::fs::read_to_string(path) {
-        Ok(text) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => FileState::Absent,
+    use std::io::Read as _;
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileState::Absent,
+        Err(e) => return FileState::Unreadable(e.to_string()),
+    };
+    let mut text = String::new();
+    // One byte past the cap tells an over-long file from one exactly at it.
+    match file.take(MAX_SETTINGS_BYTES.saturating_add(1)).read_to_string(&mut text) {
+        Ok(n) if u64::try_from(n).is_ok_and(|n| n > MAX_SETTINGS_BYTES) => {
+            FileState::Invalid(format!("longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"))
+        }
+        Ok(_) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
         Err(e) => FileState::Unreadable(e.to_string()),
     }
 }
 
-/// `prefersReducedMotion` over the settings chain of [`settings_files`]:
-/// the first file that sets it wins, as for the auto-compaction keys, and
-/// no file setting it means `false` (SPEC § 4.2).
+/// The keys of the files of a chain that are there and parse, in the
+/// chain's order (highest precedence first); a file that is absent, too
+/// long or does not parse contributes nothing.
 #[must_use]
-pub fn reduced_motion(cwd: Option<&Path>, home: Option<&Path>) -> bool {
-    settings_files(cwd, home)
+pub fn read_keys(files: &[PathBuf]) -> Vec<FileKeys> {
+    files
         .iter()
-        .filter_map(|file| std::fs::read_to_string(file).ok())
-        .find_map(|text| from_settings_json(&text).reduced_motion)
-        .unwrap_or(false)
+        .filter_map(|file| match read_file(file) {
+            FileState::Keys(keys) => Some(keys),
+            _ => None,
+        })
+        .collect()
 }
 
-/// Resolve auto-compaction for a working directory.
+/// The keys a command run in `project` reads: the whole chain, the
+/// platform's managed file included (a render goes through
+/// `Clock` instead, which may forbid the read).
 #[must_use]
-pub fn resolve(env: &Env, cwd: Option<&Path>, home: Option<&Path>) -> AutoCompact {
-    let mut window: Option<u64> = None;
-    let mut enabled: Option<bool> = None;
-    for file in settings_files(cwd, home) {
-        if window.is_some() && enabled.is_some() {
-            break;
-        }
-        let Ok(text) = std::fs::read_to_string(&file) else { continue };
-        let keys = from_settings_json(&text);
-        window = window.or(keys.auto_compact_window);
-        enabled = enabled.or(keys.auto_compact_enabled);
-    }
+pub fn keys_for(project: Option<&Path>, home: Option<&Path>) -> Vec<FileKeys> {
+    read_keys(&settings_files(Some(&managed_settings_path()), project, home))
+}
+
+/// `prefersReducedMotion` over a chain's keys: the first file that sets
+/// it wins, as for the auto-compaction keys, and no file setting it means
+/// `false` (SPEC § 4.2).
+#[must_use]
+pub fn reduced_motion(keys: &[FileKeys]) -> bool {
+    keys.iter().find_map(|k| k.reduced_motion).unwrap_or(false)
+}
+
+/// Resolve auto-compaction from the environment and a chain's keys.
+#[must_use]
+pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
+    let window = keys.iter().find_map(|k| k.auto_compact_window);
+    let enabled = keys.iter().find_map(|k| k.auto_compact_enabled);
     let env_window = env.window.as_deref().and_then(|s| s.trim().parse::<u64>().ok());
     AutoCompact {
         enabled: enabled.unwrap_or(true)
@@ -274,6 +320,10 @@ mod tests {
         assert_eq!(keys.disable_all_hooks, Some(false));
         assert!(parse_settings_json("{ broken").unwrap_err().starts_with("not valid JSON: "));
         assert_eq!(parse_settings_json("[1]").unwrap_err(), "not a JSON object");
+        // An empty file is what a fresh `touch` leaves and what `install`
+        // treats as `{}`: no keys, no problem.
+        assert_eq!(parse_settings_json(""), Ok(FileKeys::default()));
+        assert_eq!(parse_settings_json(" \n"), Ok(FileKeys::default()));
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_file(&dir.path().join("none.json")), FileState::Absent);
         assert!(matches!(read_file(dir.path()), FileState::Unreadable(_)));
@@ -281,10 +331,37 @@ mod tests {
         assert!(matches!(read_file(&dir.path().join("bad.json")), FileState::Invalid(_)));
         std::fs::write(dir.path().join("ok.json"), "{}").unwrap();
         assert_eq!(read_file(&dir.path().join("ok.json")), FileState::Keys(FileKeys::default()));
-        let chain = settings_chain(Some(Path::new("/p")), Some(Path::new("/h")));
+        std::fs::write(dir.path().join("empty.json"), "").unwrap();
+        assert_eq!(read_file(&dir.path().join("empty.json")), FileState::Keys(FileKeys::default()));
+        // A file past the cap is skipped, not parsed (SPEC § 5).
+        let huge = dir.path().join("huge.json");
+        let padding = " ".repeat(usize::try_from(MAX_SETTINGS_BYTES).unwrap());
+        std::fs::write(&huge, format!("{{\"prefersReducedMotion\": true}}{padding}")).unwrap();
+        assert!(matches!(read_file(&huge), FileState::Invalid(ref e) if e.contains("longer")));
+        let at_cap = dir.path().join("at-cap.json");
+        let body = "{\"prefersReducedMotion\": true}";
+        std::fs::write(
+            &at_cap,
+            format!(
+                "{body}{}",
+                " ".repeat(usize::try_from(MAX_SETTINGS_BYTES).unwrap() - body.len())
+            ),
+        )
+        .unwrap();
+        assert!(
+            matches!(read_file(&at_cap), FileState::Keys(ref k) if k.reduced_motion == Some(true))
+        );
+        assert_eq!(read_keys(&[huge, at_cap, dir.path().join("none.json")]).len(), 1);
+        let chain = settings_chain(
+            Some(Path::new("/m/managed.json")),
+            Some(Path::new("/p")),
+            Some(Path::new("/h")),
+        );
         let labels: Vec<&str> = chain.iter().map(|(l, _)| *l).collect();
         assert_eq!(labels, ["managed", "local", "project", "user"]);
         assert_eq!(chain[3].1, Path::new("/h/.claude/settings.json"));
+        assert_eq!(settings_files(None, None, None), Vec::<PathBuf>::new());
+        assert_eq!(settings_files(None, Some(Path::new("/p")), None).len(), 2);
     }
 
     /// SPEC § 4.2: `prefersReducedMotion` follows the file order of the
@@ -298,25 +375,38 @@ mod tests {
         let proj = dir.path().join("proj");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::create_dir_all(proj.join(".claude")).unwrap();
-        assert!(!reduced_motion(Some(&proj), Some(&home)), "no file: off");
+        // No managed file: the tests must not depend on the machine's.
+        let chain = |p: Option<&Path>, h: Option<&Path>| read_keys(&settings_files(None, p, h));
+        assert!(!reduced_motion(&chain(Some(&proj), Some(&home))), "no file: off");
         std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
             .unwrap();
-        assert!(reduced_motion(Some(&proj), Some(&home)));
-        assert!(reduced_motion(None, Some(&home)));
-        assert!(!reduced_motion(Some(&proj), None), "the user file needs a home");
+        assert!(reduced_motion(&chain(Some(&proj), Some(&home))));
+        assert!(reduced_motion(&chain(None, Some(&home))));
+        assert!(!reduced_motion(&chain(Some(&proj), None)), "the user file needs a home");
         std::fs::write(proj.join(".claude/settings.json"), r#"{"prefersReducedMotion": false}"#)
             .unwrap();
-        assert!(!reduced_motion(Some(&proj), Some(&home)), "the project file wins");
+        assert!(!reduced_motion(&chain(Some(&proj), Some(&home))), "the project file wins");
         std::fs::write(
             proj.join(".claude/settings.local.json"),
             r#"{"prefersReducedMotion": true}"#,
         )
         .unwrap();
-        assert!(reduced_motion(Some(&proj), Some(&home)), "the local file wins over both");
+        assert!(reduced_motion(&chain(Some(&proj), Some(&home))), "the local file wins over both");
         std::fs::write(proj.join(".claude/settings.local.json"), "{ broken").unwrap();
-        assert!(!reduced_motion(Some(&proj), Some(&home)), "a broken file is skipped");
+        assert!(!reduced_motion(&chain(Some(&proj), Some(&home))), "a broken file is skipped");
         std::fs::write(proj.join(".claude/settings.json"), r#"{"theme": "dark"}"#).unwrap();
-        assert!(reduced_motion(Some(&proj), Some(&home)), "a file without the key is skipped");
+        assert!(
+            reduced_motion(&chain(Some(&proj), Some(&home))),
+            "a file without the key is skipped"
+        );
+        // A managed file outranks them all.
+        let managed = dir.path().join("managed.json");
+        std::fs::write(&managed, r#"{"prefersReducedMotion": false}"#).unwrap();
+        assert!(!reduced_motion(&read_keys(&settings_files(
+            Some(&managed),
+            Some(&proj),
+            Some(&home)
+        ))));
     }
 
     #[test]
@@ -333,14 +423,15 @@ mod tests {
         .unwrap();
         std::fs::write(proj.join(".claude/settings.json"), r#"{"autoCompactWindow": 400000}"#)
             .unwrap();
-        let ac = resolve(&Env::default(), Some(&proj), Some(&home));
+        let chain = |p: Option<&Path>, h: Option<&Path>| read_keys(&settings_files(None, p, h));
+        let ac = resolve(&Env::default(), &chain(Some(&proj), Some(&home)));
         assert_eq!(ac, AutoCompact { enabled: true, window: Some(400_000), pct_override: None });
         std::fs::write(
             proj.join(".claude/settings.local.json"),
             r#"{"autoCompactEnabled": false}"#,
         )
         .unwrap();
-        let ac = resolve(&Env::default(), Some(&proj), Some(&home));
+        let ac = resolve(&Env::default(), &chain(Some(&proj), Some(&home)));
         assert_eq!(ac.window, Some(400_000));
         assert!(!ac.enabled);
         let env = Env {
@@ -349,19 +440,22 @@ mod tests {
             disable: None,
             disable_all: None,
         };
-        let ac = resolve(&env, None, Some(&home));
+        let ac = resolve(&env, &chain(None, Some(&home)));
         assert_eq!(
             ac,
             AutoCompact { enabled: true, window: Some(250_000), pct_override: Some(80.0) }
         );
         for on in ["1", "true", "YES", " On "] {
             let env = Env { disable: Some(on.into()), ..Default::default() };
-            assert!(!resolve(&env, None, None).enabled, "{on}");
+            assert!(!resolve(&env, &[]).enabled, "{on}");
         }
         for off in ["0", "false", "no", "off", "", "maybe"] {
             let env = Env { disable: Some(off.into()), ..Default::default() };
-            assert!(resolve(&env, None, None).enabled, "{off}");
+            assert!(resolve(&env, &[]).enabled, "{off}");
         }
-        assert_eq!(settings_files(None, None), vec![managed_settings_path()]);
+        assert_eq!(
+            settings_files(Some(&managed_settings_path()), None, None),
+            vec![managed_settings_path()]
+        );
     }
 }

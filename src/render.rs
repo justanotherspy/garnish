@@ -105,10 +105,15 @@ pub struct Clock {
     /// index and text-module offset at 0 and cuts a ticker line with the
     /// ellipsis (`GARNISH_ANIMATE=0`, SPEC § 4.2).
     pub animate: bool,
-    /// Whether Claude Code's settings chain may be read for
-    /// `prefersReducedMotion` (SPEC § 4.2). Off for docs and goldens, which
-    /// must not depend on the settings of the machine rendering them.
+    /// Whether Claude Code's settings chain may be read at all (the
+    /// autocompact keys of SPEC § 2.3, `prefersReducedMotion` of § 4.2).
+    /// Off for docs and goldens, which must not depend on the settings of
+    /// the machine rendering them.
     pub settings: bool,
+    /// The organisation's managed settings file, first in the chain: the
+    /// platform path for a real run, `None` for a pinned one (and for tests
+    /// that must not see the machine's).
+    pub managed: Option<std::path::PathBuf>,
 }
 
 impl Clock {
@@ -119,11 +124,12 @@ impl Clock {
         Self {
             now: crate::time::now(),
             tz: crate::time::local_zone(),
-            home: std::env::var("HOME").ok().filter(|h| !h.is_empty()),
+            home: crate::claude_settings::home_dir().map(|h| h.display().to_string()),
             settings_env: crate::claude_settings::Env::from_process(),
             git: true,
             animate: crate::time::animate_from_env(),
             settings: true,
+            managed: Some(crate::claude_settings::managed_settings_path()),
         }
     }
 
@@ -141,22 +147,21 @@ impl Clock {
             git: false,
             animate: false,
             settings: false,
+            managed: None,
         }
     }
 
-    /// Whether animations run for this render (SPEC § 4.2), strongest
-    /// first: `GARNISH_ANIMATE=0` freezes them, an explicit `animate` in the
-    /// config decides, else Claude Code's `prefersReducedMotion` for the
-    /// payload's project directory freezes them, else they run. The
-    /// settings chain is read only when the answer depends on it.
+    /// The settings files a render of `payload` may read, highest
+    /// precedence first: the managed file, the chain of the directory Claude
+    /// Code was launched in, the home; none under a pinned clock.
     #[must_use]
-    pub fn animate_for(&self, config: &Config, payload: &Payload) -> bool {
-        self.animate
-            && config.animate.unwrap_or_else(|| {
-                let project = payload.project_dir().map(Path::new);
-                let home = self.home.as_deref().map(Path::new);
-                !(self.settings && crate::claude_settings::reduced_motion(project, home))
-            })
+    pub fn settings_files(&self, payload: &Payload) -> Vec<std::path::PathBuf> {
+        if !self.settings {
+            return Vec::new();
+        }
+        let project = payload.project_dir().map(Path::new);
+        let home = self.home.as_deref().map(Path::new);
+        crate::claude_settings::settings_files(self.managed.as_deref(), project, home)
     }
 }
 
@@ -180,7 +185,7 @@ pub fn render_lines_at(
 ) -> Vec<Vec<Segment>> {
     let width = config.width(columns);
     let cache = crate::cache::Cache::from_env();
-    let ctx = Ctx {
+    let mut ctx = Ctx {
         payload,
         theme: &config.theme,
         icons: config.icons,
@@ -193,9 +198,19 @@ pub fn render_lines_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
-        animate: clock.animate_for(config, payload),
+        animate: false,
         dirs: std::cell::OnceCell::new(),
+        settings_files: clock.settings_files(payload),
+        settings: std::cell::OnceCell::new(),
     };
+    // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
+    // `animate` decides, else Claude Code's prefersReducedMotion freezes,
+    // else animations run. The chain is read only when the answer depends
+    // on it, and once for the tick (the context module shares the keys).
+    ctx.animate = clock.animate
+        && config
+            .animate
+            .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
     let stale = stale_glyphs(config.icons);
     let layout = Layout {
         chars: config.frame.chars.clone(),
@@ -753,13 +768,19 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         json["workspace"]["project_dir"] = serde_json::json!(project.to_str().unwrap());
         let payload = Payload::parse(&json.to_string()).unwrap();
+        // No managed file: the test must not see the machine's.
         let clock = |animate: bool, settings: bool| Clock {
             now: jiff::Timestamp::from_second(1_738_425_601).unwrap(),
             home: Some(home.to_str().unwrap().to_owned()),
             animate,
             settings,
+            managed: None,
             ..Clock::fixed()
         };
+        // The docs and goldens render with the fixed clock: no settings file.
+        assert!(!Clock::fixed().settings && Clock::fixed().managed.is_none());
+        assert_eq!(Clock::fixed().settings_files(&payload), Vec::<std::path::PathBuf>::new());
+        assert_eq!(clock(true, true).settings_files(&payload).len(), 3, "local, project, user");
         let cfg = |text: &str| {
             let (config, errs) = config::parse(text, &SCHEMAS);
             assert!(errs.is_empty(), "{errs:?}");
@@ -786,8 +807,11 @@ mod tests {
             moving(&render(&cfg(base), &clock(true, false))),
             "a clock without settings access never sees the setting"
         );
-        assert!(!clock(true, true).animate_for(&cfg(base), &payload));
-        assert!(clock(true, false).animate_for(&cfg(base), &payload));
+        // A managed file outranks the project's.
+        let managed = dir.path().join("managed.json");
+        std::fs::write(&managed, r#"{"prefersReducedMotion": false}"#).unwrap();
+        let with_managed = Clock { managed: Some(managed), ..clock(true, true) };
+        assert!(moving(&render(&cfg(base), &with_managed)), "the managed file wins");
         // The user file is read when the project files do not decide.
         std::fs::remove_file(&project_settings).unwrap();
         assert!(moving(&render(&cfg(base), &clock(true, true))), "no file: on");

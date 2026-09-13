@@ -10,13 +10,21 @@ use std::process::Command;
 
 fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, bool) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    // The working directory is the test's own, not the checkout: `config
+    // show` and `doctor` read the settings chain of the current directory,
+    // and the checkout's `.claude/` must not leak into a test. Every
+    // argument a test passes is an absolute path.
     cmd.args(args)
+        .current_dir(home)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("GARNISH_CACHE_DIR", home.join("cache"))
         .env("GARNISH_NOW", "1738425600")
         .env("NO_COLOR", "1")
-        .env_remove("GARNISH_CONFIG");
+        .env_remove("GARNISH_CONFIG")
+        // A developer running with animations off must not turn the
+        // suite red; a test that wants the switch sets it through `extra`.
+        .env_remove("GARNISH_ANIMATE");
     for (k, v) in extra {
         cmd.env(k, v);
     }
@@ -125,6 +133,9 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     assert!(ok && out.contains("no config file"), "{out}");
     let (out, _, ok) = run(&["config", "init", "--preset", "compact"], home, &[]);
     assert!(ok && out.starts_with("wrote "), "{out}");
+    // `init` leaves `animate` to Claude Code's prefersReducedMotion (SPEC § 4.2).
+    let written = std::fs::read_to_string(home.join(".config/garnish/garnish.toml")).unwrap();
+    assert!(written.contains("\n# animate = true\n"), "{written}");
     let (out, err, ok) = run(&["config", "init"], home, &[]);
     assert!(!ok, "refuses to overwrite without --force");
     // A refusal is one line on stderr, not an error report (walkthrough bug 7).
@@ -348,6 +359,22 @@ fn config_show_prints_the_animate_switch_in_effect() {
         .unwrap();
     assert!(show("").contains("\nanimate = false\n"), "the user setting freezes an unset key");
     assert!(show("animate = true\n").contains("\nanimate = true\n"), "an explicit key wins");
+    // The project chain of the current directory (the test's home) outranks
+    // the user file; the session switch is not part of a config and stays out.
+    std::fs::write(home.join(".claude/settings.local.json"), r#"{"prefersReducedMotion": false}"#)
+        .unwrap();
+    assert!(show("").contains("\nanimate = true\n"), "the local file wins");
+    std::fs::remove_file(home.join(".claude/settings.local.json")).unwrap();
+    std::fs::write(&cfg, "preset = \"minimal\"\nanimate = true\n").unwrap();
+    let (shown, _, ok) = run(
+        &["--config", cfg.to_str().unwrap(), "config", "show"],
+        home,
+        &[("GARNISH_ANIMATE", "0")],
+    );
+    assert!(
+        ok && shown.contains("\nanimate = true\n"),
+        "GARNISH_ANIMATE is a session switch: {shown}"
+    );
     // What `show` prints is what the tick uses: the shown config renders
     // the same frozen spinner as the original under the same settings.
     let payload =

@@ -50,6 +50,8 @@ fn render_modules(c: &mut Criterion) {
         durations: cfg.durations,
         animate: clock.animate,
         dirs: std::cell::OnceCell::new(),
+        settings_files: Vec::new(),
+        settings: std::cell::OnceCell::new(),
     };
     let mut group = c.benchmark_group("render_module");
     for entry in garnish::modules::REGISTRY.iter() {

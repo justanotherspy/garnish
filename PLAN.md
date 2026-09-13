@@ -196,6 +196,7 @@ Open items only; closed ones are in the work log.
 - [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 - [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
 - [ ] Open question for Daniel (Phase 19, SPEC § 2.1): the harness draws every status line row dim and folds that into every coloured piece, and nothing in the output can undo it, so the FUTURE-SPEC A1 reset prefix was dropped. Should `preview` (and the § 14 pane) draw their rows dim instead, so what you see is what the screen shows? A `Painter` flag that folds SGR 2 into every segment would do it; today `preview` shows full intensity and the guide explains the difference
+- [ ] A `GARNISH_MANAGED_SETTINGS` test hook (SPEC § 9) so the goldens and `tests/cli.rs`, which run the binary, stop reading the machine's managed settings file: the in-process tests pass `managed: None`, but a managed file with `prefersReducedMotion` or `autoCompactWindow` on the machine running `cargo test` turns the goldens red today (the autocompact keys have had this exposure since Phase 3). A new env hook is a spec change, so it waits for Daniel
 - [ ] On-screen check of the status line's height (Phase 19 could only read the binary: `LINES` is the terminal height and the component draws every row with no cap of its own): render nine lines at 24 and 50 terminal lines in a real session and record the rule in SPEC § 2.1 and `CLAUDE.md`; it decides whether the § 14 picker warns on height as it does on width, and whether a § 4.3 multi-line row needs a cap of its own
 
 ## Work log
@@ -356,5 +357,28 @@ was built, what the reviews found and what was decided, not how.
   `FileKeys` grown by the doctor's keys); and the `# color:` golden mode
   with `colour-on` pinning the painter's escapes, the OSC 8 link and the
   colour codes that keep an unframed spacer. An adversarial review of
-  the code ran as a five-lens workflow with three refuters per finding;
-  its outcome is recorded in the commit that fixed it.
+  the code ran as a five-lens workflow (behaviour, spec, tests,
+  hardening, lint) with three refuters per finding; every finding it
+  raised was taken, in one fix commit: `replace_file` turned a dangling
+  symlink into a regular file (it now follows the link chain, refuses a
+  loop, is born with the old file's mode and removes its temp file on any
+  failure); the doctor suggested `refreshInterval = 1` for animations
+  that were frozen, for limits without `show_reset` and for text that fit
+  its box, and stayed silent for a value below 1 (which Claude Code
+  drops); the doctor printed a `statusLine.command` from any chain file
+  raw (now plain text, 200 characters) and the current directory in full
+  (now the heading, the project files relative to it); an empty
+  `settings.json` was "invalid" to the doctor and `{}` to `install` (now
+  `{}` to both); a settings file was read without a size bound (1 MiB);
+  the settings chain was parsed twice per tick with `animate` unset (once
+  now, through `Ctx::settings()`, shared with the context module); the
+  CLI tests ran in the checkout (the checkout's `.claude/` could leak in)
+  and kept the developer's `GARNISH_ANIMATE`; `config show` folded the
+  session switch into a printed config (it prints the file-or-settings
+  value now); the unit tests could see the machine's managed settings
+  file (`Clock.managed`, `settings_chain(managed, …)`); plus the wording
+  fixes (`--force` help, the `install` message, the vim suggestion, the
+  statusline skill's claim that `--force` keeps no backup, the SPEC
+  listing's `animate` comment, this log). Declined: a
+  `GARNISH_MANAGED_SETTINGS` test hook for the goldens (a spec decision,
+  in the backlog).

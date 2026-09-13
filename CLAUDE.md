@@ -435,12 +435,19 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - `refresh = 0` is only legal for payload-only modules; config validation
   rejects it for cached ones.
 - GC compares file mtimes with the wall clock, not `GARNISH_NOW`.
-- Docs and goldens render with `Clock::fixed()`: no git discovery, no
-  settings env, no settings files (`Clock.settings = false`;
-  `prefersReducedMotion` is read only through `Clock::from_env`, and only
-  when the config leaves `animate` unset with the session switch on), no
-  cache. Tests that run the binary must set `GARNISH_CACHE_DIR` and
-  `GARNISH_NO_SPAWN` and clear `CLAUDE_*`/`DISABLE_*`.
+- Docs and in-process tests render with `Clock::fixed()`: no git
+  discovery, no settings env, no settings files (`Clock.settings = false`,
+  `Clock.managed = None`), no cache. On the render path the settings chain
+  is read through `Ctx::settings()` alone, once per tick and only when
+  something needs it (the context module's marker, `prefersReducedMotion`
+  when `animate` is unset with the session switch on); `config show` and
+  `doctor` read the chain of the current directory on their own. Tests
+  that run the binary must set `GARNISH_CACHE_DIR` and `GARNISH_NO_SPAWN`
+  and clear `CLAUDE_*`/`DISABLE_*`/`GARNISH_ANIMATE`, and `tests/cli.rs`
+  runs the binary in the test's own directory so the checkout's `.claude/`
+  never leaks into a test; the binary always reads the platform's managed
+  settings file, so the goldens are hermetic up to that file (a unit test
+  that must not see it passes `managed: None` or a chain without it).
 - Every file a command rewrites goes through `install::replace_file` (a
   never-clobbered backup next to the target, a temp file in the same
   directory, `rename`), and a file that does not parse is refused before
