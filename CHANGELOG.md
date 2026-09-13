@@ -5,6 +5,31 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Per-module presentation** (PLAN Phase 20)
+
+- `max_width` on any built-in module cuts the whole module (label, prefix
+  and suffix included) to that many cells with `…`, before the columns
+  are aligned and before the line is cut, so one long branch name or
+  session title cannot push the rest of the line off. The common keys
+  (`label`, `prefix`, `suffix`, `hide_when_empty`, `max_width`) are now
+  listed on every module page and in `config init`'s file with their
+  caps; a text module is told to use `width` instead.
+- `path.style = "fish"` abbreviates every directory but the last to its
+  first character, the way the fish shell prompts (`~/p/garnish`).
+- `branch.link = true` links the name to the branch on the forge, built
+  from the repository identity in Claude Code's payload (GitLab gets its
+  `/-/tree/` form; nothing without a repository or on a detached HEAD),
+  and a text module's `url` wraps its box in a link. `config check`
+  rejects a URL the painter would not emit instead of letting the link
+  vanish on screen.
+- `context.scale = "usable"` measures the bar and the percentage against
+  the auto-compaction threshold, so 100 % is the point compaction runs
+  and the marker is implied; it falls back to the window scale when
+  compaction is off or the threshold is under a tenth of the window.
+- `reset = "absolute" | "both"` on `limit5h`, `limit7d` and `spend`
+  prints the local time a window resets at (`⏱14:30`; the seven-day
+  window adds the weekday), alone or in parentheses after the countdown.
+
 **Harness fidelity** (PLAN Phase 19)
 
 - `animate` left unset now follows Claude Code's *Reduce motion* setting

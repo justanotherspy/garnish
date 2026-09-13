@@ -110,7 +110,12 @@ goal without a documented reason.
 4. If code was written, spawn an **adversarial code-review subagent** whose
    brief is to attack the phase's changes: find broken behaviour, subtle bugs,
    lint escapes, deviations from `SPEC.md`, and missing tests. Fix what it
-   finds.
+   finds. Give every subagent its own worktree (`isolation: "worktree"` on
+   the Agent tool and on a workflow's `agent()`) and a brief that forbids
+   git commands which touch the working tree: a Phase 20 trap-finder ran
+   `git stash` in the checkout while a layer was half-written and the edits
+   vanished from disk under the session (found through `git stash list`,
+   re-applied by hand, 2026-09-13).
 5. For every real bug found (by the review, by you, or by the user), add a
    unit test and, where the behaviour is user-visible, an integration/golden
    test so it cannot regress.
@@ -303,9 +308,15 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   fails CI when any of them drift. An option whose value sizes an
   allocation or a loop (a cell count, a row string, decimal places) carries
   `.max(…)` on its `OptSpec`: the parser rejects anything above it and the
-  reference prints it in the type column; the common row strings
-  (`label`/`prefix`/`suffix`, `ticker_gap`) are checked by hand against
-  `MAX_TEXT_CHARS`. A unit test scans `src/modules/*.rs` for every key read
+  reference prints it in the type column; the common options (`label`,
+  `prefix`, `suffix`, `hide_when_empty`, `max_width`) are the
+  `COMMON_OPTS` specs in `schema.rs` and go through the same path (adding
+  one there is enough: the parser, `config show` and every module page
+  follow), and only `ticker_gap` is checked by hand against
+  `MAX_TEXT_CHARS`. The schema matrix test in `render.rs` renders every
+  module × preset × icon set × `max_width` against every fixture, so a
+  new module or option gets the shared invariants checked for free; a
+  behaviour of its own still wants a test of its own. A unit test scans `src/modules/*.rs` for every key read
   by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `icon(cfg, "…", "…")`, …)
   and fails on one that no schema defined in that file declares, so a typo
   in a key cannot render silently as an empty icon.

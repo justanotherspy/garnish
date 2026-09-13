@@ -38,6 +38,7 @@ free-text "describe what you want" at any point and map it onto the keys.
 | Frame taste: rounded, square, double, heavy, powerline, none? | `[frame] style` | `rounded` |
 | Should columns line up across lines? | `align = true`, `durations = "fixed"`; `right_justify` | `align = true` when there are 2+ lines |
 | Anything that scrolls or moves? | `overflow = "ticker"`, a `[modules.text.<name>]` box, `[frame] fill_pattern`, `separator_frames`, `<key>_frames`; `animate = false` for screen readers | nothing animated |
+| Long branch names or session titles that crowd the line? | `max_width` on that module (cells; the cut ends in `…`); `path.style = "fish"` for short directories; `branch.link = true` for a clickable name | nothing cut |
 
 If a gallery preset matches the answers (`garnish presets`), start from it;
 otherwise start from a built-in preset and add `[[line]]` blocks.
