@@ -502,8 +502,10 @@ hide_when_empty = true
 max_width = 0
 # show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
 # show_icon = true
-# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+# show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, never a weekday, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
@@ -550,8 +552,10 @@ hide_when_empty = true
 max_width = 0
 # show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
 # show_icon = true
-# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+# show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
@@ -598,8 +602,10 @@ hide_when_empty = true
 max_width = 0
 # show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
 # show_icon = true
-# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+# show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, never a weekday, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
