@@ -294,7 +294,7 @@ pub fn char_width(c: char) -> usize {
 /// Split text into terminal clusters that must not be separated: a base
 /// character plus any following zero-width characters (combining marks,
 /// variation selectors), and anything joined by U+200D ZERO WIDTH JOINER.
-fn clusters(s: &str) -> Vec<String> {
+pub(crate) fn clusters(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut joined = false;
     for c in s.chars() {

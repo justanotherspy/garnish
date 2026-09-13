@@ -41,9 +41,10 @@ ship it befo  a rathe…       v0.2
 | key | type | default | description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Render this module. |
-| `label` | string | `""` | Dim text before the value. |
-| `prefix`, `suffix` | string | `""` | Text around the module. |
-| `hide_when_empty` | bool | `true` | With an empty `text`, hide the module instead of showing a dim `–`. |
+| `label` | string ≤ 4096 chars | `""` | Dim text before the value. |
+| `prefix` | string ≤ 4096 chars | `""` | Text before the module. |
+| `suffix` | string ≤ 4096 chars | `""` | Text after the module. |
+| `hide_when_empty` | bool | `true` | Hide the module when it has nothing to show (else a dim `–`). |
 | `text` | string ≤ 4096 chars | `""` | The text. ANSI/OSC sequences and control characters are stripped. |
 | `width` | integer ≤ 1024 | `0` | Box width in cells; 0 = the text's own width. |
 | `pad` | integer ≤ 1024 | `0` | Blank cells added on each side of the box. |
@@ -51,8 +52,9 @@ ship it befo  a rathe…       v0.2
 | `overflow` | `clip` \| `scroll` \| `scroll-wrap` | `"scroll"` | Text wider than the box: `clip` cuts with an ellipsis, `scroll` slides a window and restarts after the end, `scroll-wrap` flows continuously with `gap` between end and start. |
 | `step` | number | `1` | Cells scrolled per tick (> 0; 0.5 = every second tick). |
 | `gap` | string ≤ 4096 chars | `"   "` | `scroll-wrap` only: text between the end and the start. |
+| `url` | string ≤ 4096 chars | `""` | Wrap the box in a clickable OSC 8 link to this `http(s)://` URL (printable ASCII only; anything else is reported and dropped). |
 
-No `preset` and no `refresh`: a text module renders every tick as configured.
+No `preset`, no `refresh` and no `max_width` (the box is sized by `width`): a text module renders every tick as configured.
 
 ## Colors
 

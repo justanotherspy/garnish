@@ -16,7 +16,9 @@ pub mod presets;
 pub mod schema;
 
 use presets::TopPreset;
-use schema::{COMMON_KEYS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value};
+use schema::{
+    COMMON_KEYS, COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
+};
 
 /// Environment variable naming the config file.
 pub const CONFIG_ENV: &str = "GARNISH_CONFIG";
@@ -1037,6 +1039,17 @@ fn check_line_ids(
     }
 }
 
+/// The common keys a `[modules.text.<name>]` table may not carry (SPEC
+/// § 3.7), each with why: reported and removed before the shared parser
+/// sees the table, and left out of the "expected one of" list for a text
+/// module so the message never recommends one of them.
+const TEXT_REJECTED_KEYS: [(&str, &str); 4] = [
+    ("refresh", "text modules render every tick; remove this key"),
+    ("preset", "text modules have no presets; remove this key"),
+    ("icons", "text modules have no icons; remove this table"),
+    ("max_width", "a text module's box is sized by `width`; remove this key"),
+];
+
 /// A text module name is a bare TOML key, so `text.<name>` is unambiguous on
 /// a line and `config show` can write `[modules.text.<name>]` back verbatim.
 fn is_bare_key(name: &str) -> bool {
@@ -1076,6 +1089,7 @@ fn resolve_texts(
             ("refresh", "text modules render every tick; remove this key"),
             ("preset", "text modules have no presets; remove this key"),
             ("icons", "text modules have no icons; remove this table"),
+            ("max_width", "a text module's box is sized by `width`; remove this key"),
         ] {
             if table.remove(key).is_some() {
                 errors.push(problem(&format!("{base}.{key}"), why));
@@ -1103,6 +1117,18 @@ fn resolve_texts(
             if let Some(Value::Str(s)) = ov.opts.get_mut(key) {
                 *s = crate::ansi::plain_text(s);
             }
+        }
+        // `url` (SPEC § 3.7) must meet the painter's rule (§ 5), or the
+        // link would vanish on screen with `config check` saying nothing.
+        if let Some(Value::Str(url)) = ov.opts.get("url")
+            && !url.is_empty()
+            && !crate::ansi::safe_link(url)
+        {
+            errors.push(problem(
+                &format!("{base}.url"),
+                "must be an http:// or https:// URL of printable ASCII (percent-encode anything else)",
+            ));
+            ov.opts.remove("url");
         }
         texts.insert(name.clone(), ModuleCfg::resolve(schema, Preset::Default, icons, theme, &ov));
     }
@@ -1253,10 +1279,6 @@ fn parse_overrides(
                 Some(b) => ov.enabled = Some(b),
                 None => err(key, "expected true or false".into()),
             },
-            "hide_when_empty" => match value.as_bool() {
-                Some(b) => ov.hide_when_empty = Some(b),
-                None => err(key, "expected true or false".into()),
-            },
             "preset" => match value.as_str().and_then(Preset::parse) {
                 Some(p) => ov.preset = Some(p),
                 None => err(key, "expected \"minimal\", \"default\" or \"full\"".into()),
@@ -1269,22 +1291,6 @@ fn parse_overrides(
                 Some(n) => ov.refresh = Some(n),
                 None => err(key, "expected a non-negative integer (seconds)".into()),
             },
-            "label" | "prefix" | "suffix" => match value.as_str() {
-                // Row text like `text`/`gap`: bounded the same way (these are
-                // common keys, so the cap cannot sit on a schema option).
-                Some(s) if s.chars().count() > MAX_TEXT_CHARS => {
-                    err(key, format!("must be at most {MAX_TEXT_CHARS} characters"));
-                }
-                Some(s) => {
-                    let s = crate::ansi::plain_text(s);
-                    match key.as_str() {
-                        "label" => ov.label = Some(s),
-                        "prefix" => ov.prefix = Some(s),
-                        _ => ov.suffix = Some(s),
-                    }
-                }
-                None => err(key, "expected a string".into()),
-            },
             "icons" => match value.as_table() {
                 Some(t) => parse_icons(schema, t, &mut ov, &mut err),
                 None => err(key, "expected a table of icon overrides".into()),
@@ -1293,18 +1299,40 @@ fn parse_overrides(
                 Some(t) => parse_colors(schema, t, &mut ov, &mut err),
                 None => err(key, "expected a table of color overrides".into()),
             },
-            other => match schema.opt(other) {
-                Some(spec) => match coerce(spec.kind, value).and_then(|v| bounded(spec, v)) {
-                    Ok(v) => {
-                        ov.opts.insert(other.to_owned(), v);
-                    }
-                    Err(msg) => err(other, msg),
-                },
-                None => err(other, unknown_option_message(schema)),
-            },
+            // The common options and the module's own go through the same
+            // coercion and cap (`COMMON_OPTS` first: a schema never redeclares
+            // a common key).
+            other => {
+                match COMMON_OPTS.iter().find(|o| o.key == other).or_else(|| schema.opt(other)) {
+                    Some(spec) => match coerce(spec.kind, value).and_then(|v| bounded(spec, v)) {
+                        Ok(v) if !set_common(&mut ov, other, v.clone()) => {
+                            ov.opts.insert(other.to_owned(), v);
+                        }
+                        Ok(_) => {}
+                        Err(msg) => err(other, msg),
+                    },
+                    None => err(other, unknown_option_message(schema)),
+                }
+            }
         }
     }
     ov
+}
+
+/// Store a coerced [`COMMON_OPTS`] value on the overrides; `false` when the
+/// key is not a common option. The row strings are reduced to plain text
+/// here like `text` and `gap` (SPEC § 5).
+fn set_common(ov: &mut Overrides, key: &str, value: Value) -> bool {
+    match (key, value) {
+        ("label", Value::Str(s)) => ov.label = Some(crate::ansi::plain_text(&s)),
+        ("prefix", Value::Str(s)) => ov.prefix = Some(crate::ansi::plain_text(&s)),
+        ("suffix", Value::Str(s)) => ov.suffix = Some(crate::ansi::plain_text(&s)),
+        ("hide_when_empty", Value::Bool(b)) => ov.hide_when_empty = Some(b),
+        // `coerce` rejects a negative integer, so the conversion cannot fail.
+        ("max_width", Value::Int(n)) => ov.max_width = Some(u64::try_from(n).unwrap_or(0)),
+        _ => return false,
+    }
+    true
 }
 
 /// The size limit a module option must respect, from its schema
@@ -1317,11 +1345,13 @@ fn bounded(spec: &OptSpec, value: Value) -> Result<Value, String> {
 }
 
 fn unknown_option_message(schema: &ModuleSchema) -> String {
+    let is_text = schema.id == crate::modules::text::SCHEMA.id;
     format!(
         "unknown option; expected one of {}",
         COMMON_KEYS
             .iter()
             .copied()
+            .filter(|k| !is_text || !TEXT_REJECTED_KEYS.iter().any(|(r, _)| r == k))
             .chain(std::iter::once("colors"))
             .chain(schema.opts.iter().map(|o| o.key))
             .collect::<Vec<_>>()
@@ -1844,6 +1874,18 @@ x = 1
         assert_eq!(x.color("text"), Color::Ansi(1), "explicit colors.text wins");
         assert_eq!(x.str("text"), "rednote");
         assert_eq!(x.str("gap"), " · ");
+
+        // `url` (SPEC § 3.7) must meet the painter's rule, else it is
+        // reported and dropped; an empty one is no link at all.
+        let text = "[modules.text.a]\ntext = \"a\"\nurl = \"https://example.com/x?y=1\"\n[modules.text.b]\ntext = \"b\"\nurl = \"ftp://example.com\"\n[modules.text.c]\ntext = \"c\"\nurl = \"https://ex ample.com\"\n[modules.text.d]\ntext = \"d\"\nurl = \"\"\n";
+        let (c, errs) = parse(text, &schemas);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["modules.text.b.url", "modules.text.c.url"], "{errs:?}");
+        assert!(errs[0].message.contains("http:// or https://"), "{errs:?}");
+        assert_eq!(c.texts.get("a").unwrap().str("url"), "https://example.com/x?y=1");
+        assert_eq!(c.texts.get("b").unwrap().str("url"), "", "dropped");
+        assert_eq!(c.texts.get("c").unwrap().str("url"), "", "dropped");
+        assert_eq!(c.texts.get("d").unwrap().str("url"), "");
     }
 
     /// SPEC § 4.2: a rule pattern is one-cell glyphs, separator frames share
@@ -2093,6 +2135,7 @@ x = 1
                 ("text", "gap", MAX_TEXT_CHARS),
                 ("text", "pad", MAX_CELLS),
                 ("text", "text", MAX_TEXT_CHARS),
+                ("text", "url", MAX_TEXT_CHARS),
                 ("text", "width", MAX_CELLS),
             ]
             .into_iter()
@@ -2122,6 +2165,68 @@ x = 1
         assert_eq!(paths, ["modules.model.label"], "{errs:?}");
         let model = c.modules.get("model").unwrap();
         assert_eq!((model.label.as_str(), model.prefix.chars().count()), ("", MAX_TEXT_CHARS));
+        // The common options carry their caps as specs, like any option.
+        let common: Vec<(&str, Option<usize>)> =
+            COMMON_OPTS.iter().map(|o| (o.key, o.max)).collect();
+        assert_eq!(
+            common,
+            [
+                ("label", Some(MAX_TEXT_CHARS)),
+                ("prefix", Some(MAX_TEXT_CHARS)),
+                ("suffix", Some(MAX_TEXT_CHARS)),
+                ("hide_when_empty", None),
+                ("max_width", Some(MAX_CELLS)),
+            ]
+        );
+    }
+
+    /// SPEC § 3: `max_width` is a common option bounded like a cell count;
+    /// a text module has `width` instead and is told so (SPEC § 3.7).
+    #[test]
+    fn max_width_is_a_common_option_except_on_text_modules() {
+        let text = "[modules.branch]\nmax_width = 12\n[modules.model]\nmax_width = 2000\n[modules.pr]\nmax_width = -1\n[modules.text.a]\ntext = \"hi\"\nmax_width = 3\n";
+        let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+        let problems: Vec<(&str, &str)> =
+            errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+        assert_eq!(
+            problems,
+            [
+                // Modules are checked in registry order (`pr` before `model`).
+                ("modules.pr.max_width", "expected a non-negative integer"),
+                ("modules.model.max_width", "must be at most 1024"),
+                (
+                    "modules.text.a.max_width",
+                    "a text module's box is sized by `width`; remove this key"
+                ),
+            ]
+        );
+        assert_eq!(c.modules.get("branch").unwrap().max_width, 12);
+        assert_eq!(c.modules.get("model").unwrap().max_width, 0, "the default stands in");
+        assert_eq!(c.modules.get("pr").unwrap().max_width, 0);
+        assert_eq!(c.texts.get("a").unwrap().max_width, 0);
+        // An unknown key names it among the common keys, except on a text
+        // module, where the message never recommends a key it would reject.
+        let (_, errs) = parse("[modules.model]\nmax_widht = 1\n", &crate::modules::SCHEMAS);
+        assert!(errs[0].message.contains("max_width"), "{errs:?}");
+        let (_, errs) =
+            parse("[modules.text.a]\ntext = \"x\"\nmax_widht = 1\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        for rejected in ["max_width", "preset", "refresh", "icons"] {
+            assert!(!errs[0].message.contains(rejected), "{rejected}: {}", errs[0].message);
+        }
+        assert!(errs[0].message.contains("hide_when_empty, colors, text, width"), "{errs:?}");
+        // The common strings are still reduced to plain text on the way in.
+        let (c, errs) = parse(
+            "[modules.model]\nlabel = \"a\\u001b[31mb\"\nhide_when_empty = false\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new());
+        let model = c.modules.get("model").unwrap();
+        assert_eq!(model.label, "ab");
+        assert!(!model.hide_when_empty);
+        assert_eq!(model.common("hide_when_empty"), Some(Value::Bool(false)));
+        assert_eq!(model.common("max_width"), Some(Value::Int(0)));
+        assert_eq!(model.common("show_id"), None);
     }
 
     #[test]

@@ -9,6 +9,15 @@ use crate::num::percent_of;
 use super::util::{BAR_STYLES, bar, percent, rounded, tokens};
 use super::{Ctx, Module, Rendered, icon, seg};
 
+/// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
+/// percentage means.
+pub const SCALES: &[&str] = &["window", "usable"];
+
+/// Below this share of the window the autocompact threshold is too small
+/// to be a scale (a huge `compact_buffer_tokens`, a tiny percentage
+/// override) and `usable` falls back to `window` (SPEC § 3.2).
+const MIN_USABLE_PERCENT: f64 = 10.0;
+
 /// `context`: smooth usage bar + percentage + compaction marker.
 pub struct ContextModule;
 
@@ -82,10 +91,22 @@ impl Module for ContextModule {
         }
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
-        let pct = used.map(crate::num::clamp_percent);
+        // SPEC § 3.2 `scale = "usable"`: 100 % is the compaction point, so
+        // the usage is measured against the threshold and the marker (and
+        // its percentage) is implied rather than drawn; back to the window
+        // when compaction is off or the threshold is too small to scale by.
+        let threshold = threshold_percent(ctx, cfg, window);
+        let usable = (cfg.str("scale") == "usable")
+            .then_some(threshold)
+            .flatten()
+            .filter(|t| *t >= MIN_USABLE_PERCENT);
+        let pct = used
+            .map(crate::num::clamp_percent)
+            .map(|u| usable.map_or(u, |scale| crate::num::clamp_percent(u * 100.0 / scale)));
         let fill_color = ctx.theme.band(rounded(pct.unwrap_or(0.0)), &thresholds, &bands);
 
-        let marker = compaction_percent(ctx, cfg, window);
+        let marker =
+            if usable.is_some() || !cfg.bool("compaction_marker") { None } else { threshold };
         let width = cfg.size("width");
         if width > 0 {
             let marker_spec = marker.map(|m| (m, cfg.icon("marker"), cfg.color("marker")));
@@ -156,6 +177,12 @@ fn opts() -> Vec<OptSpec> {
             Value::StrList(vec!["band1".into(), "band2".into(), "band3".into(), "band4".into()]),
         ),
         OptSpec::new(
+            "scale",
+            Kind::Enum(SCALES),
+            "What 100 % means: `window` the whole context window; `usable` the auto-compaction threshold, so the bar and the percentage say how close compaction is (the marker and its percentage are then implied and not drawn; the window tag still names the real window). `usable` falls back to `window` when compaction is disabled or the threshold is under a tenth of the window.",
+            Value::Str("window".into()),
+        ),
+        OptSpec::new(
             "compaction_marker",
             Kind::Bool,
             "Mark the auto-compaction threshold on the bar.",
@@ -197,12 +224,91 @@ fn opts() -> Vec<OptSpec> {
     ]
 }
 
-/// The compaction threshold as a percentage of the window, if enabled.
-fn compaction_percent(ctx: &Ctx<'_>, cfg: &ModuleCfg, window: u64) -> Option<f64> {
-    if !cfg.bool("compaction_marker") {
-        return None;
-    }
+/// The auto-compaction threshold (SPEC § 2.3) as a percentage of the
+/// window, whatever `compaction_marker` says; `None` when compaction is
+/// disabled. The marker and the `usable` scale both read it.
+fn threshold_percent(ctx: &Ctx<'_>, cfg: &ModuleCfg, window: u64) -> Option<f64> {
     let ac = claude_settings::resolve(&ctx.settings_env, ctx.settings());
     let threshold = ac.threshold(window, cfg.int("compact_buffer_tokens"))?;
     Some(percent_of(threshold, window))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ansi::strip_ansi;
+    use crate::render::{Clock, render_plain_at};
+
+    /// The context module alone, plain, with `used_percentage` on a 1M
+    /// window and the given auto-compaction environment.
+    fn render(used: f64, extra: &str, env: crate::claude_settings::Env) -> String {
+        let payload = crate::payload::Payload::parse(&format!(
+            "{{\"session_id\": \"s\", \"context_window\": {{\"context_window_size\": 1000000, \"used_percentage\": {used}}}}}"
+        ))
+        .unwrap();
+        let text = format!(
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nwidth = 10\n{extra}"
+        );
+        let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let clock = Clock { settings_env: env, ..Clock::fixed() };
+        strip_ansi(&render_plain_at(&payload, &config, Some(80), &clock)).trim_end().to_owned()
+    }
+
+    /// SPEC § 3.2 `scale = "usable"`: the percentage and the bar are
+    /// measured against the threshold (98.7 % of 1M by default), capped at
+    /// 100, the marker and its label are not drawn, the window tag still
+    /// names the window; `window` is today's render, byte for byte.
+    #[test]
+    fn usable_scale_measures_against_the_compaction_threshold() {
+        let env = crate::claude_settings::Env::default();
+        assert_eq!(render(50.0, "", env.clone()), "⊞ █████░░░░▏ 50%");
+        assert_eq!(render(50.0, "scale = \"window\"\n", env.clone()), "⊞ █████░░░░▏ 50%");
+        // 50 / 98.7 = 50.66 → 51 %; no marker cell.
+        assert_eq!(render(50.0, "scale = \"usable\"\n", env.clone()), "⊞ █████░░░░░ 51%");
+        // At the threshold exactly: 100 %; above it: still 100 %.
+        assert_eq!(render(98.7, "scale = \"usable\"\n", env.clone()), "⊞ ██████████ 100%");
+        assert_eq!(render(99.5, "scale = \"usable\"\n", env.clone()), "⊞ ██████████ 100%");
+        assert_eq!(render(98.6, "scale = \"usable\"\n", env.clone()), "⊞ █████████▉ 100%");
+        // The full preset: no `⤓` label under `usable`, the window tag stays.
+        let full = "preset = \"full\"\nscale = \"usable\"\n";
+        assert_eq!(render(80.0, full, env.clone()), "⊞ ████████░░ 81% 1.0M");
+        let full_window = "preset = \"full\"\n";
+        assert_eq!(render(80.0, full_window, env), "⊞ ████████░▏ 80% ⤓99% 1.0M");
+        // A lower configured window moves the threshold: 500k − 13k = 48.7 %
+        // of 1M, so 40 % used reads 82 %.
+        let low =
+            crate::claude_settings::Env { window: Some("500000".into()), ..Default::default() };
+        assert_eq!(render(40.0, "scale = \"usable\"\n", low), "⊞ ████████▏░ 82%");
+    }
+
+    /// SPEC § 3.2: `usable` falls back to `window` when compaction is
+    /// disabled and when the threshold is under a tenth of the window.
+    #[test]
+    fn usable_scale_falls_back_to_the_window() {
+        let disabled =
+            crate::claude_settings::Env { disable: Some("1".into()), ..Default::default() };
+        assert_eq!(render(50.0, "scale = \"usable\"\n", disabled.clone()), "⊞ █████░░░░░ 50%");
+        assert_eq!(render(50.0, "", disabled), "⊞ █████░░░░░ 50%", "no marker either way");
+        // 50 000 − 13 000 = 3.7 % of the window: too small to scale by, so
+        // the window scale and its marker (in the first cell) stay.
+        let tiny =
+            crate::claude_settings::Env { window: Some("50000".into()), ..Default::default() };
+        assert_eq!(render(50.0, "scale = \"usable\"\n", tiny.clone()), "⊞ ▏████░░░░░ 50%");
+        assert_eq!(render(50.0, "", tiny), "⊞ ▏████░░░░░ 50%");
+        // Exactly a tenth (113 000 → 10.0 %) is enough.
+        let tenth =
+            crate::claude_settings::Env { window: Some("113000".into()), ..Default::default() };
+        assert_eq!(render(5.0, "scale = \"usable\"\n", tenth), "⊞ █████░░░░░ 50%");
+        // `compaction_marker` governs drawing alone: off, the scale still
+        // measures against the threshold (SPEC § 3.2 keys the fallback on
+        // § 2.3's enabled state).
+        let env = crate::claude_settings::Env::default();
+        let no_marker = "scale = \"usable\"\ncompaction_marker = false\n";
+        assert_eq!(render(50.0, no_marker, env.clone()), "⊞ █████░░░░░ 51%");
+        assert_eq!(render(50.0, "compaction_marker = false\n", env.clone()), "⊞ █████░░░░░ 50%");
+        // Bands and `warn_at` follow the displayed percentage.
+        let warn = "scale = \"usable\"\nwarn_at = 90\n";
+        assert_eq!(render(89.0, warn, env.clone()), "⊞ █████████░ 90% ⚠");
+        assert_eq!(render(88.0, warn, env), "⊞ ████████▉░ 89%");
+    }
 }

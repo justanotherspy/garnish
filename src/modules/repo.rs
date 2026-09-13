@@ -23,6 +23,9 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long the worker lets `git fetch` run (network; opt-in only).
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The `path` module's `style` choices (SPEC § 3.1).
+pub const PATH_STYLES: &[&str] = &["full", "fish"];
+
 /// Cache scope for a checkout: shared by every session in the same worktree.
 fn repo_scope(session: &str, cwd: &Path) -> Scope {
     git::discover(cwd)
@@ -57,6 +60,41 @@ pub fn shorten(path: &str, depth: usize) -> String {
     let skip = parts.len().saturating_sub(depth);
     let tail = parts.iter().skip(skip).copied().collect::<Vec<_>>().join("/");
     if home.is_empty() { tail } else { format!("{home}/{tail}") }
+}
+
+/// `style = "fish"` (SPEC § 3.1): every directory of the base but the last
+/// abbreviated to its first character, the way the fish shell prompts.
+///
+/// `~/projects/garnish` reads `~/p/garnish`; a dot-directory keeps its dot
+/// and its first letter (`.config` → `.c`), as fish does. A leading `~` is
+/// not a segment and stays whole, the last segment is never abbreviated,
+/// and a root or one-segment path is returned as is. Runs after
+/// [`shorten`], so `depth` applies first.
+#[must_use]
+pub fn fish(path: &str) -> String {
+    let (home, rest) = path.strip_prefix('~').map_or(("", path), |r| ("~", r));
+    let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+    let last = parts.len().saturating_sub(1);
+    let body = parts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| if i == last { (*p).to_owned() } else { initial(p) })
+        .collect::<Vec<_>>()
+        .join("/");
+    match (home, rest.starts_with('/'), body.is_empty()) {
+        ("~", _, true) => "~".to_owned(),
+        ("~", _, false) => format!("~/{body}"),
+        (_, true, _) => format!("/{body}"),
+        _ => body,
+    }
+}
+
+/// The abbreviation of one directory name: its first character (a terminal
+/// cluster, so a combining mark stays with its base), or the dot and the
+/// character after it for a dot-directory.
+fn initial(segment: &str) -> String {
+    let keep = if segment.starts_with('.') { 2 } else { 1 };
+    crate::ansi::clusters(segment).into_iter().take(keep).collect()
 }
 
 /// The path of `cwd` relative to `base`, if `cwd` is inside `base`.
@@ -100,6 +138,12 @@ impl Module for PathModule {
                 )
                 .minimal(Value::Int(1))
                 .full(Value::Int(0)),
+                OptSpec::new(
+                    "style",
+                    Kind::Enum(PATH_STYLES),
+                    "How the base prints: `full` as is; `fish` abbreviates every directory but the last to its first character (`~/p/garnish`; a dot-directory to `.c`), as the fish shell prompts. `depth` applies first; the subpath is untouched.",
+                    Value::Str("full".into()),
+                ),
                 OptSpec::new(
                     "show_subpath",
                     Kind::Bool,
@@ -149,6 +193,7 @@ impl Module for PathModule {
             return Rendered::empty();
         }
         let shown = shorten(&tildify(base, ctx.home.as_deref()), cfg.size("depth"));
+        let shown = if cfg.str("style") == "fish" { fish(&shown) } else { shown };
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "folder", "icon"));
@@ -386,8 +431,14 @@ impl Module for BranchModule {
                 OptSpec::new(
                     "max_length",
                     Kind::Int,
-                    "Truncate longer names (0 = no limit).",
+                    "Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead.",
                     Value::Int(40),
+                ),
+                OptSpec::new(
+                    "link",
+                    Kind::Bool,
+                    "Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD.",
+                    Value::Bool(false),
                 ),
             ],
             icons: vec![
@@ -437,7 +488,20 @@ impl Module for BranchModule {
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, if detached { "detached" } else { "branch" }, "icon"));
         }
-        segs.push(Segment::styled(shown, Style::fg(cfg.color("name")).bolded()));
+        // SPEC § 3.1 `link`: the branch on the forge, from the payload's
+        // repo identity alone (no git call); a detached head has no page.
+        let url = (cfg.bool("link") && !detached)
+            .then(|| ctx.payload.workspace.as_ref()?.repo.as_ref())
+            .flatten()
+            .and_then(|repo| branch_url(repo, &head_key, is_gitlab(repo, ctx.payload)));
+        let mut name_seg = Segment::styled(
+            shown,
+            Style::fg(cfg.color("name")).bolded().underline_if(url.is_some()),
+        );
+        if let Some(url) = url {
+            name_seg = name_seg.with_link(url);
+        }
+        segs.push(name_seg);
         if cfg.bool("show_sha")
             && !detached
             && let Some(sha) = dirs.and_then(git::head_commit)
@@ -634,6 +698,54 @@ impl Module for SyncModule {
     }
 }
 
+/// Whether the forge is GitLab, whose tree URLs carry `/-/` (SPEC § 3.1):
+/// a host named after it, or an open merge request (`pr.kind = "mr"`, the
+/// payload's other GitLab signal, which covers a self-hosted name).
+fn is_gitlab(repo: &crate::payload::Repo, payload: &crate::payload::Payload) -> bool {
+    repo.host.as_deref().is_some_and(|h| h.to_ascii_lowercase().contains("gitlab"))
+        || payload.pr.as_ref().and_then(|p| p.kind.as_deref()) == Some("mr")
+}
+
+/// The page of `branch` on the forge (SPEC § 3.1): `https://<host>/<owner>/
+/// <name>/tree/<branch>`, `/-/tree/` on GitLab; `None` when the payload's
+/// repo identity is incomplete. Every part is percent-encoded so the
+/// painter's rule (SPEC § 5: printable ASCII) holds for any name.
+fn branch_url(repo: &crate::payload::Repo, branch: &str, gitlab: bool) -> Option<String> {
+    let host = repo.host.as_deref().filter(|s| !s.is_empty())?;
+    let owner = repo.owner.as_deref().filter(|s| !s.is_empty())?;
+    let name = repo.name.as_deref().filter(|s| !s.is_empty())?;
+    let tree = if gitlab { "/-/tree/" } else { "/tree/" };
+    Some(format!(
+        "https://{}/{}/{}{tree}{}",
+        percent_encode(host),
+        percent_encode(owner),
+        percent_encode(name),
+        percent_encode(branch)
+    ))
+}
+
+/// Percent-encode a URL path.
+///
+/// The RFC 3986 unreserved characters and `/` are kept; every other byte
+/// of the UTF-8 encoding becomes `%XX`, so `feature/#12` and a non-ASCII
+/// name make a valid, printable-ASCII link.
+#[must_use]
+pub fn percent_encode(s: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(char::from(b));
+            }
+            _ => {
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
+}
+
 /// The `⇡N ⇣M` counts.
 ///
 /// A non-zero count carries its `ahead`/`behind` colour; a zero shown because
@@ -730,5 +842,125 @@ mod tests {
         assert_eq!(subpath("/a/b", "/a/b/c/d"), Some("c/d".into()));
         assert_eq!(subpath("/a/b", "/a/b"), None);
         assert_eq!(subpath("/a/b", "/a/c"), None);
+    }
+
+    /// SPEC § 3.1 `link`: the forge URL from the payload's repo identity,
+    /// percent-encoded, `/-/tree/` on GitLab, nothing without a repo or
+    /// on a detached head; the link is off by default.
+    #[test]
+    fn branch_link_is_built_from_the_payload_repo() {
+        assert_eq!(percent_encode("feature/#12"), "feature/%2312");
+        assert_eq!(percent_encode("fix ünï"), "fix%20%C3%BCn%C3%AF");
+        assert_eq!(percent_encode("a-b.c_d~e"), "a-b.c_d~e");
+        assert_eq!(percent_encode("x?y&z=1"), "x%3Fy%26z%3D1");
+        let repo = |host: &str| crate::payload::Repo {
+            host: Some(host.into()),
+            owner: Some("dschwartz".into()),
+            name: Some("garnish".into()),
+        };
+        assert_eq!(
+            branch_url(&repo("github.com"), "feature/#12", false).as_deref(),
+            Some("https://github.com/dschwartz/garnish/tree/feature/%2312")
+        );
+        assert_eq!(
+            branch_url(&repo("gitlab.example.org"), "main", true).as_deref(),
+            Some("https://gitlab.example.org/dschwartz/garnish/-/tree/main")
+        );
+        assert_eq!(branch_url(&crate::payload::Repo::default(), "main", false), None);
+        let mut half = repo("github.com");
+        half.name = Some(String::new());
+        assert_eq!(branch_url(&half, "main", false), None);
+        // Every URL built passes the painter's rule, whatever the name.
+        for name in ["feature/#12", "ünïcode", "a b", "tab\tname", "\u{202e}rtl"] {
+            let url = branch_url(&repo("github.com"), name, false).unwrap();
+            assert!(crate::ansi::safe_link(&url), "{url}");
+        }
+        // GitLab: the host's name, or an open merge request on any host.
+        let with_pr = |kind: Option<&str>| crate::payload::Payload {
+            pr: Some(crate::payload::Pr { kind: kind.map(str::to_owned), ..Default::default() }),
+            ..Default::default()
+        };
+        assert!(is_gitlab(&repo("gitlab.com"), &crate::payload::Payload::default()));
+        assert!(is_gitlab(&repo("GitLab.example.org"), &crate::payload::Payload::default()));
+        assert!(!is_gitlab(&repo("git.example.com"), &crate::payload::Payload::default()));
+        assert!(is_gitlab(&repo("git.example.com"), &with_pr(Some("mr"))));
+        assert!(!is_gitlab(&repo("git.example.com"), &with_pr(Some("pr"))));
+        assert!(!is_gitlab(&repo("github.com"), &with_pr(None)));
+        // Through the module: the fixture's worktree branch, linked and
+        // underlined only with `link = true`.
+        let render = |extra: &str, fixture: &str| {
+            let path =
+                format!("{}/tests/fixtures/payloads/{fixture}.json", env!("CARGO_MANIFEST_DIR"));
+            let payload =
+                crate::payload::Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let text = format!(
+                "icons = \"unicode\"\ncolor = \"always\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"branch\"]\n[modules.branch]\n{extra}"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = crate::render::Clock::fixed();
+            let lines = crate::render::render_lines_at(&payload, &config, Some(80), &clock);
+            lines.into_iter().next().unwrap_or_default()
+        };
+        let linked = render("link = true\n", "worktree-session");
+        let name = linked.iter().find(|s| s.text() == "worktree-feature-x").unwrap();
+        assert_eq!(
+            name.link.as_deref(),
+            Some("https://github.com/dschwartz/garnish/tree/worktree-feature-x")
+        );
+        assert!(name.style.underline);
+        let plain = render("", "worktree-session");
+        let name = plain.iter().find(|s| s.text() == "worktree-feature-x").unwrap();
+        assert_eq!(name.link, None);
+        assert!(!name.style.underline);
+        // A name cut by `max_length` still links to the whole branch.
+        let cut = render("link = true\nmax_length = 5\n", "worktree-session");
+        let name = cut.iter().find(|s| s.link.is_some()).unwrap();
+        assert_eq!(name.text(), "work…");
+        assert_eq!(
+            name.link.as_deref(),
+            Some("https://github.com/dschwartz/garnish/tree/worktree-feature-x")
+        );
+    }
+
+    /// SPEC § 3.1 `style = "fish"`: every directory but the last to its
+    /// first character, `~` and the last segment whole, a dot-directory to
+    /// its dot and first letter, root and one-segment paths untouched, and
+    /// `depth` (which keeps the `~`) applied first.
+    #[test]
+    fn fish_abbreviates_every_directory_but_the_last() {
+        assert_eq!(fish("~/projects/garnish"), "~/p/garnish");
+        assert_eq!(fish("~"), "~");
+        assert_eq!(fish("~/garnish"), "~/garnish");
+        assert_eq!(fish("/"), "/");
+        assert_eq!(fish("/srv/a/b/c"), "/s/a/b/c");
+        assert_eq!(fish("garnish"), "garnish");
+        assert_eq!(fish("projects/garnish"), "p/garnish");
+        assert_eq!(fish("/home/dev/.config/garnish"), "/h/d/.c/garnish");
+        assert_eq!(fish("~/Übung/ü/x"), "~/Ü/ü/x", "the first character, not the first byte");
+        assert_eq!(fish("/e\u{301}tude/x"), "/e\u{301}/x", "a combining mark stays with its base");
+        assert_eq!(fish(&shorten("~/repos/garnish/src", 2)), "~/g/src");
+        assert_eq!(fish(&shorten("/srv/repos/garnish/src", 2)), "g/src");
+        assert_eq!(fish(&shorten("~/repos/garnish/src", 0)), "~/r/g/src");
+        // Through the module: the base is abbreviated after `depth`, the
+        // subpath below it stays whole.
+        let payload = crate::payload::Payload::parse(
+            "{\"cwd\": \"/home/dev/projects/garnish/src/modules\", \"workspace\": {\"current_dir\": \"/home/dev/projects/garnish/src/modules\", \"project_dir\": \"/home/dev/projects/garnish\"}}",
+        )
+        .unwrap();
+        let render = |depth: u8| {
+            let text = format!(
+                "icons = \"ascii\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"path\"]\n[modules.path]\nstyle = \"fish\"\ndepth = {depth}\n"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = crate::render::Clock::fixed();
+            crate::render::render_plain_at(&payload, &config, Some(80), &clock)
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(render(0), "~/p/garnish/src/modules");
+        assert_eq!(render(2), "~/p/garnish/src/modules");
+        assert_eq!(render(1), "~/garnish/src/modules");
     }
 }

@@ -308,8 +308,47 @@ impl ModuleSchema {
 }
 
 /// Keys every module accepts in addition to its own options.
-pub const COMMON_KEYS: [&str; 8] =
-    ["enabled", "preset", "refresh", "label", "prefix", "suffix", "hide_when_empty", "icons"];
+pub const COMMON_KEYS: [&str; 9] = [
+    "enabled",
+    "preset",
+    "refresh",
+    "label",
+    "prefix",
+    "suffix",
+    "hide_when_empty",
+    "max_width",
+    "icons",
+];
+
+/// The common options every module takes besides its own, as specs.
+///
+/// The parser bounds them like any option ([`OptSpec::max`]) and the
+/// reference prints them with their caps (SPEC § 3, § 5). `enabled`,
+/// `preset` and `refresh` stay hand-parsed: a preset is a name and
+/// `refresh` depends on whether the module is cached. Text modules
+/// (SPEC § 3.7) take every entry but `max_width`, which `config check`
+/// rejects there in favour of `width`.
+pub const COMMON_OPTS: [OptSpec; 5] = [
+    OptSpec::new("label", Kind::Str, "Dim text before the value.", Value::Str(String::new()))
+        .max(crate::config::MAX_TEXT_CHARS),
+    OptSpec::new("prefix", Kind::Str, "Text before the module.", Value::Str(String::new()))
+        .max(crate::config::MAX_TEXT_CHARS),
+    OptSpec::new("suffix", Kind::Str, "Text after the module.", Value::Str(String::new()))
+        .max(crate::config::MAX_TEXT_CHARS),
+    OptSpec::new(
+        "hide_when_empty",
+        Kind::Bool,
+        "Hide the module when it has nothing to show (else a dim `–`).",
+        Value::Bool(true),
+    ),
+    OptSpec::new(
+        "max_width",
+        Kind::Int,
+        "Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.",
+        Value::Int(0),
+    )
+    .max(crate::config::MAX_CELLS),
+];
 
 /// The fully resolved configuration of one module instance.
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +369,9 @@ pub struct ModuleCfg {
     pub suffix: String,
     /// Hide the module when it has nothing to say.
     pub hide_when_empty: bool,
+    /// Cells the decorated module is cut to with the ellipsis; 0 = unlimited
+    /// (SPEC § 3). Always 0 for a text module, which has `width` instead.
+    pub max_width: usize,
     opts: BTreeMap<&'static str, Value>,
     icons: BTreeMap<&'static str, String>,
     /// Frames an icon cycles through when animations run (`<key>_frames`);
@@ -411,6 +453,7 @@ impl ModuleCfg {
             prefix: overrides.prefix.clone().unwrap_or_default(),
             suffix: overrides.suffix.clone().unwrap_or_default(),
             hide_when_empty: overrides.hide_when_empty.unwrap_or(true),
+            max_width: crate::num::u64_to_usize(overrides.max_width.unwrap_or(0)),
             opts,
             icons,
             icon_frames: schema
@@ -458,6 +501,20 @@ impl ModuleCfg {
     #[must_use]
     pub const fn schema(&self) -> &ModuleSchema {
         &self.schema
+    }
+
+    /// The resolved value of a [`COMMON_OPTS`] key, for `config show` and
+    /// the docs (`None` for a key that is not a common option).
+    #[must_use]
+    pub fn common(&self, key: &str) -> Option<Value> {
+        match key {
+            "label" => Some(Value::Str(self.label.clone())),
+            "prefix" => Some(Value::Str(self.prefix.clone())),
+            "suffix" => Some(Value::Str(self.suffix.clone())),
+            "hide_when_empty" => Some(Value::Bool(self.hide_when_empty)),
+            "max_width" => Some(Value::Int(i64::try_from(self.max_width).unwrap_or(i64::MAX))),
+            _ => None,
+        }
     }
 
     /// Raw option value.
@@ -576,6 +633,8 @@ pub struct Overrides {
     pub suffix: Option<String>,
     /// `hide_when_empty`.
     pub hide_when_empty: Option<bool>,
+    /// `max_width` (cells; 0 = unlimited).
+    pub max_width: Option<u64>,
     /// Module-specific options.
     pub opts: BTreeMap<String, Value>,
     /// Icon overrides.

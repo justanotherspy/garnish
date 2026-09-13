@@ -1,0 +1,27 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600
+# icons: unicode
+# color: always
+# `url` on a text module wraps its box in an OSC 8 link (SPEC § 3.7): the
+# link covers the box, not the `pad` cells around it. Rendered with colour
+# on because the painter emits no link under `--color never` (SPEC § 9).
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["text.docs", "text.tag"]
+
+[modules.text.docs]
+text  = "docs"
+url   = "https://github.com/justanotherspy/garnish/tree/main/docs"
+width = 8
+pad   = 1
+justify = "center"
+
+[modules.text.tag]
+text  = "v0.2"
+color = "muted"
+url   = "https://github.com/justanotherspy/garnish/releases"
