@@ -1,0 +1,41 @@
+# A throwaway connectivity probe: does this repository's GitHub OIDC token
+# exchange for an Anthropic access token under the federation rule below?
+# It builds nothing and gates nothing; the exchange response is printed with
+# every *_token value redacted.
+name: anthropic-wif-test
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+# Every action is pinned to a full commit SHA (Renovate keeps the pins and the
+# version comments current).
+jobs:
+  call-claude:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch GitHub OIDC token
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            core.exportVariable('JWT', token);
+      - name: Exchange for an Anthropic access token
+        run: |
+          curl -sS https://api.anthropic.com/v1/oauth/token \
+            -H "content-type: application/json" \
+            --data @- <<JSON | jq 'with_entries(if (.key | test("token$")) then .value = "<redacted>" else . end)'
+          {
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": "$JWT",
+            "federation_rule_id": "fdrl_01Sf3P3B65XKxK66EWBeNrxh",
+            "organization_id": "c419af23-49f3-48ec-b346-a345f64ee5ec",
+            "service_account_id": "svac_01So6woBVPFG4GmNRJT2QKVz",
+            "workspace_id": "wrkspc_01FrtuNtJAYdwk63f9DRj7UY"
+          }
+          JSON
