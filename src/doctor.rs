@@ -186,6 +186,26 @@ pub fn settings_rows(
         });
     }
     rows.push(row("prefersReducedMotion", &text));
+    // Which renderer draws the screen decides what a tall status line does
+    // (SPEC § 2.1); an unset key leaves the choice to Claude Code.
+    let text = match resolved(chain, |k| k.tui.clone()) {
+        Some((tui, from)) if tui == "fullscreen" => format!(
+            "fullscreen ({from}): the prompt box and the status line share at most half the terminal's rows, and a taller status line loses its last rows"
+        ),
+        Some((tui, from)) if tui == "default" => format!(
+            "default ({from}): the classic renderer cuts nothing; every status line row costs a row of transcript"
+        ),
+        Some((tui, from)) => {
+            let plain = crate::ansi::plain_text(&tui);
+            let shown: String = plain.chars().take(MAX_COMMAND_CHARS).collect();
+            format!("{shown} ({from})")
+        }
+        None => {
+            "unset: Claude Code picks the renderer (fresh installs get fullscreen); `/tui` shows and sets it"
+                .to_owned()
+        }
+    };
+    rows.push(row("tui", &text));
     rows
 }
 
@@ -628,7 +648,7 @@ mod tests {
         let local = proj.join(".claude/settings.local.json");
         std::fs::write(
             &user,
-            r#"{"statusLine": {"type": "command", "command": "garnish", "refreshInterval": 5}, "prefersReducedMotion": true}"#,
+            r#"{"statusLine": {"type": "command", "command": "garnish", "refreshInterval": 5}, "prefersReducedMotion": true, "tui": "fullscreen"}"#,
         )
         .unwrap();
         std::fs::write(
@@ -668,12 +688,16 @@ mod tests {
             "{text}"
         );
         assert!(row(&rows, "prefersReducedMotion", "true (user): animations are frozen"), "{text}");
+        assert!(
+            row(&rows, "tui", "fullscreen (user): the prompt box and the status line"),
+            "{text}"
+        );
         // The key column is one width, so the values line up.
         assert!(rows.iter().skip(4).all(|r| r.get(23..24) == Some(" ")), "{text}");
         // A key set in two files: the higher file wins, key by key.
         std::fs::write(
             &local,
-            r#"{"statusLine": {"command": "/opt/garnish", "refreshInterval": 2}, "prefersReducedMotion": false}"#,
+            r#"{"statusLine": {"command": "/opt/garnish", "refreshInterval": 2}, "prefersReducedMotion": false, "tui": "default"}"#,
         )
         .unwrap();
         let rows = settings_rows(&chain(Some(&proj), Some(&home)), Some(&proj), &cfg, true);
@@ -682,6 +706,14 @@ mod tests {
         assert!(row(&rows, "refreshInterval", "2 (local); set 1"), "{text}");
         assert!(row(&rows, "hideVimModeIndicator", "false (project)"), "{text}");
         assert!(row(&rows, "prefersReducedMotion", "false (local)"), "{text}");
+        assert!(row(&rows, "tui", "default (local): the classic renderer"), "{text}");
+        // An unknown value is shown as plain text; an unset key says so.
+        std::fs::write(&local, "{\"tui\": \"x\\u001b[31my\"}").unwrap();
+        let rows = settings_rows(&chain(Some(&proj), Some(&home)), Some(&proj), &cfg, true);
+        assert!(row(&rows, "tui", "xy (local)"), "{}", rows.join("\n"));
+        std::fs::write(&local, "{}").unwrap();
+        let rows = settings_rows(&chain(Some(&proj), None), Some(&proj), &cfg, true);
+        assert!(row(&rows, "tui", "unset: Claude Code picks"), "{}", rows.join("\n"));
         std::fs::write(&local, "{ broken").unwrap();
         // No ticking module and no vim: no suggestion; an explicit `animate`
         // changes the reduced-motion note.

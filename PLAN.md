@@ -17,11 +17,13 @@ tap landed on 2026-09-11 and waits for its first tag. On 2026-09-12 every
 open code item was closed and the spec was audited against the code, and
 Phases 19–22 were written that day from the FUTURE-SPEC review and
 Daniel's layout and setup ideas. Phase 19 (harness fidelity) was built
-the same day on a branch (PR pending): five of its six layers landed as
-designed; the sixth, the per-row dim reset, was dropped after the harness
-binary showed it cannot work, and became a spec correction (SPEC § 2.1)
-plus an open question for Daniel (§ Backlog). **The drift between SPEC
-and the code is now Phases 20–22 below.**
+the same day and merged on 2026-09-13 (PR #49): five of its six layers
+landed as designed; the sixth, the per-row dim reset, was dropped after
+the harness binary showed it cannot work and became a spec correction
+(SPEC § 2.1). Its three open questions were decided the same day
+(`preview` dims its rows, a `GARNISH_MANAGED_SETTINGS` hook, the height
+rule read from the binary; work log). **The drift between SPEC and the
+code is now Phases 20–22 below.**
 
 ## Done — Phases 0–18, compacted
 
@@ -195,7 +197,6 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
 - [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 - [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
-- [ ] On-screen check of the status line's height (Phase 19 could only read the binary: `LINES` is the terminal height and the component draws every row with no cap of its own): render nine lines at 24 and 50 terminal lines in a real session and record the rule in SPEC § 2.1 and `CLAUDE.md`; it decides whether the § 14 picker warns on height as it does on width, and whether a § 4.3 multi-line row needs a cap of its own
 
 ## Work log
 
@@ -380,3 +381,26 @@ was built, what the reviews found and what was decided, not how.
   listing's `animate` comment, this log). Declined: a
   `GARNISH_MANAGED_SETTINGS` test hook for the goldens (a spec decision,
   in the backlog).
+- **2026-09-13 (backlog decisions)** — Daniel took the three Phase 19
+  questions as suggested and PR #49 merged mid-way; the rest went on a
+  fresh branch. `preview` draws every row faint (`Painter.dim` through
+  `Request.dim`; only `preview` sets it, the tick's bytes and goldens are
+  unchanged, the colour-on golden re-pinned) and SPEC § 14 has the pane
+  do the same. `GARNISH_MANAGED_SETTINGS` (SPEC § 9) names the managed
+  settings file or, empty, none: `managed_settings_path` returns an
+  `Option`, every binary-run test and the bench set it empty, `doctor`
+  lists it, one CLI test points it at a fixture (CI's one red was that
+  test comparing a `/var` path with `doctor`'s `/private/var` cwd on
+  macOS; canonicalised). The height rule came from the 2.1.270 binary in
+  the session's container (a five-lens read with refuters, the renderer
+  and component-tree lenses decisive): three renderers, nothing cut by
+  the classic one (the frame scrolls, the bottom `LINES − 1` rows stay),
+  `⌊LINES / 2⌋` for the whole bottom block in fullscreen (the status
+  line's last rows go first; 7 rows whole at 24 lines, 20 at 50), and
+  `LINES − 2` in the off-by-default DECSTBM split renderer. Decided:
+  garnish caps nothing on the tick, the § 14 picker warns against the
+  fullscreen budget, § 4.3 rows need no cap of their own, `doctor` prints
+  the `tui` setting with what it means; SPEC § 2.1, § 7, § 11, § 14,
+  `CLAUDE.md` (with the literals to grep after an upgrade), the guide and
+  README carry it. Read, not watched: a nine-line status line at 24 rows
+  on a real screen would confirm the arithmetic.

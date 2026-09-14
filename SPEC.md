@@ -115,15 +115,50 @@ that is empty in both modes.
 
 **Height.** `LINES` in the script's environment is the whole terminal's
 row count (2.1.270: the hook runner copies `process.stdout.rows` next to
-`columns`), and the status line component draws every row of the output,
-one `<Text>` per row in a column with no cap of its own, inside a footer
-column that may shrink (`flexShrink: 1`). Whether a tall status line
-squeezes the transcript or scrolls the screen is decided above that
-component and was not verified on screen (the Phase 19 session had no
-interactive terminal; the on-screen check stays in PLAN § Backlog), so
-the § 14 picker states a preset's row count and warns on width only, and
-a multi-line row (§ 4.3) gets no height cap of its own until the rule is
-known.
+`columns`; the renderer reads the same number, falling back to 24 and
+clamping at 2048). The status line component draws every row of the
+output, one `<Text>` per row in a column with no cap of its own, and
+nothing between it and the screen bounds its height either: the footer
+(the status line and the hint line beside the mode block), the composer
+(the prompt box above them, the hint line below) and the REPL slot carry
+no height, `maxHeight` or `overflow`. What a tall status line does is
+decided by which of Claude Code's three renderers is active (read in the
+2.1.270 binary on 2026-09-13, PLAN work log; read, not watched on a
+screen):
+
+- *classic* (`tui = "default"` in the settings, and always in
+  screen-reader mode): nothing is cut. The frame is laid out with a width
+  constraint only, so more rows make it taller; once it is taller than the
+  terminal its top scrolls into the scrollback and the bottom `LINES − 1`
+  rows stay in view, the prompt box and the status line among them.
+  Renders are cell diffs; the visible rows are erased and redrawn only on
+  a resize, a forced reset or when the frame shrinks back to fit, and the
+  scrollback is never touched. Every status line row costs a row of
+  transcript.
+- *fullscreen* (the alternate screen: `tui = "fullscreen"`,
+  `CLAUDE_CODE_NO_FLICKER=1`, and Claude Code's own choice for fresh
+  installs and behind server-side gates): the bottom block (the prompt
+  box with its notices, the status line, the hint line, the suggestions)
+  sits in a box of `maxHeight = ⌊LINES / 2⌋` (`LINES − 2` while a history
+  search or an elicitation overlay is open) inside a root `LINES` tall,
+  and the alternate-screen buffer drops anything laid out below the root.
+  The block is top-aligned, so its last rows go first: the hint line,
+  then the status line from the bottom up. With the prompt box's three
+  rows, its margin and the hint line, the status line keeps
+  `⌊LINES / 2⌋ − 5` rows whole: 7 at 24 rows, 20 at 50.
+- *split* (DECSTBM scroll regions; off unless `CLAUDE_CODE_DECSTBM` or a
+  server flag turns it on): the bottom block is bounded to `LINES − 2`
+  rows, the transcript keeps two, and overflow is again cut from the
+  bottom.
+
+The script is told nothing about the renderer (the `tui` key is in the
+settings chain, the gates are not), so garnish caps nothing on the tick:
+every configured row is printed, and the fullscreen budget is the rule
+the tools apply. `doctor` prints the `tui` setting with the other keys
+(§ 7), the § 14 picker warns when a preset's row count exceeds
+`⌊LINES / 2⌋ − 5` for the terminal it runs in, and a multi-line row
+(§ 4.3) gets no height cap of its own: the harness cuts a too-tall block
+from the bottom in fullscreen and cuts nothing in classic.
 
 ### 2.2 Payload (stdin JSON)
 
@@ -1114,7 +1149,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). Target state (§ 14): the bare `garnish` with a terminal on stdin prints one line pointing at `garnish setup` and exits 0 instead of waiting; the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command) and `prefersReducedMotion` (with how the config's `animate` interacts) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts) and `tui` (which renderer draws the screen and what it does with a tall status line, § 2.1) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
@@ -1253,11 +1288,10 @@ per-module render cost.
 - Session duration is `cost.total_duration_ms` and resets on `/clear`.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
-  small terminals. A multi-line row (§ 4.3) costs its height; whether the
-  harness caps the status line's height is an open backlog item (§ 2.1:
-  Phase 19 could read the binary only, which draws every row and caps
-  nothing itself), and until it is known the `setup` picker states a
-  preset's row count.
+  small terminals. A multi-line row (§ 4.3) costs its height. The harness
+  caps nothing in its classic renderer and gives the prompt box and the
+  status line together at most half the terminal in fullscreen (§ 2.1),
+  the budget the `setup` picker warns against.
 
 ## 12. Presets gallery (PLAN Phase 17, shipped in v0.2.0)
 
@@ -1357,9 +1391,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the real width (`COLUMNS − 4 − padding`), with its summary, declared
   width and `needs` line, and a warning when the terminal is narrower than
   the preset's declared width (the `…` cut is shown as it would be on
-  screen, not hidden) or shorter than the harness allows for the preset's
-  row count (a rule still to be verified on screen, PLAN § Backlog; until
-  then the picker states the row count). `Enter` applies it: the file is written with the
+  screen, not hidden) or shorter than the fullscreen budget of § 2.1
+  allows for the preset's row count (`⌊LINES / 2⌋ − 5` rows whole; the
+  picker states the count either way). `Enter` applies it: the file is written with the
   previous one kept by `install`'s backup rule (§ 5), and the install screen follows
   if the settings file has no `statusLine` yet. `e` opens the highlighted
   preset in the builder instead of applying it.
