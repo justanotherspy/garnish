@@ -192,6 +192,19 @@ minutes for nothing. Cost is held down by the narrow triggers, a
 `--max-turns` cap, `cancel-in-progress` concurrency, and a tool allowlist
 with no build tools in it.
 
+**The `concurrency` block belongs to the job, not the workflow, and moving it
+up breaks the review.** A workflow-level group is claimed when a run is
+*created*, before any job `if` is evaluated, so a run that goes on to skip
+every job still evicts whatever run holds the group. This workflow talks on
+the very events it listens to — `track_progress` posts a tracking comment and
+the review posts its summary through `gh pr comment`, both as `claude[bot]`,
+and both come back as `issue_comment: created` — so the workflow cancelled
+itself: the first real review died 80 seconds in (run 34878106655) when its
+own tracking comment created a second run that took the group and was then
+skipped. Two guards keep it dead: the group sits on the job, where a skipped
+job never joins it, and the `if` excludes bot authors so those comments are
+never candidates.
+
 ## Release process
 
 A release is a signed `vX.Y.Z` tag on `main`. `.github/workflows/release.yml`
