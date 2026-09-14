@@ -255,6 +255,17 @@ Daniel's approval.
 shell so a release can be reproduced by hand; `render-cask.sh <version>`
 works locally for any published release.
 
+**The cask template is declarative, not Ruby.** Homebrew 6.0 deprecated the
+`postflight` block (arbitrary Ruby) in favour of `postflight_steps`, whose
+body is a fixed vocabulary evaluated by `Homebrew::InstallSteps::DSL`:
+`run` instead of `system_command`, `on_macos` instead of `if OS.mac?`. Ruby
+interpolation does not run in there, so the staged binary is
+`"{{staged_path}}/garnish"` (a Homebrew template token), **not**
+`"#{staged_path}/garnish"` — that looks like a typo and is not one. Homebrew
+also deprecated `url ... verified:` and ignores it, so the template carries a
+bare `url`. Artifacts run in class order, not file order, so
+`postflight_steps` still runs after `binary`.
+
 ## Style: strict lints, never panic (namtao.com/rust)
 
 `Cargo.toml` denies `clippy::pedantic`, `clippy::nursery`, and every panic

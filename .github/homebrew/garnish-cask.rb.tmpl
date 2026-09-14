@@ -6,26 +6,22 @@ cask "garnish" do
   on_macos do
     on_intel do
       sha256 "@@SHA_X86_64_APPLE_DARWIN@@"
-      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-x86_64-apple-darwin.tar.gz",
-          verified: "github.com/justanotherspy/garnish/"
+      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-x86_64-apple-darwin.tar.gz"
     end
     on_arm do
       sha256 "@@SHA_AARCH64_APPLE_DARWIN@@"
-      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-aarch64-apple-darwin.tar.gz",
-          verified: "github.com/justanotherspy/garnish/"
+      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-aarch64-apple-darwin.tar.gz"
     end
   end
 
   on_linux do
     on_intel do
       sha256 "@@SHA_X86_64_LINUX@@"
-      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-x86_64-unknown-linux-gnu.tar.gz",
-          verified: "github.com/justanotherspy/garnish/"
+      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-x86_64-unknown-linux-gnu.tar.gz"
     end
     on_arm do
       sha256 "@@SHA_AARCH64_LINUX@@"
-      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-aarch64-unknown-linux-gnu.tar.gz",
-          verified: "github.com/justanotherspy/garnish/"
+      url "https://github.com/justanotherspy/garnish/releases/download/v#{version}/garnish-aarch64-unknown-linux-gnu.tar.gz"
     end
   end
 
@@ -45,11 +41,11 @@ cask "garnish" do
   # Strip com.apple.quarantine so the binary runs after install.
   # must_succeed: false — the attribute is absent when installed with
   # --no-quarantine, and xattr -d errors on a missing attribute.
-  postflight do
-    if OS.mac?
-      system_command "/usr/bin/xattr",
-                     args:         ["-dr", "com.apple.quarantine", "#{staged_path}/garnish"],
-                     must_succeed: false
+  postflight_steps do
+    on_macos do
+      run "/usr/bin/xattr",
+          args:         ["-dr", "com.apple.quarantine", "{{staged_path}}/garnish"],
+          must_succeed: false
     end
   end
 
