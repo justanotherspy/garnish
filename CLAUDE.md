@@ -192,6 +192,21 @@ minutes for nothing. Cost is held down by the narrow triggers, a
 `--max-turns` cap, `cancel-in-progress` concurrency, and a tool allowlist
 with no build tools in it.
 
+**Turns are the binding constraint, not money.** Every inline comment is a
+turn and so is every `track_progress` checklist update, so progress tracking
+and a tight `--max-turns` pull against each other. At 15 the first real review
+(run 34879256227) died on `error_max_turns` three seconds after its second
+inline comment, with the summary unwritten, on a two-file 33-line diff; the cap
+is now 25. Those 16 turns cost $0.95, so the ceiling is roughly $1.50-2.00 for
+a review that is only ever asked for by hand — raise the cap before trimming
+the review. A PR touching `src/` will want more again, and the prompt tells the
+review to fold leftover findings into the summary rather than spend its last
+turns posting them one by one, so running out degrades instead of truncating.
+
+Note that `claude_args` is a block scalar whose every line reaches the CLI
+verbatim: a `#` line inside it becomes an argument, not a comment. Notes about
+those flags go above the key.
+
 **The `concurrency` block belongs to the job, not the workflow, and moving it
 up breaks the review.** A workflow-level group is claimed when a run is
 *created*, before any job `if` is evaluated, so a run that goes on to skip
