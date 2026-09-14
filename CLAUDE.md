@@ -123,7 +123,11 @@ goal without a documented reason.
   or updates it, plus `cargo-nextest`; `make setup ARGS=--bench` adds
   `hyperfine` and `jq`; `--all` adds `watchexec`. If a fresh nightly breaks
   the build or nursery lints, pin `channel = "nightly-YYYY-MM-DD"` to the
-  last good date and note it in `PLAN.md`; unpin later.
+  last good date and note it in `PLAN.md`; unpin later. When `make setup`
+  stops with a PATH note, rustup's `cargo`/`rustc` proxies are not on the
+  shell's PATH (a package-manager rustup keeps them in its own bin
+  directory; Homebrew's is keg-only): fix PATH on the host, never in the
+  repository.
 - Edition 2024. `cargo nextest run` for tests, `cargo test --doc` for
   doctests, `cargo bench` for criterion, `./bench/run.sh` for hyperfine
   end-to-end. Without `cargo-nextest`, `cargo test` runs the same suites but

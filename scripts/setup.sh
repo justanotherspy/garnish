@@ -91,6 +91,28 @@ else
 fi
 log "rustup update $channel"
 rustup update --no-self-update "$channel"
+
+# --- proxies: cargo and rustc must be on PATH --------------------------------
+# rustup's proxies are not always next to rustup itself: rustup-init puts them
+# in $CARGO_HOME/bin, a package-manager rustup keeps them in its own bin
+# directory (Homebrew's formula is keg-only, so only `rustup` is linked).
+# Without them every cargo command fails with "command not found", so find
+# them, use them for the rest of this run, and refuse to finish until the
+# shell's PATH has them too.
+proxy_dir=""
+if ! have cargo || ! have rustc; then
+  candidates=("${CARGO_HOME:-$HOME/.cargo}/bin")
+  if have brew; then candidates+=("$(brew --prefix rustup 2>/dev/null || true)/bin"); fi
+  for dir in "${candidates[@]}"; do
+    if [ -x "$dir/cargo" ] && [ -x "$dir/rustc" ]; then proxy_dir="$dir"; break; fi
+  done
+  if [ -z "$proxy_dir" ]; then
+    echo "setup: rustup installed $channel but its cargo and rustc proxies are in none of: ${candidates[*]}" >&2
+    echo "setup: see https://rust-lang.github.io/rustup/installation/already-installed-rust.html" >&2
+    exit 1
+  fi
+  export PATH="$proxy_dir:$PATH"
+fi
 rustc --version
 
 # --- cargo-nextest ---------------------------------------------------------
@@ -133,6 +155,13 @@ if [ "$want_all" = 1 ] && [ "$host" != ci ]; then
     log "cargo install watchexec-cli"
     cargo install --locked watchexec-cli
   fi
+fi
+
+if [ -n "$proxy_dir" ]; then
+  log "PATH"
+  echo "setup: cargo and rustc live in $proxy_dir, which is not on your PATH." >&2
+  echo "setup: add it in your shell's startup file (Homebrew: \`brew info rustup\`), open a new shell and re-run make setup." >&2
+  exit 1
 fi
 
 log "ready"

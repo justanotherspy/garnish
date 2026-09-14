@@ -404,3 +404,13 @@ was built, what the reviews found and what was decided, not how.
   `CLAUDE.md` (with the literals to grep after an upgrade), the guide and
   README carry it. Read, not watched: a nine-line status line at 24 rows
   on a real screen would confirm the arithmetic.
+- **2026-09-14 (first macOS host)** — `make setup` on Daniel's Mac died
+  with `rustc: command not found` after a clean toolchain install: the
+  rustup there is Homebrew's keg-only formula, whose `cargo`/`rustc`
+  proxies sit in `$(brew --prefix rustup)/bin`, off PATH, while
+  `~/.cargo/bin` held dead 2022 symlinks to a `rustup-init` the formula
+  no longer ships. Fixed on the host (PATH); `scripts/setup.sh` now looks
+  for the proxies in `$CARGO_HOME/bin` and rustup's own bin, uses them
+  for its run and stops with a PATH note instead of a bare `command not
+  found`. `make install` then built and installed `garnish` 0.2.0 with no
+  change needed.
