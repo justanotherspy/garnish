@@ -25,12 +25,6 @@ on:
   pull_request:
     types: [labeled]
 
-# One review per pull request at a time. A newer request cancels one that is
-# still running rather than paying for both.
-concurrency:
-  group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
-  cancel-in-progress: true
-
 # Every action is pinned to a full commit SHA (Renovate keeps the pins and the
 # version comments current).
 jobs:
@@ -40,25 +34,47 @@ jobs:
     # draft and open checks live in the guard step below, because the
     # `issue_comment` payload describes the pull request as an *issue* and the
     # shape of that object is not worth betting the gate on.
+    #
+    # Bot authors are excluded because this review talks on the very events it
+    # listens to: `track_progress` posts a tracking comment and the review
+    # posts its summary through `gh pr comment`, both as `claude[bot]`, and
+    # both arrive back here as `issue_comment: created`.
     if: |
       (
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request != null &&
         github.event.issue.user.login == 'justanotherspy' &&
+        github.event.comment.user.type != 'Bot' &&
         contains(github.event.comment.body, '@claude')
       ) || (
         github.event_name == 'pull_request_review_comment' &&
         github.event.pull_request.user.login == 'justanotherspy' &&
+        github.event.comment.user.type != 'Bot' &&
         contains(github.event.comment.body, '@claude')
       ) || (
         github.event_name == 'pull_request_review' &&
         github.event.pull_request.user.login == 'justanotherspy' &&
+        github.event.review.user.type != 'Bot' &&
         contains(github.event.review.body, '@claude')
       ) || (
         github.event_name == 'pull_request' &&
         github.event.pull_request.user.login == 'justanotherspy' &&
         github.event.label.name == 'claude-review'
       )
+    # One review per pull request at a time: a newer request cancels one that
+    # is still running rather than paying for both.
+    #
+    # This MUST stay on the job and never move up to the workflow. A
+    # workflow-level group is claimed when the run is *created*, before any
+    # job `if` is evaluated, so a run that goes on to skip every job still
+    # evicts the run holding the group. That is not hypothetical: it killed
+    # the first real review 80 seconds in (run 34878106655), because the
+    # tracking comment the review had just posted created a second run that
+    # claimed the group and was then skipped. On the job, a skipped job never
+    # joins the group.
+    concurrency:
+      group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
