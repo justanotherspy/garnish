@@ -40,7 +40,10 @@ cask "garnish" do
   # flag makes Gatekeeper block them as "from an unidentified developer."
   # Strip com.apple.quarantine so the binary runs after install.
   # must_succeed: false — the attribute is absent when installed with
-  # --no-quarantine, and xattr -d errors on a missing attribute.
+  # --no-quarantine, and xattr -d errors on a missing attribute. It also
+  # swallows a wrong path, so verify a real install (not just `brew fetch`)
+  # before the first tag: `xattr -p com.apple.quarantine "$(brew --prefix)/bin/garnish"`
+  # must answer "No such xattr".
   postflight_steps do
     on_macos do
       run "/usr/bin/xattr",
