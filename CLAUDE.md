@@ -196,12 +196,22 @@ with no build tools in it.
 turn and so is every `track_progress` checklist update, so progress tracking
 and a tight `--max-turns` pull against each other. At 15 the first real review
 (run 34879256227) died on `error_max_turns` three seconds after its second
-inline comment, with the summary unwritten, on a two-file 33-line diff; the cap
-is now 25. Those 16 turns cost $0.95, so the ceiling is roughly $1.50-2.00 for
-a review that is only ever asked for by hand — raise the cap before trimming
-the review. A PR touching `src/` will want more again, and the prompt tells the
-review to fold leftover findings into the summary rather than spend its last
-turns posting them one by one, so running out degrades instead of truncating.
+inline comment, with the summary unwritten, on a two-file 33-line diff. The cap
+is now **50**, which is deliberately generous: a truncated review wastes
+everything it already spent, so raise the cap before trimming the review.
+
+**Sonnet 5 at `--effort high` is what pays for that ceiling.** Sonnet is about
+2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so 50 Sonnet
+turns cost roughly what 25 Opus turns would; the 16 Opus turns of that first
+review cost $0.95. Note that `high` is not the top of the range — `xhigh` sits
+between it and `max` and is Claude Code's own default for Sonnet 5 — so this is
+a deliberate setting, not a maximum.
+
+Two prompt rules keep the output usable. The review folds leftover findings
+into the summary rather than spending its last turns posting them one by one,
+so running out degrades instead of truncating; and it writes tersely, leading
+with the finding and aiming under 120 words an inline comment, because the
+first review's findings were correct but ran to several screens each.
 
 Note that `claude_args` is a block scalar whose every line reaches the CLI
 verbatim: a `#` line inside it becomes an argument, not a comment. Notes about
