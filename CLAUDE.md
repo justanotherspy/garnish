@@ -280,6 +280,56 @@ Daniel's approval.
 shell so a release can be reproduced by hand; `render-cask.sh <version>`
 works locally for any published release.
 
+**The cask template is declarative, not Ruby.** `postflight_steps` replaces
+the `postflight` block (arbitrary Ruby); its body is a fixed vocabulary
+evaluated by `Homebrew::InstallSteps::DSL`: `run` instead of
+`system_command`, `on_macos` instead of `if OS.mac?`. Ruby interpolation
+does not run in there, so the staged binary is `"{{staged_path}}/garnish"`
+(a Homebrew template token), **not** `"#{staged_path}/garnish"` — that looks
+like a typo and is not one. Homebrew also ignores `url ... verified:`, so
+the template carries a bare `url`. Artifacts run in class order, not file
+order, so `postflight_steps` still runs after `binary`.
+
+Versions, because the timing is confusing: the steps DSL has existed since
+**5.1.14**, `verified:` became a no-op in **6.0.13**, but both `odeprecated`
+calls sat commented out in `cask/dsl.rb` through 6.0.22 and were switched on
+in **7.0.0** (2026-09-13), which is why the warnings appeared all at once.
+
+This is not cosmetic. `odeprecated` defaults to `disable_for_developers:
+true` and raises `MethodDeprecatedError` when `Homebrew::EnvConfig.developer?`,
+so with `HOMEBREW_DEVELOPER` set a deprecated stanza makes the cask fail to
+load outright. It also never ages out of a tap like ours: the call is guarded
+by `unless @cask.loaded_from_api?`, so casks served from homebrew/cask's JSON
+API stay quiet and source-loaded third-party taps always warn.
+
+Two DSL facts the template depends on, both verified in `install_steps.rb`
+at tag 7.0.1: `run`'s `args` are template-expanded
+(`args…map { |arg| expand_template_tokens(arg) }`, line 1246), and
+`must_succeed:` round-trips through the step's `allow_failure` (lines 723
+and 1252). A `{{token}}` that resolves to nothing cannot pass through
+silently: `staged_path` is in `CONTENT_PATH_TOKENS`, so it goes to
+`root_path`, which **raises** `unknown install step base` (line 1596)
+rather than leaving the literal in place.
+
+**`brew fetch` does not exercise any of this.** It downloads and checksums;
+it never stages or installs, and neither does `brew info --cask`. So the
+`render` job cannot prove the quarantine strip works. The place to check it
+by hand is the approval gate on the first release, which is the only point
+where the artifacts exist and nothing has shipped yet: `render` has already
+built the pre-release's binaries and kept the rendered cask as the `cask`
+artifact, and `publish` is still waiting for approval, so the tap is
+untouched. Download that artifact on a Mac and install it:
+
+```
+brew install --cask ./garnish.rb
+xattr -p com.apple.quarantine "$(brew --prefix)/bin/garnish"   # want: No such xattr
+```
+
+Rejecting the approval then leaves a pre-release with binaries and no cask,
+and the fix is a new version through steps 1–2: a tag is never moved. This
+cannot be done before tagging, because the tag push is what creates the
+pre-release and its binaries in the first place.
+
 ## Style: strict lints, never panic (namtao.com/rust)
 
 `Cargo.toml` denies `clippy::pedantic`, `clippy::nursery`, and every panic
