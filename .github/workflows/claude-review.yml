@@ -113,7 +113,7 @@ jobs:
 
       - name: Review
         if: steps.gate.outputs.review == 'true'
-        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1.0.223
+        uses: anthropics/claude-code-action@bf38e86e58df9ebf3420326d019f955bb3be64dd # v1.0.225
         with:
           # These values are identifiers, not secrets. The federation rule is
           # what restricts which OIDC subject may exchange for a token.
@@ -172,16 +172,48 @@ jobs:
             the review rather than repeating what CI already says.
 
             Post specific issues as inline comments on the lines they concern,
-            and one top-level comment summarising the review. Be concise and
-            say which findings are blocking and which are nits. Do not post a
-            comment that only offers praise.
+            and one top-level comment summarising the review. Say which
+            findings are blocking and which are nits. Do not post a comment
+            that only offers praise.
+
+            **Write tersely.** Lead each comment with the finding in one
+            sentence, then only the evidence needed to act on it. No preamble,
+            no restating the diff, no narrating what you are about to say, no
+            recap of your own reasoning. Prefer a short code block or a
+            ```suggestion``` block over prose describing a change. Aim for
+            under 120 words per inline comment; go longer only when a subtle
+            correctness argument genuinely needs it. The summary is a short
+            list, one line per finding, blocking ones first. A reviewer should
+            be able to read the whole review in a minute.
+
+            You have a turn budget, and every inline comment and every progress
+            update spends one. The summary comment is the most useful thing you
+            produce, so protect it: as the budget runs low, fold your remaining
+            findings into the summary rather than posting them one by one. Run
+            short on inline comments, never on the summary.
 
             Keep the review to the diff and the code it touches. Do NOT run
             `cargo build`, `cargo test`, `cargo clippy` or `make check` - CI
             already runs all of those, and a toolchain build here costs
             several minutes for nothing.
 
+          # `claude_args` is a block scalar: every line is passed to the CLI
+          # verbatim, so a `#` line here would become an argument, not a
+          # comment. Keep notes above this key.
+          #
+          # --max-turns: 15 was not enough. The first real review
+          # (run 34879256227) died on error_max_turns three seconds after its
+          # second inline comment, with the summary still unwritten.
+          # `track_progress` is part of that cost, since each checklist update
+          # is a turn, and so is each inline comment. 50 is deliberately
+          # generous: a truncated review wastes everything it already spent.
+          #
+          # --model / --effort: Sonnet 5 at high effort. Sonnet is ~2.5x
+          # cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), which is
+          # what pays for doubling the turn ceiling - 16 Opus turns cost $0.95,
+          # so 50 Sonnet turns land in the same place rather than above it.
           claude_args: |
-            --model claude-opus-5
-            --max-turns 15
+            --model claude-sonnet-5
+            --effort high
+            --max-turns 50
             --allowedTools "mcp__github_inline_comment__create_inline_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
