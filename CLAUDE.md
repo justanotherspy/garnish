@@ -313,14 +313,22 @@ rather than leaving the literal in place.
 
 **`brew fetch` does not exercise any of this.** It downloads and checksums;
 it never stages or installs, and neither does `brew info --cask`. So the
-`render` job cannot prove the quarantine strip works. Verify it once by
-hand on a Mac against the first pre-release, before tagging, since a tag is
-never moved:
+`render` job cannot prove the quarantine strip works. The place to check it
+by hand is the approval gate on the first release, which is the only point
+where the artifacts exist and nothing has shipped yet: `render` has already
+built the pre-release's binaries and kept the rendered cask as the `cask`
+artifact, and `publish` is still waiting for approval, so the tap is
+untouched. Download that artifact on a Mac and install it:
 
 ```
-brew install --cask ./out/garnish.rb
+brew install --cask ./garnish.rb
 xattr -p com.apple.quarantine "$(brew --prefix)/bin/garnish"   # want: No such xattr
 ```
+
+Rejecting the approval then leaves a pre-release with binaries and no cask,
+and the fix is a new version through steps 1–2: a tag is never moved. This
+cannot be done before tagging, because the tag push is what creates the
+pre-release and its binaries in the first place.
 
 ## Style: strict lints, never panic (namtao.com/rust)
 
