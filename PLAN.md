@@ -178,6 +178,7 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README, and the "from the first tagged release" qualifier from README § Install and guide § 1
 - [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's fullscreen and classic renderers (`/tui`) to confirm the § 2.1 arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt; the classic frame scrolling), then drop "read, not watched" from SPEC § 2.1 and `CLAUDE.md`
 - [ ] Whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+- [ ] A one-line pull request against `main`: `ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head` on the review workflow's checkout step. Three of its four triggers are comment events, whose `GITHUB_REF` is the default branch, so a review asked for with `@claude` reads `main`'s tree while reasoning about the pull request's diff. It has to go in alone and first: the action refuses to run at all on a branch whose copy of the workflow differs from `main`'s (§ Claude review)
 - [ ] How far to go in refusing a hostile `.git/config`. The audit's review found that refusing a `-` remote closed one door and left others: the same file sets `core.fsmonitor` (a command `git status` runs) and `remote.<name>.uploadpack` (a command a fetch runs), and both are now overridden on the command line, which costs nothing real. Three remain, and each is a setting a user may genuinely want honoured in their own repositories: `core.sshCommand`, `core.gitProxy`, and an `ext::` remote URL. All three need `fetch_interval > 0`, which is opt-in and defaults to 0, so nothing reaches them by default. The options are to clear them too (safe against an unpacked archive, breaks a custom ssh command or proxy), to refuse to fetch at all when the repository is not owned by the user (git's own `safe.directory` answer), or to leave them and say so in the `fetch_interval` docs
 
 **Parked designs** (decided, not to be reopened without a reason)
@@ -537,9 +538,13 @@ was built, what the reviews found and what was decided, not how.
   asserted `key_hash` and `sanitize`.
 
   **CI** gained the shellcheck gate `CLAUDE.md` has always required (about
-  600 lines of shell, none of it checked), `permissions: contents: read`
-  on `ci.yml`, and an explicit `ref:` on the review workflow's checkout,
-  whose three comment triggers were reading `main`'s tree.
+  600 lines of shell, none of it checked) and `permissions: contents: read`
+  on `ci.yml`. An explicit `ref:` on the review workflow's checkout, whose
+  three comment triggers read `main`'s tree, was written and then taken back
+  out: the action refuses to run on any branch whose copy of its workflow
+  differs from `main`'s, so carrying the fix here cost this very branch its
+  Claude review (a green twelve-second job saying `Workflow validation
+  failed`). It goes in alone, first, and is in the backlog.
 
   **Documents.** SPEC said the settings chain is read every tick (it is
   read once, on demand), put `sync`'s fetch-age hint in the wrong preset

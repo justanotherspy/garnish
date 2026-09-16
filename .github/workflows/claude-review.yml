@@ -105,17 +105,10 @@ jobs:
             echo "Skipping: a review runs only on an open, ready-for-review pull request." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # The pull request's own head, named explicitly. Three of the four
-      # triggers are comment events, whose `GITHUB_REF` is the default
-      # branch, not the pull request — so without a `ref:` the review would
-      # be reading `main`'s tree while reasoning about the pull request's
-      # diff, which is exactly the mistake the prompt below assumes away
-      # ("The PR branch is already checked out").
       - name: Checkout repository
         if: steps.gate.outputs.review == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head
           fetch-depth: 1
 
       - name: Review

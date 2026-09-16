@@ -233,10 +233,20 @@ and was then skipped. Two guards keep it dead: the group sits on the job,
 where a skipped job never joins it, and the `if` excludes bot authors so
 those comments are never candidates.
 
-**The checkout names the pull request's head explicitly.** Three of the four
-triggers are comment events, whose `GITHUB_REF` is the default branch, so
-without `ref: refs/pull/<n>/head` the review reads `main`'s tree while
-reasoning about the pull request's diff.
+**A pull request that edits this file cannot be reviewed by it.** The action
+exchanges its OIDC token only when the workflow file is byte-identical to the
+copy on the default branch, and refuses with `Workflow validation failed`
+otherwise: the job goes green in about twelve seconds having done nothing, so
+the tell is the duration, not a red check. A change here therefore lands in
+its own pull request, before the branch that wants the review, and never
+alongside it.
+
+That is why the checkout still does not name the pull request's head. Three
+of the four triggers are comment events, whose `GITHUB_REF` is the default
+branch, so without `ref: refs/pull/<n>/head` a review asked for by `@claude`
+reads `main`'s tree while reasoning about the pull request's diff. The
+`labeled` trigger is a `pull_request` event and is unaffected, which is why
+this has gone unnoticed. PLAN's backlog carries the fix.
 
 ## Release process
 
