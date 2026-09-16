@@ -436,10 +436,15 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `.max(…)` on its `OptSpec`: the parser rejects anything above it and the
   reference prints it in the type column; the common options (`label`,
   `prefix`, `suffix`, `hide_when_empty`, `max_width`) are the
-  `COMMON_OPTS` specs in `schema.rs` and go through the same path (adding
-  one there is enough: the parser, `config show` and every module page
-  follow), and only `ticker_gap` is checked by hand against
-  `MAX_TEXT_CHARS`. The schema matrix test in `render.rs` renders every
+  `COMMON_OPTS` specs in `schema.rs` and go through the same coercion, cap
+  and reference path, and only `ticker_gap` is checked by hand against
+  `MAX_TEXT_CHARS`. A sixth common option means four edits, not one,
+  because the five are read on the tick path as named fields rather than
+  through the option map: the spec in `COMMON_OPTS`, a field on
+  `Overrides`, an arm in `set_common`, and a field on `ModuleCfg` with its
+  arm in `ModuleCfg::resolve` and `ModuleCfg::common`. A unit test fails
+  when the first is done and the rest are not, so the trap has a tripwire
+  rather than being a rule to remember. The schema matrix test in `render.rs` renders every
   module × preset × icon set × `max_width` against every fixture, so a
   new module or option gets the shared invariants checked for free; a
   behaviour of its own still wants a test of its own. A unit test scans

@@ -718,9 +718,18 @@ fn worker_repo_modules_render_in_every_preset_and_icon_set() {
             assert!(ok, "{label}: {out}");
             let row = out.lines().next().unwrap_or_default();
             // The repo really is read: the branch, and the commit `setup`
-            // left unpushed as one ahead.
+            // left unpushed as one ahead — with the set's own glyph, so a
+            // module that rendered nothing cannot satisfy this.
             assert!(row.contains("main"), "{label}: no branch in {row:?}");
-            assert!(row.contains('1'), "{label}: no ahead count in {row:?}");
+            let set = garnish::icons::IconSet::parse(icons).unwrap();
+            let glyph = garnish::modules::entry("sync")
+                .unwrap()
+                .schema
+                .icon("ahead")
+                .unwrap()
+                .glyph
+                .get(set);
+            assert!(row.contains(&format!("{glyph}1")), "{label}: no {glyph:?}1 in {row:?}");
             assert!(
                 unicode_width::UnicodeWidthStr::width(row) <= 116,
                 "{label}: {row:?} is wider than the box"
