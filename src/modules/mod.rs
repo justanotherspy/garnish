@@ -163,15 +163,15 @@ impl Ctx<'_> {
     }
 
     /// The wall-clock time of a future epoch-seconds instant in the tick's
-    /// zone (`14:30`, or `Tue 14:30` with `weekday`), the absolute twin of
-    /// [`Ctx::countdown`] (SPEC § 3.3); `None` once passed, like it.
+    /// zone, in one of the [`crate::time::WallClock`] forms, the absolute
+    /// twin of [`Ctx::countdown`] (SPEC § 3.3); `None` once passed, like it.
     #[must_use]
-    pub fn wall_clock(&self, epoch_secs: i64, weekday: bool) -> Option<String> {
+    pub fn wall_clock(&self, epoch_secs: i64, form: crate::time::WallClock) -> Option<String> {
         if epoch_secs <= self.now.as_second() {
             return None;
         }
         let at = Timestamp::from_second(epoch_secs).ok()?;
-        Some(crate::time::wall_clock(at, &self.tz, weekday))
+        Some(crate::time::wall_clock(at, &self.tz, form))
     }
 
     /// The animation frame (or scroll offset) at this tick: [`crate::time::frame`]

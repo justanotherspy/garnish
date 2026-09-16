@@ -146,7 +146,7 @@ max_width = 0
 # dirty = false
 # max_length (integer) — Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
 # max_length = 40
-# link (bool) — Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD. [minimal=false default=false full=false]
+# link (bool) — Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD. GitLab is recognised by a host named after it or an open merge request, so a self-hosted GitLab on an unrelated host name links to `/tree/` until one is open. [minimal=false default=false full=false]
 # link = false
 [modules.branch.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
@@ -504,7 +504,7 @@ max_width = 0
 # show_icon = true
 # show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
-# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, never a weekday, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, no weekday or date, since this window resets within the day, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
 # reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
@@ -554,7 +554,7 @@ max_width = 0
 # show_icon = true
 # show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
-# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday, since the reset is days away (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
 # reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
@@ -604,7 +604,7 @@ max_width = 0
 # show_icon = true
 # show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
-# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, never a weekday, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱27d8h`), `absolute` the local date the window resets on, since it is weeks away and a clock time alone would read as tonight (`⏱Mar 1`), or `both` (`27d8h (Mar 1)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
 # reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0

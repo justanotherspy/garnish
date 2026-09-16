@@ -27,8 +27,11 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   and the marker is implied; it falls back to the window scale when
   compaction is off or the threshold is under a tenth of the window.
 - `reset = "absolute" | "both"` on `limit5h`, `limit7d` and `spend`
-  prints the local time a window resets at (`⏱14:30`; the seven-day
-  window adds the weekday), alone or in parentheses after the countdown.
+  prints when a window resets, alone or in parentheses after the
+  countdown, in the form that identifies the instant at the distance that
+  window sits: the time for the five-hour window (`⏱14:30`), the weekday
+  and time for the seven-day one (`⏱Tue 14:30`), the date for the spend
+  window, which is weeks out (`⏱Mar 1`).
 
 **Harness fidelity** (PLAN Phase 19)
 

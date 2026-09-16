@@ -274,9 +274,11 @@ A8):
   the branch on the forge, built from `workspace.repo.{host,owner,name}`
   in the payload (`https://<host>/<owner>/<name>/tree/<branch>`; `/-/tree/`
   when the host is named after GitLab or the payload's open request is a
-  merge request, `pr.kind = "mr"`, which covers a self-hosted name), no
-  git call; nothing is linked when the payload has no `repo` (or an
-  incomplete one) or the head is detached, and the name is underlined
+  merge request, `pr.kind = "mr"`, a host naming GitHub winning over that
+  signal since `/-/tree/` on github.com is a 404), no git call; nothing is
+  linked when the payload has no `repo`, an empty branch name (which would
+  link to the repository root, not the page the row names), an incomplete
+  `repo` or a detached head, and the name is underlined
   only when it is linked, as `pr` does. Each path part is percent-encoded
   into the URL (RFC 3986 unreserved characters and `/` kept, everything
   else `%XX` of its UTF-8 bytes), so `feature/#12` and a non-ASCII name
@@ -287,7 +289,17 @@ A8):
   optional `:port`) and drops the link when it is not (decided
   2026-09-16: percent-encoding it turned a self-hosted
   `gitlab.example.com:8443` into `…com%3A8443`, and a host holding a
-  slash or userinfo would have aimed the link elsewhere).
+  slash or userinfo would have aimed the link elsewhere). A `.` or `..`
+  path segment has its dots encoded, so a payload-supplied owner or name
+  cannot walk the URL up to another page once a browser normalises it.
+
+  **Known limitation** (decided 2026-09-16, with Daniel: documented rather
+  than given a key): a self-hosted GitLab whose host is not named after it
+  and which has no open merge request is indistinguishable in the payload
+  from a GitHub-shaped forge, so it gets `/tree/` and the link 404s. The
+  two signals cover github.com, gitlab.com, any host naming either, and
+  any host at all while an MR is open. A `branch.forge` override is in
+  PLAN's backlog if the case ever turns up in practice.
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
@@ -346,12 +358,18 @@ Limit modules render nothing when their window is absent. `cost` has
 
 `reset = "countdown" | "absolute" | "both"` on `limit5h`, `limit7d` and
 `spend` (PLAN Phase 20; from FUTURE-SPEC § 8.2, A10): `absolute` prints
-the local wall-clock time the window resets at, with the module's
-existing spacing (`⏱14:30`); `limit7d` always adds the weekday
-(`⏱Tue 14:30`) and `limit5h` and `spend` never do, so the width of the
-text is as steady as `durations = "fixed"` promises on a ticker line.
-`both` prints the countdown followed by the time in parentheses
-(`2h13m (14:30)`, the countdown in the module's `durations` style);
+when the window resets, with the module's existing spacing, in the form
+that identifies the instant at the distance that window sits. The further
+off, the coarser: `limit5h` resets within the day, so it prints the time
+alone (`⏱14:30`) and its width is as steady as `durations = "fixed"`
+promises on a ticker line; `limit7d` is days away, so it adds the weekday
+(`⏱Tue 14:30`); `spend` is weeks away, so it prints the date instead
+(`⏱Mar 1`, no zero padding). A clock time alone on `spend` read as
+tonight when the reset was 27 days out (corrected 2026-09-16: the Phase
+20 review found the committed golden saying `⏱00:00` for 1 March).
+`both` prints the countdown followed by that form in parentheses
+(`2h13m (14:30)`, `27d8h (Mar 1)`, the countdown in the module's
+`durations` style);
 `countdown` (default) is today's behaviour; `show_reset = false` hides
 every form, and so does an instant that has passed, as the countdown
 always did. The time is formatted with jiff in the tick's local zone,

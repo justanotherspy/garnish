@@ -4,6 +4,7 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::{Glyph, glyph};
 use crate::payload::RateWindow;
+use crate::time::WallClock;
 
 use super::util::{BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded};
 use super::{Ctx, Module, Rendered, icon, seg};
@@ -19,20 +20,34 @@ pub enum Window {
     Spend,
 }
 
+impl Window {
+    /// The shape this window's absolute reset reads in (SPEC § 3.3): the
+    /// further off the reset, the coarser the form that identifies it. Only
+    /// the five-hour window resets within the day, and it is the one whose
+    /// text a ticker line wants steady.
+    const fn wall_clock(self) -> WallClock {
+        match self {
+            Self::FiveHour => WallClock::Time,
+            Self::SevenDay => WallClock::Weekday,
+            Self::Spend => WallClock::Date,
+        }
+    }
+}
+
 /// The `reset` choices (SPEC § 3.3): how the time a window resets at shows.
 pub const RESET_STYLES: &[&str] = &["countdown", "absolute", "both"];
 
-/// The `reset` option's doc per window: the seven-day window is the one
-/// whose reset is days away, so its absolute time carries the weekday; the
-/// others never do, so the width of the text stays as steady as
-/// `durations = "fixed"` (SPEC § 3.3).
+/// The `reset` option's doc per window, following [`Window::wall_clock`].
 const fn reset_doc(window: Window) -> &'static str {
     match window {
         Window::SevenDay => {
-            "How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form."
+            "How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday, since the reset is days away (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form."
         }
-        Window::FiveHour | Window::Spend => {
-            "How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, never a weekday, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form."
+        Window::FiveHour => {
+            "How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, no weekday or date, since this window resets within the day, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form."
+        }
+        Window::Spend => {
+            "How the reset shows: `countdown` (`⏱27d8h`), `absolute` the local date the window resets on, since it is weeks away and a clock time alone would read as tonight (`⏱Mar 1`), or `both` (`27d8h (Mar 1)`); `show_reset = false` hides every form."
         }
     }
 }
@@ -185,7 +200,7 @@ impl Module for LimitModule {
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
         if cfg.bool("show_reset")
             && let Some(at) = w.resets_at
-            && let Some(reset) = reset_text(ctx, cfg, at, self.0 == Window::SevenDay)
+            && let Some(reset) = reset_text(ctx, cfg, at, self.0.wall_clock())
         {
             let g = cfg.icon("reset");
             let glyph_txt = if g.is_empty() { String::new() } else { format!("{g} ") };
@@ -196,12 +211,12 @@ impl Module for LimitModule {
 }
 
 /// The reset in the module's `reset` form (SPEC § 3.3): the countdown, the
-/// wall-clock time in the tick's zone (with the weekday on `limit7d` only),
-/// or the countdown followed by the time in parentheses. `None` once the
+/// absolute time in the tick's zone in this window's [`WallClock`] shape,
+/// or the countdown followed by that time in parentheses. `None` once the
 /// instant has passed, whichever the form.
-fn reset_text(ctx: &Ctx<'_>, cfg: &ModuleCfg, at: i64, weekday: bool) -> Option<String> {
+fn reset_text(ctx: &Ctx<'_>, cfg: &ModuleCfg, at: i64, form: WallClock) -> Option<String> {
     let countdown = ctx.countdown(cfg, at);
-    let clock = ctx.wall_clock(at, weekday);
+    let clock = ctx.wall_clock(at, form);
     match cfg.str("reset") {
         "absolute" => clock,
         "both" => countdown.zip(clock).map(|(c, t)| format!("{c} ({t})")),
@@ -322,7 +337,7 @@ mod tests {
     /// and Sat 1 March 00:00 (spend), all UTC; the spend window is over
     /// its limit, which `spend` prints unclamped.
     #[test]
-    fn reset_forms_follow_the_zone_and_the_weekday_rule() {
+    fn reset_forms_follow_the_zone_and_each_windows_shape() {
         let all = |form: &str| {
             format!(
                 "[modules.limit5h]\nreset = \"{form}\"\n[modules.limit7d]\nreset = \"{form}\"\n[modules.spend]\nreset = \"{form}\"\n"
@@ -333,31 +348,31 @@ mod tests {
         assert_eq!(render(&all("countdown"), at, TimeZone::UTC), render("", at, TimeZone::UTC));
         assert_eq!(
             render(&all("absolute"), at, TimeZone::UTC),
-            "⏳ 24% ⏱ 18:13  ≣ 41% ⏱ Tue 20:00  $ 112% ⏱ 00:00"
+            "⏳ 24% ⏱ 18:13  ≣ 41% ⏱ Tue 20:00  $ 112% ⏱ Mar 1"
         );
         assert_eq!(
             render(&all("both"), at, TimeZone::UTC),
-            "⏳ 24% ⏱ 2h13m (18:13)  ≣ 41% ⏱ 3d4h (Tue 20:00)  $ 112% ⏱ 27d8h (00:00)"
+            "⏳ 24% ⏱ 2h13m (18:13)  ≣ 41% ⏱ 3d4h (Tue 20:00)  $ 112% ⏱ 27d8h (Mar 1)"
         );
         // Another instant: the countdown moves, the absolute time does not.
         let later = at + 3_600;
         assert_eq!(
             render(&all("both"), later, TimeZone::UTC),
-            "⏳ 24% ⏱ 1h13m (18:13)  ≣ 41% ⏱ 3d3h (Tue 20:00)  $ 112% ⏱ 27d7h (00:00)"
+            "⏳ 24% ⏱ 1h13m (18:13)  ≣ 41% ⏱ 3d3h (Tue 20:00)  $ 112% ⏱ 27d7h (Mar 1)"
         );
-        // Another zone: the times shift with it, the weekday too.
+        // Another zone: the times shift with it, the weekday and date too.
         let plus_five = TimeZone::fixed(Offset::constant(5));
         assert_eq!(
             render(&all("absolute"), at, plus_five),
-            "⏳ 24% ⏱ 23:13  ≣ 41% ⏱ Wed 01:00  $ 112% ⏱ 05:00"
+            "⏳ 24% ⏱ 23:13  ≣ 41% ⏱ Wed 01:00  $ 112% ⏱ Mar 1"
         );
         // Past the instant nothing shows in any form; `show_reset = false`
         // hides every form; the module's own `durations` shapes `both`.
         let past = 1_738_699_201;
-        assert_eq!(render(&all("absolute"), past, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112% ⏱ 00:00");
+        assert_eq!(render(&all("absolute"), past, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112% ⏱ Mar 1");
         assert_eq!(
             render(&all("both"), past, TimeZone::UTC),
-            "⏳ 24%  ≣ 41%  $ 112% ⏱ 24d3h (00:00)"
+            "⏳ 24%  ≣ 41%  $ 112% ⏱ 24d3h (Mar 1)"
         );
         let hidden = "[modules.limit5h]\nreset = \"absolute\"\nshow_reset = false\n[modules.limit7d]\nreset = \"both\"\nshow_reset = false\n[modules.spend]\nshow_reset = false\n";
         assert_eq!(render(hidden, at, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112%");

@@ -2,12 +2,15 @@
 # columns: 100
 # now: 1738425600, 1738429200
 # icons: unicode
-# `reset = "absolute"` prints the wall-clock time a window resets at in the
-# clock's zone (UTC here), `both` the countdown with the time in
-# parentheses, `countdown` (the default) the countdown alone (SPEC § 3.3).
-# Only `limit7d` carries the weekday: its reset is days away, while the
-# five-hour and spend windows keep a steady width. Rendered at two instants
-# an hour apart: the countdowns move, the absolute times do not.
+# `reset = "absolute"` prints when a window resets, in the clock's zone
+# (UTC here), `both` the countdown with that form in parentheses,
+# `countdown` (the default) the countdown alone (SPEC § 3.3). Each window
+# gets the form that identifies its instant at the distance it sits: the
+# five-hour window the time alone, so its width stays steady; `limit7d`
+# the weekday, its reset being days away; `spend` the date, its reset
+# being weeks away, where a time alone would read as tonight. Rendered at
+# two instants an hour apart: the countdowns move, the absolute forms do
+# not.
 
 [frame]
 style = "none"
