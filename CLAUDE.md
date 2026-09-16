@@ -233,6 +233,15 @@ and was then skipped. Two guards keep it dead: the group sits on the job,
 where a skipped job never joins it, and the `if` excludes bot authors so
 those comments are never candidates.
 
+**A review that delegates spends the budget and posts nothing.** On PR #66
+the run ended `"subtype": "success"` after 44 of its 50 turns and $2.43 with
+no summary and no inline comments, its checklist showing four of six
+dimensions as "delegated, running"; `permission_denials_count` was 4 and
+`--allowedTools` carries no `Task`. A green job and a half-ticked checklist
+are the only signal, so read the tracking comment rather than the check
+mark. The fix is in PLAN's backlog with the one below, since both change
+this file and so must land on `main` first.
+
 **A pull request that edits this file cannot be reviewed by it.** The action
 exchanges its OIDC token only when the workflow file is byte-identical to the
 copy on the default branch, and refuses with `Workflow validation failed`
