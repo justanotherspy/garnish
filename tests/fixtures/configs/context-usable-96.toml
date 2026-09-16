@@ -1,0 +1,20 @@
+# fixture: ctx-1m-96
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# env: CLAUDE_CODE_AUTO_COMPACT_WINDOW=900000
+# The `context-usable-80` setup at 96 % of the window: past the 88.7 %
+# threshold the usable scale is capped at 100 % (SPEC § 3.2), and the
+# `exceeds_200k` badge of the `full` preset still shows.
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["context"]
+
+[modules.context]
+preset = "full"
+width  = 20
+scale  = "usable"

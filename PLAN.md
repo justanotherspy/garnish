@@ -22,8 +22,13 @@ landed as designed; the sixth, the per-row dim reset, was dropped after
 the harness binary showed it cannot work and became a spec correction
 (SPEC § 2.1). Its three open questions were decided the same day
 (`preview` dims its rows, a `GARNISH_MANAGED_SETTINGS` hook, the height
-rule read from the binary; work log). **The drift between SPEC and the
-code is now Phases 20–22 below.**
+rule read from the binary; work log). Phase 20 (per-module presentation)
+was built the same day on a branch (PR #51): all seven layers as
+designed, with the four corners the code settled recorded in SPEC
+(`max_width` cuts the decorated module, fish paths keep the `~` that
+`depth` keeps, the usable scale hides the marker's percentage too,
+GitLab is the host's name or an open merge request). **The drift between
+SPEC and the code is now Phases 21–22 below.**
 
 ## Done — Phases 0–18, compacted
 
@@ -49,6 +54,7 @@ code is now Phases 20–22 below.**
 | 17 Presets gallery | `presets/*.toml` embedded, `docs/presets.md`, `garnish presets`, `config init --preset <gallery>`; website dropped 09-12 for the setup | 09-06 |
 | 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270 | 09-12 |
+| 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -65,51 +71,30 @@ Phases 19–22 are the 2026-09-12 review of `FUTURE-SPEC.md` (PR #27) with
 Daniel: the cheap, invariant-safe ideas moved into `SPEC.md` (each
 paragraph there names its FUTURE-SPEC section and proposal id), his layout
 model, and the interactive setup he chose in place of the website.
-**Order: 19 → 20 → 21 → 22.** Phase 19 went first because it was meant to
-change every colour-on render (the dim reset, which the harness binary
-then ruled out, see the work log) and because it brings the colour-on
-golden mode the later phases use (`# color:` in `tests/config_golden.rs`,
-`colour-on`); Phase 20's `max_width`
-and the schema-generated matrix test are what the builder's module editor
-is built on; Phase 21's layout model is what the builder must draw;
-Phase 22 is the one that adds crates. Each phase is its own `gh stack`
-chain of `phase-N/<concern>` layers, as before (Phase 19 landed as five
-commits on one branch, the session having no `gh stack`); one release per
-phase is fine, `v0.3.0` being whichever lands first through the
-pipeline. Nothing here lifts a non-goal: no network, no transcript, no
-tick-side write, the module set stays at 21.
+**Order: 19 → 20 → 21 → 22; 19 and 20 are done (the table above).**
+Phase 19 went first because it was meant to change every colour-on render
+(the dim reset, which the harness binary then ruled out, see the work log)
+and because it brought the colour-on golden mode the later phases use
+(`# color:` in `tests/config_golden.rs`, `colour-on`); Phase 20's
+`max_width` and the schema-generated matrix test are what the builder's
+module editor is built on; Phase 21's layout model is what the builder
+must draw; Phase 22 is the one that adds crates. Each phase is its own
+`gh stack` chain of `phase-N/<concern>` layers, as before (Phases 19 and
+20 each landed as one branch of small commits, one per layer, their
+sessions having no `gh stack`); one release per phase is fine, `v0.3.0`
+being whichever lands first through the pipeline. Nothing here lifts a
+non-goal: no network, no transcript, no tick-side write, the module set
+stays at 21. The code maps below were read on 2026-09-12, before Phase 19
+moved things; re-derive their line pointers against `main` when the phase
+starts (Phase 20's had drifted: `render_group` sat elsewhere and two of
+the seams it named were the wrong constructs, so the session navigated by
+symbol instead).
 
 (A 24 h lock horizon from FUTURE-SPEC § 15 was on the Phase 19 list and
 was dropped in the spec review: `LOCK_STALE_MS` already bounds a lock's
 life. Phase 19's own layers are in the done table; what it could not
 settle, the on-screen height rule and the dim `preview` question, is in
 the backlog.)
-
-### Phase 20 — Per-module presentation (SPEC § 3, § 3.7, § 9)
-
-Code map (2026-09-12): the common options are parsed by hand
-(`src/config/mod.rs:1239-1267`, `COMMON_KEYS` is `[&str; 8]` at
-`src/config/schema.rs:311`) and applied by `modules::decorate`
-(`src/modules/mod.rs:379-431`) from `render_group` (`src/render.rs:364`);
-`ansi::truncate` (`src/ansi.rs:320`) keeps `link` per segment and
-`Painter::paint` opens and closes OSC 8 per segment, and `Painter.links`
-is off under `--color never` (`src/render.rs:48`), so no golden can hold a
-link today; `repo.rs` has `shorten` (`:48`), `depth` (`:95`) and a `branch`
-`max_length` character cap (`:386`), and nothing reads `workspace.repo`;
-`context::compaction_percent` (`src/modules/context.rs:200`) returns a
-window percentage and early-returns when the marker is off; the three usage
-modules come from one schema builder (`src/modules/usage.rs:44-62`) with
-`show_reset` at `:75` and the countdown at `:162`; `Ctx.tz` exists
-(`src/render.rs:169`) but only durations are formatted.
-
-- [ ] `phase-20/common-opts`: a `COMMON_OPTS` table of `OptSpec`s (`label`, `prefix`, `suffix`, `hide_when_empty`, `max_width`) replaces the hand-parse so caps go through `over_max` and the reference's common-key table prints them; `COMMON_KEYS` grows to nine; `write_modules` (`src/docs.rs:241`) and the docs page follow; `max_width` rejected on text modules next to the text-name check (`src/config/mod.rs:997`) with a message naming `width`
-- [ ] `phase-20/max-width`: applied after `decorate` and before `align_columns` (between `src/render.rs:207` and `:210`) through `ansi::truncate`; balanced OSC 8 asserted on painted output, not on segments; `branch.max_length` stays the per-module character cap and is documented as such; unit tests on a linked `pr` and a wide branch name; config golden `max-width`
-- [ ] `phase-20/schema-matrix` (FUTURE-SPEC § 15 item 11): an in-crate test (it inspects `Segment::text`, private outside the crate) generated from `ModuleSchema` over module × preset × icon set × `max_width ∈ {0, 1, 4, 12}` × fixture asserting width ≤ `max_width`, nothing rendered for a hidden state, balanced OSC 8 on painted output, no escape bytes in text; rayon like `src/render.rs:1013`, under the longer nextest budget
-- [ ] `phase-20/path-style`: `style = "full" | "fish"` (A7) declared in `repo.rs`'s schema (the source scan checks keys against the schemas in the same file) and applied after `shorten`; unit tests on `~`, a root path, a one-segment base and `depth = 2` with `fish`; config golden `path-fish`
-- [ ] `phase-20/links`: `payload.rs` gains `workspace.repo.{host,owner,name}` if it lacks it; `branch` `link = true` (A8) builds the URL with a hand-written percent-encoder (unreserved and `/` kept; no indexing, no `as`) and GitLab `/-/tree/`, nothing when `repo` is absent or the head is detached; `text.<name>` `url` through the painter's `http(s)://` rule with `config check` reporting anything else; unit tests including `feature/#12` and a non-ASCII name; goldens `branch-link` (on `git-worktree`, which carries `repo`) and `text-link` under the Phase 19 `# color:` mode, since `--color never` paints no links
-- [ ] `phase-20/context-scale`: factor the threshold out of `compaction_percent` so it is available with the marker off, then `scale = "usable"` (A11): percentage and bar against the § 2.3 threshold, marker hidden, bands on the displayed percentage, falls back to `window` when compaction is disabled or the threshold is under a tenth of the window; unit tests at the threshold edges and the two fallbacks, config golden `context-usable` at 80 % and 96 % of 1M
-- [ ] `phase-20/reset-absolute`: a jiff wall-clock formatter in `time.rs` over `Clock.tz`, reached through a new `Ctx` method beside `countdown`; `reset = "countdown" | "absolute" | "both"` (A10) on the shared usage schema with the weekday rule as `limit7d`'s per-id branch in the builder (never on `limit5h` or `spend`); `show_reset = false` hides every form; unit tests at two instants and two zones, config golden `reset-absolute` pinned at two `# now:` values
-- [ ] Schema → render → `make docs` → `UPDATE_GOLDEN=1`; guide § 5 gains the three presentation keys; CHANGELOG; adversarial review; work log
 
 ### Phase 21 — Layout: lines, columns and boxes (SPEC § 4.3)
 
@@ -197,6 +182,9 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
 - [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 - [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+- [ ] Open question from the Phase 20 review (2026-09-16): `spend` with `reset = "absolute"` prints a bare wall-clock time for an instant weeks out — the committed golden reads `$ 112% ⏱ 00:00` for a reset 27 days away, which a user reads as tonight. The no-weekday rule (SPEC § 3.3) buys steady width, which only `limit5h` really needs, and a weekday would not disambiguate at 27 days either. Options: a date form (`⏱Mar 1`) for `spend`, always or beyond ~24 h; or leave it and say in the guide that `absolute` suits the five-hour window
+- [ ] Open question from the Phase 20 review (2026-09-16): a self-hosted GitLab whose host is not named after it (`git.example.com`) and has no open merge request gets a GitHub-shaped `/tree/` URL, which 404s. SPEC § 3.1 calls `pr.kind = "mr"` the cover for a self-hosted name, but it only covers it while an MR is open. Options: a `branch.forge = "auto" | "github" | "gitlab"` key; or leave it and document the limitation
+- [ ] From the Phase 20 review (2026-09-16), cheap and uncontroversial but not done on that branch: the `text.<name>` family is outside the schema matrix (it is the one family whose content is wholly user-supplied); `branch.link`'s `!detached` guard has no test at any level (it needs a temp-repo integration test, the unit level cannot reach a detached head); no golden pins `branch.link` on the `pr-mr` fixture; `benches/tick.rs` has no `max_width` case; and `docs/modules/text.md` lost its text-specific `hide_when_empty` wording when the common options became one table
 
 ## Work log
 
@@ -404,6 +392,40 @@ was built, what the reviews found and what was decided, not how.
   `CLAUDE.md` (with the literals to grep after an upgrade), the guide and
   README carry it. Read, not watched: a nine-line status line at 24 rows
   on a real screen would confirm the arithmetic.
+- **2026-09-13 (Phase 20)** — Per-module presentation, on a branch as one
+  commit per layer (no `gh stack` in the session). A four-lens
+  trap-finding workflow read the plan against the code before the layers
+  and its findings were taken as they came: the `branch-link` golden went
+  on `worktree-session` (the only fixture with both `workspace.repo` and
+  a branch the module can read without a repository on disk;
+  `git-worktree` renders no branch there), the config-golden harness takes
+  one `# fixture:` per file so `context-usable` became two files, the
+  SPEC's fish example `g/src` contradicted `shorten` (which keeps the `~`
+  at every depth) and was corrected to `~/g/src`, the marker's `⤓`
+  percentage under `usable` was decided (hidden with the marker, since it
+  would read a constant 100 %), the fallback keys on § 2.3's enabled state
+  while `compaction_marker` governs drawing alone, GitLab is the host's
+  name or `pr.kind = "mr"`, the URL is built from the untruncated name,
+  a text `url` is checked by the config against the painter's rule, the
+  ASCII `pr` pending glyph is `..` so the matrix asserts an implication
+  (cut ⇒ ellipsis; uncut ⇒ byte-identical) rather than an equivalence,
+  the unknown-option message for a text module no longer recommends the
+  keys it rejects, and a fish initial is a terminal cluster. The layers:
+  `COMMON_OPTS` (the common keys as bounded specs, `COMMON_KEYS` nine
+  wide, `config show` and the reference printing them from the table);
+  `max_width` in `render_group` after `decorate` and before
+  `align_columns`, skipped at 0 so the default tick pays nothing; the
+  schema matrix (about 100 000 single-module renders, 0.6 s under rayon,
+  registered for nextest's longer budget); `path.style = "fish"`;
+  `branch.link` and `text.url`; `context.scale = "usable"` with the
+  threshold factored out of the marker; `reset` on the limit modules with
+  `time::wall_clock` and `Ctx::wall_clock`. The pre-Phase-19 code map's
+  line pointers had drifted, so the layers navigated by symbol. One
+  incident: a finder agent ran `git stash` in the checkout while the
+  reset layer was half-written, so three files silently reverted; the
+  stash was found, the edits re-applied and the lesson written into
+  `CLAUDE.md` § Phase protocol (worktree isolation, no git commands that
+  touch the tree).
 - **2026-09-14 (first macOS host)** — `make setup` on Daniel's Mac died
   with `rustc: command not found` after a clean toolchain install: the
   rustup there is Homebrew's keg-only formula, whose `cargo`/`rustc`
@@ -414,3 +436,30 @@ was built, what the reviews found and what was decided, not how.
   for its run and stops with a PATH note instead of a bare `command not
   found`. `make install` then built and installed `garnish` 0.2.0 with no
   change needed.
+- **2026-09-16 (Phase 20 rebase and review)** — PR #51 had gone stale:
+  cut from `85fe8b4`, twelve commits behind `main` and conflicting in this
+  file. Its nine commits were replayed on `c62c03b` (one conflict, both
+  sides kept, Phase 20's entries slotted in by date) and the phase
+  protocol's step 4, which #51 never ran, was done here: three adversarial
+  lenses (correctness and the lint policy, SPEC conformance, tests and
+  performance), each in its own worktree with a no-git brief. The lint
+  policy came out clean — no `unwrap`, indexing, `as` or unchecked
+  arithmetic outside tests, and no `#[allow]` in the whole change set —
+  and a mutation pass proved all eight new goldens real (revert a feature,
+  exactly its golden fails). What they found, all fixed: the settings
+  chain was read on every `context` render where the marker used to skip
+  it; `branch.link` built a link to the repository root for an empty
+  branch name, encoded the host so a self-hosted forge on a port became
+  `…com%3A8443`, and let `pr.kind = "mr"` point github.com at a 404
+  `/-/tree/`; `percent_encode` passed `.`/`..` segments through, so a
+  payload-supplied owner could walk the URL up a level; `ansi::clusters`
+  split flags and skin tones, so a cap cut half a flag off (and `fish`
+  abbreviated `...` to `..`, showing a path as its own parent). The
+  schema matrix covered a new module but not a new option — every
+  module-specific key sat at its default, Phase 20's own five included —
+  so it now sweeps every `Bool` and `Enum` a schema declares (still
+  0.40 s) and asserts no segment carries a link the painter would refuse.
+  Two invariants that were comments became tests (no schema redeclares a
+  common key; every rejected text key is refused with its own message,
+  from one table rather than two copies). Left for Daniel (§ Backlog):
+  the `spend` absolute reset, and a self-hosted GitLab with no open MR.

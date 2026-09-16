@@ -82,6 +82,13 @@ fn schema() -> ModuleSchema {
                 Value::Str("   ".into()),
             )
             .max(MAX_TEXT_CHARS),
+            OptSpec::new(
+                "url",
+                Kind::Str,
+                "Wrap the box in a clickable OSC 8 link to this `http(s)://` URL (printable ASCII only; anything else is reported and dropped).",
+                Value::Str(String::new()),
+            )
+            .max(MAX_TEXT_CHARS),
         ],
         icons: Vec::new(),
         colors: vec![ColorSpec { key: "text", doc: "The text.", default: "accent" }],
@@ -142,6 +149,11 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
             _ => scroll(&styled, box_w, ctx.frame(step, text_w), "", false),
         }
     };
+    // `url` (SPEC § 3.7) links the box, padding cells excluded; the config
+    // already checked it against the painter's rule, which applies again.
+    let url = cfg.str("url");
+    let body: Vec<Segment> =
+        if url.is_empty() { body } else { body.into_iter().map(|s| s.with_link(url)).collect() };
     let pad = cfg.size("pad").min(ctx.width);
     if pad == 0 {
         return Rendered::fresh(body);
@@ -151,4 +163,49 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
     out.extend(body);
     out.push(blank);
     Rendered::fresh(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::render::{Clock, render_lines_at};
+
+    /// SPEC § 3.7 `url`: every segment of the finished box carries the
+    /// link (a scrolled window's cut cells and padding, a clipped box's
+    /// ellipsis, the `justify` fill), the `pad` cells around it never.
+    #[test]
+    fn url_links_the_whole_box_but_not_the_pads() {
+        let payload = crate::payload::Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let module = |table: &str| {
+            let text = format!(
+                "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\nurl = \"https://x.example/a\"\n{table}"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            // Offset 1 into a two-cell script cuts the first cluster.
+            let clock = Clock {
+                now: jiff::Timestamp::from_second(1_738_425_601).unwrap(),
+                animate: true,
+                ..Clock::fixed()
+            };
+            render_lines_at(&payload, &config, Some(80), &clock).into_iter().next().unwrap()
+        };
+        let linked = |segs: &[crate::ansi::Segment]| {
+            segs.iter().all(|s| s.link.as_deref() == Some("https://x.example/a"))
+        };
+        let scrolled = module("text = \"日本語テキスト\"\nwidth = 5\npad = 1\n");
+        assert_eq!(scrolled.first().unwrap().text(), " ");
+        assert_eq!(scrolled.last().unwrap().text(), " ");
+        assert!(
+            scrolled.first().unwrap().link.is_none() && scrolled.last().unwrap().link.is_none()
+        );
+        assert!(linked(&scrolled[1..scrolled.len() - 1]), "{scrolled:?}");
+        assert_eq!(crate::ansi::segments_width(&scrolled), 7);
+        let clipped = module("text = \"clip me\"\nwidth = 4\noverflow = \"clip\"\n");
+        assert_eq!(crate::ansi::Painter::PLAIN.paint(&clipped), "cli…");
+        assert!(linked(&clipped), "{clipped:?}");
+        let centred = module("text = \"hi\"\nwidth = 6\njustify = \"center\"\n");
+        assert_eq!(crate::ansi::Painter::PLAIN.paint(&centred), "  hi  ");
+        assert!(linked(&centred), "{centred:?}");
+        assert!(centred.len() >= 3, "fill, text, fill: {centred:?}");
+    }
 }

@@ -34,15 +34,18 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
 | `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
-| `label` | string | `""` | `""` | `""` | Dim text before the value. |
-| `prefix` / `suffix` | string | `""` | `""` | `""` | Text around the module. |
+| `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
+| `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
+| `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
 | `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `width` | integer ≤ 1024 | `0` | `20` | `30` | Bar width in cells; 0 hides the bar. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the context icon. |
 | `show_percent` | bool | `true` | `true` | `true` | Show the percentage after the bar. |
 | `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the band color changes. |
 | `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band (roles or literal colors). |
+| `scale` | `window` \| `usable` | `"window"` | `"window"` | `"window"` | What 100 % means: `window` the whole context window; `usable` the auto-compaction threshold, so the bar and the percentage say how close compaction is (the marker and its percentage are then implied and not drawn; the window tag still names the real window). `usable` falls back to `window` when compaction is disabled or the threshold is under a tenth of the window. |
 | `compaction_marker` | bool | `true` | `true` | `true` | Mark the auto-compaction threshold on the bar. |
 | `compact_buffer_tokens` | integer | `13000` | `13000` | `13000` | Tokens Claude Code reserves below the window for the compaction summary. |
 | `show_compaction_percent` | bool | `false` | `false` | `true` | Also print the compaction threshold as a percentage. |

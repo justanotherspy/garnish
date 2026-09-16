@@ -162,6 +162,18 @@ impl Ctx<'_> {
         self.durations_for(cfg).countdown_at(until_epoch_secs, self.now.as_second())
     }
 
+    /// The wall-clock time of a future epoch-seconds instant in the tick's
+    /// zone, in one of the [`crate::time::WallClock`] forms, the absolute
+    /// twin of [`Ctx::countdown`] (SPEC § 3.3); `None` once passed, like it.
+    #[must_use]
+    pub fn wall_clock(&self, epoch_secs: i64, form: crate::time::WallClock) -> Option<String> {
+        if epoch_secs <= self.now.as_second() {
+            return None;
+        }
+        let at = Timestamp::from_second(epoch_secs).ok()?;
+        Some(crate::time::wall_clock(at, &self.tz, form))
+    }
+
     /// The animation frame (or scroll offset) at this tick: [`crate::time::frame`]
     /// of the tick's clock, or 0 when animations are off. Every moving part
     /// goes through here so `animate = false` and `GARNISH_ANIMATE=0` freeze

@@ -1,0 +1,20 @@
+# fixture: worktree-session
+# columns: 60
+# now: 1738425600
+# icons: unicode
+# color: always
+# `branch.link = true` wraps the name in an OSC 8 link to the branch on the
+# forge, built from `workspace.repo` in the payload (SPEC § 3.1); this
+# fixture carries the repo and names its branch through `worktree.branch`.
+# Rendered with colour on because the painter emits no link under
+# `--color never` (SPEC § 9).
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["branch", "pr"]
+
+[modules.branch]
+link = true

@@ -38,6 +38,10 @@ free-text "describe what you want" at any point and map it onto the keys.
 | Frame taste: rounded, square, double, heavy, powerline, none? | `[frame] style` | `rounded` |
 | Should columns line up across lines? | `align = true`, `durations = "fixed"`; `right_justify` | `align = true` when there are 2+ lines |
 | Anything that scrolls or moves? | `overflow = "ticker"`, a `[modules.text.<name>]` box, `[frame] fill_pattern`, `separator_frames`, `<key>_frames`; `animate = false` for screen readers | nothing animated |
+| Long branch names or session titles that crowd the line? | `max_width` on that module (cells; the cut ends in `…`); `path.style = "fish"` for short directories | nothing cut |
+| Anything worth clicking (a terminal with OSC 8)? | `branch.link = true` for the branch on the forge; `url` on a `[modules.text.<name>]` box | nothing linked |
+| Does the context bar mean the window, or how close auto-compaction is? | `context.scale = "usable"` makes 100 % the compaction point and implies the marker | `window` |
+| A window's reset as time left, or the clock time it resets at? | `reset = "countdown" \| "absolute" \| "both"` on `limit5h`, `limit7d`, `spend` | `countdown` |
 
 If a gallery preset matches the answers (`garnish presets`), start from it;
 otherwise start from a built-in preset and add `[[line]]` blocks.
