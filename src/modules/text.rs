@@ -252,7 +252,11 @@ mod tests {
             ("combining", "e\u{301}e\u{301}e\u{301}"),
             ("newline", "one\ntwo"),
         ];
-        let is_escape = |c: char| c.is_control() || c == '\u{7}';
+        // Format characters too, not only controls: the `bidi` fixture is
+        // there for U+202E, which is `Cf` and passes `is_control`, so a
+        // predicate of controls alone let the one row that exists to catch a
+        // reversed name assert nothing but its width.
+        let is_escape = |c: char| c.is_control() || crate::ansi::is_format_char(c);
         // A URL the painter would refuse never reaches a row because the
         // *config* refuses it first, which is the stronger rule and is
         // asserted once here rather than swept.

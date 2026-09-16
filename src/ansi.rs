@@ -603,7 +603,7 @@ fn clean(s: String) -> String {
 /// Unicode `Cf` characters that change layout or reading order without
 /// occupying a cell: zero-width space/non-joiner, the bidi marks and
 /// embeddings/isolates, word joiner and friends, the byte order mark.
-const fn is_format_char(c: char) -> bool {
+pub(crate) const fn is_format_char(c: char) -> bool {
     matches!(
         c,
         '\u{200b}' | '\u{200c}' | '\u{200e}' | '\u{200f}' | '\u{061c}' | '\u{180e}' | '\u{feff}'

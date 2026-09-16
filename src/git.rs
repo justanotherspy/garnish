@@ -178,10 +178,19 @@ fn read_ref_file(base: &Path, name: &str) -> Option<String> {
 
 /// [`read_ref_file`] as bytes, with the size cap the caller needs.
 fn read_ref_bytes(base: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
+    read_under(&base.canonicalize().ok()?, name, max)
+}
+
+/// [`read_ref_bytes`] given an already-resolved directory.
+///
+/// `resolve_ref` reads up to five hops across two directories, so resolving
+/// the *base* inside the read would repeat the same `realpath` up to ten
+/// times on a warm tick, where the old code did none. It is resolved once
+/// per directory and only the target is resolved per read.
+fn read_under(root: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
     use std::io::Read as _;
-    let path = base.join(name).canonicalize().ok()?;
-    let root = base.canonicalize().ok()?;
-    if !path.starts_with(&root) {
+    let path = root.join(name).canonicalize().ok()?;
+    if !path.starts_with(root) {
         return None;
     }
     let mut bytes = Vec::new();
@@ -199,14 +208,23 @@ pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
     if dirs.uses_reftable() {
         return None;
     }
+    // Resolved once for the whole walk, not once per hop per directory.
+    let roots: Vec<PathBuf> = [&dirs.git_dir, &dirs.common_dir]
+        .into_iter()
+        .filter_map(|d| d.canonicalize().ok())
+        .collect();
     let mut name = refname.to_owned();
     for _ in 0..SYMREF_MAX_DEPTH {
         if !joinable_ref(&name) {
             return None;
         }
         let mut next: Option<String> = None;
-        for base in [&dirs.git_dir, &dirs.common_dir] {
-            let Some(text) = read_ref_file(base, &name) else { continue };
+        for base in &roots {
+            let Some(text) =
+                read_under(base, &name, MAX_REF_BYTES).and_then(|b| String::from_utf8(b).ok())
+            else {
+                continue;
+            };
             let line = text.lines().next().unwrap_or("").trim();
             if let Some(r) = line.strip_prefix("ref:") {
                 next = Some(r.trim().to_owned());
@@ -258,7 +276,9 @@ pub fn head_commit(dirs: &Dirs) -> Option<String> {
 /// `("origin", "refs/remotes/origin/main")`.
 #[must_use]
 pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
-    let text = std::fs::read_to_string(dirs.common_dir.join("config")).ok()?;
+    // Through the same contained, bounded reader as every ref: `config` sits
+    // under the git directory and is as symlinkable as `HEAD` is.
+    let text = read_ref_file(&dirs.common_dir, "config")?;
     let mut in_section = false;
     let mut remote: Option<String> = None;
     let mut merge: Option<String> = None;

@@ -95,8 +95,8 @@ impl Module for ContextModule {
         //
         // The threshold is read from the settings chain, which a tick touches
         // only when something needs it (CLAUDE.md § Cache and worker
-        // invariants): with the marker off and the window scale, nothing
-        // does, so it is not read at all.
+        // invariants): with the marker, its percentage and the usable scale
+        // all off, nothing does, so it is not read at all.
         let usable_scale = cfg.str("scale") == "usable";
         let wants_threshold =
             usable_scale || cfg.bool("compaction_marker") || cfg.bool("show_compaction_percent");

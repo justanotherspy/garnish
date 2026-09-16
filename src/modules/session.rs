@@ -289,7 +289,13 @@ impl Module for ClockModule {
                     segs.push(seg(cfg, format!("{f} "), "spinner"));
                 }
             } else {
-                segs.push(seg(cfg, format!("{} ", cfg.icon("spinner")), "spinner"));
+                // `glyph_prefix` is the whole of it: an animated spinner
+                // blanked to `["", ""]` must leave no cell either, which
+                // the static branch above has always got right.
+                let frame = glyph_prefix(cfg, "spinner");
+                if !frame.is_empty() {
+                    segs.push(seg(cfg, frame, "spinner"));
+                }
             }
         }
         let fmt = match (cfg.str("format") == "12h", cfg.bool("seconds")) {

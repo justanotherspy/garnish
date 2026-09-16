@@ -13,8 +13,10 @@ Fixed, each with a test:
   could make garnish read files outside it or run commands. A `.git/HEAD`
   naming a ref outside the repository (`ref: ../../../x`), or a symlinked
   `HEAD`, ref or `refs/heads` directory, made `branch` show the first
-  seven characters of any file as its short SHA: garnish now requires the
-  file it opens to be inside the git directory. And `.git/config` could
+  seven characters of any file as its short SHA: every ref file garnish
+  opens (`HEAD`, a loose ref, `packed-refs`, `config`) must now resolve to
+  a path inside the git directory, and is read with a size cap. And
+  `.git/config` could
   run a command three ways: a remote name starting with `-` (git reads it
   as an option), `core.fsmonitor` (`git status` runs it) and
   `remote.<name>.uploadpack` (a fetch runs it). The name is refused and

@@ -16,7 +16,7 @@ use crate::git::{self, Head};
 use crate::icons::glyph;
 
 use super::util::{cut_name, short_sha};
-use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, badge, lead, seg};
+use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, badge, glyph_prefix, lead, seg};
 
 /// How long the worker lets a local git command run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -284,7 +284,8 @@ impl Module for WorktreeModule {
             && let (Some(orig), Some(branch)) =
                 (wt.original_branch.as_deref(), wt.branch.as_deref())
         {
-            segs.push(seg(cfg, format!(" {orig} {} {branch}", cfg.icon("arrow")), "original"));
+            let arrow = glyph_prefix(cfg, "arrow");
+            segs.push(seg(cfg, format!(" {orig} {arrow}{branch}"), "original"));
         }
         Rendered::fresh(segs)
     }
