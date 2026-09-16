@@ -272,12 +272,17 @@ A8):
   merge request, `pr.kind = "mr"`, which covers a self-hosted name), no
   git call; nothing is linked when the payload has no `repo` (or an
   incomplete one) or the head is detached, and the name is underlined
-  only when it is linked, as `pr` does. Every part is percent-encoded
+  only when it is linked, as `pr` does. Each path part is percent-encoded
   into the URL (RFC 3986 unreserved characters and `/` kept, everything
   else `%XX` of its UTF-8 bytes), so `feature/#12` and a non-ASCII name
   link correctly and the painter's rule (§ 5: `http(s)://`, printable
   ASCII) is met; the URL carries the whole name even when `max_length`
-  cut the one on screen.
+  cut the one on screen. The host is an authority, not a path part, so it
+  is used verbatim when it is one (letters, digits, `-`, `.`, and an
+  optional `:port`) and drops the link when it is not (decided
+  2026-09-16: percent-encoding it turned a self-hosted
+  `gitlab.example.com:8443` into `…com%3A8443`, and a host holding a
+  slash or userinfo would have aimed the link elsewhere).
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see

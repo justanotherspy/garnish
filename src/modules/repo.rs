@@ -708,20 +708,36 @@ fn is_gitlab(repo: &crate::payload::Repo, payload: &crate::payload::Payload) -> 
 
 /// The page of `branch` on the forge (SPEC § 3.1): `https://<host>/<owner>/
 /// <name>/tree/<branch>`, `/-/tree/` on GitLab; `None` when the payload's
-/// repo identity is incomplete. Every part is percent-encoded so the
-/// painter's rule (SPEC § 5: printable ASCII) holds for any name.
+/// repo identity is incomplete or its host is not an authority. The path
+/// parts are percent-encoded so the painter's rule (SPEC § 5: printable
+/// ASCII) holds for any name.
 fn branch_url(repo: &crate::payload::Repo, branch: &str, gitlab: bool) -> Option<String> {
-    let host = repo.host.as_deref().filter(|s| !s.is_empty())?;
+    let host = repo.host.as_deref().and_then(authority)?;
     let owner = repo.owner.as_deref().filter(|s| !s.is_empty())?;
     let name = repo.name.as_deref().filter(|s| !s.is_empty())?;
     let tree = if gitlab { "/-/tree/" } else { "/tree/" };
     Some(format!(
-        "https://{}/{}/{}{tree}{}",
-        percent_encode(host),
+        "https://{host}/{}/{}{tree}{}",
         percent_encode(owner),
         percent_encode(name),
         percent_encode(branch)
     ))
+}
+
+/// The host as a URL authority, used verbatim, or `None` when it is not one.
+///
+/// A host cannot be percent-encoded like a path part: a self-hosted forge
+/// on a port (`gitlab.example.com:8443`) would become
+/// `gitlab.example.com%3A8443`, a host that no browser resolves. It is
+/// checked instead, so a name with a slash, userinfo or any other
+/// authority syntax in it drops the link rather than pointing the link
+/// somewhere else (SPEC § 3.1).
+fn authority(host: &str) -> Option<&str> {
+    let (name, port) = host.split_once(':').map_or((host, None), |(n, p)| (n, Some(p)));
+    let named = !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.');
+    let ported = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    (named && ported).then_some(host)
 }
 
 /// Percent-encode a URL path.
@@ -870,6 +886,24 @@ mod tests {
         let mut half = repo("github.com");
         half.name = Some(String::new());
         assert_eq!(branch_url(&half, "main", false), None);
+        // A self-hosted forge on a port keeps its `:` (percent-encoding the
+        // host would give `gitlab.example.com%3A8443`, which resolves
+        // nowhere), and a host that is not an authority drops the link
+        // rather than pointing it somewhere else.
+        assert_eq!(
+            branch_url(&repo("gitlab.example.com:8443"), "main", true).as_deref(),
+            Some("https://gitlab.example.com:8443/dschwartz/garnish/-/tree/main")
+        );
+        for bad in [
+            "evil.com/dschwartz/other",
+            "user@evil.com",
+            "github.com:",
+            "github.com:80x",
+            "exämple.com",
+            ":8443",
+        ] {
+            assert_eq!(branch_url(&repo(bad), "main", false), None, "{bad}");
+        }
         // Every URL built passes the painter's rule, whatever the name.
         for name in ["feature/#12", "ünïcode", "a b", "tab\tname", "\u{202e}rtl"] {
             let url = branch_url(&repo("github.com"), name, false).unwrap();

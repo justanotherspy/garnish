@@ -439,7 +439,8 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `MAX_TEXT_CHARS`. The schema matrix test in `render.rs` renders every
   module × preset × icon set × `max_width` against every fixture, so a
   new module or option gets the shared invariants checked for free; a
-  behaviour of its own still wants a test of its own. A unit test scans `src/modules/*.rs` for every key read
+  behaviour of its own still wants a test of its own. A unit test scans
+  `src/modules/*.rs` for every key read
   by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `icon(cfg, "…", "…")`, …)
   and fails on one that no schema defined in that file declares, so a typo
   in a key cannot render silently as an empty icon.
