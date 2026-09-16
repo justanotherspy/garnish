@@ -207,8 +207,8 @@ already spent, so raise the cap before trimming the review.
 **Sonnet 5 at `--effort high` is what pays for that ceiling.** Sonnet is
 about 2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so 50
 Sonnet turns cost roughly what 25 Opus turns would. Note that `high` is not
-the top of the range — `xhigh` sits between it and `max` and is Claude
-Code's own default for Sonnet 5 — so this is a deliberate setting, not a
+the top of the range (`xhigh` sits between it and `max` and is Claude
+Code's own default for Sonnet 5), so this is a deliberate setting, not a
 maximum.
 
 Two prompt rules keep the output usable. The review folds leftover findings
@@ -452,7 +452,7 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `lead(cfg, "…")`,
   `badge(cfg, "…", "…")`, `icon(cfg, "…", "…")`, …)
   and fails on one that no schema defined in that file declares, so a typo
-  in a key cannot render silently as an empty icon — a new helper that
+  in a key cannot render silently as an empty icon. A new helper that
   takes a key by name has to be added to that scan's pattern list.
 - **A module never spells a shared rule itself.** The leading glyph is
   `modules::lead`, a trailing one `modules::badge`, a name cut
@@ -495,7 +495,7 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `tests/fixtures/settings/`); `# color: always` renders one with colour
   on (the row-start guards of both suites strip escape sequences first;
   `colour-on`, `branch-link`, `text-link` and `theme-nord` are the goldens
-  in that mode — the link pair because the painter emits no OSC 8 under
+  in that mode, the link pair because the painter emits no OSC 8 under
   `--color never`, and `theme-nord` because a palette other than the
   default reached no render at all). Both suites also fail on a golden
   whose fixture is gone, since `UPDATE_GOLDEN=1` never deletes one.

@@ -91,7 +91,7 @@ shows, not the lines. To switch presets outright, delete the `[[line]]` and
 
 ## Install
 
-With [Homebrew](https://brew.sh) (macOS and Linux, prebuilt binary — from
+With [Homebrew](https://brew.sh) (macOS and Linux, prebuilt binary, from
 the first tagged release; until then, build from source):
 
 ```sh

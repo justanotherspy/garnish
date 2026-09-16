@@ -73,8 +73,8 @@ sample (the same payload) to a temp file:
 ```
 
 Show the preview, ask whether it reads right, iterate on the draft. When
-they approve, back the existing file up and then copy the draft into place
-— the backup is the `.bak-<epoch>` one `garnish` itself keeps (SPEC § 5:
+they approve, back the existing file up and then copy the draft into
+place. The backup is the `.bak-<epoch>` one `garnish` itself keeps (SPEC § 5:
 a file garnish rewrites always leaves one), and a plain `cp` on its own
 would keep nothing:
 

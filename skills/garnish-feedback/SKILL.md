@@ -57,7 +57,7 @@ glyphs or the right edge.
 The issue is public. Before anything leaves the machine, redact: replace
 the home directory in every path with `~` (`doctor` already collapses it
 and `config show` prints no path, so this catches anything pasted by
-hand — a path carries the username), and keep only the `GARNISH_*`
+hand, since a path carries the username), and keep only the `GARNISH_*`
 lines of the doctor's `environment` section. Then print the **whole body**
 so the person can read it, and ask (AskUserQuestion when available):
 "post this to justanotherspy/garnish as a public issue?". Only a yes runs:

@@ -328,7 +328,7 @@ PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
 the generated `docs/modules/pr.md`). The number is linked with OSC 8 to
 `pr.url` when there is one the painter will emit (§ 5), and underlined only
-then — a payload may carry no URL, or an `ssh://` one, and an underline
+then: a payload may carry no URL, or an `ssh://` one, and an underline
 with no link reads as clickable.
 
 (Corrected in PLAN Phase 12: `○` and `◌`, and with them `branch`'s dirty
@@ -1428,7 +1428,7 @@ them needs network access from garnish itself, they drive `gh` and the
 - **`garnish-statusline`.** Conversational config builder (the hands-on
   one is `garnish setup`, § 14; both write the same file, and the skill
   will point at `setup` when the person would rather see the choices than
-  answer questions — target state, PLAN Phase 22). Asks, with
+  answer questions; target state, PLAN Phase 22). Asks, with
   recommended defaults: terminal and font (Nerd Font? decides `icons`),
   usual terminal width (decides preset and line count), what matters most
   (repo, model/context, usage limits, timers), colour preference (theme,

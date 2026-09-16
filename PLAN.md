@@ -17,7 +17,7 @@ tap landed on 2026-09-11 and waits for its first tag.
 
 Phases 19 (harness fidelity) and 20 (per-module presentation) landed on
 2026-09-13 and 2026-09-16, and an audit of everything through Phase 20
-followed on 2026-09-17: the code was read against the documents, the
+followed the same day: the code was read against the documents, the
 defects it found were fixed with a test each, and the rules that had been
 written out more than once were given one home.
 
@@ -49,7 +49,7 @@ nothing else.** `main` is ready for Phase 21.
 | 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 | 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
-| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; 194 → 223 tests | 09-17 |
+| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; 194 → 223 tests | 09-16 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -183,7 +183,7 @@ Open items only; closed ones are in the work log.
 
 - [ ] A `branch.forge = "auto" | "github" | "gitlab"` key, if a self-hosted GitLab with no open merge request ever turns up in practice. Decided 2026-09-16 with Daniel: documented as a known limitation instead (SPEC § 3.1, the `link` option text and `examples/garnish.toml`)
 - [ ] `parse_settings_json` accepts files Claude Code rejects: its schema is strict for every key (an enum's spelling, a number's type), and a user, project or local file that fails it is skipped entirely, so `doctor` can show `ok` and resolve keys from a file Claude Code never reads. The `tui` row names its own case; the general check would mean carrying Claude Code's schema, which is a spec decision
-- [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings-chain reads for 30 s — only if the tick budget is ever threatened. The chain is already read at most once per tick and only on demand, so this is about the config parse
+- [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings-chain reads for 30 s, but only if the tick budget is ever threatened. The chain is already read at most once per tick and only on demand, so this is about the config parse
 - [ ] From `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 
 ## Work log
@@ -276,7 +276,7 @@ was built, what the reviews found and what was decided, not how.
   reduced motion, the doctor's settings report, never rewriting an
   unparsable file, `max_width`, fish paths, branch and text links, the
   usable context scale, absolute reset times, the schema-generated matrix
-  test — Phases 19 and 20.
+  test: Phases 19 and 20.
 
   Daniel's layout ideas (grid columns, titled rules and boxes, panels of
   stacked boxes) became one model in SPEC § 4.3: a row is columns, a column
@@ -284,13 +284,13 @@ was built, what the reviews found and what was decided, not how.
   `justify`, titles and boxes as decorations, two levels deep, with a plain
   row as one `1fr` column so the default render is byte-identical. The name
   came from his distinction: a *line* is one terminal line, a *row* is the
-  addressable unit, one or more lines tall — so the unit is `[[row]]` with
+  addressable unit, one or more lines tall, so the unit is `[[row]]` with
   `[[row.col]]` and `[[row.col.row]]` beneath, and `[[line]]` and
   `hide_empty_lines` stay as permanent aliases. Two adversarial reviews of
   the spec text returned 25 findings each, all taken (`51d4b66`, `cada6ef`):
   the samples contradicted the box rules, the lock horizon could never
   fire, `path.depth` already existed, and about two dozen corners were
-  defined — the `truncate = false` rule, gap-then-column clamping, the fill
+  defined: the `truncate = false` rule, gap-then-column clamping, the fill
   pattern phased over the row, `config show` as a fixed point,
   both-direction nesting. A read-only code map at the top of each open
   phase re-cut its layers where the code's shape demanded. Open drafts #27
@@ -300,7 +300,7 @@ was built, what the reviews found and what was decided, not how.
   the 2.1.261 npm package: the 13 000 buffer is unchanged in both,
   `COLUMNS`/`LINES` are the full terminal size, and the status line
   component wraps each row in `<Text dimColor wrap="truncate">` around a
-  child whose Ink fork merges the parent's `dim` into every piece — so a
+  child whose Ink fork merges the parent's `dim` into every piece, so a
   leading `ESC[0m` is parsed away and FUTURE-SPEC A1's premise never held.
   The dim-reset layer was therefore not built; SPEC § 2.1 records the
   mechanism and how to re-verify it.
@@ -455,7 +455,7 @@ was built, what the reviews found and what was decided, not how.
   or empty run clears the status line, and an aborted run keeps the
   previous text. Merged with Phase 20 (#51) the same day; the only
   conflict was this file.
-- **2026-09-17 (audit through Phase 20)** — Daniel asked for the whole
+- **2026-09-16 (audit through Phase 20)** — Daniel asked for the whole
   project up to Phase 20 to be checked against its documents, its defects
   fixed, and its duplication consolidated, so `main` is ready for Phase 21.
   A seven-lens read-only audit (config, render, modules, systems,
@@ -472,12 +472,12 @@ was built, what the reviews found and what was decided, not how.
   where `--upload-pack=<cmd>` runs `<cmd>`.
 
   **Four things nothing bounded.** `run_program`'s timeout covered only the
-  wait — joining the pipe readers blocked until every descendant closed the
+  wait: joining the pipe readers blocked until every descendant closed the
   write end, so an ssh `ControlPersist` master outliving `git fetch` left
   the worker in `read_to_end` for ever with its lock held. A stamp in the
   future (a resumed VM, NTP correcting a bad RTC) made a lock live for ever
   and an entry fresh for ever, because the negative age passed the
-  staleness check and then satisfied the grace window — and the existing
+  staleness check and then satisfied the grace window. The existing
   live-lock test only passed *because* of that, stamping from the wall
   clock while the tick ran on `GARNISH_NOW`. A failed entry stored a
   command's whole stderr, which every warm tick then read and parsed.
@@ -486,7 +486,7 @@ was built, what the reviews found and what was decided, not how.
   **Empty is unset.** `config::locate` read `GARNISH_CONFIG` and
   `XDG_CONFIG_HOME` without the empty guard its siblings have, so
   `GARNISH_CONFIG=` put `⚠ config: cannot read` on every tick and
-  `XDG_CONFIG_HOME=` made the lookup relative to the current directory — a
+  `XDG_CONFIG_HOME=` made the lookup relative to the current directory, so a
   checkout holding `garnish/garnish.toml` became the user's config.
 
   **Nine silent or wrong renders.** A failed or overdue module built wholly
@@ -522,13 +522,13 @@ was built, what the reviews found and what was decided, not how.
 
   **The tests had five blind spots.** Every pinned render runs under
   `Clock::fixed()`, whose `git: false` makes the repo group render nothing,
-  and every fixture's `cwd` does not exist either — so `sync` and half of
+  and every fixture's `cwd` does not exist either, so `sync` and half of
   `branch` appeared in none of the 472 goldens, in no matrix case and in no
   benchmark (`render_module/sync` was timing an early return). The git
   helpers ran under the developer's `~/.gitconfig`, which on this project
   means `commit.gpgsign`. The payload goldens and the generated docs had no
   orphan check. The "unwritable cache" case was a no-op as root. And
-  `Cache::from_env`'s precedence chain had no test — the one named for it
+  `Cache::from_env`'s precedence chain had no test: the one named for it
   asserted `key_hash` and `sanitize`.
 
   **CI** gained the shellcheck gate `CLAUDE.md` has always required (about
