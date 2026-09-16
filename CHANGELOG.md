@@ -19,9 +19,9 @@ Fixed, each with a test:
   as an option), `core.fsmonitor` (`git status` runs it) and
   `remote.<name>.uploadpack` (a fetch runs it). The name is refused and
   the other two are overridden on every call.
-- A module refreshed in the background lost its `⟳`/`✗` mark when it had
-  no value of its own, so `sync` with a broken git looked like an empty
-  row instead of a failure. A `git status` whose output could not be read
+- A module whose last background refresh *failed* lost its `✗` mark when
+  it had no value of its own, so `sync` with a broken git looked like an
+  empty row instead of a failure. A `git status` whose output could not be read
   before the timeout also reported a *clean* tree rather than a failure,
   so the dirty marker went missing with nothing to show why.
 - `pr` underlined its number whenever `link = true`, even when the payload
@@ -49,8 +49,8 @@ Fixed, each with a test:
   directory, so a checkout holding `garnish/garnish.toml` became your
   config. An empty path variable means unset everywhere now.
 - Under `color = "256"` every theme was shifted: the 6×6×6 cube's levels
-  are `0, 95, 135, 175, 215, 255`, not evenly spaced, so a colour could be
-  moved by up to 41 per channel.
+  are `0, 95, 135, 175, 215, 255`, not evenly spaced, so a channel could
+  be moved by up to 69 and could land 95 away from the nearest level.
 - A clipped text box of wide glyphs (CJK, emoji) could come out narrower
   than its `width`, shifting an aligned column.
 - A background worker could hang for ever holding its module's lock when

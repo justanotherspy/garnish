@@ -717,7 +717,7 @@ fn worker_fetch_failure_keeps_counts_and_is_not_retried_within_the_interval() {
 /// Every pinned render in the suite runs with `Clock::fixed()`, whose
 /// `git: false` makes `Ctx::git_dirs()` `None`, and every payload fixture's
 /// `cwd` is a path that does not exist — so `sync` returned nothing and
-/// `branch` lost its sha and dirty halves in all 472 goldens and in the
+/// `branch` lost its sha and dirty halves in every golden and in the
 /// schema matrix. This is the one place they render with git on.
 ///
 /// Serial (`worker_`): a shared cache root and a temp repository.

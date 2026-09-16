@@ -162,10 +162,31 @@ fn joinable_ref(name: &str) -> bool {
 /// suspicious name at all. Resolving both sides and comparing catches every
 /// shape of that. Git has not written a symbolic ref as a symlink since
 /// `core.prefersymlinkrefs` was deprecated, so nothing legitimate is refused.
+/// A ref file holds one short line, so anything near this is not one. The
+/// cap is also what keeps a hostile `.git/HEAD` from becoming a branch name
+/// the size of the file: `head` takes the whole first line, and every render
+/// that cuts it (`branch.max_length`) works over its clusters.
+const MAX_REF_BYTES: u64 = 64 * 1024;
+
+/// `packed-refs` is a real file in a real repository and a large one in a
+/// big repository, so its bound is generous where a ref's is tight.
+const MAX_PACKED_REFS_BYTES: u64 = 16 * 1024 * 1024;
+
 fn read_ref_file(base: &Path, name: &str) -> Option<String> {
+    String::from_utf8(read_ref_bytes(base, name, MAX_REF_BYTES)?).ok()
+}
+
+/// [`read_ref_file`] as bytes, with the size cap the caller needs.
+fn read_ref_bytes(base: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
+    use std::io::Read as _;
     let path = base.join(name).canonicalize().ok()?;
     let root = base.canonicalize().ok()?;
-    path.starts_with(&root).then(|| std::fs::read_to_string(&path).ok())?
+    if !path.starts_with(&root) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(&path).ok()?.take(max).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// Resolve a full ref name (`refs/heads/main`) to a commit id.
@@ -206,8 +227,12 @@ pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
 /// Look a ref up in `packed-refs`, stopping at the first match. The file is
 /// scanned as bytes so a multi-megabyte packed-refs costs one read plus a
 /// linear scan with no per-line allocation.
+///
+/// It goes through [`read_ref_bytes`] like every other ref read: it is the
+/// fallback whenever a loose ref is absent, so a symlinked `packed-refs`
+/// would be the same way out of the repository as a symlinked `HEAD`.
 fn packed_ref(dirs: &Dirs, refname: &str) -> Option<String> {
-    let packed = std::fs::read(dirs.common_dir.join("packed-refs")).ok()?;
+    let packed = read_ref_bytes(&dirs.common_dir, "packed-refs", MAX_PACKED_REFS_BYTES)?;
     let want = refname.as_bytes();
     packed
         .split(|b| *b == b'\n')
@@ -298,7 +323,30 @@ const NO_COMMAND_HOOKS: [&str; 2] = ["-c", "core.fsmonitor="];
 /// Returns the stderr text (or a timeout message) on failure.
 pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     let args: Vec<&str> = NO_COMMAND_HOOKS.into_iter().chain(args.iter().copied()).collect();
-    run_program(Path::new("git"), cwd, &args, timeout)
+    run_program_wanting(Path::new("git"), cwd, &args, timeout, Stdout::Read)
+}
+
+/// [`run_git`] for a command whose stdout the caller throws away.
+///
+/// Only the exit status matters, so a stdout read that has to be abandoned
+/// is not a failure: `fetch` runs `--quiet` and is precisely the call whose
+/// pipes an ssh `ControlPersist` master holds open, so treating that as an
+/// error recorded a fetch that worked as one that did not.
+///
+/// # Errors
+/// Returns the stderr text (or a timeout message) on failure.
+fn run_git_quiet(cwd: &Path, args: &[&str], timeout: Duration) -> Result<(), String> {
+    let args: Vec<&str> = NO_COMMAND_HOOKS.into_iter().chain(args.iter().copied()).collect();
+    run_program_wanting(Path::new("git"), cwd, &args, timeout, Stdout::Discard).map(|_| ())
+}
+
+/// Whether the caller reads what the child wrote to stdout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stdout {
+    /// The output is the answer, so failing to read it is a failure.
+    Read,
+    /// Only the exit status matters.
+    Discard,
 }
 
 /// How long the pipes are still read after the child has exited and the
@@ -337,6 +385,17 @@ pub fn run_program(
     args: &[&str],
     timeout: Duration,
 ) -> Result<String, String> {
+    run_program_wanting(program, cwd, args, timeout, Stdout::Read)
+}
+
+/// [`run_program`], told whether the caller will read the output.
+fn run_program_wanting(
+    program: &Path,
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+    want: Stdout,
+) -> Result<String, String> {
     use std::process::{Command, Stdio};
     let mut child = Command::new(program)
         .args(args)
@@ -373,12 +432,17 @@ pub fn run_program(
     // What is left of the budget, never below a floor: the child has exited,
     // so its pipes are normally closed already and both arrive at once.
     let left = || timeout.saturating_sub(start.elapsed()).max(DRAIN_FLOOR);
-    // A read that gave up is an error, never an empty answer. `is_dirty`
-    // reads "no output" as "clean", so returning `Ok("")` here would put a
-    // fabricated value in the cache for a whole TTL instead of a `✗`.
-    let out = stdout
-        .recv_timeout(left())
-        .map_err(|_| format!("git {} wrote no output before the timeout", args.join(" ")))?;
+    // A read that gave up is an error, never an empty answer, for a caller
+    // that reads it: `is_dirty` takes "no output" for "clean", so `Ok("")`
+    // here would put a fabricated value in the cache for a whole TTL
+    // instead of a `✗`. For a caller that discards it, nothing was lost.
+    let out = match (stdout.recv_timeout(left()), want) {
+        (Ok(out), _) => out,
+        (Err(_), Stdout::Discard) => Vec::new(),
+        (Err(_), Stdout::Read) => {
+            return Err(format!("git {} wrote no output before the timeout", args.join(" ")));
+        }
+    };
     // stderr only decorates a failure, so a lost one costs the message, not
     // the answer.
     let err = stderr.recv_timeout(left()).unwrap_or_default();
@@ -458,7 +522,7 @@ pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> 
         return Err(format!("refusing to fetch from remote {remote:?}"));
     }
     let args = ["fetch", "--quiet", "--upload-pack", "git-upload-pack", "--", remote];
-    run_git(cwd, &args, timeout).map(|_| ())
+    run_git_quiet(cwd, &args, timeout)
 }
 
 /// `git --version`, for `doctor` (killed after two seconds like every other
@@ -688,10 +752,38 @@ mod tests {
         link(&work.join(".git/refs/heads"), &work);
         assert_eq!(resolve_ref(&dirs, "refs/heads/secret.txt"), None, "through a linked dir");
 
-        // A real ref, read the ordinary way, still resolves.
+        // 4. `packed-refs` is the fallback whenever a loose ref is absent,
+        //    so a link there is the same door.
         let (_d2, work2) = repo();
         let dirs2 = discover(&work2).unwrap();
-        assert!(head_commit(&dirs2).is_some(), "an honest repository still works");
+        let sha = head_commit(&dirs2).unwrap();
+        git(&work2, &["pack-refs", "--all"]);
+        assert_eq!(resolve_ref(&dirs2, "refs/heads/main"), Some(sha), "packed refs still resolve");
+        let elsewhere = work2.join("packed-elsewhere");
+        std::fs::write(&elsewhere, "deadbeef refs/heads/main\n").unwrap();
+        link(&work2.join(".git/packed-refs"), &elsewhere);
+        assert_eq!(resolve_ref(&dirs2, "refs/heads/main"), None, "a linked packed-refs is refused");
+    }
+
+    /// A ref file is one short line, so a huge one is not a ref. The cap is
+    /// what stops a hostile `.git/HEAD` becoming a branch name the size of
+    /// the file, which every render that cuts it then walks cluster by
+    /// cluster on the tick path.
+    #[test]
+    fn a_ref_file_is_bounded_so_a_huge_head_cannot_become_a_branch_name() {
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        let huge = "a".repeat(usize::try_from(MAX_REF_BYTES).unwrap_or(0) * 2);
+        std::fs::write(work.join(".git/HEAD"), format!("ref: refs/heads/{huge}\n")).unwrap();
+        let name = match head(&dirs) {
+            Some(Head::Branch(n)) => n,
+            other => panic!("expected a branch, got {other:?}"),
+        };
+        assert!(
+            u64::try_from(name.len()).is_ok_and(|n| n <= MAX_REF_BYTES),
+            "the name is {} bytes, past the cap",
+            name.len()
+        );
     }
 
     /// The remote comes from the repository's own `.git/config`, so a name
@@ -742,6 +834,32 @@ mod tests {
         let clean = write("git-clean", "#!/bin/sh\nprintf 'M file\\n'\nexit 0\n");
         let out = run_program(&clean, &work, &["status"], Duration::from_millis(500));
         assert_eq!(out.as_deref(), Ok("M file\n"));
+
+        // A caller that discards stdout loses nothing when the read is
+        // abandoned, so the same grandchild must not turn a command that
+        // *worked* into a failure. `fetch` is that caller, runs `--quiet`,
+        // and is the very call an ssh `ControlPersist` master outlives.
+        let started = std::time::Instant::now();
+        let out = run_program_wanting(
+            &leaky,
+            &work,
+            &["fetch"],
+            Duration::from_millis(500),
+            Stdout::Discard,
+        );
+        assert_eq!(out.as_deref(), Ok(""), "a discarded read is not a failure");
+        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+        // It still fails when the command itself does, in git's own words
+        // (nothing holds the pipes here, so the stderr does arrive).
+        let bad = write("git-bad", "#!/bin/sh\necho boom >&2\nexit 1\n");
+        let out = run_program_wanting(
+            &bad,
+            &work,
+            &["fetch"],
+            Duration::from_millis(500),
+            Stdout::Discard,
+        );
+        assert_eq!(out.as_deref().map_err(String::as_str), Err("boom"));
     }
 
     #[test]

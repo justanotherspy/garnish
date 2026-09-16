@@ -142,12 +142,13 @@ pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
     if max == 0 {
         return name.to_owned();
     }
-    // Count before collecting. `clusters` allocates a `String` per grapheme,
-    // and this runs on the tick path over a branch name that came from an
-    // unbounded read of `.git/HEAD` in a checkout garnish did not create: a
-    // huge name would become millions of small allocations every second just
-    // to find out it needed no cut. A cluster is at least one char, so
-    // `chars` under the limit settles it without touching the heap.
+    // A cluster is at least one char, so a name with no more chars than the
+    // budget cannot need cutting and never reaches `clusters`, which
+    // allocates a `String` per grapheme. That only covers the short names;
+    // the long ones are bounded at the source instead (`git::MAX_REF_BYTES`
+    // caps what `.git/HEAD` can make a branch name in a checkout garnish did
+    // not create), because there is no cheap way to count clusters without
+    // building them.
     if name.chars().take(max.saturating_add(1)).count() <= max {
         return name.to_owned();
     }

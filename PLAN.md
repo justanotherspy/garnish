@@ -49,7 +49,7 @@ nothing else.** `main` is ready for Phase 21.
 | 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 | 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
-| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; then an adversarial review of the audit itself, which found four regressions it had introduced and five fixes that had stopped at the example; 194 → 225 tests | 09-16 |
+| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; then an adversarial review of the audit itself, which found four regressions it had introduced, five fixes that had stopped at the example, five tests that checked less than they claimed and four documents that had gone out of date with the code; 194 → 227 tests | 09-16 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -461,7 +461,7 @@ was built, what the reviews found and what was decided, not how.
   fixed, and its duplication consolidated, so `main` is ready for Phase 21.
   A seven-lens read-only audit (config, render, modules, systems,
   documents, tests, simplification), each lens in its own worktree, found
-  the work below; every defect got a test, and the suite went 194 → 225.
+  the work below; every defect got a test, and the suite went 194 → 227.
 
   **Two ways out of the repository**, both reachable from a checkout the
   user did not create (an unpacked archive, a shared directory): a
@@ -490,9 +490,11 @@ was built, what the reviews found and what was decided, not how.
   `XDG_CONFIG_HOME=` made the lookup relative to the current directory, so a
   checkout holding `garnish/garnish.toml` became the user's config.
 
-  **Nine silent or wrong renders.** A failed or overdue module built wholly
-  from its cache entry lost its `✗`/`⟳` mark, so a broken git read as an
-  empty row; `pr` underlined its number whenever `link = true`, even with
+  **Nine silent or wrong renders.** A *failed* module built wholly from its
+  cache entry lost its `✗` mark, so a broken git read as an empty row (the
+  first fix took the overdue case with it, which the review caught: an
+  overdue module with no value still hides, or `sync` would flash `– ⟳`
+  after every idle pause); `pr` underlined its number whenever `link = true`, even with
   no URL to link to; `sync` printed `refs/heads/main` where every other
   case reads `origin/main`; `spend` picked its band from a percentage
   clamped to 100 while printing the unclamped one; `context`'s
@@ -526,7 +528,7 @@ was built, what the reviews found and what was decided, not how.
   **The tests had five blind spots.** Every pinned render runs under
   `Clock::fixed()`, whose `git: false` makes the repo group render nothing,
   and every fixture's `cwd` does not exist either, so `sync` and half of
-  `branch` appeared in none of the 472 goldens, in no matrix case and in no
+  `branch` appeared in no golden at all, in no matrix case and in no
   benchmark (`render_module/sync` was timing an early return). The git
   helpers ran under the developer's `~/.gitconfig`, which on this project
   means `commit.gpgsign`. The payload goldens and the generated docs had no
@@ -535,7 +537,7 @@ was built, what the reviews found and what was decided, not how.
   asserted `key_hash` and `sanitize`.
 
   **CI** gained the shellcheck gate `CLAUDE.md` has always required (about
-  1,100 lines of shell, none of it checked), `permissions: contents: read`
+  600 lines of shell, none of it checked), `permissions: contents: read`
   on `ci.yml`, and an explicit `ref:` on the review workflow's checkout,
   whose three comment triggers were reading `main`'s tree.
 
@@ -586,4 +588,25 @@ was built, what the reviews found and what was decided, not how.
   the example, and check what is already on disk before making a config rule
   stricter. Both reproductions were run before and after the fix (a
   symlinked HEAD rendering `SECRETVALUE`, a future stamp leaving the fetch
-  frozen). 223 → 225 tests.
+  frozen).
+
+  A fourth pass, over the claims the branch makes rather than its code,
+  found two more of the same kind and a regression from the round above.
+  `run_program`'s new "a read that gave up is an error" reached `fetch`,
+  which runs `--quiet` and throws its stdout away and is the one caller
+  whose pipes an ssh master holds open, so a fetch that worked was recorded
+  as failed: the callers that read stdout are the ones that treat losing it
+  as a failure now. The symlink rule had stopped at the three shapes it had
+  tests for and left `packed-refs`, the fallback every absent loose ref
+  takes; every ref read goes through one bounded, contained reader, and the
+  bound is also why a hostile `.git/HEAD` can no longer make a branch name
+  the size of the file. And the blank-`marker` exemption was in the static
+  arm but not the frames arm of the same rule.
+
+  It also caught four documents saying things that were no longer true: the
+  `⟳` mark in three places after the overdue case was put back, a 256-colour
+  error bound wrong by 28 (69, not 41, brute-forced to check), a shellcheck
+  gate credited with 1,100 lines of shell where there are 600, and a
+  `CLAUDE.md` tripwire that covered one of the four edits it claimed. The
+  tripwire now writes every common option into a config and requires it
+  back out, which fails if any of the four is missed. 194 → 227 tests.

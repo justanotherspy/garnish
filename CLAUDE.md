@@ -442,9 +442,13 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   because the five are read on the tick path as named fields rather than
   through the option map: the spec in `COMMON_OPTS`, a field on
   `Overrides`, an arm in `set_common`, and a field on `ModuleCfg` with its
-  arm in `ModuleCfg::resolve` and `ModuleCfg::common`. A unit test fails
-  when the first is done and the rest are not, so the trap has a tripwire
-  rather than being a rule to remember. The schema matrix test in `render.rs` renders every
+  arm in `ModuleCfg::resolve` and `ModuleCfg::common`. The tripwire is
+  `no_schema_redeclares_a_common_key_and_every_common_key_is_stored`, which
+  writes every `COMMON_OPTS` key into a config at a non-default value and
+  requires `ModuleCfg::common` to give it back, so any of the other three
+  edits being missed shows up as the default returning. Adding the spec
+  alone therefore fails the suite rather than shipping a dead key.
+  The schema matrix test in `render.rs` renders every
   module × preset × icon set × `max_width` against every fixture, so a
   new module or option gets the shared invariants checked for free; a
   behaviour of its own still wants a test of its own. A unit test scans

@@ -927,7 +927,7 @@ mod tests {
         // Every level maps to itself, and the midpoints go to the nearer
         // one: the corners alone pass under an even split of the range,
         // which is what used to move `color = "256"` themes off their
-        // palette (`#6c7086` → 103, a light blue-grey, instead of 59).
+        // palette (`#6c7086` → 103, a light blue-grey, instead of 60).
         for (i, level) in CUBE_LEVELS.into_iter().enumerate() {
             let index = u8::try_from(16 + i * 36 + i * 6 + i).unwrap();
             assert_eq!(rgb_to_256(level, level, level), index, "level {level}");
@@ -942,9 +942,11 @@ mod tests {
     }
 
     /// Every byte lands on its nearest cube level, so no channel is ever
-    /// moved further than half the gap it sits in — 48 across the wide
+    /// moved further than half the gap it sits in: 48 across the wide
     /// 0..95 step, 20 across the even 40-wide ones. The old even split of
-    /// the range was off by up to 41 inside a 40-wide step.
+    /// the range was off by up to 47 even inside a 40-wide step (128 went
+    /// to 175) and by 69 across the wide first one (26 went to 95, where
+    /// 0 is nearest, a gap of 95 between the two answers).
     #[test]
     fn rgb_cube_is_the_nearest_level_for_every_byte() {
         for c in 0..=u8::MAX {

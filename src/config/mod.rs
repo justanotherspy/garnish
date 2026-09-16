@@ -1443,7 +1443,10 @@ fn parse_icons(
                     // through `fill_frames`, equal widths and all.
                     Ok(frames)
                         if spec.one_cell()
-                            && frames.iter().any(|f| crate::ansi::display_width(f) != 1) =>
+                            && frames.iter().any(|f| {
+                                !(f.is_empty() && spec.may_be_blank())
+                                    && crate::ansi::display_width(f) != 1
+                            }) =>
                     {
                         err(&format!("icons.{ik}"), "must be exactly one cell wide".into());
                     }
@@ -2361,6 +2364,42 @@ x = 1
             assert!(
                 set_common(&mut ov, opt.key, opt.default.clone()),
                 "`{}` is a common option with no `set_common` arm: it would be dropped",
+                opt.key
+            );
+        }
+
+        // The whole chain, end to end, so the tripwire covers all four edits
+        // a sixth common option needs rather than only the `set_common` arm:
+        // every key is written into a config, and the value that comes back
+        // out of the resolved `ModuleCfg` must be the one that went in. A
+        // missing `Overrides` field, `resolve` arm or `common` arm all show
+        // up here as the default coming back.
+        let not_the_default = |opt: &OptSpec| match &opt.default {
+            Value::Bool(b) => Value::Bool(!b),
+            Value::Int(n) => Value::Int(n.saturating_add(1)),
+            Value::Float(f) => Value::Float(f + 0.5),
+            Value::Str(s) => Value::Str(format!("{s}x")),
+            other => other.clone(),
+        };
+        let rows = COMMON_OPTS.iter().map(|opt| {
+            let value = match not_the_default(opt) {
+                Value::Bool(b) => b.to_string(),
+                Value::Int(n) => n.to_string(),
+                Value::Float(f) => f.to_string(),
+                Value::Str(s) => crate::config::schema::toml_string(&s),
+                other => panic!("no literal for {other:?}"),
+            };
+            format!("{} = {value}\n", opt.key)
+        });
+        let text: String = std::iter::once("[modules.clock]\n".to_owned()).chain(rows).collect();
+        let (cfg, errs) = parse(&text, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new(), "{text}");
+        let clock = cfg.modules.get("clock").expect("the clock module");
+        for opt in &COMMON_OPTS {
+            assert_eq!(
+                clock.common(opt.key),
+                Some(not_the_default(opt)),
+                "`{}` did not survive the config → `ModuleCfg` chain ({text})",
                 opt.key
             );
         }

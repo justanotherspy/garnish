@@ -433,12 +433,15 @@ pub fn muted(theme: &Theme, text: impl Into<String>) -> Segment {
 
 /// Apply `label`, `prefix`, `suffix`, and staleness styling to a render.
 ///
-/// An overdue or failed module always keeps its `⟳`/`✗` mark (SPEC § 3.6),
-/// even when it had nothing to say: `sync` at the default preset is built
-/// wholly from its cache entry, so a failed refresh leaves it with no
-/// segments at all, and hiding it then would report a broken git as an
-/// ordinary empty row. The placeholder `–` stands in for the value and the
-/// mark still follows.
+/// A *failed* module keeps its `✗` (SPEC § 3.6) even when it had nothing to
+/// say: `sync` at the default preset is built wholly from its cache entry,
+/// so a failed refresh leaves it with no segments at all, and hiding it
+/// then would report a broken git as an ordinary empty row. The placeholder
+/// `–` stands in for the value and the mark follows it.
+///
+/// An *overdue* module with nothing to say still hides, because its last
+/// value really was nothing and a `– ⟳` would flicker in every idle pause.
+/// Only a value that exists is dimmed and marked with `⟳`.
 #[must_use]
 pub fn decorate(
     rendered: Rendered,
