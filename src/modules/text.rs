@@ -157,8 +157,10 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
             _ => scroll(&styled, box_w, ctx.frame(step, text_w), "", false),
         }
     };
-    // `url` (SPEC § 3.7) links the box, padding cells excluded; the config
-    // already checked it against the painter's rule, which applies again.
+    // `url` (SPEC § 3.7) links the whole box and nothing outside it: the
+    // `justify` fill, a scrolled window's cells and the clip shortfall are
+    // all inside, only the `pad` cells added below are not. The config
+    // already checked the URL against the painter's rule, which applies again.
     let url = cfg.str("url");
     let body: Vec<Segment> =
         if url.is_empty() { body } else { body.into_iter().map(|s| s.with_link(url)).collect() };
@@ -211,6 +213,13 @@ mod tests {
         let clipped = module("text = \"clip me\"\nwidth = 4\noverflow = \"clip\"\n");
         assert_eq!(crate::ansi::Painter::PLAIN.paint(&clipped), "cli…");
         assert!(linked(&clipped), "{clipped:?}");
+        // A cut that lands short (the next cluster is two cells wide with one
+        // cell left) is padded to the box, and that cell is inside the box
+        // like the `justify` fill, so it carries the link too.
+        let short = module("text = \"日本語\"\nwidth = 4\noverflow = \"clip\"\n");
+        assert_eq!(crate::ansi::Painter::PLAIN.paint(&short), "日… ");
+        assert_eq!(crate::ansi::segments_width(&short), 4);
+        assert!(linked(&short), "{short:?}");
         let centred = module("text = \"hi\"\nwidth = 6\njustify = \"center\"\n");
         assert_eq!(crate::ansi::Painter::PLAIN.paint(&centred), "  hi  ");
         assert!(linked(&centred), "{centred:?}");

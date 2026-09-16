@@ -63,7 +63,7 @@ fill = true
 fill_pattern = ""
 fill_step = 1
 fill_direction = "right"
-# separator_frames = []
+separator_frames = []
 separator_step = 1
 
 # Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.

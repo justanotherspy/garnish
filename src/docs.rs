@@ -222,15 +222,7 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
     let _ = writeln!(out, "fill_pattern = {}", toml_string(&cfg.frame.fill_pattern.concat()));
     let _ = writeln!(out, "fill_step = {}", Value::Float(cfg.frame.fill_step).to_toml());
     let _ = writeln!(out, "fill_direction = {}", toml_string(cfg.frame.fill_direction.name()));
-    // An empty list is the static separator, and writing it back would be a
-    // config the parser rejects ("expected at least one frame"), so the key
-    // is shown commented out until there are frames to write.
-    let empty_frames = if cfg.frame.separator_frames.is_empty() { "# " } else { "" };
-    let _ = writeln!(
-        out,
-        "{empty_frames}separator_frames = {}",
-        toml_list(&cfg.frame.separator_frames)
-    );
+    let _ = writeln!(out, "separator_frames = {}", toml_list(&cfg.frame.separator_frames));
     let _ = writeln!(out, "separator_step = {}", Value::Float(cfg.frame.separator_step).to_toml());
     let _ = writeln!(out);
 }

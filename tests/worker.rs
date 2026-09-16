@@ -85,12 +85,17 @@ fn push_from_a_second_clone(env: &Env, name: &str) -> PathBuf {
     other
 }
 
-fn sync_entry(env: &Env) -> String {
+fn sync_entry_path(env: &Env) -> PathBuf {
     std::fs::read_dir(env.cache.join("repos"))
         .unwrap()
         .flatten()
-        .find_map(|d| std::fs::read_to_string(d.path().join("sync.cache")).ok())
+        .map(|d| d.path().join("sync.cache"))
+        .find(|p| p.is_file())
         .expect("sync.cache written")
+}
+
+fn sync_entry(env: &Env) -> String {
+    std::fs::read_to_string(sync_entry_path(env)).expect("sync.cache readable")
 }
 
 fn payload(work: &Path) -> String {
@@ -492,6 +497,25 @@ fn worker_fetch_interval_fetches_once_per_interval() {
     let entry = sync_entry(&env);
     assert!(entry.contains(&format!("fetch_attempt={later}")), "{entry}");
     assert!(entry.contains("behind=2"), "{entry}");
+
+    // A stamp *ahead* of the clock is a clock that stepped backwards (a
+    // resumed VM, NTP correcting a bad RTC), not an attempt from the future.
+    // Its age is negative, so a plain `age >= interval` never came true and
+    // auto-fetch stayed frozen, silently, until the wall clock caught up.
+    // Here the entry is stamped an hour ahead and the next refresh must
+    // still fetch, which the third push proves.
+    push_from_a_second_clone(&env, "third");
+    let ahead_stamp = (wall + 4000).to_string();
+    let path = sync_entry_path(&env);
+    let poisoned = sync_entry(&env)
+        .replace(&format!("fetch_attempt={later}"), &format!("fetch_attempt={ahead_stamp}"));
+    assert!(poisoned.contains(&format!("fetch_attempt={ahead_stamp}")), "{poisoned}");
+    std::fs::write(&path, &poisoned).unwrap();
+    let (_, err, ok) = garnish(&env, refresh, None, &[("GARNISH_NOW", later.as_str())]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains(&format!("fetch_attempt={later}")), "the future stamp stays: {entry}");
+    assert!(entry.contains("behind=3"), "the fetch must not be frozen: {entry}");
 }
 
 /// The first executable `git` on `PATH`.

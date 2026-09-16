@@ -1275,7 +1275,7 @@ fn resolve_frame(
     };
     let separator_frames: Vec<String> =
         raw.and_then(|f| f.separator_frames.as_deref()).map_or_else(Vec::new, |frames| {
-            equal_width_frames(frames.iter().map(String::as_str), "the columns")
+            equal_width_frames(frames.iter().map(String::as_str), "the columns", true)
                 .inspect_err(|msg| errors.push(problem("frame.separator_frames", msg)))
                 .unwrap_or_default()
         });
@@ -1394,13 +1394,24 @@ fn unknown_option_message(schema: &ModuleSchema) -> String {
 /// frames cycle. `what` names that thing in the message.
 ///
 /// One rule for the frame's `separator_frames` and every icon table's
-/// `<key>_frames`: the empty list used to be reported for an icon and
-/// accepted in silence for the separator.
+/// `<key>_frames`: every frame is the same width, or the thing they draw
+/// jitters from tick to tick.
+///
+/// `allow_empty` is what the two keys disagree on, and it is a
+/// compatibility rule rather than a design one: `[]` is the line every
+/// `garnish config init` has ever written for `separator_frames` (it means
+/// "no animation, keep the static separator"), so rejecting it would put a
+/// `⚠ config:` row on every tick of every config in the wild. An icon's
+/// `<key>_frames = []` has always been reported and nothing generates it.
 fn equal_width_frames<'a>(
     frames: impl IntoIterator<Item = &'a str>,
     what: &str,
+    allow_empty: bool,
 ) -> Result<Vec<String>, String> {
     let frames: Vec<String> = frames.into_iter().map(crate::ansi::plain_text).collect();
+    if frames.is_empty() && allow_empty {
+        return Ok(frames);
+    }
     let Some(width) = frames.first().map(|f| crate::ansi::display_width(f)) else {
         return Err("expected at least one frame".to_owned());
     };
@@ -1420,12 +1431,22 @@ fn parse_icons(
     for (ik, iv) in table {
         // `<key>_frames`: equal-width frames cycled one per tick (SPEC § 4.2).
         if let Some(base) = ik.strip_suffix("_frames")
-            && schema.icon(base).is_some()
+            && let Some(spec) = schema.icon(base)
         {
             let given: Option<Vec<&str>> =
                 iv.as_array().and_then(|items| items.iter().map(toml::Value::as_str).collect());
             match given {
-                Some(frames) => match equal_width_frames(frames, "the row") {
+                Some(frames) => match equal_width_frames(frames, "the row", false) {
+                    // A frame becomes the glyph for that tick, so the bar's
+                    // one-cell rule applies to every frame too. Checking only
+                    // the static arm below left the same defect reachable
+                    // through `fill_frames`, equal widths and all.
+                    Ok(frames)
+                        if spec.one_cell()
+                            && frames.iter().any(|f| crate::ansi::display_width(f) != 1) =>
+                    {
+                        err(&format!("icons.{ik}"), "must be exactly one cell wide".into());
+                    }
                     Ok(frames) => {
                         ov.icon_frames.insert(base.to_owned(), frames);
                     }
@@ -1441,8 +1462,11 @@ fn parse_icons(
                 // A bar glyph is repeated cell by cell, so anything but one
                 // cell breaks the row's arithmetic; `bar` would swap in a
                 // safe glyph and the override would vanish in silence. Same
-                // rule, same message as `frame.fill_char`.
-                if spec.one_cell() && crate::ansi::display_width(&glyph) != 1 {
+                // rule, same message as `frame.fill_char`. Blanking the
+                // marker is not that case: it is how the marker is turned
+                // off, and `bar` honours it (`IconSpec::may_be_blank`).
+                let blanked = glyph.is_empty() && spec.may_be_blank();
+                if spec.one_cell() && !blanked && crate::ansi::display_width(&glyph) != 1 {
                     err(&format!("icons.{ik}"), "must be exactly one cell wide".into());
                 } else {
                     ov.icons.insert(ik.clone(), glyph);
@@ -2052,6 +2076,30 @@ x = 1
         assert_eq!(c.frame.fill_pattern, Vec::<String>::new());
     }
 
+    /// `separator_frames = []` is the line every `garnish config init` has
+    /// written, and it means "no animation". Rejecting it would put a
+    /// `⚠ config:` row on every tick of every config already on disk, so the
+    /// empty list is legal there and reported for an icon, which nothing
+    /// generates.
+    #[test]
+    fn an_empty_frame_list_is_legal_for_the_separator_and_not_for_an_icon() {
+        // The real schema set: `config show` writes every module, so a round
+        // trip through a reduced one would fail on the modules it omits.
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse("[frame]\nseparator_frames = []\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_frames, Vec::<String>::new());
+        // What `config init` writes still parses clean after a round trip.
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(shown.contains("separator_frames = []"), "{shown}");
+        assert_eq!(parse(&shown, all).1, Vec::new());
+
+        let (_, errs) = parse("[modules.model.icons]\nmodel_frames = []\n", all);
+        let problems: Vec<(&str, &str)> =
+            errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+        assert_eq!(problems, [("modules.model.icons.model_frames", "expected at least one frame")]);
+    }
+
     #[test]
     fn a_ticker_defaults_durations_to_fixed_unless_set() {
         // SPEC § 4.1: a timer changing width inside the scrolled group makes
@@ -2334,6 +2382,45 @@ x = 1
         assert_eq!(errs, Vec::new());
         let context = cfg.modules.get("context").unwrap();
         assert_eq!((context.icon("fill"), context.icon("context")), ("▓", "ctx:"));
+
+        // An animated bar glyph is the same rule: a frame is the glyph for
+        // its tick, so equal widths are not enough.
+        let (_, errs) = parse(
+            "[modules.context.icons]\nfill_frames = [\"🟩\", \"🟥\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        let problems: Vec<(&str, &str)> =
+            errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+        assert_eq!(
+            problems,
+            [("modules.context.icons.fill_frames", "must be exactly one cell wide")]
+        );
+        let (cfg, errs) = parse(
+            "[modules.context.icons]\nfill_frames = [\"▓\", \"▒\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new(), "one-cell frames are still taken");
+        assert!(cfg.modules.contains_key("context"));
+
+        // Blanking the marker is how it is turned off, and `util::bar`
+        // honours it, so the width rule must not refuse it. The cells
+        // themselves cannot be blanked: a zero-width cell has no width to
+        // repeat.
+        let (cfg, errs) =
+            parse("[modules.context.icons]\nmarker = \"\"\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(cfg.modules.get("context").map(|m| m.icon("marker")), Some(""));
+        for key in ["fill", "empty"] {
+            let text = format!("[modules.context.icons]\n{key} = \"\"\n");
+            let (_, errs) = parse(&text, &crate::modules::SCHEMAS);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(
+                problems,
+                [(&*format!("modules.context.icons.{key}"), "must be exactly one cell wide")],
+                "{text}"
+            );
+        }
     }
 
     /// SPEC § 3.7: the keys a text module refuses are one table, so the

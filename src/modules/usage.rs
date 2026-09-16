@@ -9,7 +9,7 @@ use crate::time::WallClock;
 use super::util::{
     BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded, rounded_unclamped,
 };
-use super::{Ctx, Module, Rendered, lead, seg};
+use super::{Ctx, Module, Rendered, glyph_prefix, lead, seg};
 
 /// Which rate-limit window a limit module shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,9 +205,7 @@ impl Module for LimitModule {
             && let Some(at) = w.resets_at
             && let Some(reset) = reset_text(ctx, cfg, at, self.0.wall_clock())
         {
-            let g = cfg.icon("reset");
-            let glyph_txt = if g.is_empty() { String::new() } else { format!("{g} ") };
-            segs.push(seg(cfg, format!(" {glyph_txt}{reset}"), "reset"));
+            segs.push(seg(cfg, format!(" {}{reset}", glyph_prefix(cfg, "reset")), "reset"));
         }
         Rendered::fresh(segs)
     }

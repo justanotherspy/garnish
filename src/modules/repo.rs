@@ -676,12 +676,21 @@ impl Module for SyncModule {
                 .and_then(|e| e.get("fetch_attempt")?.parse::<i64>().ok());
             let now = crate::time::now_secs();
             let attempt_age = last_attempt.map(|t| now.saturating_sub(t));
-            let due = attempt_age
-                .is_none_or(|age| age >= i64::try_from(interval).unwrap_or(i64::MAX))
+            // A stamp *ahead* of the clock is a clock that stepped backwards
+            // (a resumed VM, NTP correcting a bad RTC), not an attempt from
+            // the future: its negative age would otherwise never reach the
+            // interval and auto-fetch would stay frozen, silently, until the
+            // wall clock caught up. Same rule as `Entry::is_fresh`.
+            let window = 0..i64::try_from(interval).unwrap_or(i64::MAX);
+            let due = attempt_age.is_none_or(|age| !window.contains(&age))
                 && git::fetch_age(&dirs, now).is_none_or(|age| age >= interval);
             if due {
                 values.insert("fetch_attempt".to_owned(), now.to_string());
                 if let Err(e) = git::fetch(&dirs.toplevel, &remote, FETCH_TIMEOUT) {
+                    // The same bound `Entry::err` puts on a failed entry: this
+                    // one rides in an `ok` entry the tick parses every render,
+                    // and a fetch talks to a server that can say anything.
+                    let e: String = e.chars().take(crate::cache::MAX_ERROR_CHARS).collect();
                     values.insert("fetch_error".to_owned(), e);
                 }
             } else if let Some(t) = last_attempt {

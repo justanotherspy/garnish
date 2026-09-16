@@ -29,10 +29,11 @@ Fixed, each with a test:
 - `branch.max_length` and `session_name.max_length` cut with `…` even
   under `icons = "ascii"`, and could split a flag or an accented letter in
   half.
-- A bar glyph (`fill`, `empty`, `marker`) that was not exactly one cell
-  was silently replaced while `config check` said `ok`; it is reported
-  now, like `frame.fill_char`. `[frame] separator_frames = []` was
-  likewise accepted in silence.
+- A bar glyph (`fill` or `empty`) that was not exactly one cell was
+  silently replaced while `config check` said `ok`; it is reported now,
+  like `frame.fill_char`. `marker` is exempt when it is blank, which is
+  how the marker is turned off. `[frame] separator_frames = []` keeps
+  meaning "no animation" and is still accepted.
 - `GARNISH_CONFIG=` (empty) put `⚠ config: cannot read` on every tick, and
   `XDG_CONFIG_HOME=` made the config lookup relative to the current
   directory, so a checkout holding `garnish/garnish.toml` became your

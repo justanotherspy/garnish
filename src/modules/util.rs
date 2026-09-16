@@ -142,6 +142,15 @@ pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
     if max == 0 {
         return name.to_owned();
     }
+    // Count before collecting. `clusters` allocates a `String` per grapheme,
+    // and this runs on the tick path over a branch name that came from an
+    // unbounded read of `.git/HEAD` in a checkout garnish did not create: a
+    // huge name would become millions of small allocations every second just
+    // to find out it needed no cut. A cluster is at least one char, so
+    // `chars` under the limit settles it without touching the heap.
+    if name.chars().take(max.saturating_add(1)).count() <= max {
+        return name.to_owned();
+    }
     let clusters = crate::ansi::clusters(name);
     if clusters.len() <= max {
         return name.to_owned();

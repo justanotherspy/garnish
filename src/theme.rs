@@ -240,26 +240,74 @@ mod tests {
 
     /// `Palette::spec` maps a role by its *index* in `Role::ALL`, so
     /// reordering a palette's 13-entry array (or `Role::ALL`) silently hands
-    /// every role a different colour while every spec still parses. These
-    /// four roles per palette pin the mapping: `accent` opens the array,
-    /// `ok`/`danger` sit in the middle and `band4` closes it, so no swap
-    /// leaves all four in place.
+    /// every role a different colour while every spec still parses.
+    ///
+    /// Every role is pinned, not a sample of them. Sampling looks like it
+    /// works and does not: the first version of this test took `accent`,
+    /// `ok`, `danger` and `band4`, but `danger` and `band4` are the same
+    /// colour in all six palettes and `mono` is `default` almost throughout,
+    /// so exchanging that pair, or rotating any of the nine roles between
+    /// them, left the assertion green.
     #[test]
     fn each_palette_keeps_its_colour_on_each_role() {
-        let expected = [
-            ("garnish", ["#7dd3a0", "#a6e3a1", "#f38ba8", "#f38ba8"]),
-            ("catppuccin-mocha", ["#cba6f7", "#a6e3a1", "#f38ba8", "#f38ba8"]),
-            ("nord", ["#88c0d0", "#a3be8c", "#bf616a", "#bf616a"]),
-            ("dracula", ["#bd93f9", "#50fa7b", "#ff5555", "#ff5555"]),
-            ("tokyonight", ["#7aa2f7", "#9ece6a", "#f7768e", "#f7768e"]),
-            ("mono", ["default", "default", "default", "default"]),
+        let expected: [(&str, [&str; 13]); 6] = [
+            (
+                "garnish",
+                [
+                    "#7dd3a0", "#89b4fa", "#6c7086", "#cdd6f4", "#a6e3a1", "#f9e2af", "#fab387",
+                    "#f38ba8", "#585b70", "#a6e3a1", "#f9e2af", "#fab387", "#f38ba8",
+                ],
+            ),
+            (
+                "catppuccin-mocha",
+                [
+                    "#cba6f7", "#89b4fa", "#6c7086", "#cdd6f4", "#a6e3a1", "#f9e2af", "#fab387",
+                    "#f38ba8", "#45475a", "#94e2d5", "#a6e3a1", "#f9e2af", "#f38ba8",
+                ],
+            ),
+            (
+                "nord",
+                [
+                    "#88c0d0", "#81a1c1", "#4c566a", "#d8dee9", "#a3be8c", "#ebcb8b", "#d08770",
+                    "#bf616a", "#4c566a", "#a3be8c", "#ebcb8b", "#d08770", "#bf616a",
+                ],
+            ),
+            (
+                "dracula",
+                [
+                    "#bd93f9", "#8be9fd", "#6272a4", "#f8f8f2", "#50fa7b", "#f1fa8c", "#ffb86c",
+                    "#ff5555", "#44475a", "#50fa7b", "#f1fa8c", "#ffb86c", "#ff5555",
+                ],
+            ),
+            (
+                "tokyonight",
+                [
+                    "#7aa2f7", "#bb9af7", "#565f89", "#c0caf5", "#9ece6a", "#e0af68", "#ff9e64",
+                    "#f7768e", "#3b4261", "#9ece6a", "#e0af68", "#ff9e64", "#f7768e",
+                ],
+            ),
+            (
+                "mono",
+                [
+                    "default", "default", "gray", "default", "default", "default", "default",
+                    "default", "gray", "default", "default", "default", "default",
+                ],
+            ),
         ];
         assert_eq!(expected.len(), PALETTES.len(), "a palette was added or removed");
         for (name, specs) in expected {
             let p = palette(name).unwrap_or_else(|| panic!("no palette {name}"));
-            let got = [Role::Accent, Role::Ok, Role::Danger, Role::Band4].map(|r| p.spec(r));
-            assert_eq!(got, specs, "{name}");
+            assert_eq!(Role::ALL.map(|r| p.spec(r)), specs, "{name}");
         }
+        // The names are pinned too: `Role::ALL` is the order the arrays are
+        // written in, so a role inserted in the middle has to be noticed.
+        assert_eq!(
+            Role::ALL.map(Role::name),
+            [
+                "accent", "accent2", "muted", "text", "ok", "warn", "hot", "danger", "frame",
+                "band1", "band2", "band3", "band4",
+            ]
+        );
     }
 
     #[test]

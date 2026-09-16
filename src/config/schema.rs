@@ -239,6 +239,17 @@ impl IconSpec {
     pub fn one_cell(&self) -> bool {
         ONE_CELL_ICONS.contains(&self.key)
     }
+
+    /// True when blanking this glyph is how the user turns the thing off.
+    ///
+    /// An empty glyph means "draw nothing" everywhere in garnish, and the
+    /// marker is the one bar glyph that can be left out: `util::bar` skips
+    /// it and the bar is still the same width. `fill` and `empty` are the
+    /// cells themselves, so blanking either would collapse the row.
+    #[must_use]
+    pub fn may_be_blank(&self) -> bool {
+        self.key == "marker"
+    }
 }
 
 /// The icon keys that are drawn one per bar cell (see [`IconSpec::one_cell`]).

@@ -405,6 +405,19 @@ pub fn badge(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
     if glyph.is_empty() { Vec::new() } else { vec![seg(cfg, format!(" {glyph}"), color_key)] }
 }
 
+/// A glyph and the space after it, ready to be interpolated before text, or
+/// the empty string when that glyph is blank.
+///
+/// [`badge`] covers a glyph that is a segment of its own; this covers the
+/// other shape, a glyph built into a longer string (`⚡ 1h`). It exists for
+/// the same reason: written by hand the emptiness check gets forgotten, and
+/// the leftover space is a cell that shifts an aligned column.
+#[must_use]
+pub fn glyph_prefix(cfg: &ModuleCfg, icon_key: &str) -> String {
+    let glyph = cfg.icon(icon_key);
+    if glyph.is_empty() { String::new() } else { format!("{glyph} ") }
+}
+
 /// The segment with its style dimmed (an overdue or failed value).
 #[must_use]
 pub const fn dimmed(mut segment: Segment) -> Segment {
@@ -433,8 +446,12 @@ pub fn decorate(
     theme: &Theme,
     stale_glyphs: (&str, &str),
 ) -> Vec<Segment> {
-    let fresh = rendered.freshness == Freshness::Fresh;
-    if rendered.is_empty() && fresh && cfg.hide_when_empty {
+    // A failed module with nothing of its own is the one case `hide_when_empty`
+    // must not swallow: hiding it reports a broken git as an ordinary empty
+    // row. An *overdue* one still hides, because its last value really was
+    // nothing (an in-sync `sync` renders no segments), and showing `– ⟳` for
+    // it would flicker a row in every idle pause.
+    if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hide_when_empty {
         return Vec::new();
     }
     // The wrapping is the same for every state; only the middle differs.
@@ -482,10 +499,16 @@ mod tests {
         cfg.modules.get(id).cloned().unwrap_or_else(|| panic!("no module {id}"))
     }
 
-    /// A glyph set to `""` drops the badge entirely. Two of the seven
-    /// trailing-badge sites used to skip the check and emit a lone space,
+    /// A glyph set to `""` leaves no cell behind, in either shape a trailing
+    /// glyph takes.
+    ///
+    /// Four of the nine trailing-badge sites used to skip the check (branch
+    /// dirty, context exceeds, cache warm, cache cold) and emit a lone space,
     /// which is a segment like any other: the module kept a cell and
-    /// `align = true` shifted the whole column.
+    /// `align = true` shifted the whole column. [`glyph_prefix`] is the same
+    /// rule for a glyph built into a longer string, where the leftover was a
+    /// *double* space (`cache`'s countdown arm, which the first pass at this
+    /// missed because it fixed the example rather than the class).
     #[test]
     fn a_badge_with_no_glyph_takes_no_cell() {
         let cfg = module_cfg("branch", "[modules.branch.icons]\ndirty = \"\"\n");
@@ -499,12 +522,25 @@ mod tests {
             icon(&module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n"), "folder", "icon"),
             Vec::new()
         );
+        // The interpolated shape: glyph and its space, or nothing at all.
+        let cfg = module_cfg("cache", "");
+        assert_eq!(glyph_prefix(&cfg, "warm"), format!("{} ", cfg.icon("warm")));
+        assert_eq!(
+            glyph_prefix(&module_cfg("cache", "[modules.cache.icons]\nwarm = \"\"\n"), "warm"),
+            ""
+        );
     }
 
-    /// SPEC § 3.6: an overdue or failed module keeps its `⟳`/`✗` mark even
-    /// when it had nothing to show. `sync` at the default preset is built
-    /// wholly out of its cache entry, so a failed refresh leaves it with no
-    /// segments, and hiding it then reported a broken git as an empty row.
+    /// SPEC § 3.6: a *failed* module keeps its `✗` even when it had nothing
+    /// to show. `sync` at the default preset is built wholly out of its cache
+    /// entry, so a failed refresh leaves it with no segments, and hiding it
+    /// then reported a broken git as an empty row.
+    ///
+    /// An *overdue* one is the opposite case and still hides: its last value
+    /// really was nothing (a repository in sync renders no segments), and
+    /// `sync`'s 5 s TTL times the default `stale_after = 5` means every idle
+    /// pause over 25 s would otherwise flash a `– ⟳` row until the worker
+    /// lands. That is the flicker `stale_after` exists to remove.
     #[test]
     fn a_failed_module_with_no_value_still_carries_its_mark() {
         let theme = Theme::default();
@@ -513,9 +549,10 @@ mod tests {
         assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
         let text =
             |r: Rendered| crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, marks));
-        assert_eq!(text(Rendered::empty()), "", "a fresh empty module is still hidden");
-        assert_eq!(text(Rendered { segments: Vec::new(), freshness: Freshness::Failed }), "– ✗");
-        assert_eq!(text(Rendered { segments: Vec::new(), freshness: Freshness::Stale }), "– ⟳");
+        let empty = |f: Freshness| Rendered { segments: Vec::new(), freshness: f };
+        assert_eq!(text(Rendered::empty()), "", "a fresh empty module is hidden");
+        assert_eq!(text(empty(Freshness::Stale)), "", "so is an overdue one with no value");
+        assert_eq!(text(empty(Freshness::Failed)), "– ✗", "a broken one is never silent");
         // A module that did render keeps its value, dimmed, with the mark.
         let value =
             || Rendered { segments: vec![Segment::plain("⇡2")], freshness: Freshness::Stale };
@@ -666,6 +703,15 @@ mod tests {
             // both literals are keys. The space or `(` before the name keeps
             // the pattern from matching inside another word.
             for call in [" icon(", "(icon(", " badge(", "(badge("] {
+                for (at, _) in src.match_indices(call) {
+                    for key in literal_arguments(&src, at + call.len()).0 {
+                        check(&key, at);
+                    }
+                }
+            }
+            // `glyph_prefix(cfg, "icon")`: one icon key, no colour of its
+            // own (the caller's `seg` carries that).
+            for call in [" glyph_prefix(", "(glyph_prefix("] {
                 for (at, _) in src.match_indices(call) {
                     for key in literal_arguments(&src, at + call.len()).0 {
                         check(&key, at);

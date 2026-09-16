@@ -510,9 +510,11 @@ was built, what the reviews found and what was decided, not how.
 
   **One home per rule.** `IconSet::ellipsis` and `IconSet::stale_glyphs`,
   `util::cut_name` and `util::short_sha`, `modules::lead` (the `show_icon`
-  preamble seventeen renders opened with) and `modules::badge` (a trailing
-  glyph, two of whose seven sites had dropped the empty-glyph guard and
-  left a stray cell), `config::env_path`, `equal_width_frames`,
+  preamble seventeen renders opened with), `modules::badge` (a trailing
+  glyph, four of whose nine sites had dropped the empty-glyph guard and
+  left a stray cell) and `modules::glyph_prefix` (the same glyph built
+  into a longer string, where the leftover was a double space),
+  `config::env_path`, `equal_width_frames`,
   `refuse_unparsable`, one `comment()` in place of three identical closures,
   `common_keys()` derived from `COMMON_OPTS`, `name()` on `ColorChoice` and
   `StaleStyle` where `docs.rs` had carried stand-ins. `Freshness::Failed`
