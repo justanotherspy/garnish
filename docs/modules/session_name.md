@@ -41,7 +41,7 @@ The name set with `--name` or `/rename`, or the AI-generated title. Hidden when 
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the icon. |
 | `show_id` | bool | `false` | `false` | `true` | Append the first 8 characters of the session id. |
-| `max_length` | integer | `32` | `32` | `32` | Truncate longer names (0 = no limit). |
+| `max_length` | integer | `32` | `32` | `32` | Cut a longer name to this many characters with `…` (`..` in the ascii set; 0 = no limit). |
 
 ## Icons
 

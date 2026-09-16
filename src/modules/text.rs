@@ -11,7 +11,6 @@ use std::sync::LazyLock;
 use crate::ansi::{Segment, display_width, scroll, truncate};
 use crate::config::schema::{ColorSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::config::{MAX_CELLS, MAX_TEXT_CHARS};
-use crate::icons::IconSet;
 
 use super::{Ctx, Rendered, seg};
 
@@ -137,10 +136,7 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
     } else {
         let step = cfg.float("step");
         match cfg.str("overflow") {
-            "clip" => {
-                let ellipsis = if ctx.icons == IconSet::Ascii { ".." } else { "…" };
-                truncate(&styled, box_w, ellipsis)
-            }
+            "clip" => truncate(&styled, box_w, ctx.icons.ellipsis()),
             "scroll-wrap" => {
                 let gap = cfg.str("gap");
                 let period = text_w.saturating_add(display_width(gap));

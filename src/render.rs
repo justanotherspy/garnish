@@ -217,13 +217,13 @@ pub fn render_lines_at(
         && config
             .animate
             .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
-    let stale = stale_glyphs(config.icons);
+    let stale = config.icons.stale_glyphs();
     let layout = Layout {
         chars: config.frame.chars.clone(),
         fill: config.frame.fill,
         width,
         truncate: config.truncate,
-        ellipsis: ellipsis_for(config.icons).into(),
+        ellipsis: config.icons.ellipsis().into(),
         // The effective animation switch is decided once, on `ctx`; with it
         // off there is no ticker and an over-wide line is cut (SPEC § 4.2).
         ticker: (config.overflow == config::Overflow::Ticker && ctx.animate).then(|| Ticker {
@@ -453,22 +453,6 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
         module
     } else {
         crate::ansi::truncate(&module, max, ellipsis)
-    }
-}
-
-/// The mark a cut ends in: `…`, or `..` where the icon set is ASCII only.
-/// One rule, so the schema matrix cannot drift from what a tick draws.
-const fn ellipsis_for(icons: IconSet) -> &'static str {
-    match icons {
-        IconSet::Ascii => "..",
-        IconSet::Nerd | IconSet::Unicode | IconSet::Emoji => "…",
-    }
-}
-
-const fn stale_glyphs(icons: IconSet) -> (&'static str, &'static str) {
-    match icons {
-        IconSet::Ascii => ("~", "x"),
-        IconSet::Nerd | IconSet::Unicode | IconSet::Emoji => ("⟳", "✗"),
     }
 }
 
@@ -1348,7 +1332,7 @@ mod tests {
             let shown = matrix_config(id, preset, icons, max, false, extra);
             let uncapped = matrix_config(id, preset, icons, 0, true, extra);
             // The ellipsis a cut ends in: `…`, or as much of `..` as fits.
-            let cut_mark: String = ellipsis_for(icons).chars().take(max.max(1)).collect();
+            let cut_mark: String = icons.ellipsis().chars().take(max.max(1)).collect();
             let clock = Clock::fixed();
             for (name, payload) in payloads {
                 let label = format!(

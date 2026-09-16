@@ -144,7 +144,7 @@ max_width = 0
 # show_sha = false
 # dirty (bool) — Show a marker when the tree has changes. [minimal=false default=false full=true]
 # dirty = false
-# max_length (integer) — Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
+# max_length (integer) — Cut the name itself to this many characters with `…` (`..` in the ascii set; 0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
 # max_length = 40
 # link (bool) — Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD. GitLab is recognised by a host named after it or an open merge request, so a self-hosted GitLab on an unrelated host name links to `/tree/` until one is open. [minimal=false default=false full=false]
 # link = false
@@ -854,7 +854,7 @@ max_width = 0
 # show_icon = true
 # show_id (bool) — Append the first 8 characters of the session id. [minimal=false default=false full=true]
 # show_id = false
-# max_length (integer) — Truncate longer names (0 = no limit). [minimal=32 default=32 full=32]
+# max_length (integer) — Cut a longer name to this many characters with `…` (`..` in the ascii set; 0 = no limit). [minimal=32 default=32 full=32]
 # max_length = 32
 [modules.session_name.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.

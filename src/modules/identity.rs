@@ -4,6 +4,7 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
+use super::util::cut_name;
 use super::{Ctx, Module, Rendered, icon, seg};
 
 /// `session_name`: the custom or AI-generated session title.
@@ -30,7 +31,7 @@ impl Module for SessionNameModule {
                 OptSpec::new(
                     "max_length",
                     Kind::Int,
-                    "Truncate longer names (0 = no limit).",
+                    "Cut a longer name to this many characters with `…` (`..` in the ascii set; 0 = no limit).",
                     Value::Int(32),
                 ),
             ],
@@ -51,12 +52,7 @@ impl Module for SessionNameModule {
         let Some(name) = ctx.payload.session_name.as_deref().filter(|n| !n.is_empty()) else {
             return Rendered::empty();
         };
-        let max = cfg.size("max_length");
-        let shown: String = if max > 0 && name.chars().count() > max {
-            name.chars().take(max.saturating_sub(1)).chain(std::iter::once('…')).collect()
-        } else {
-            name.to_owned()
-        };
+        let shown = cut_name(name, cfg.size("max_length"), ctx.icons);
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, "name", "icon"));

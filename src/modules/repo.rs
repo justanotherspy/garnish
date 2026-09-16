@@ -15,6 +15,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::git::{self, Head};
 use crate::icons::glyph;
 
+use super::util::{cut_name, short_sha};
 use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, icon, seg};
 
 /// How long the worker lets a local git command run.
@@ -441,7 +442,7 @@ impl Module for BranchModule {
                 OptSpec::new(
                     "max_length",
                     Kind::Int,
-                    "Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead.",
+                    "Cut the name itself to this many characters with `…` (`..` in the ascii set; 0 = no limit); the common `max_width` caps the whole module in cells instead.",
                     Value::Int(40),
                 ),
                 OptSpec::new(
@@ -483,17 +484,12 @@ impl Module for BranchModule {
         let (name, detached) =
             match (&head, ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref())) {
                 (Some(Head::Branch(b)), _) => (b.clone(), false),
-                (Some(Head::Detached(sha)), _) => (sha.chars().take(7).collect(), true),
+                (Some(Head::Detached(sha)), _) => (short_sha(sha), true),
                 (None, Some(b)) => (b.to_owned(), false),
                 (None, None) => return Rendered::empty(),
             };
-        let head_key = name.clone();
-        let max = cfg.size("max_length");
-        let shown: String = if max > 0 && name.chars().count() > max {
-            name.chars().take(max.saturating_sub(1)).chain(std::iter::once('…')).collect()
-        } else {
-            name
-        };
+        let shown = cut_name(&name, cfg.size("max_length"), ctx.icons);
+        let head_key = name;
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("show_icon") {
             segs.extend(icon(cfg, if detached { "detached" } else { "branch" }, "icon"));
@@ -516,7 +512,7 @@ impl Module for BranchModule {
             && !detached
             && let Some(sha) = dirs.and_then(git::head_commit)
         {
-            segs.push(seg(cfg, format!(" {}", sha.chars().take(7).collect::<String>()), "sha"));
+            segs.push(seg(cfg, format!(" {}", short_sha(&sha)), "sha"));
         }
         let mut freshness = Freshness::Fresh;
         if cfg.bool("dirty")
@@ -543,7 +539,7 @@ impl Module for BranchModule {
         let dirs = git::discover(ctx.cwd).ok_or_else(|| "not a git repository".to_owned())?;
         let head = match git::head(&dirs) {
             Some(Head::Branch(b)) => b,
-            Some(Head::Detached(sha)) => sha.chars().take(7).collect(),
+            Some(Head::Detached(sha)) => short_sha(&sha),
             None => String::new(),
         };
         let dirty = git::is_dirty(&dirs.toplevel, GIT_TIMEOUT)?;
