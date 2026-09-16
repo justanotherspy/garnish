@@ -176,7 +176,10 @@ impl OptSpec {
     pub fn over_max(&self, value: &Value) -> Option<String> {
         let max = self.max?;
         match value {
-            Value::Int(n) if usize::try_from(*n).is_ok_and(|n| n > max) => {
+            // `is_none_or`, not `is_ok_and`: a value too large for `usize`
+            // (a 32-bit build) is over any `max` by definition, and letting
+            // it through is what SPEC § 5 records as an aborted tick.
+            Value::Int(n) if usize::try_from(*n).ok().is_none_or(|n| n > max) => {
                 Some(format!("must be at most {max}"))
             }
             Value::Str(s) if s.chars().count() > max => {
@@ -221,6 +224,25 @@ pub struct IconSpec {
     /// Default glyph per icon set.
     pub glyph: Glyph,
 }
+
+impl IconSpec {
+    /// Whether an override for this key has to be exactly one cell wide.
+    ///
+    /// True for the glyphs [`crate::modules::util::bar`] repeats cell by
+    /// cell: a wider one would break the width arithmetic of the whole row,
+    /// so `bar` substitutes a safe glyph and the user's choice vanishes with
+    /// nothing said. The config reports it instead, as it does for
+    /// `frame.fill_char`, which is the same rule for the rule's own glyph.
+    /// A unit test pins the vocabulary: a schema that declares one of these
+    /// keys declares a one-cell glyph in every icon set.
+    #[must_use]
+    pub fn one_cell(&self) -> bool {
+        ONE_CELL_ICONS.contains(&self.key)
+    }
+}
+
+/// The icon keys that are drawn one per bar cell (see [`IconSpec::one_cell`]).
+pub const ONE_CELL_ICONS: [&str; 3] = ["fill", "empty", "marker"];
 
 /// One color the module uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

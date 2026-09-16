@@ -269,6 +269,7 @@ fn run_command() -> Result<()> {
             let mut stdout = std::io::stdout().lock();
             let _ = stdout.write_all(out.as_bytes());
             let _ = stdout.flush();
+            tick_note(&input, req.columns, &out);
             Ok(())
         }
         Command::Preview { path, args } => preview(&path, config_path, &args),
@@ -523,9 +524,7 @@ fn install_default_config(
 fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
     explicit
         .map(Path::to_path_buf)
-        .or_else(|| {
-            std::env::var_os(config::CONFIG_ENV).filter(|v| !v.is_empty()).map(PathBuf::from)
-        })
+        .or_else(|| config::env_path(config::CONFIG_ENV))
         .or_else(config::default_path)
 }
 
@@ -535,10 +534,34 @@ fn no_home(flag: &str, what: &str) -> color_eyre::Report {
     Quiet.into()
 }
 
-/// `COLUMNS`, then `GARNISH_COLUMNS`.
+/// The per-tick diagnostic line of SPEC § 5, written only with
+/// `GARNISH_DEBUG` set: what the tick was given and what it produced, which
+/// is what a report of "the status line looks wrong" needs and a screenshot
+/// does not carry. Costs one environment read when the hook is off.
+fn tick_note(input: &str, columns: Option<usize>, out: &str) {
+    if !crate::debug::enabled() {
+        return;
+    }
+    let widest = out
+        .lines()
+        .map(|line| crate::ansi::display_width(&crate::ansi::strip_ansi(line)))
+        .max()
+        .unwrap_or(0);
+    crate::debug::log(&format!(
+        "tick stdin={}B columns={} rows={} widest={widest}",
+        input.len(),
+        columns.map_or_else(|| "unset".to_owned(), |c| c.to_string()),
+        out.lines().count(),
+    ));
+}
+
+/// Environment variable naming the width when `COLUMNS` is absent.
+pub const COLUMNS_ENV: &str = "GARNISH_COLUMNS";
+
+/// `COLUMNS`, then [`COLUMNS_ENV`].
 #[must_use]
 pub fn env_columns() -> Option<usize> {
-    ["COLUMNS", "GARNISH_COLUMNS"].iter().find_map(|k| std::env::var(k).ok()?.trim().parse().ok())
+    ["COLUMNS", COLUMNS_ENV].iter().find_map(|k| std::env::var(k).ok()?.trim().parse().ok())
 }
 
 fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result<()> {

@@ -71,7 +71,7 @@ fn schema() -> ModuleSchema {
             OptSpec::new(
                 "step",
                 Kind::Float,
-                "Cells scrolled per tick (> 0; 0.5 = every second tick).",
+                "Cells scrolled per tick (0.001–1000; 0.5 = every second tick).",
                 Value::Float(1.0),
             ),
             OptSpec::new(

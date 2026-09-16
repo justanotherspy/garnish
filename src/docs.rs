@@ -165,7 +165,15 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     let _ = writeln!(out, "fill_pattern = {}", toml_string(&cfg.frame.fill_pattern.concat()));
     let _ = writeln!(out, "fill_step = {}", Value::Float(cfg.frame.fill_step).to_toml());
     let _ = writeln!(out, "fill_direction = {}", toml_string(cfg.frame.fill_direction.name()));
-    let _ = writeln!(out, "separator_frames = {}", toml_list(&cfg.frame.separator_frames));
+    // An empty list is the static separator, and writing it back would be a
+    // config the parser rejects ("expected at least one frame"), so the key
+    // is shown commented out until there are frames to write.
+    let empty_frames = if cfg.frame.separator_frames.is_empty() { "# " } else { "" };
+    let _ = writeln!(
+        out,
+        "{empty_frames}separator_frames = {}",
+        toml_list(&cfg.frame.separator_frames)
+    );
     let _ = writeln!(out, "separator_step = {}", Value::Float(cfg.frame.separator_step).to_toml());
     let _ = writeln!(out);
 
@@ -714,7 +722,8 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick (must be > 0; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |"
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
+        steps = crate::config::STEP_BOUNDS
     );
     let _ = writeln!(
         o,
@@ -773,7 +782,8 @@ fn frame_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `fill_step` | `1` | Cells the pattern shifts per tick (0.5 = every second tick). |"
+        "| `fill_step` | `1` | Cells the pattern shifts per tick ({}; 0.5 = every second tick). |",
+        crate::config::STEP_BOUNDS
     );
     let _ = writeln!(
         o,
@@ -783,7 +793,11 @@ fn frame_section(o: &mut String) {
         o,
         "| `separator_frames` | `[]` | Separator strings cycled one per tick; every frame must have the same width (validation rejects a mismatch so columns cannot jitter). A per-line `separator` wins over the frames. Empty keeps the static `separator`. |"
     );
-    let _ = writeln!(o, "| `separator_step` | `1` | Frames the separator advances per tick. |");
+    let _ = writeln!(
+        o,
+        "| `separator_step` | `1` | Frames the separator advances per tick ({}). |",
+        crate::config::STEP_BOUNDS
+    );
     let _ = writeln!(
         o,
         "\nAnimations follow the clock rule of [Animation](guide.md#animation): frame = `floor(now × step) mod period`, so `animate = false` or `GARNISH_ANIMATE=0` freezes them at frame 0, which is also what these generated samples show.\n"

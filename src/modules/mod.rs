@@ -408,23 +408,12 @@ pub fn decorate(
     theme: &Theme,
     stale_glyphs: (&str, &str),
 ) -> Vec<Segment> {
-    if rendered.is_empty() {
-        if cfg.hide_when_empty {
-            return Vec::new();
-        }
-        let mut out: Vec<Segment> = Vec::new();
-        if !cfg.prefix.is_empty() {
-            out.push(Segment::plain(&cfg.prefix));
-        }
-        if !cfg.label.is_empty() {
-            out.push(muted(theme, format!("{} ", cfg.label)));
-        }
-        out.push(muted(theme, "–"));
-        if !cfg.suffix.is_empty() {
-            out.push(Segment::plain(&cfg.suffix));
-        }
-        return out;
+    let empty = rendered.is_empty();
+    if empty && cfg.hide_when_empty {
+        return Vec::new();
     }
+    // The wrapping is the same either way; only the middle differs, so an
+    // empty module's placeholder carries its prefix, label and suffix.
     let mut out: Vec<Segment> = Vec::new();
     if !cfg.prefix.is_empty() {
         out.push(Segment::plain(&cfg.prefix));
@@ -433,6 +422,7 @@ pub fn decorate(
         out.push(muted(theme, format!("{} ", cfg.label)));
     }
     match &rendered.freshness {
+        _ if empty => out.push(muted(theme, "–")),
         Freshness::Fresh => out.extend(rendered.segments),
         Freshness::Stale => {
             out.extend(rendered.segments.into_iter().map(dimmed));
@@ -702,5 +692,33 @@ mod tests {
         {
             assert_eq!(glyph_problem(good), None, "{good:?} must be accepted");
         }
+    }
+
+    /// The `fill`/`empty`/`marker` vocabulary belongs to the bar: every
+    /// schema that declares one of those keys declares a one-cell glyph in
+    /// every icon set, which is what lets the config reject a wider
+    /// override outright (`IconSpec::one_cell`). Reusing one of the names
+    /// for something that is not a bar cell fails here.
+    #[test]
+    fn bar_glyph_keys_are_one_cell_in_every_set() {
+        use crate::config::schema::ONE_CELL_ICONS;
+        let mut seen = 0_usize;
+        for schema in SCHEMAS.iter() {
+            for icon in schema.icons.iter().filter(|i| i.one_cell()) {
+                seen = seen.saturating_add(1);
+                for set in IconSet::ALL {
+                    let g = icon.glyph.get(set);
+                    assert_eq!(
+                        crate::ansi::display_width(g),
+                        1,
+                        "{}.{} in {}: {g:?}",
+                        schema.id,
+                        icon.key,
+                        set.name()
+                    );
+                }
+            }
+        }
+        assert!(seen >= ONE_CELL_ICONS.len(), "the bar keys vanished from the schemas: {seen}");
     }
 }

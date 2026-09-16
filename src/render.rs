@@ -89,8 +89,7 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
         format!("{glyph} config: {origin}{message}{suffix}"),
         Style::fg(config.theme.role(Role::Warn)).dimmed(),
     )];
-    let ellipsis = if config.icons == IconSet::Ascii { ".." } else { "…" };
-    crate::ansi::truncate(&line, width, ellipsis)
+    crate::ansi::truncate(&line, width, config.icons.ellipsis())
 }
 
 /// The environment-dependent inputs of a render, so docs and tests can pin them.

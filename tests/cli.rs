@@ -624,6 +624,42 @@ fn managed_settings_hook_names_the_first_file_of_the_chain() {
     assert_ne!(plain(&hook), plain(&[]), "the managed file changes the tick");
 }
 
+/// SPEC § 5, § 9: `GARNISH_DEBUG` appends a line per tick to
+/// `<cache>/debug.log` and `doctor` shows its tail; with the hook off the
+/// file is never created, and nothing the hook does reaches stdout.
+///
+/// Serial: the hook and the cache root are per-process environment, and the
+/// log is shared with whatever else writes to that root.
+#[test]
+fn cache_debug_hook_logs_one_line_per_tick_and_nothing_without_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "[[line]]\nmodules = [\"model\"]\n").unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    let log = home.join("cache").join("debug.log");
+
+    let quiet = tick(&cfg, home, payload, &[]);
+    assert!(!log.exists(), "the hook is off: {}", log.display());
+
+    let noisy = tick(&cfg, home, payload, &[("GARNISH_DEBUG", "1")]);
+    assert_eq!(noisy, quiet, "the hook must not change what a tick prints");
+    tick(&cfg, home, payload, &[("GARNISH_DEBUG", "1")]);
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(text.lines().count(), 2, "one line per tick: {text}");
+    for line in text.lines() {
+        assert!(line.contains(" pid="), "{line}");
+        assert!(line.contains("columns=84"), "{line}");
+        assert!(line.contains("rows=1"), "{line}");
+    }
+
+    let (report, _, ok) =
+        run(&["doctor"], home, &[("GARNISH_CACHE_DIR", home.join("cache").to_str().unwrap())]);
+    assert!(ok, "{report}");
+    assert!(report.contains("debug.log (last 2 of 2 lines)"), "{report}");
+    assert!(report.contains("GARNISH_CACHE_DIR="), "{report}");
+}
+
 /// SPEC § 2.1: `preview` paints every row faint, as Claude Code draws the
 /// status line on screen; the tick does not, since the harness adds it.
 #[test]

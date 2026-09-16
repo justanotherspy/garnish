@@ -63,7 +63,7 @@ fill = true
 fill_pattern = ""
 fill_step = 1
 fill_direction = "right"
-separator_frames = []
+# separator_frames = []
 separator_step = 1
 
 # Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.
@@ -984,7 +984,7 @@ net = "muted"
 # pad = 0  # Blank cells added on each side of the box.
 # justify = "left"  # Where text narrower than the box sits.
 # overflow = "scroll"  # Text wider than the box: `clip` cuts with an ellipsis, `scroll` slides a window and restarts after the end, `scroll-wrap` flows continuously with `gap` between end and start.
-# step = 1  # Cells scrolled per tick (> 0; 0.5 = every second tick).
+# step = 1  # Cells scrolled per tick (0.001–1000; 0.5 = every second tick).
 # gap = "   "  # `scroll-wrap` only: text between the end and the start.
 # url = ""  # Wrap the box in a clickable OSC 8 link to this `http(s)://` URL (printable ASCII only; anything else is reported and dropped).
 # [modules.text.motd.colors]
