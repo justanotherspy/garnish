@@ -86,16 +86,22 @@ right = ["clock"]
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the folder icon. [minimal=false default=true full=true]
 # show_icon = true
 # depth (integer) — Path components of the base to keep (0 = all). [minimal=1 default=2 full=0]
 # depth = 2
+# style (`full` | `fish`) — How the base prints: `full` as is; `fish` abbreviates every directory but the last to its first character (`~/p/garnish`; a dot-directory to `.c`), as the fish shell prompts. `depth` applies first; the subpath is untouched. [minimal="full" default="full" full="full"]
+# style = "full"
 # show_subpath (bool) — Show the path below the base. [minimal=false default=true full=true]
 # show_subpath = true
 # show_added (bool) — Show the count of added directories. [minimal=false default=false full=true]
@@ -122,20 +128,26 @@ added = "muted"
 enabled = true
 # preset = "default"
 refresh = 5
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the branch icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_sha (bool) — Append the short commit SHA. [minimal=false default=false full=true]
 # show_sha = false
 # dirty (bool) — Show a marker when the tree has changes. [minimal=false default=false full=true]
 # dirty = false
-# max_length (integer) — Truncate longer names (0 = no limit). [minimal=40 default=40 full=40]
+# max_length (integer) — Cut the name itself to this many characters with `…` (0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
 # max_length = 40
+# link (bool) — Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD. GitLab is recognised by a host named after it or an open merge request, so a self-hosted GitLab on an unrelated host name links to `/tree/` until one is open. [minimal=false default=false full=false]
+# link = false
 [modules.branch.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # branch — Branch icon.
@@ -160,12 +172,16 @@ dirty = "warn"
 enabled = true
 # preset = "default"
 refresh = 5
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_zero (bool) — Show `0` counts instead of hiding them. [minimal=false default=false full=false]
 # show_zero = false
 # show_upstream (bool) — Show the upstream name. [minimal=false default=false full=true]
@@ -204,12 +220,16 @@ stale = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_original (bool) — Show `original → branch`. [minimal=false default=false full=true]
@@ -234,12 +254,16 @@ original = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the PR icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_state (bool) — Show the review-state glyph. [minimal=false default=true full=true]
@@ -282,12 +306,16 @@ draft = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the model icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_id (bool) — Append the raw model id. [minimal=false default=false full=true]
@@ -322,12 +350,16 @@ thinking = "accent2"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # style (`scale` | `word` | `both`) — How to show the level. [minimal="word" default="scale" full="both"]
 # style = "scale"
 # show_icon (bool) — Show the effort icon. [minimal=false default=true full=true]
@@ -354,12 +386,16 @@ word = "text"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # width (integer ≤ 1024) — Bar width in cells; 0 hides the bar. [minimal=0 default=20 full=30]
 # width = 20
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
@@ -372,6 +408,8 @@ hide_when_empty = true
 # thresholds = [50, 75, 90]
 # band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
+# scale (`window` | `usable`) — What 100 % means: `window` the whole context window; `usable` the auto-compaction threshold, so the bar and the percentage say how close compaction is (the marker and its percentage are then implied and not drawn; the window tag still names the real window). `usable` falls back to `window` when compaction is disabled or the threshold is under a tenth of the window. [minimal="window" default="window" full="window"]
+# scale = "window"
 # compaction_marker (bool) — Mark the auto-compaction threshold on the bar. [minimal=true default=true full=true]
 # compaction_marker = true
 # compact_buffer_tokens (integer) — Tokens Claude Code reserves below the window for the compaction summary. [minimal=13000 default=13000 full=13000]
@@ -422,12 +460,16 @@ warn = "danger"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # hide_default (bool) — Hide when the style is `default`. [minimal=true default=true full=false]
 # hide_default = true
 # show_icon (bool) — Show the style icon. [minimal=false default=true full=true]
@@ -448,16 +490,22 @@ name = "text"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
 # show_icon = true
-# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+# show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, no weekday or date, since this window resets within the day, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
@@ -492,16 +540,22 @@ empty = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
 # show_icon = true
-# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+# show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday, since the reset is days away (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
@@ -536,16 +590,22 @@ empty = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the window icon. [minimal=false default=true full=true]
 # show_icon = true
-# show_reset (bool) — Show the countdown to the reset. [minimal=false default=true full=true]
+# show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
+# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱27d8h`), `absolute` the local date the window resets on, since it is weeks away and a clock time alone would read as tonight (`⏱Mar 1`), or `both` (`27d8h (Mar 1)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
@@ -580,12 +640,16 @@ empty = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the cost icon. [minimal=false default=true full=true]
 # show_icon = true
 # decimals (integer ≤ 8) — Decimal places. [minimal=2 default=2 full=2]
@@ -618,12 +682,16 @@ removed = "danger"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_start (bool) — Append the start time (HH:MM). [minimal=false default=false full=true]
@@ -648,12 +716,16 @@ start = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_share (bool) — Append the share of the session. [minimal=false default=false full=true]
@@ -678,12 +750,16 @@ share = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_ttl (bool) — Show the TTL badge. [minimal=false default=true full=true]
@@ -724,12 +800,16 @@ detail = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # format (`24h` | `12h`) — Hour format. [minimal="24h" default="24h" full="24h"]
 # format = "24h"
 # seconds (bool) — Show seconds. [minimal=false default=true full=true]
@@ -760,12 +840,16 @@ date = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_id (bool) — Append the first 8 characters of the session id. [minimal=false default=false full=true]
@@ -790,12 +874,16 @@ id = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # style (`badge` | `short`) — Full word or one letter. [minimal="short" default="badge" full="badge"]
 # style = "badge"
 # show_icon (bool) — Show the vim icon. [minimal=false default=false full=true]
@@ -820,12 +908,16 @@ visual = "warn"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_thinking (bool) — Show the thinking glyph. [minimal=false default=false full=true]
@@ -850,12 +942,16 @@ thinking = "accent2"
 enabled = true
 # preset = "default"
 refresh = 0
-# label: text before the value; prefix/suffix: text around the module
+# label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
 prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
 hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
 # show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # show_net (bool) — Append the net change. [minimal=false default=false full=true]
@@ -890,6 +986,7 @@ net = "muted"
 # overflow = "scroll"  # Text wider than the box: `clip` cuts with an ellipsis, `scroll` slides a window and restarts after the end, `scroll-wrap` flows continuously with `gap` between end and start.
 # step = 1  # Cells scrolled per tick (> 0; 0.5 = every second tick).
 # gap = "   "  # `scroll-wrap` only: text between the end and the start.
+# url = ""  # Wrap the box in a clickable OSC 8 link to this `http(s)://` URL (printable ASCII only; anything else is reported and dropped).
 # [modules.text.motd.colors]
 # text = "accent"
 

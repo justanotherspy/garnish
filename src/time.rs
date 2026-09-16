@@ -196,6 +196,32 @@ fn countdown_at(until_epoch_secs: i64, now_epoch_secs: i64) -> Option<String> {
     DurationStyle::Compact.countdown_at(until_epoch_secs, now_epoch_secs)
 }
 
+/// How an absolute reset time reads (SPEC § 3.3), one shape per window:
+/// the further off a reset is, the coarser the form that identifies it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallClock {
+    /// `14:30`, for a window that resets within the day (`limit5h`).
+    Time,
+    /// `Tue 14:30`, for a window days out (`limit7d`).
+    Weekday,
+    /// `Mar 1`, for a window weeks out (`spend`), where a clock time alone
+    /// reads as tonight.
+    Date,
+}
+
+/// The wall-clock time of an instant in a zone, in one of the [`WallClock`]
+/// forms (SPEC § 3.3: the absolute form of a reset time, in the zone the
+/// `clock` module uses so the two agree).
+#[must_use]
+pub fn wall_clock(at: Timestamp, tz: &TimeZone, form: WallClock) -> String {
+    let format = match form {
+        WallClock::Time => "%H:%M",
+        WallClock::Weekday => "%a %H:%M",
+        WallClock::Date => "%b %-d",
+    };
+    at.to_zoned(tz.clone()).strftime(format).to_string()
+}
+
 /// Seconds elapsed since an epoch-seconds instant (zero when in the future).
 #[must_use]
 pub fn elapsed_since(epoch_secs: i64) -> u64 {
@@ -265,6 +291,32 @@ mod tests {
         assert_eq!(frame(at(-5), 1.0, 10), 0, "before the epoch counts as 0");
         // year 9999 with a huge step: the tick count saturates and still reduces
         assert!(frame(at(253_402_207_200), f64::MAX, 3) < 3);
+    }
+
+    #[test]
+    fn wall_clock_prints_the_zone_in_each_windows_form() {
+        use WallClock::{Date, Time, Weekday};
+        use jiff::tz::{Offset, TimeZone};
+        let at = |secs: i64| Timestamp::from_second(secs).unwrap();
+        // 2025-02-01T18:13:40Z is a Saturday; 2025-02-04T20:00:00Z a Tuesday.
+        assert_eq!(wall_clock(at(1_738_433_620), &TimeZone::UTC, Time), "18:13");
+        assert_eq!(wall_clock(at(1_738_433_620), &TimeZone::UTC, Weekday), "Sat 18:13");
+        assert_eq!(wall_clock(at(1_738_699_200), &TimeZone::UTC, Weekday), "Tue 20:00");
+        let plus_two = TimeZone::fixed(Offset::constant(2));
+        assert_eq!(wall_clock(at(1_738_433_620), &plus_two, Time), "20:13");
+        let minus_five = TimeZone::fixed(Offset::constant(-5));
+        assert_eq!(wall_clock(at(1_738_699_200), &minus_five, Weekday), "Tue 15:00");
+        // A zone shift across midnight moves the weekday with it.
+        let plus_five = TimeZone::fixed(Offset::constant(5));
+        assert_eq!(wall_clock(at(1_738_699_200), &plus_five, Weekday), "Wed 01:00");
+        // The date form: no padding, so a single-digit day does not carry a
+        // zero or a gap into a row whose width is measured in cells.
+        assert_eq!(wall_clock(at(1_740_787_200), &TimeZone::UTC, Date), "Mar 1");
+        assert_eq!(wall_clock(at(1_738_433_620), &TimeZone::UTC, Date), "Feb 1");
+        assert_eq!(wall_clock(at(1_739_000_000), &TimeZone::UTC, Date), "Feb 8");
+        assert_eq!(wall_clock(at(1_740_000_000), &TimeZone::UTC, Date), "Feb 19");
+        // The date follows the zone across midnight like the weekday does.
+        assert_eq!(wall_clock(at(1_740_787_200), &minus_five, Date), "Feb 28");
     }
 
     #[test]

@@ -86,8 +86,8 @@ shows, not the lines. To switch presets outright, delete the `[[line]]` and
 - A [Nerd Font](https://www.nerdfonts.com) for the default glyphs. Without
   one, set `icons = "unicode"` (or `emoji` / `ascii`).
 - A terminal with OSC 8 support (iTerm2, Kitty, WezTerm, Ghostty…) if you
-  want clickable pull-request numbers. Everything else works anywhere ANSI
-  colors do.
+  want clickable pull-request numbers, branch names (`link = true`) and
+  text boxes (`url`). Everything else works anywhere ANSI colors do.
 
 ## Install
 
@@ -144,7 +144,10 @@ width  = 30
 ```
 
 Every module has `minimal` / `default` / `full` presets plus its own icons,
-colors and refresh interval. Put any module on any line, left or right.
+colors and refresh interval, and the common `label`, `prefix`, `suffix`,
+`hide_when_empty` and `max_width` keys (`max_width` cuts a module to that
+many cells with `…`, so one long value cannot push the rest of the line
+off). Put any module on any line, left or right.
 
 A few top-level keys keep a multi-line layout tidy: `align = true` pads every
 module column to the widest module in it, so the `│` separators stack

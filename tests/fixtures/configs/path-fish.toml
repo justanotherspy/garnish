@@ -1,0 +1,20 @@
+# fixture: subdir-added-dirs
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# `style = "fish"` abbreviates every directory of the base but the last to
+# its first character, the way the fish shell prompts; the `~` and the last
+# segment stay whole, and the dim subpath below the base is untouched
+# (SPEC § 3.1). `depth` applies first: with the full preset (`depth = 0`)
+# the whole `~/projects/garnish` reads `~/p/garnish`.
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["path", "model"]
+
+[modules.path]
+preset = "full"
+style  = "fish"

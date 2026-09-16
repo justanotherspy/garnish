@@ -1,0 +1,46 @@
+# fixture: worktree-session
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# `max_width` caps one module at N cells with `…` (SPEC § 3): the whole
+# decorated module, label and prefix included, is cut before the columns
+# are aligned and before the line is cut, so the rest of the line keeps its
+# place. `branch.max_length` is the older per-name character cap and still
+# applies first; a placeholder `–` is capped like any value.
+
+align = true
+
+[[line]]
+modules = ["path", "branch", "session_name"]
+right   = ["clock"]
+
+[[line]]
+modules = ["model", "context", "pr", "vim"]
+right   = ["clock"]
+
+[modules.path]
+max_width = 9
+
+[modules.branch]
+max_length = 12
+max_width = 10
+
+[modules.session_name]
+label = "name"
+max_width = 8
+
+[modules.model]
+prefix = "["
+suffix = "]"
+max_width = 7
+
+[modules.context]
+max_width = 12
+
+[modules.pr]
+max_width = 4
+
+[modules.vim]
+hide_when_empty = false
+label = "vim"
+max_width = 3

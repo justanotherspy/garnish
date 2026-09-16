@@ -8,7 +8,9 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::config::schema::{Kind, ModuleSchema, OptSpec, Preset, Value, toml_string};
+use crate::config::schema::{
+    COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Preset, Value, toml_string,
+};
 use crate::config::{self, Config, Overlay};
 use crate::frame::FrameStyle;
 use crate::icons::IconSet;
@@ -224,10 +226,7 @@ fn write_texts(out: &mut String, cfg: &Config, annotated: bool) {
         }
         let _ = writeln!(out, "[modules.text.{name}]");
         let _ = writeln!(out, "enabled = {}", m.enabled);
-        let _ = writeln!(out, "label = {}", toml_string(&m.label));
-        let _ = writeln!(out, "prefix = {}", toml_string(&m.prefix));
-        let _ = writeln!(out, "suffix = {}", toml_string(&m.suffix));
-        let _ = writeln!(out, "hide_when_empty = {}", m.hide_when_empty);
+        write_common(out, m, annotated, text_common_opts());
         for opt in &schema.opts {
             if annotated {
                 let _ = writeln!(out, "# {} — {}", opt.key, opt.doc);
@@ -242,6 +241,34 @@ fn write_texts(out: &mut String, cfg: &Config, annotated: bool) {
             let _ = writeln!(out, "{} = {}", color.key, toml_string(&spec));
         }
         let _ = writeln!(out);
+    }
+}
+
+/// The common options a text module takes: every one but `max_width`, which
+/// `config check` rejects there in favour of `width` (SPEC § 3.7).
+fn text_common_opts() -> &'static [OptSpec] {
+    static OPTS: std::sync::LazyLock<Vec<OptSpec>> = std::sync::LazyLock::new(|| {
+        COMMON_OPTS.iter().filter(|o| o.key != "max_width").cloned().collect()
+    });
+    &OPTS
+}
+
+/// The `label`, `prefix`, `suffix`, `hide_when_empty` (and, for a built-in
+/// module, `max_width`) lines of a module table, from the same specs the
+/// parser bounds them with.
+fn write_common(out: &mut String, m: &ModuleCfg, annotated: bool, opts: &[OptSpec]) {
+    for opt in opts {
+        if annotated {
+            let _ = writeln!(
+                out,
+                "# {} ({}) — {}",
+                opt.key,
+                kind_column(opt).replace("\\|", "|"),
+                opt.doc
+            );
+        }
+        let value = m.common(opt.key).unwrap_or_else(|| opt.default.clone());
+        let _ = writeln!(out, "{} = {}", opt.key, value.to_toml());
     }
 }
 
@@ -268,15 +295,7 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
             let _ = writeln!(out, "preset = {}", toml_string(m.preset.name()));
         }
         let _ = writeln!(out, "refresh = {}", m.refresh);
-        c(out, "label: text before the value; prefix/suffix: text around the module");
-        let _ = writeln!(out, "label = {}", toml_string(&m.label));
-        let _ = writeln!(out, "prefix = {}", toml_string(&m.prefix));
-        let _ = writeln!(out, "suffix = {}", toml_string(&m.suffix));
-        c(
-            out,
-            "hide_when_empty: hide the module entirely when it has nothing to show (else a dim –)",
-        );
-        let _ = writeln!(out, "hide_when_empty = {}", m.hide_when_empty);
+        write_common(out, m, annotated, &COMMON_OPTS);
         for opt in &schema.opts {
             if annotated {
                 let presets: Vec<String> = Preset::ALL
@@ -513,12 +532,16 @@ pub fn text_page() -> String {
     let _ = writeln!(o, "## Options\n\n`[modules.text.<name>]`\n");
     let _ = writeln!(o, "| key | type | default | description |\n|---|---|---|---|");
     let _ = writeln!(o, "| `enabled` | bool | `true` | Render this module. |");
-    let _ = writeln!(o, "| `label` | string | `\"\"` | Dim text before the value. |");
-    let _ = writeln!(o, "| `prefix`, `suffix` | string | `\"\"` | Text around the module. |");
-    let _ = writeln!(
-        o,
-        "| `hide_when_empty` | bool | `true` | With an empty `text`, hide the module instead of showing a dim `–`. |"
-    );
+    for opt in text_common_opts() {
+        let _ = writeln!(
+            o,
+            "| `{}` | {} | `{}` | {} |",
+            opt.key,
+            kind_column(opt),
+            opt.default.to_toml(),
+            opt.doc.replace('|', "\\|")
+        );
+    }
     for opt in &schema.opts {
         let _ = writeln!(
             o,
@@ -531,7 +554,7 @@ pub fn text_page() -> String {
     }
     let _ = writeln!(
         o,
-        "\nNo `preset` and no `refresh`: a text module renders every tick as configured.\n"
+        "\nNo `preset`, no `refresh` and no `max_width` (the box is sized by `width`): a text module renders every tick as configured.\n"
     );
     let _ = writeln!(
         o,
@@ -572,16 +595,16 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
         "| `refresh` | integer | `{r}` | `{r}` | `{r}` | Seconds between background refreshes; 0 = every tick. |",
         r = schema.refresh
     );
-    let _ =
-        writeln!(o, "| `label` | string | `\"\"` | `\"\"` | `\"\"` | Dim text before the value. |");
-    let _ = writeln!(
-        o,
-        "| `prefix` / `suffix` | string | `\"\"` | `\"\"` | `\"\"` | Text around the module. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |"
-    );
+    for opt in &COMMON_OPTS {
+        let value = opt.default.to_toml();
+        let _ = writeln!(
+            o,
+            "| `{}` | {} | `{value}` | `{value}` | `{value}` | {} |",
+            opt.key,
+            kind_column(opt),
+            opt.doc.replace('|', "\\|")
+        );
+    }
     for opt in &schema.opts {
         let _ = writeln!(
             o,
@@ -826,7 +849,7 @@ fn presets_section(o: &mut String) {
 
     let _ = writeln!(
         o,
-        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
+        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
     );
 }
 
