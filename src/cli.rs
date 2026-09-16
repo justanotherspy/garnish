@@ -442,15 +442,7 @@ fn install(
     let existing = inst::read_existing(&plan.settings).map_err(|e| eyre!(e))?;
     let merged = match inst::merge(existing.as_deref().unwrap_or(""), &plan) {
         Ok(merged) => merged,
-        Err(problem) => {
-            // A settings file that does not parse is never rewritten (SPEC
-            // § 5): the file and the problem on one line, exit 1, no report.
-            eprintln!(
-                "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-                plan.settings.display()
-            );
-            return Err(Quiet.into());
-        }
+        Err(problem) => return Err(refuse_unparsable(&plan.settings, &problem)),
     };
     if dry_run {
         writeln!(stdout, "would write {}:", plan.settings.display())?;
@@ -531,6 +523,17 @@ fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
         .map(Path::to_path_buf)
         .or_else(|| config::env_path(config::CONFIG_ENV))
         .or_else(config::default_path)
+}
+
+/// The one-line refusal for a file that does not parse (SPEC § 5: a file
+/// garnish cannot read is never rewritten). The path and the problem on one
+/// line, exit 1, no report.
+fn refuse_unparsable(path: &Path, problem: &str) -> color_eyre::Report {
+    eprintln!(
+        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+        path.display()
+    );
+    Quiet.into()
 }
 
 /// The one-line refusal for a writing command run without `HOME`.
@@ -689,11 +692,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
                 let current = std::fs::read_to_string(&target)
                     .with_context(|| format!("reading {}", target.display()))?;
                 if let Some(problem) = config::syntax_error(&current) {
-                    eprintln!(
-                        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-                        target.display()
-                    );
-                    return Err(Quiet.into());
+                    return Err(refuse_unparsable(&target, &problem));
                 }
             }
             let backup =

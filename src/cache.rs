@@ -287,12 +287,6 @@ impl LockGuard {
             .is_some_and(|pid| pid == std::process::id())
     }
 
-    /// Path of the lock file.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// Keep the lock file after drop (hand-over to a spawned worker).
     pub const fn disarm(&mut self) {
         self.armed = false;

@@ -16,7 +16,7 @@ use crate::git::{self, Head};
 use crate::icons::glyph;
 
 use super::util::{cut_name, short_sha};
-use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, badge, icon, seg};
+use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, badge, lead, seg};
 
 /// How long the worker lets a local git command run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -205,10 +205,7 @@ impl Module for PathModule {
         }
         let shown = shorten(&tildify(base, ctx.home.as_deref()), cfg.size("depth"));
         let shown = if cfg.str("style") == "fish" { fish(&shown) } else { shown };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "folder", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "folder");
         segs.push(Segment::styled(shown, Style::fg(cfg.color("base")).bolded()));
         if cfg.bool("show_subpath")
             && let Some(sub) = subpath(base, cwd)
@@ -280,10 +277,7 @@ impl Module for WorktreeModule {
             .or_else(|| p.workspace.as_ref().and_then(|w| w.git_worktree.as_deref()))
             .filter(|n| !n.is_empty());
         let Some(name) = name else { return Rendered::empty() };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "worktree", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "worktree");
         segs.push(seg(cfg, name, "name"));
         if cfg.bool("show_original")
             && let Some(wt) = p.worktree.as_ref()
@@ -380,10 +374,7 @@ impl Module for PrModule {
         let Some(pr) = ctx.payload.pr.as_ref() else { return Rendered::empty() };
         let Some(number) = pr.number else { return Rendered::empty() };
         let is_mr = pr.kind.as_deref() == Some("mr");
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, if is_mr { "mr" } else { "pr" }, "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, if is_mr { "mr" } else { "pr" });
         let label = if is_mr { format!("!{number}") } else { format!("#{number}") };
         // SPEC § 3.1: underlined only when it really is linked. The payload
         // may carry no `url` at all, or an `ssh://`/`git@` one the painter
@@ -496,10 +487,7 @@ impl Module for BranchModule {
             };
         let shown = cut_name(&name, cfg.size("max_length"), ctx.icons);
         let head_key = name;
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, if detached { "detached" } else { "branch" }, "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, if detached { "detached" } else { "branch" });
         // SPEC § 3.1 `link`: the branch on the forge, from the payload's
         // repo identity alone (no git call); a detached head has no page.
         let url = (cfg.bool("link") && !detached)

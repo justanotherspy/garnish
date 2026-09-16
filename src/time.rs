@@ -222,12 +222,6 @@ pub fn wall_clock(at: Timestamp, tz: &TimeZone, form: WallClock) -> String {
     at.to_zoned(tz.clone()).strftime(format).to_string()
 }
 
-/// Seconds elapsed since an epoch-seconds instant (zero when in the future).
-#[must_use]
-pub fn elapsed_since(epoch_secs: i64) -> u64 {
-    now_secs().checked_sub(epoch_secs).and_then(|d| u64::try_from(d).ok()).unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

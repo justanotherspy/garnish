@@ -5,7 +5,7 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, Rendered, badge, icon, seg};
+use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// `model`: display name, fast-mode and thinking glyphs, optionally the model id.
 pub struct ModelModule;
@@ -72,10 +72,7 @@ impl Module for ModelModule {
         if name.is_empty() {
             return Rendered::empty();
         }
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "model", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "model");
         segs.push(Segment::styled(name, Style::fg(cfg.color("name")).bolded()));
         if cfg.bool("show_fast") && ctx.payload.fast_mode == Some(true) {
             segs.extend(badge(cfg, "fast", "fast"));
@@ -146,10 +143,7 @@ impl Module for EffortModule {
         };
         let steps = LEVELS.iter().position(|l| *l == level).map_or(0, |i| i.saturating_add(1));
         let style = cfg.str("style");
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "effort", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "effort");
         if style != "word" {
             let scale: Vec<char> = cfg.icon("scale").chars().collect();
             let lit: String = scale.iter().take(steps).collect();
@@ -210,10 +204,7 @@ impl Module for StyleModule {
         if name.is_empty() || (cfg.bool("hide_default") && name == "default") {
             return Rendered::empty();
         }
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "style", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "style");
         segs.push(seg(cfg, name, "name"));
         Rendered::fresh(segs)
     }

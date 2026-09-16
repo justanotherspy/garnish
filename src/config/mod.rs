@@ -17,7 +17,7 @@ pub mod schema;
 
 use presets::TopPreset;
 use schema::{
-    COMMON_KEYS, COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
+    COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value, common_keys,
 };
 
 /// Environment variable naming the config file.
@@ -74,6 +74,18 @@ pub enum StaleStyle {
     Hide,
     /// Show stale values unchanged.
     Plain,
+}
+
+impl StaleStyle {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Dim => "dim",
+            Self::Hide => "hide",
+            Self::Plain => "plain",
+        }
+    }
 }
 
 /// Where a padded right-group module's text sits (`right_justify`, SPEC § 4.1).
@@ -140,6 +152,18 @@ pub enum ColorChoice {
 }
 
 impl ColorChoice {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Always => "always",
+            Self::Never => "never",
+            Self::Ansi256 => "256",
+            Self::TrueColor => "truecolor",
+        }
+    }
+
     /// Resolve to a concrete mode given the environment.
     #[must_use]
     pub const fn mode(self, no_color_env: bool) -> ColorMode {
@@ -1356,9 +1380,7 @@ fn unknown_option_message(schema: &ModuleSchema) -> String {
     let is_text = schema.id == crate::modules::text::SCHEMA.id;
     format!(
         "unknown option; expected one of {}",
-        COMMON_KEYS
-            .iter()
-            .copied()
+        common_keys()
             .filter(|k| !is_text || !TEXT_REJECTED_KEYS.iter().any(|(r, _)| r == k))
             .chain(std::iter::once("colors"))
             .chain(schema.opts.iter().map(|o| o.key))
@@ -2260,15 +2282,7 @@ x = 1
         // and `colors` are matched by name too, so a schema option with one
         // of those keys would be parsed by the hand-written arm and its
         // `cfg.bool(..)`/`cfg.int(..)` reader would see the default for ever.
-        let common: Vec<&str> =
-            COMMON_KEYS.iter().copied().chain(std::iter::once("colors")).collect();
-        for opt in &COMMON_OPTS {
-            assert!(
-                COMMON_KEYS.contains(&opt.key),
-                "`{}` is a common option missing from COMMON_KEYS, so no \"expected one of\" message names it",
-                opt.key
-            );
-        }
+        let common: Vec<&str> = common_keys().chain(std::iter::once("colors")).collect();
         let schemas =
             crate::modules::SCHEMAS.iter().chain(std::iter::once(&*crate::modules::text::SCHEMA));
         for schema in schemas {

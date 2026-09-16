@@ -9,7 +9,7 @@ use crate::time::WallClock;
 use super::util::{
     BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded, rounded_unclamped,
 };
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Module, Rendered, lead, seg};
 
 /// Which rate-limit window a limit module shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,10 +185,7 @@ impl Module for LimitModule {
         // one holding 100, so a threshold above 100 could never be reached.
         let shown = if self.0 == Window::Spend { rounded_unclamped(used) } else { rounded(used) };
         let color = ctx.theme.band(shown, &thresholds, &bands);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "window", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "window");
         let bw = cfg.size("bar_width");
         if bw > 0 {
             segs.extend(bar(
@@ -295,10 +292,7 @@ impl Module for CostModule {
         }
         let Some(cost) = ctx.payload.cost.as_ref() else { return Rendered::empty() };
         let usd = cost.total_cost_usd.unwrap_or(0.0);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "cost", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "cost");
         segs.push(Segment::styled(
             dollars(usd, cfg.size("decimals")),
             Style::fg(cfg.color("amount")).bolded(),

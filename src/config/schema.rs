@@ -329,18 +329,16 @@ impl ModuleSchema {
     }
 }
 
-/// Keys every module accepts in addition to its own options.
-pub const COMMON_KEYS: [&str; 9] = [
-    "enabled",
-    "preset",
-    "refresh",
-    "label",
-    "prefix",
-    "suffix",
-    "hide_when_empty",
-    "max_width",
-    "icons",
-];
+/// The keys every module accepts besides its own options, in the order the
+/// "expected one of" message names them.
+///
+/// Derived from [`COMMON_OPTS`] rather than listed again, so adding a common
+/// option cannot leave it out of the message: only the three hand-parsed
+/// keys and the two tables are spelled here.
+pub fn common_keys() -> impl Iterator<Item = &'static str> {
+    const HAND_PARSED: [&str; 3] = ["enabled", "preset", "refresh"];
+    HAND_PARSED.into_iter().chain(COMMON_OPTS.iter().map(|o| o.key)).chain(std::iter::once("icons"))
+}
 
 /// The common options every module takes besides its own, as specs.
 ///
@@ -350,7 +348,7 @@ pub const COMMON_KEYS: [&str; 9] = [
 /// `refresh` depends on whether the module is cached. Text modules
 /// (SPEC § 3.7) take every entry but `max_width`, which `config check`
 /// rejects there in favour of `width`.
-pub const COMMON_OPTS: [OptSpec; 5] = [
+pub static COMMON_OPTS: [OptSpec; 5] = [
     OptSpec::new("label", Kind::Str, "Dim text before the value.", Value::Str(String::new()))
         .max(crate::config::MAX_TEXT_CHARS),
     OptSpec::new("prefix", Kind::Str, "Text before the module.", Value::Str(String::new()))

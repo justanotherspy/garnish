@@ -19,45 +19,78 @@ use crate::payload::Payload;
 use crate::render::{Clock, render_plain_at};
 use crate::theme::{PALETTES, Role};
 
+/// One `#` comment line, written only for an annotated file (`config init`
+/// writes them; `config show` writes the values alone).
+fn comment(out: &mut String, annotated: bool, text: &str) {
+    if annotated {
+        let _ = writeln!(out, "# {text}");
+    }
+}
+
 /// The top-level keys of the config file, in schema order.
 fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
-    let c = |s: &mut String, text: &str| {
-        if annotated {
-            let _ = writeln!(s, "# {text}");
-        }
-    };
-    c(out, "garnish configuration — see docs/config.md for every key.");
-    c(out, "Top-level preset: default | minimal | full | compact");
+    comment(out, annotated, "garnish configuration — see docs/config.md for every key.");
+    comment(out, annotated, "Top-level preset: default | minimal | full | compact");
     let _ = writeln!(out, "preset = {}", toml_string(cfg.preset.name()));
-    c(out, "Icon set: nerd | unicode | emoji | ascii");
+    comment(out, annotated, "Icon set: nerd | unicode | emoji | ascii");
     let _ = writeln!(out, "icons = {}", toml_string(cfg.icons.name()));
-    c(out, &format!("Theme: {}", PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(" | ")));
-    let _ = writeln!(out, "theme = {}", toml_string(&cfg.theme_name));
-    c(out, "Color output: auto | always | never | 256 | truecolor");
-    let _ = writeln!(out, "color = {}", toml_string(color_name(cfg.color)));
-    c(out, "Truncate the left group when a line overflows the width.");
-    let _ = writeln!(out, "truncate = {}", cfg.truncate);
-    c(out, "Stale cached values: dim | hide | plain");
-    let _ = writeln!(out, "stale_style = {}", toml_string(stale_name(cfg.stale_style)));
-    c(out, "TTL periods a cached value may be overdue before it is styled stale (>= 1).");
-    let _ = writeln!(out, "stale_after = {}", cfg.stale_after);
-    c(out, "Extra cells subtracted from the width, on top of the 4 Claude Code's box");
-    c(out, "always takes; set 2 x statusLine.padding when that setting is non-zero.");
-    let _ = writeln!(out, "padding = {}", cfg.padding);
-    c(out, "Pad each module column to the widest module in it across lines, so the");
-    c(out, "separators line up vertically.");
-    let _ = writeln!(out, "align = {}", cfg.align);
-    c(
+    comment(
         out,
+        annotated,
+        &format!("Theme: {}", PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(" | ")),
+    );
+    let _ = writeln!(out, "theme = {}", toml_string(&cfg.theme_name));
+    comment(out, annotated, "Color output: auto | always | never | 256 | truecolor");
+    let _ = writeln!(out, "color = {}", toml_string(cfg.color.name()));
+    comment(out, annotated, "Truncate the left group when a line overflows the width.");
+    let _ = writeln!(out, "truncate = {}", cfg.truncate);
+    comment(out, annotated, "Stale cached values: dim | hide | plain");
+    let _ = writeln!(out, "stale_style = {}", toml_string(cfg.stale_style.name()));
+    comment(
+        out,
+        annotated,
+        "TTL periods a cached value may be overdue before it is styled stale (>= 1).",
+    );
+    let _ = writeln!(out, "stale_after = {}", cfg.stale_after);
+    comment(
+        out,
+        annotated,
+        "Extra cells subtracted from the width, on top of the 4 Claude Code's box",
+    );
+    comment(
+        out,
+        annotated,
+        "always takes; set 2 x statusLine.padding when that setting is non-zero.",
+    );
+    let _ = writeln!(out, "padding = {}", cfg.padding);
+    comment(
+        out,
+        annotated,
+        "Pad each module column to the widest module in it across lines, so the",
+    );
+    comment(out, annotated, "separators line up vertically.");
+    let _ = writeln!(out, "align = {}", cfg.align);
+    comment(
+        out,
+        annotated,
         "Where a padded right-group module's text sits: end (hugs the cap) | start (follows the separator)",
     );
     let _ = writeln!(out, "right_justify = {}", toml_string(cfg.right_justify.name()));
-    c(out, "Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).");
-    let _ = writeln!(out, "hide_empty_lines = {}", cfg.hide_empty_lines);
-    c(out, "A left group wider than its budget: truncate (cut with …) | ticker (scroll it)");
-    let _ = writeln!(out, "overflow = {}", toml_string(cfg.overflow.name()));
-    c(
+    comment(
         out,
+        annotated,
+        "Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).",
+    );
+    let _ = writeln!(out, "hide_empty_lines = {}", cfg.hide_empty_lines);
+    comment(
+        out,
+        annotated,
+        "A left group wider than its budget: truncate (cut with …) | ticker (scroll it)",
+    );
+    let _ = writeln!(out, "overflow = {}", toml_string(cfg.overflow.name()));
+    comment(
+        out,
+        annotated,
         "Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start",
     );
     let _ = writeln!(
@@ -66,20 +99,23 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         crate::config::schema::Value::Float(cfg.ticker_step).to_toml()
     );
     let _ = writeln!(out, "ticker_gap = {}", toml_string(&cfg.ticker_gap));
-    c(
+    comment(
         out,
+        annotated,
         "Master switch for every animation (spinner, scrolling text, rule pattern, separator and icon frames); false freezes them at frame 0 and cuts a ticker line with …",
     );
-    c(
+    comment(
         out,
+        annotated,
         "Unset, animations follow Claude Code's prefersReducedMotion setting; GARNISH_ANIMATE=0 freezes a session either way",
     );
     // Left as a comment in an annotated file so the settings rule keeps
     // working after `config init`; `show` prints the value in effect.
     let prefix = if annotated { "# " } else { "" };
     let _ = writeln!(out, "{prefix}animate = {}", cfg.animate.unwrap_or(true));
-    c(
+    comment(
         out,
+        annotated,
         "Elapsed times and countdowns: compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m); unset, it is fixed under overflow = \"ticker\" and compact otherwise, and each timer module can pin its own",
     );
     // Left as a comment in an annotated file so the ticker rule keeps
@@ -98,38 +134,53 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
 #[must_use]
 pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     let mut out = String::new();
-    let c = |s: &mut String, text: &str| {
-        if annotated {
-            let _ = writeln!(s, "# {text}");
-        }
-    };
     write_top_level(&mut out, cfg, annotated);
+    write_colors(&mut out, cfg, annotated);
+    write_frame(&mut out, cfg, annotated);
+    write_lines(&mut out, cfg, annotated);
+    write_modules(&mut out, cfg, annotated);
+    write_texts(&mut out, cfg, annotated);
+    out
+}
 
-    c(&mut out, "Role color overrides; every module color defaults to one of these roles.");
+/// `[colors]`: the role overrides, commented out in an annotated file so the
+/// theme keeps deciding them.
+fn write_colors(out: &mut String, cfg: &Config, annotated: bool) {
+    comment(
+        out,
+        annotated,
+        "Role color overrides; every module color defaults to one of these roles.",
+    );
     let _ = writeln!(out, "[colors]");
-    if annotated {
-        for role in Role::ALL {
-            let _ = writeln!(
-                out,
-                "# {} = {}",
-                role.name(),
-                toml_string(&cfg.theme.role(role).to_spec())
-            );
-        }
-    } else {
-        for role in Role::ALL {
-            let _ =
-                writeln!(out, "{} = {}", role.name(), toml_string(&cfg.theme.role(role).to_spec()));
-        }
+    let prefix = if annotated { "# " } else { "" };
+    for role in Role::ALL {
+        let _ = writeln!(
+            out,
+            "{prefix}{} = {}",
+            role.name(),
+            toml_string(&cfg.theme.role(role).to_spec())
+        );
     }
     let _ = writeln!(out);
+}
 
-    c(&mut out, "Frame style: none | rounded | square | double | heavy | powerline | custom");
+/// `[frame]`: the style, the custom glyphs when there are any, and the
+/// animation keys of SPEC § 4.2.
+fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
+    comment(
+        out,
+        annotated,
+        "Frame style: none | rounded | square | double | heavy | powerline | custom",
+    );
     let _ = writeln!(out, "[frame]");
     let _ = writeln!(out, "style = {}", toml_string(cfg.frame.style.name()));
-    c(&mut out, "Extend the rule to the full width and close with the right cap.");
+    comment(out, annotated, "Extend the rule to the full width and close with the right cap.");
     let _ = writeln!(out, "fill = {}", cfg.frame.fill);
-    c(&mut out, "Default separator between modules on a line (style-dependent when unset).");
+    comment(
+        out,
+        annotated,
+        "Default separator between modules on a line (style-dependent when unset).",
+    );
     if annotated && cfg.frame.style != FrameStyle::Custom {
         let _ = writeln!(out, "# separator = {}", toml_string(&cfg.frame.chars.separator));
     } else {
@@ -152,16 +203,22 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
             let _ = writeln!(out, "{key} = {}", toml_string(value));
         }
     } else {
-        c(
-            &mut out,
+        comment(
+            out,
+            annotated,
             "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad",
         );
     }
-    c(
-        &mut out,
+    comment(
+        out,
+        annotated,
         "Animation (see docs/config.md): a one-cell-glyph pattern travelling along the rule,",
     );
-    c(&mut out, "and separator frames cycled one per tick (all the same width). Empty = static.");
+    comment(
+        out,
+        annotated,
+        "and separator frames cycled one per tick (all the same width). Empty = static.",
+    );
     let _ = writeln!(out, "fill_pattern = {}", toml_string(&cfg.frame.fill_pattern.concat()));
     let _ = writeln!(out, "fill_step = {}", Value::Float(cfg.frame.fill_step).to_toml());
     let _ = writeln!(out, "fill_direction = {}", toml_string(cfg.frame.fill_direction.name()));
@@ -176,9 +233,13 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     );
     let _ = writeln!(out, "separator_step = {}", Value::Float(cfg.frame.separator_step).to_toml());
     let _ = writeln!(out);
+}
 
-    c(
-        &mut out,
+/// `[[line]]` per configured line.
+fn write_lines(out: &mut String, cfg: &Config, annotated: bool) {
+    comment(
+        out,
+        annotated,
         "Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.",
     );
     for line in &cfg.lines {
@@ -201,10 +262,6 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
         }
     }
     let _ = writeln!(out);
-
-    write_modules(&mut out, cfg, annotated);
-    write_texts(&mut out, cfg, annotated);
-    out
 }
 
 /// The `[modules.text.<name>]` tables (SPEC § 3.7): every defined text module
@@ -281,17 +338,13 @@ fn write_common(out: &mut String, m: &ModuleCfg, annotated: bool, opts: &[OptSpe
 }
 
 fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
-    let c = |s: &mut String, text: &str| {
-        if annotated {
-            let _ = writeln!(s, "# {text}");
-        }
-    };
     for schema in SCHEMAS.iter() {
         let Some(m) = cfg.modules.get(schema.id) else { continue };
-        c(out, &format!("{} — {}", schema.id, schema.summary));
+        comment(out, annotated, &format!("{} — {}", schema.id, schema.summary));
         let _ = writeln!(out, "[modules.{}]", schema.id);
-        c(
+        comment(
             out,
+            annotated,
             "preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)",
         );
         let _ = writeln!(out, "enabled = {}", m.enabled);
@@ -363,24 +416,6 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
 
 fn toml_list(items: &[String]) -> String {
     format!("[{}]", items.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "))
-}
-
-const fn color_name(c: crate::config::ColorChoice) -> &'static str {
-    match c {
-        crate::config::ColorChoice::Auto => "auto",
-        crate::config::ColorChoice::Always => "always",
-        crate::config::ColorChoice::Never => "never",
-        crate::config::ColorChoice::Ansi256 => "256",
-        crate::config::ColorChoice::TrueColor => "truecolor",
-    }
-}
-
-const fn stale_name(s: crate::config::StaleStyle) -> &'static str {
-    match s {
-        crate::config::StaleStyle::Dim => "dim",
-        crate::config::StaleStyle::Hide => "hide",
-        crate::config::StaleStyle::Plain => "plain",
-    }
 }
 
 /// Payload fixtures embedded for the documentation renders.
@@ -476,8 +511,7 @@ fn preset_sample(preset: config::presets::TopPreset, icons: IconSet) -> String {
 
 /// The `docs/modules/<id>.md` page for one module.
 #[must_use]
-pub fn module_page(id: &str) -> Option<String> {
-    let schema = SCHEMAS.iter().find(|s| s.id == id)?;
+pub fn module_page(schema: &ModuleSchema) -> String {
     let mut o = String::new();
     let _ = writeln!(o, "# `{}`\n\n{}\n\n{}\n", schema.id, schema.summary, schema.doc);
     let _ = writeln!(
@@ -498,7 +532,7 @@ pub fn module_page(id: &str) -> Option<String> {
             o,
             "| `{}` | `{}` |",
             p.name(),
-            module_sample(id, p, IconSet::Unicode).replace('|', "\\|")
+            module_sample(schema.id, p, IconSet::Unicode).replace('|', "\\|")
         );
     }
     let _ = writeln!(o, "\n## Icon sets (default preset)\n\n| icons | render |\n|---|---|");
@@ -507,12 +541,12 @@ pub fn module_page(id: &str) -> Option<String> {
             o,
             "| `{}` | `{}` |",
             set.name(),
-            module_sample(id, Preset::Default, set).replace('|', "\\|")
+            module_sample(schema.id, Preset::Default, set).replace('|', "\\|")
         );
     }
 
     module_reference(&mut o, schema);
-    Some(o)
+    o
 }
 
 /// The config the text-module page renders: the SPEC § 3.7 example.
@@ -995,10 +1029,8 @@ pub fn generate(out: &Path) -> std::io::Result<usize> {
     std::fs::write(out.join("config.md"), config_page())?;
     n = n.saturating_add(1);
     for s in SCHEMAS.iter() {
-        if let Some(page) = module_page(s.id) {
-            std::fs::write(out.join("modules").join(format!("{}.md", s.id)), page)?;
-            n = n.saturating_add(1);
-        }
+        std::fs::write(out.join("modules").join(format!("{}.md", s.id)), module_page(s))?;
+        n = n.saturating_add(1);
     }
     std::fs::write(out.join("modules").join("text.md"), text_page())?;
     n = n.saturating_add(1);
@@ -1057,7 +1089,7 @@ mod tests {
     #[test]
     fn every_module_has_a_page_with_samples_for_every_preset_and_icon_set() {
         for s in SCHEMAS.iter() {
-            let page = module_page(s.id).unwrap();
+            let page = module_page(s);
             assert!(page.starts_with(&format!("# `{}`", s.id)));
             for p in Preset::ALL {
                 assert!(page.contains(&format!("| `{}` |", p.name())), "{}: {}", s.id, p.name());
@@ -1074,7 +1106,6 @@ mod tests {
                 assert!(page.contains(&format!("| `{}` |", opt.key)), "{}: {}", s.id, opt.key);
             }
         }
-        assert!(module_page("nope").is_none());
     }
 
     #[test]

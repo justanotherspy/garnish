@@ -7,7 +7,7 @@ use crate::icons::glyph;
 use crate::num::percent_of;
 
 use super::util::{BAR_STYLES, bar, percent, rounded, tokens};
-use super::{Ctx, Module, Rendered, badge, icon, seg};
+use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
 /// percentage means.
@@ -85,10 +85,7 @@ impl Module for ContextModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let window = ctx.payload.context_window_size();
         let used = ctx.payload.context_window.as_ref().and_then(|c| c.used_percentage);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "context", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "context");
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
         // SPEC § 3.2 `scale = "usable"`: 100 % is the compaction point, so

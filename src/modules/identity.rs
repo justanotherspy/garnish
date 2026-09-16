@@ -5,7 +5,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::icons::glyph;
 
 use super::util::cut_name;
-use super::{Ctx, Module, Rendered, badge, icon, seg};
+use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// `session_name`: the custom or AI-generated session title.
 pub struct SessionNameModule;
@@ -53,10 +53,7 @@ impl Module for SessionNameModule {
             return Rendered::empty();
         };
         let shown = cut_name(name, cfg.size("max_length"), ctx.icons);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "name", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "name");
         segs.push(seg(cfg, shown, "name"));
         if cfg.bool("show_id")
             && let Some(id) = ctx.payload.session_id.as_deref()
@@ -121,10 +118,7 @@ impl Module for VimModule {
         } else {
             mode.to_owned()
         };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "vim", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "vim");
         segs.push(Segment::styled(text, Style::fg(cfg.color(color_key)).bolded()));
         Rendered::fresh(segs)
     }
@@ -178,10 +172,7 @@ impl Module for AgentModule {
         else {
             return Rendered::empty();
         };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "agent", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "agent");
         segs.push(seg(cfg, name, "name"));
         if cfg.bool("show_thinking")
             && ctx.payload.thinking.as_ref().and_then(|t| t.enabled) == Some(true)
@@ -244,10 +235,7 @@ impl Module for LinesModule {
         if cfg.bool("hide_zero") && added == 0 && removed == 0 {
             return Rendered::empty();
         }
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "lines", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "lines");
         segs.push(seg(cfg, format!("{}{added}", cfg.icon("added")), "added"));
         segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
         if cfg.bool("show_net") {

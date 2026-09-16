@@ -7,7 +7,7 @@ use jiff::Timestamp;
 
 use std::collections::BTreeMap;
 
-use crate::ansi::{Color, Segment, Style};
+use crate::ansi::{Segment, Style};
 use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
 use crate::config::schema::{Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
@@ -48,8 +48,9 @@ pub enum Freshness {
     Fresh,
     /// Rendered from a cache entry past its TTL; a refresh is under way.
     Stale,
-    /// The last refresh failed; the message is kept for `doctor`.
-    Failed(String),
+    /// The last refresh failed. The message is not carried: `doctor`
+    /// re-reads the `err` entries from disk, and a row shows only the mark.
+    Failed,
 }
 
 /// A module's output for one tick.
@@ -220,7 +221,7 @@ impl Ctx<'_> {
         }
         let failed = lookup.entry.as_ref().filter(|e| e.status == crate::cache::Status::Err);
         if lookup.fresh {
-            let freshness = failed.map_or(Freshness::Fresh, |e| Freshness::Failed(e.error.clone()));
+            let freshness = if failed.is_some() { Freshness::Failed } else { Freshness::Fresh };
             return (lookup, freshness);
         }
         if !lookup.in_progress {
@@ -229,7 +230,7 @@ impl Ctx<'_> {
         let grace_ms = ttl_ms.saturating_mul(u64::from(self.stale_after.max(1)));
         let overdue = mismatched || lookup.entry.as_ref().is_none_or(|e| !e.is_fresh(grace_ms));
         let freshness = match failed {
-            Some(e) => Freshness::Failed(e.error.clone()),
+            Some(_) => Freshness::Failed,
             None if overdue => Freshness::Stale,
             None => Freshness::Fresh,
         };
@@ -364,12 +365,6 @@ pub fn entry(id: &str) -> Option<&'static Entry> {
     REGISTRY.iter().find(|e| e.schema.id == id)
 }
 
-/// All module ids, in documentation order.
-#[must_use]
-pub fn ids() -> Vec<&'static str> {
-    REGISTRY.iter().map(|e| e.schema.id).collect()
-}
-
 /// A styled text segment using a module color key.
 #[must_use]
 pub fn seg(cfg: &ModuleCfg, text: impl Into<String>, color_key: &str) -> Segment {
@@ -385,6 +380,16 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
     } else {
         vec![Segment::styled(format!("{glyph} "), Style::fg(cfg.color(color_key)))]
     }
+}
+
+/// A module's leading icon: its `show_icon` option and its `icon` colour,
+/// which is how all seventeen of them open.
+///
+/// The one place the option and the colour key are spelled, so a module
+/// cannot quietly ignore `show_icon` or reach for a different colour.
+#[must_use]
+pub fn lead(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
+    if cfg.bool("show_icon") { icon(cfg, icon_key, "icon") } else { Vec::new() }
 }
 
 /// A trailing badge: a space and the icon in its own colour, or nothing when
@@ -449,7 +454,7 @@ pub fn decorate(
                 out.push(muted(theme, format!(" {}", stale_glyphs.0)));
             }
         }
-        Freshness::Failed(_) => {
+        Freshness::Failed => {
             out.extend(value.into_iter().map(dimmed));
             if !stale_glyphs.1.is_empty() {
                 out.push(Segment::styled(
@@ -463,12 +468,6 @@ pub fn decorate(
         out.push(Segment::plain(&cfg.suffix));
     }
     out
-}
-
-/// Convenience: a plain-colored segment.
-#[must_use]
-pub fn colored(text: impl Into<String>, color: Color) -> Segment {
-    Segment::styled(text, Style::fg(color))
 }
 
 #[cfg(test)]
@@ -515,10 +514,7 @@ mod tests {
         let text =
             |r: Rendered| crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, marks));
         assert_eq!(text(Rendered::empty()), "", "a fresh empty module is still hidden");
-        assert_eq!(
-            text(Rendered { segments: Vec::new(), freshness: Freshness::Failed("boom".into()) }),
-            "– ✗"
-        );
+        assert_eq!(text(Rendered { segments: Vec::new(), freshness: Freshness::Failed }), "– ✗");
         assert_eq!(text(Rendered { segments: Vec::new(), freshness: Freshness::Stale }), "– ⟳");
         // A module that did render keeps its value, dimmed, with the mark.
         let value =
@@ -666,12 +662,24 @@ mod tests {
                     check(key, at);
                 }
             }
-            // `icon(cfg, "icon", "color")`: both literals are keys.
-            for call in [" icon(", "(icon("] {
+            // `icon(cfg, "icon", "color")` and `badge(cfg, "icon", "color")`:
+            // both literals are keys. The space or `(` before the name keeps
+            // the pattern from matching inside another word.
+            for call in [" icon(", "(icon(", " badge(", "(badge("] {
                 for (at, _) in src.match_indices(call) {
                     for key in literal_arguments(&src, at + call.len()).0 {
                         check(&key, at);
                     }
+                }
+            }
+            // `lead(cfg, "icon")` carries the icon key and, implicitly, the
+            // `icon` colour every module's leading glyph takes.
+            for call in [" lead(", "(lead("] {
+                for (at, _) in src.match_indices(call) {
+                    for key in literal_arguments(&src, at + call.len()).0 {
+                        check(&key, at);
+                    }
+                    check("icon", at);
                 }
             }
         }
