@@ -230,4 +230,6 @@ Every module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`
 | `GARNISH_NOW` | Freeze the clock (epoch seconds or RFC 3339) for reproducible renders. |
 | `GARNISH_NO_SPAWN` | Log intended background refreshes to `<cache>/spawns.log` instead of spawning them (tests). |
 | `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |
-| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact. |
+| `GARNISH_DEBUG` | `1` appends a line per tick to `<cache>/debug.log`, rotated at 1 MiB; `garnish doctor` shows the tail. Nothing is written otherwise. |
+| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's; empty means there is none. |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact; the last two turn compaction off, so the marker goes with it. |

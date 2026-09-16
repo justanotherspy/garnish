@@ -13,24 +13,16 @@ the schema-driven config with presets, themes, icon sets and frames, the
 cache and worker model, aligned columns and fixed durations, per-key config
 fallback, the clock-driven ticker, text modules and animations, the presets
 gallery and the three bundled skills. The release pipeline with the Homebrew
-tap landed on 2026-09-11 and waits for its first tag. On 2026-09-12 every
-open code item was closed and the spec was audited against the code, and
-Phases 19–22 were written that day from the FUTURE-SPEC review and
-Daniel's layout and setup ideas. Phase 19 (harness fidelity) was built
-the same day and merged on 2026-09-13 (PR #49): five of its six layers
-landed as designed; the sixth, the per-row dim reset, was dropped after
-the harness binary showed it cannot work and became a spec correction
-(SPEC § 2.1). Its three open questions were decided the same day
-(`preview` dims its rows, a `GARNISH_MANAGED_SETTINGS` hook, the height
-rule read from the binary; the last merged as PR #50 on 2026-09-14 and
-its review findings followed on 2026-09-16; work log). Phase 20
-(per-module presentation) was built the same day on a branch (PR #51,
-merged 2026-09-16): all seven layers as designed, with the four corners
-the code settled recorded in SPEC (`max_width` cuts the decorated
-module, fish paths keep the `~` that `depth` keeps, the usable scale
-hides the marker's percentage too, GitLab is the host's name or an open
-merge request). **The drift between SPEC and the code is now Phases
-21–22 below.**
+tap landed on 2026-09-11 and waits for its first tag.
+
+Phases 19 (harness fidelity) and 20 (per-module presentation) landed on
+2026-09-13 and 2026-09-16, and an audit of everything through Phase 20
+followed on 2026-09-17: the code was read against the documents, the
+defects it found were fixed with a test each, and the rules that had been
+written out more than once were given one home.
+
+**The drift between SPEC and the code is now Phases 21–22 below, and
+nothing else.** `main` is ready for Phase 21.
 
 ## Done — Phases 0–18, compacted
 
@@ -57,6 +49,7 @@ merge request). **The drift between SPEC and the code is now Phases
 | 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 | 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
+| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; 194 → 223 tests | 09-17 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -180,15 +173,18 @@ gates rustdoc.
 
 Open items only; closed ones are in the work log.
 
-- [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings.json reads for 30 s — only if the tick budget is ever threatened (SPEC § 3.2 says the settings chain is read every tick)
-- [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
-- [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
-- [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+**Waiting on Daniel**
+
+- [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README, and the "from the first tagged release" qualifier from README § Install and guide § 1
 - [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's fullscreen and classic renderers (`/tui`) to confirm the § 2.1 arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt; the classic frame scrolling), then drop "read, not watched" from SPEC § 2.1 and `CLAUDE.md`
-- [ ] `parse_settings_json` accepts files Claude Code rejects: its schema is strict for every key (an enum's spelling, a number's type), and a user, project or local file that fails it is skipped entirely, so `doctor` can show `ok` and resolve keys from a file Claude Code never reads (the `tui` row names its own case since 2026-09-16; the general check would mean carrying Claude Code's schema, a spec decision)
-- [ ] Open question from the Phase 20 review (2026-09-16): `spend` with `reset = "absolute"` prints a bare wall-clock time for an instant weeks out — the committed golden reads `$ 112% ⏱ 00:00` for a reset 27 days away, which a user reads as tonight. The no-weekday rule (SPEC § 3.3) buys steady width, which only `limit5h` really needs, and a weekday would not disambiguate at 27 days either. Options: a date form (`⏱Mar 1`) for `spend`, always or beyond ~24 h; or leave it and say in the guide that `absolute` suits the five-hour window
-- [ ] Open question from the Phase 20 review (2026-09-16): a self-hosted GitLab whose host is not named after it (`git.example.com`) and has no open merge request gets a GitHub-shaped `/tree/` URL, which 404s. SPEC § 3.1 calls `pr.kind = "mr"` the cover for a self-hosted name, but it only covers it while an MR is open. Options: a `branch.forge = "auto" | "github" | "gitlab"` key; or leave it and document the limitation
-- [ ] From the Phase 20 review (2026-09-16), cheap and uncontroversial but not done on that branch: the `text.<name>` family is outside the schema matrix (it is the one family whose content is wholly user-supplied); `branch.link`'s `!detached` guard has no test at any level (it needs a temp-repo integration test, the unit level cannot reach a detached head); no golden pins `branch.link` on the `pr-mr` fixture; `benches/tick.rs` has no `max_width` case; and `docs/modules/text.md` lost its text-specific `hide_when_empty` wording when the common options became one table
+- [ ] Whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+
+**Parked designs** (decided, not to be reopened without a reason)
+
+- [ ] A `branch.forge = "auto" | "github" | "gitlab"` key, if a self-hosted GitLab with no open merge request ever turns up in practice. Decided 2026-09-16 with Daniel: documented as a known limitation instead (SPEC § 3.1, the `link` option text and `examples/garnish.toml`)
+- [ ] `parse_settings_json` accepts files Claude Code rejects: its schema is strict for every key (an enum's spelling, a number's type), and a user, project or local file that fails it is skipped entirely, so `doctor` can show `ok` and resolve keys from a file Claude Code never reads. The `tui` row names its own case; the general check would mean carrying Claude Code's schema, which is a spec decision
+- [ ] Optional headroom (Phase 8 analysis): cache the resolved config keyed by mtime, cache the settings-chain reads for 30 s — only if the tick budget is ever threatened. The chain is already read at most once per tick and only on demand, so this is about the config parse
+- [ ] From `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 
 ## Work log
 
@@ -270,109 +266,61 @@ was built, what the reviews found and what was decided, not how.
   macOS counted `branch` spawns without the lock hand-over.
 - **2026-09-12 (documents, PR #48)** — Daniel asked for FUTURE-SPEC's
   low-impact ideas in the spec and plan, the website dropped, and an
-  interactive setup in its place. SPEC § 14: `garnish setup` as FUTURE-SPEC
-  § 13's `ratatui` option made a decision (exact preview through
-  `render_lines_at`, editors generated from `ModuleSchema`, the gallery
-  first, live save, install through `install`, `setup --preset` as the
-  scriptable twin, a pointer when `garnish` is typed at a terminal), then
-  selection in the preview by mouse or keyboard over a placement map, an
-  overlay form of checkboxes and pickers, string pickers seeded from the
-  presets, a glyph picker with schema suggestions drawn with the doctor's
-  width marker. Chosen from the rest by "Tier A, no crate, no non-goal, no
-  tick-side write, module set unchanged": the dim reset, reduced motion,
-  the doctor's settings report, never rewriting an unparsable file,
-  `max_width`, fish paths, branch and text links, the usable context
-  scale, absolute reset times, the schema-generated matrix test (Phases 19
-  and 20). Daniel's layout ideas arrived one at a time (grid columns,
-  titled rules and boxes, panels of stacked boxes); asked whether they
-  still read as one thing, I flagged the `align` collision and the three
-  sections, he left the consolidation to me, and SPEC § 4.3 became one
-  model: a line is columns, a column is a row of modules or a stack,
-  `width = "1fr" | "auto" | cells`, `justify`, titles and boxes as
-  decorations, two levels deep, with a plain line as one `1fr` column so
-  the default render is byte-identical. (I first kept the name `[[line]]`
-  to avoid a migration; Daniel then drew the distinction that settled it:
-  a *line* is one terminal line, a *row* is the addressable unit, one or
-  more lines tall, a box three of them, a future art or animation row
-  more. So the unit is `[[row]]`, with `[[row.col]]` and
-  `[[row.col.row]]` beneath, `[[line]]` and `hide_empty_lines` kept as
-  permanent aliases so nothing breaks, and a rename layer opens
-  Phase 21.)
-  Decided with Daniel: the one `width` key and `gap = 1`. An adversarial
-  review of the day's spec text returned 25 findings, all taken (the
-  samples contradicted the box rules; the lock horizon could never fire;
-  `path.depth` already existed; a dozen corners defined, listed in the
-  commit `51d4b66`). Then this plan was compacted to the drift between
-  SPEC and the code plus this log. Daniel asked for the spec's
-  ambiguities, traps and stale text to be fleshed out, a second review,
-  and the phases checked against the code: the "target state" marks came
-  off the shipped sections, § 4.3 and § 14 gained edge-case and trap
-  lists, a read-only code map (recorded at the top of each open phase)
-  re-cut the layers where the code's shape demanded (a colour-on golden
-  mode, `animate` as `Option<bool>`, a `COMMON_OPTS` table, a `rows`
-  layer with block caps and rule segments that the placement map reads,
-  an embedded `fixtures.rs`, the install core apart from its printing,
-  a `GARNISH_STDIN_TTY` hook), and a second adversarial review returned
-  25 more findings, all taken (commit `cada6ef`: one `truncate = false`
-  rule, gap-then-column clamping, `auto` and no-`fr` cases, the fill
-  pattern phased over the row, a segment-to-span painter for the preview
-  pane, `config show` as a fixed point, both-direction nesting, backups
-  on `config init --force` and `setup --preset`). Open drafts #27 and #40
-  stay parked.
+  interactive setup in its place. SPEC § 14 became `garnish setup`:
+  FUTURE-SPEC § 13's `ratatui` option made a decision, with the exact
+  preview through `render_lines_at`, editors generated from `ModuleSchema`,
+  the gallery first, live save, install through `install`,
+  `setup --preset` as the scriptable twin, and selection in the preview
+  over a placement map. Chosen from the rest by "Tier A, no crate, no
+  non-goal, no tick-side write, module set unchanged": the dim reset,
+  reduced motion, the doctor's settings report, never rewriting an
+  unparsable file, `max_width`, fish paths, branch and text links, the
+  usable context scale, absolute reset times, the schema-generated matrix
+  test — Phases 19 and 20.
+
+  Daniel's layout ideas (grid columns, titled rules and boxes, panels of
+  stacked boxes) became one model in SPEC § 4.3: a row is columns, a column
+  is modules or a stack of rows, `width = "1fr" | "auto" | cells`,
+  `justify`, titles and boxes as decorations, two levels deep, with a plain
+  row as one `1fr` column so the default render is byte-identical. The name
+  came from his distinction: a *line* is one terminal line, a *row* is the
+  addressable unit, one or more lines tall — so the unit is `[[row]]` with
+  `[[row.col]]` and `[[row.col.row]]` beneath, and `[[line]]` and
+  `hide_empty_lines` stay as permanent aliases. Two adversarial reviews of
+  the spec text returned 25 findings each, all taken (`51d4b66`, `cada6ef`):
+  the samples contradicted the box rules, the lock horizon could never
+  fire, `path.depth` already existed, and about two dozen corners were
+  defined — the `truncate = false` rule, gap-then-column clamping, the fill
+  pattern phased over the row, `config show` as a fixed point,
+  both-direction nesting. A read-only code map at the top of each open
+  phase re-cut its layers where the code's shape demanded. Open drafts #27
+  and #40 stay parked.
 - **2026-09-12 (Phase 19)** — Harness fidelity, on a branch as five
-  commits (no `gh stack` in that session). The verify items came first,
-  read from the 2.1.270 binary on the host and the 2.1.261 native npm
-  package fetched for comparison: the 13 000 buffer is unchanged in both;
-  `COLUMNS`/`LINES` are the full terminal size; and the status line
+  commits. The verify items came first, read from the 2.1.270 binary and
+  the 2.1.261 npm package: the 13 000 buffer is unchanged in both,
+  `COLUMNS`/`LINES` are the full terminal size, and the status line
   component wraps each row in `<Text dimColor wrap="truncate">` around a
-  child that parses the row's escapes into per-piece styles, with the Ink
-  fork merging the parent's `dim` into every piece, so a leading `ESC[0m`
-  is parsed away and the FUTURE-SPEC A1 premise never held in any
-  supported version. Decided (documents first): the dim-reset layer was
-  not built; SPEC § 2.1 records the mechanism and how to re-verify it,
-  the guide's troubleshooting explains the difference from `preview`, and
-  whether `preview` should dim its own rows is Daniel's question in the
-  backlog. The height rule could be read only as far as the binary goes
-  (no cap in the component, `flexShrink: 1` on the footer column); the
-  on-screen check stays in the backlog. Then the layers: `animate` as
-  `Option<bool>` (`config init` comments the key out like `durations`,
-  `show` prints the value in effect, the three round-trip tests compare
-  with the switch pinned); `prefersReducedMotion` on the settings chain
-  with `Clock.settings` gating the read so `Clock::fixed()` never touches
-  a settings file, unit tests per precedence pair and two config goldens
-  reaching a settings fixture through `$ROOT` in `# env:`; never-rewrite
-  through one `install::replace_file` (backup, temp, rename) with
-  `config::syntax_error` for the TOML probe and one-line `Quiet` refusals
-  in `install` and `config init --force`; the doctor's settings rows as a
-  pure function over a labelled, read chain (`claude_settings::FileState`,
-  `FileKeys` grown by the doctor's keys); and the `# color:` golden mode
-  with `colour-on` pinning the painter's escapes, the OSC 8 link and the
-  colour codes that keep an unframed spacer. An adversarial review of
-  the code ran as a five-lens workflow (behaviour, spec, tests,
-  hardening, lint) with three refuters per finding; every finding it
-  raised was taken, in one fix commit: `replace_file` turned a dangling
-  symlink into a regular file (it now follows the link chain, refuses a
-  loop, is born with the old file's mode and removes its temp file on any
-  failure); the doctor suggested `refreshInterval = 1` for animations
-  that were frozen, for limits without `show_reset` and for text that fit
-  its box, and stayed silent for a value below 1 (which Claude Code
-  drops); the doctor printed a `statusLine.command` from any chain file
-  raw (now plain text, 200 characters) and the current directory in full
-  (now the heading, the project files relative to it); an empty
-  `settings.json` was "invalid" to the doctor and `{}` to `install` (now
-  `{}` to both); a settings file was read without a size bound (1 MiB);
-  the settings chain was parsed twice per tick with `animate` unset (once
-  now, through `Ctx::settings()`, shared with the context module); the
-  CLI tests ran in the checkout (the checkout's `.claude/` could leak in)
-  and kept the developer's `GARNISH_ANIMATE`; `config show` folded the
-  session switch into a printed config (it prints the file-or-settings
-  value now); the unit tests could see the machine's managed settings
-  file (`Clock.managed`, `settings_chain(managed, …)`); plus the wording
-  fixes (`--force` help, the `install` message, the vim suggestion, the
-  statusline skill's claim that `--force` keeps no backup, the SPEC
-  listing's `animate` comment, this log). Declined: a
-  `GARNISH_MANAGED_SETTINGS` test hook for the goldens (a spec decision,
-  in the backlog).
+  child whose Ink fork merges the parent's `dim` into every piece — so a
+  leading `ESC[0m` is parsed away and FUTURE-SPEC A1's premise never held.
+  The dim-reset layer was therefore not built; SPEC § 2.1 records the
+  mechanism and how to re-verify it.
+
+  The layers that did land: `animate` as `Option<bool>` following
+  `prefersReducedMotion` over the settings chain (with `Clock.settings`
+  gating the read so a pinned clock never touches a settings file);
+  never-rewrite through one `install::replace_file`; the doctor's settings
+  rows as a pure function over a labelled chain; and the `# color:` golden
+  mode. A five-lens adversarial review with three refuters per finding
+  found all of these, all fixed: `replace_file` turned a dangling symlink
+  into a regular file; the doctor suggested `refreshInterval = 1` where
+  nothing was animated and printed a settings `command` raw; an empty
+  `settings.json` was "invalid" to the doctor and `{}` to `install`; a
+  settings file was read without a size bound; the settings chain was
+  parsed twice per tick; the CLI tests could see the checkout's `.claude/`
+  and the developer's `GARNISH_ANIMATE`; `config show` folded the session
+  switch into a printed config; the unit tests could see the machine's
+  managed settings file. Declined: a `GARNISH_MANAGED_SETTINGS` hook for
+  the goldens (a spec decision, taken the next day).
 - **2026-09-13 (backlog decisions)** — Daniel took the three Phase 19
   questions as suggested and PR #49 merged mid-way; the rest went on the
   same branch restarted from `main` (PR #50, merged 2026-09-14). `preview`
@@ -466,8 +414,11 @@ was built, what the reviews found and what was decided, not how.
   0.40 s) and asserts no segment carries a link the painter would refuse.
   Two invariants that were comments became tests (no schema redeclares a
   common key; every rejected text key is refused with its own message,
-  from one table rather than two copies). Left for Daniel (§ Backlog):
-  the `spend` absolute reset, and a self-hosted GitLab with no open MR.
+  from one table rather than two copies). The `spend` window took the date
+  form (`⏱Mar 1`) rather than a bare clock time, since a reset weeks out
+  read as tonight; a self-hosted GitLab with no open merge request was
+  documented as a known limitation instead of given a `branch.forge` key
+  (SPEC § 3.1).
 - **2026-09-16 (height-rule review)** — The adversarial review of PR #50
   (four lenses; most of its refuters and the height read's own died when
   the account ran out of usage credits, so the findings were judged by
@@ -504,3 +455,99 @@ was built, what the reviews found and what was decided, not how.
   or empty run clears the status line, and an aborted run keeps the
   previous text. Merged with Phase 20 (#51) the same day; the only
   conflict was this file.
+- **2026-09-17 (audit through Phase 20)** — Daniel asked for the whole
+  project up to Phase 20 to be checked against its documents, its defects
+  fixed, and its duplication consolidated, so `main` is ready for Phase 21.
+  A seven-lens read-only audit (config, render, modules, systems,
+  documents, tests, simplification), each lens in its own worktree, found
+  the work below; every defect got a test, and the suite went 194 → 223.
+
+  **Two ways out of the repository**, both reachable from a checkout the
+  user did not create (an unpacked archive, a shared directory): a
+  `.git/HEAD` saying `ref: ../../../secret` made `branch` render the first
+  seven characters of that file as the short SHA, because a ref name was
+  joined onto the git directory unchecked (`git::joinable_ref` is git's own
+  `check-ref-format` rule now, applied to every `ref:` hop); and `git
+  fetch` took the remote name from `.git/config` as a positional argument,
+  where `--upload-pack=<cmd>` runs `<cmd>`.
+
+  **Four things nothing bounded.** `run_program`'s timeout covered only the
+  wait — joining the pipe readers blocked until every descendant closed the
+  write end, so an ssh `ControlPersist` master outliving `git fetch` left
+  the worker in `read_to_end` for ever with its lock held. A stamp in the
+  future (a resumed VM, NTP correcting a bad RTC) made a lock live for ever
+  and an entry fresh for ever, because the negative age passed the
+  staleness check and then satisfied the grace window — and the existing
+  live-lock test only passed *because* of that, stamping from the wall
+  clock while the tick ran on `GARNISH_NOW`. A failed entry stored a
+  command's whole stderr, which every warm tick then read and parsed.
+  `Cache::write` left its temp file behind on any failure.
+
+  **Empty is unset.** `config::locate` read `GARNISH_CONFIG` and
+  `XDG_CONFIG_HOME` without the empty guard its siblings have, so
+  `GARNISH_CONFIG=` put `⚠ config: cannot read` on every tick and
+  `XDG_CONFIG_HOME=` made the lookup relative to the current directory — a
+  checkout holding `garnish/garnish.toml` became the user's config.
+
+  **Nine silent or wrong renders.** A failed or overdue module built wholly
+  from its cache entry lost its `✗`/`⟳` mark, so a broken git read as an
+  empty row; `pr` underlined its number whenever `link = true`, even with
+  no URL to link to; `sync` printed `refs/heads/main` where every other
+  case reads `origin/main`; `spend` picked its band from a percentage
+  clamped to 100 while printing the unclamped one; `context`'s
+  `show_compaction_percent` did nothing unless the marker was also on;
+  `branch.max_length` and `session_name.max_length` cut with `…` even in
+  the ascii set, and by `char` rather than by cluster; a bar glyph override
+  that was not one cell was swapped out in silence while `config check`
+  said `ok`; `[frame] separator_frames = []` was accepted where an icon's
+  was reported; a non-table item in an inline `line` array renumbered every
+  later line, so an error named a `line[n]` that was not the user's; and
+  `rgb_to_256` split the range evenly although xterm's cube levels are
+  `0, 95, 135, 175, 215, 255`, which moved whole themes under
+  `color = "256"` (`#6c7086` came out a light blue-grey). A clipped text
+  box of wide glyphs could also come out narrower than its `width`, which
+  the new sweep over that family found.
+
+  **One home per rule.** `IconSet::ellipsis` and `IconSet::stale_glyphs`,
+  `util::cut_name` and `util::short_sha`, `modules::lead` (the `show_icon`
+  preamble seventeen renders opened with) and `modules::badge` (a trailing
+  glyph, two of whose seven sites had dropped the empty-glyph guard and
+  left a stray cell), `config::env_path`, `equal_width_frames`,
+  `refuse_unparsable`, one `comment()` in place of three identical closures,
+  `common_keys()` derived from `COMMON_OPTS`, `name()` on `ColorChoice` and
+  `StaleStyle` where `docs.rs` had carried stand-ins. `Freshness::Failed`
+  held a message its own doc said `doctor` read (it does not, it re-reads
+  the entries), so it was a `String` cloned per tick and dropped; five more
+  public items had no caller at all.
+
+  **The tests had five blind spots.** Every pinned render runs under
+  `Clock::fixed()`, whose `git: false` makes the repo group render nothing,
+  and every fixture's `cwd` does not exist either — so `sync` and half of
+  `branch` appeared in none of the 472 goldens, in no matrix case and in no
+  benchmark (`render_module/sync` was timing an early return). The git
+  helpers ran under the developer's `~/.gitconfig`, which on this project
+  means `commit.gpgsign`. The payload goldens and the generated docs had no
+  orphan check. The "unwritable cache" case was a no-op as root. And
+  `Cache::from_env`'s precedence chain had no test — the one named for it
+  asserted `key_hash` and `sanitize`.
+
+  **CI** gained the shellcheck gate `CLAUDE.md` has always required (about
+  1,100 lines of shell, none of it checked), `permissions: contents: read`
+  on `ci.yml`, and an explicit `ref:` on the review workflow's checkout,
+  whose three comment triggers were reading `main`'s tree.
+
+  **Documents.** SPEC said the settings chain is read every tick (it is
+  read once, on demand), put `sync`'s fetch-age hint in the wrong preset
+  column, still named `●`/`○` glyphs its own width rule bans, credited the
+  statusline skill with `config init --force` semantics it did not have
+  (the skill now takes the backup), and justified the feedback skill's
+  redaction with a claim `doctor` stopped making in v0.2.0. The generated
+  environment table left out `GARNISH_DEBUG` and `DISABLE_COMPACT`; the
+  reference documented `ticker_step` as "> 0" while the parser takes
+  0.001–1000. `GARNISH_DEBUG` itself wrote only on a failed spawn although
+  SPEC promised per-tick diagnostics, so the tick writes one line and
+  `debug.rs` has tests (it had none). `CLAUDE.md` restated SPEC § 2.1
+  paragraph for paragraph and carried run IDs, dollar figures and
+  Homebrew line numbers that cannot stay true; it keeps the conclusions and
+  the grep anchors. This backlog lost two items that were already answered
+  and gained the shape it has now: what waits on Daniel, and what is parked.

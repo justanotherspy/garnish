@@ -730,6 +730,25 @@ fn worker_repo_modules_render_in_every_preset_and_icon_set() {
             }
         }
     }
+    // `branch.link` needs a branch: SPEC § 3.1 gives a detached HEAD no page,
+    // and the unit level cannot reach one (it has no repository on disk).
+    config(
+        &env,
+        "color = \"always\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nlink = true\n",
+    );
+    let repo = r#""repo":{"host":"github.com","owner":"o","name":"r"}"#;
+    let linked =
+        payload(&env.work).replace(r#""added_dirs":[]"#, &format!(r#""added_dirs":[],{repo}"#));
+    let no_color = [("NO_COLOR", "")];
+    let (out, _, ok) = garnish(&env, &[], Some(&linked), &no_color);
+    assert!(ok && out.contains("\x1b]8;;https://github.com/o/r/tree/main"), "{out:?}");
+    let head = env.work.join(".git").join("HEAD");
+    let sha = std::fs::read_to_string(env.work.join(".git/refs/heads/main")).unwrap();
+    std::fs::write(&head, &sha).unwrap();
+    let (out, _, ok) = garnish(&env, &[], Some(&linked), &no_color);
+    assert!(ok && !out.contains("\x1b]8;;"), "a detached HEAD has no page: {out:?}");
+    std::fs::write(&head, "ref: refs/heads/main\n").unwrap();
+
     // `max_length` cuts the branch name with the icon set's own mark, which
     // no other test reaches: the matrix never sets it (it is an integer, and
     // only booleans and enums are swept) and every golden runs without git.

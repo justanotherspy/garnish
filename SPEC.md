@@ -265,8 +265,8 @@ one, `label`, `prefix`, `suffix`, `hide_when_empty`) are specs in
 | id | shows | minimal | default | full | refresh |
 |---|---|---|---|---|---|
 | `path` | base dir (git toplevel, else `project_dir`) + cwd subpath | base name | `~/parent/base` + dim `/sub` | full tilde path + subpath + `added_dirs` count | 0 (toplevel cached) |
-| `branch` | branch or detached HEAD | name | icon + name | + short SHA, dirty `●` | 5 |
-| `sync` | ahead/behind vs `@{upstream}` | `⇡2 ⇣1` when non-zero | colored counts, the `no_upstream` glyph (`⊘`) when the branch has none | + upstream name + fetch-age hint (`stale` glyph, a space, the age: `↻ 12m`, § 4.1) | 5 (+ opt-in `fetch_interval`) |
+| `branch` | branch or detached HEAD | name | icon + name | + short SHA, dirty `✱` | 5 |
+| `sync` | ahead/behind vs `@{upstream}` | `⇡2 ⇣1` when non-zero | colored counts, the `no_upstream` glyph (`⊘`) when the branch has none, the fetch-age hint (`stale` glyph, a space, the age: `↻ 12m`, § 4.1) | + upstream name (`origin/main`, or the branch name alone when the upstream is a local branch) | 5 (+ opt-in `fetch_interval`) |
 | `worktree` | `workspace.git_worktree` / `worktree.name` | name | icon + name | + `original_branch → branch` | 0 |
 | `pr` | open PR/MR | `#123` linked | icon + `#123` linked + state glyph | + state word | 0 |
 
@@ -326,9 +326,16 @@ A8):
 
 PR state glyphs/colors: approved `✓` ok, pending `❍` warn, changes_requested
 `✗` danger, draft `❏` muted (the unicode set; nerd uses nf-fa glyphs, see
-the generated `docs/modules/pr.md`). Link uses OSC 8 to `pr.url`. (Changed
-in PLAN Phase 12: `○` and `◌` are East Asian Ambiguous and drew two cells
-in COSMIC Terminal.)
+the generated `docs/modules/pr.md`). The number is linked with OSC 8 to
+`pr.url` when there is one the painter will emit (§ 5), and underlined only
+then — a payload may carry no URL, or an `ssh://` one, and an underline
+with no link reads as clickable.
+
+(Corrected in PLAN Phase 12: `○` and `◌`, and with them `branch`'s dirty
+`●` and `cache`'s `●`/`○`, are Geometric Shapes or East Asian Ambiguous and
+drew two cells in COSMIC Terminal. The shipped glyphs are `❍`, `❏`, `✱` and
+`✦`/`✧`; the unit test `built_in_glyphs_have_one_width_in_every_terminal`
+rejects the whole block.)
 
 ### 3.2 Model group
 
@@ -336,7 +343,7 @@ in COSMIC Terminal.)
 |---|---|---|---|---|---|
 | `model` | `display_name`, `⚡` when fast | name | icon + name (+⚡) | + `model.id`, thinking glyph | 0 |
 | `effort` | `effort.level` | word | icon + scale `▁▃▅▇█` | scale + word | 0 |
-| `context` | bar (100% = window) + % + compaction marker | `42%` | bar(20) + `42%` | bar(30) + `42%` + marker label + window tag + `exceeds_200k` | 0 (the settings chain of § 2.3 is read every tick; caching it for 30 s is the backlog's optional headroom, not implemented) |
+| `context` | bar (100% = window) + % + compaction marker | `42%` | bar(20) + `42%` | bar(30) + `42%` + marker label + window tag + `exceeds_200k` | 0 (the § 2.3 settings chain is read at most once per tick, and only when the marker, its label or `scale = "usable"` needs it) |
 | `style` | `output_style.name` | name unless default | icon + name unless default | always | 0 |
 
 Context bar: filled cells `█` with partial blocks for sub-cell precision,
@@ -406,7 +413,7 @@ is stale at the boundary.
 |---|---|---|---|---|---|
 | `session` | `total_duration_ms` | `1h12m` | icon + `1h12m` | + start time | 0 |
 | `api` | `total_api_duration_ms` | `8m20s` | icon + `8m20s` | + `(11%)` of session | 0 |
-| `cache` | prompt cache | `91%` | icon + `91%` + TTL badge + `● 47m`/`○` warm countdown | + misses, writes | 0 |
+| `cache` | prompt cache | `91%` | icon + `91%` + TTL badge + `✦ 47m`/`✧` warm countdown | + misses, writes | 0 |
 | `clock` | local time + spinner | `HH:MM` | spinner + `HH:MM:SS` | + date, UTC offset | 0 |
 
 `cache` hit % = `prompt_cache.hit_ratio`; fallback to the last request's
@@ -1420,17 +1427,18 @@ them needs network access from garnish itself, they drive `gh` and the
 
 - **`garnish-statusline`.** Conversational config builder (the hands-on
   one is `garnish setup`, § 14; both write the same file, and the skill
-  points at `setup` when the person would rather see the choices than
-  answer questions). Asks, with
+  will point at `setup` when the person would rather see the choices than
+  answer questions — target state, PLAN Phase 22). Asks, with
   recommended defaults: terminal and font (Nerd Font? decides `icons`),
   usual terminal width (decides preset and line count), what matters most
   (repo, model/context, usage limits, timers), colour preference (theme,
   or match the terminal), frame taste (rounded / powerline / none), whether
   columns should line up (`align`, `durations`), and offers a free-text
-  "describe what you want" step. It writes the config with
-  `garnish config init --force` semantics after showing a `garnish preview`
-  of it, validates with `config check`, and explains how to tweak it. It
-  never edits `settings.json` beyond what `garnish install` does.
+  "describe what you want" step. It drafts into a temp file, shows a
+  `garnish preview` of it, and only then copies it over the real one behind
+  the same `.bak-<epoch>` backup garnish itself keeps (§ 5), validates with
+  `config check`, and explains how to tweak it. It never edits
+  `settings.json` beyond what `garnish install` does.
 - **`garnish-feedback`.** Files a GitHub issue on `justanotherspy/garnish`
   with `gh issue create` using a template: terminal application and
   version, font, OS, `garnish --version`, the config (`garnish config
@@ -1445,11 +1453,12 @@ them needs network access from garnish itself, they drive `gh` and the
   file with its § 12 header and the sample, asking for a screenshot. A
   maintainer turns accepted issues into `presets/<name>.toml` PRs.
 - **Both reporting skills post to a public repository**, so each one first
-  replaces the home directory in every path with `~` (doctor and `config
-  show` print absolute paths), keeps only `GARNISH_*` lines of the doctor's
-  environment section, prints the whole issue body, and asks the person
-  explicitly before `gh issue create`. Nothing leaves the machine on an
-  unanswered or negative question.
+  replaces the home directory in every path with `~` (`doctor` already
+  collapses it and `config show` prints no path at all, so this catches
+  what the person pasted by hand), keeps only `GARNISH_*` lines of the
+  doctor's environment section, prints the whole issue body, and asks the
+  person explicitly before `gh issue create`. Nothing leaves the machine on
+  an unanswered or negative question.
 
 ## 14. Interactive setup (target state; PLAN Phase 22)
 

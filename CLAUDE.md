@@ -144,7 +144,7 @@ goal without a documented reason.
 ## Commands
 
 ```
-make setup        # scripts/setup.sh: toolchain + nextest (ARGS=--bench|--all for more)
+make setup        # scripts/setup.sh: toolchain + nextest + shellcheck (ARGS=--bench|--all for more)
 make check        # fmt --check + clippy -D warnings + nextest + doctests
 make lint         # fmt --check + clippy
 make test         # cargo nextest run && cargo test --doc
@@ -152,7 +152,7 @@ make docs         # regenerate docs/ and examples/ from the module schemas
 make bench        # hyperfine budget gate (fails when over budget)
 make watch        # watchexec: lint + test on every save
 make install      # cargo install --path . --locked  → $CARGO_HOME/bin/garnish
-./scripts/ci.sh   # everything above plus rustdoc -D warnings and the docs-sync check
+./scripts/ci.sh   # everything above plus shellcheck and rustdoc -D warnings
 ```
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `scripts/setup.sh` and
@@ -199,18 +199,17 @@ with no build tools in it.
 
 **Turns are the binding constraint, not money.** Every inline comment is a
 turn and so is every `track_progress` checklist update, so progress tracking
-and a tight `--max-turns` pull against each other. At 15 the first real review
-(run 34879256227) died on `error_max_turns` three seconds after its second
-inline comment, with the summary unwritten, on a two-file 33-line diff. The cap
-is now **50**, which is deliberately generous: a truncated review wastes
-everything it already spent, so raise the cap before trimming the review.
+and a tight `--max-turns` pull against each other; at 15 a review of a
+two-file diff died on `error_max_turns` with its summary unwritten. The cap
+is **50**, deliberately generous: a truncated review wastes everything it
+already spent, so raise the cap before trimming the review.
 
-**Sonnet 5 at `--effort high` is what pays for that ceiling.** Sonnet is about
-2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so 50 Sonnet
-turns cost roughly what 25 Opus turns would; the 16 Opus turns of that first
-review cost $0.95. Note that `high` is not the top of the range — `xhigh` sits
-between it and `max` and is Claude Code's own default for Sonnet 5 — so this is
-a deliberate setting, not a maximum.
+**Sonnet 5 at `--effort high` is what pays for that ceiling.** Sonnet is
+about 2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so 50
+Sonnet turns cost roughly what 25 Opus turns would. Note that `high` is not
+the top of the range — `xhigh` sits between it and `max` and is Claude
+Code's own default for Sonnet 5 — so this is a deliberate setting, not a
+maximum.
 
 Two prompt rules keep the output usable. The review folds leftover findings
 into the summary rather than spending its last turns posting them one by one,
@@ -229,11 +228,15 @@ every job still evicts whatever run holds the group. This workflow talks on
 the very events it listens to — `track_progress` posts a tracking comment and
 the review posts its summary through `gh pr comment`, both as `claude[bot]`,
 and both come back as `issue_comment: created` — so the workflow cancelled
-itself: the first real review died 80 seconds in (run 34878106655) when its
-own tracking comment created a second run that took the group and was then
-skipped. Two guards keep it dead: the group sits on the job, where a skipped
-job never joins it, and the `if` excludes bot authors so those comments are
-never candidates.
+itself, its own tracking comment creating a second run that took the group
+and was then skipped. Two guards keep it dead: the group sits on the job,
+where a skipped job never joins it, and the `if` excludes bot authors so
+those comments are never candidates.
+
+**The checkout names the pull request's head explicitly.** Three of the four
+triggers are comment events, whose `GITHUB_REF` is the default branch, so
+without `ref: refs/pull/<n>/head` the review reads `main`'s tree while
+reasoning about the pull request's diff.
 
 ## Release process
 
@@ -308,13 +311,13 @@ by `unless @cask.loaded_from_api?`, so casks served from homebrew/cask's JSON
 API stay quiet and source-loaded third-party taps always warn.
 
 Two DSL facts the template depends on, both verified in `install_steps.rb`
-at tag 7.0.1: `run`'s `args` are template-expanded
-(`args…map { |arg| expand_template_tokens(arg) }`, line 1246), and
-`must_succeed:` round-trips through the step's `allow_failure` (lines 723
-and 1252). A `{{token}}` that resolves to nothing cannot pass through
-silently: `staged_path` is in `CONTENT_PATH_TOKENS`, so it goes to
-`root_path`, which **raises** `unknown install step base` (line 1596)
-rather than leaving the literal in place.
+at tag 7.0.1 (named by symbol, not by line: Homebrew's line numbers move
+every release): `run`'s `args` are template-expanded
+(`args…map { |arg| expand_template_tokens(arg) }`), and `must_succeed:`
+round-trips through the step's `allow_failure`. A `{{token}}` that resolves
+to nothing cannot pass through silently: `staged_path` is in
+`CONTENT_PATH_TOKENS`, so it goes to `root_path`, which **raises**
+`unknown install step base` rather than leaving the literal in place.
 
 **`brew fetch` does not exercise any of this.** It downloads and checksums;
 it never stages or installs, and neither does `brew info --cask`. So the
@@ -441,9 +444,22 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   new module or option gets the shared invariants checked for free; a
   behaviour of its own still wants a test of its own. A unit test scans
   `src/modules/*.rs` for every key read
-  by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `icon(cfg, "…", "…")`, …)
+  by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `lead(cfg, "…")`,
+  `badge(cfg, "…", "…")`, `icon(cfg, "…", "…")`, …)
   and fails on one that no schema defined in that file declares, so a typo
-  in a key cannot render silently as an empty icon.
+  in a key cannot render silently as an empty icon — a new helper that
+  takes a key by name has to be added to that scan's pattern list.
+- **A module never spells a shared rule itself.** The leading glyph is
+  `modules::lead`, a trailing one `modules::badge`, a name cut
+  `util::cut_name`, the mark a cut ends in `IconSet::ellipsis`, the
+  overdue and failed marks `IconSet::stale_glyphs`. Each was written out
+  per module once and drifted: two badges forgot the empty-glyph guard and
+  left a stray cell, and two cuts emitted `…` under `icons = "ascii"`.
+- **A glyph that is repeated cell by cell must be one cell.** `fill`,
+  `empty` and `marker` are that vocabulary (`schema::ONE_CELL_ICONS`); the
+  config rejects a wider override under the module's path, as it has always
+  done for `frame.fill_char`, rather than letting `util::bar` substitute one
+  in silence.
 - `Segment.text` is private: `Segment::plain`/`styled`/`with_text`/`push_str`
   reduce text to plain text on the way in and `text()` reads it, so nothing
   can put an escape sequence on a row by assigning a field.
@@ -453,11 +469,17 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - The module set is fixed (21 ids listed in `SPEC.md`) plus the `text.<name>`
   family (SPEC § 3.7: static text only, no commands, no files). No
   generic/plugin module that runs anything.
-- Every time read goes through `time::now()`. Every path goes through
-  `paths::*`. Every env hook is documented in `SPEC.md` § Test hooks:
-  `GARNISH_NOW`, `GARNISH_CACHE_DIR`, `GARNISH_CONFIG`, `GARNISH_NO_SPAWN`,
-  `GARNISH_COLUMNS`, `GARNISH_DEBUG`, `GARNISH_ANIMATE`,
-  `GARNISH_MANAGED_SETTINGS`; `doctor` lists every one that is set.
+- Every time read goes through `time::now()`. Every env hook has a
+  `*_ENV` constant, is listed in `doctor::TEST_HOOKS` (which is what
+  `doctor` prints) and is documented in `SPEC.md` § Test hooks; a unit test
+  scans the source for a `GARNISH_*` literal that is in neither, so a new
+  hook cannot be invisible in a bug report.
+- **An environment variable holding a path is unset when it is empty.**
+  `config::env_path` is that rule and `claude_settings::home_dir` is its
+  `HOME` twin: `GARNISH_CONFIG=` once named the empty path and
+  `XDG_CONFIG_HOME=` once made the config lookup relative to the current
+  directory. `GARNISH_MANAGED_SETTINGS` is the one exception, and says so:
+  empty means "no managed file", unset means the platform's.
 - Fixtures: `tests/fixtures/payloads/*.json`, `tests/fixtures/configs/*.toml`;
   golden renders in `tests/golden/`. Payload goldens (`tests/golden.rs`) vary
   fixture × preset × icon set; config goldens (`tests/config_golden.rs`) render
@@ -467,9 +489,15 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   repository root, which is how `HOME` points at a settings fixture under
   `tests/fixtures/settings/`); `# color: always` renders one with colour
   on (the row-start guards of both suites strip escape sequences first;
-  `colour-on`, `branch-link` and `text-link` are the goldens in that mode,
-  the link pair because the painter emits no OSC 8 under `--color never`).
-  Tests that touch the cache dir or PATH
+  `colour-on`, `branch-link`, `text-link` and `theme-nord` are the goldens
+  in that mode — the link pair because the painter emits no OSC 8 under
+  `--color never`, and `theme-nord` because a palette other than the
+  default reached no render at all). Both suites also fail on a golden
+  whose fixture is gone, since `UPDATE_GOLDEN=1` never deletes one.
+  Every pinned render runs with `Clock::fixed()`, whose `git: false` makes
+  the repo group render nothing, so `branch` and `sync` are covered by
+  `worker_repo_modules_render_in_every_preset_and_icon_set` in a real
+  repository instead. Tests that touch the cache dir or PATH
   shims are named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
   serially (`.config/nextest.toml`). A test that must kill a process group
   (the tick's, to prove the worker outlives it) spawns the tick with
@@ -496,54 +524,31 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   2.1.260 binary and unchanged in 2.1.261 and 2.1.270 (`let r=e-13000` in
   the threshold function next to `testPctOverride`); configurable as
   `modules.context.compact_buffer_tokens`.
-- **Every row is drawn dim, and nothing garnish prints can undo it**
-  (2.1.261 and 2.1.270). The status line component renders each row as
-  `<Text dimColor wrap="truncate">` around a child that parses the row's
-  escape sequences into per-piece style props and re-emits them; the Ink
-  fork merges the parent's `dim` into every piece (the text-tree walk
-  `h=n.textStyles?{...s,...n.textStyles}:s`) and a piece can only add
-  styles, so a reset (`ESC[0m`) is parsed away. `preview` therefore paints
-  every segment faint too (`Painter.dim`, decided 2026-09-13) so that it
-  shows the screen's intensity; the tick never does (the harness adds it,
-  and the goldens pin the tick's bytes). SPEC § 2.1 records why the
-  FUTURE-SPEC A1 prefix was dropped. To re-verify after an upgrade:
-  `grep -a -o` the binary (a Bun
-  executable holding minified JS) for `dimColor:!0,wrap:"truncate",children:e(`
-  next to the function that splits the stdout on newlines and carries the
-  previous rows' escape sequences onto the next row; follow its child to a
-  `memo` over a function destructuring `children`, `dimColor`, `italic`,
-  `wrap` that feeds the text to a tokenizer (`.feed(`) and collects
-  `{text, props}` pieces; then find the `textStyles` merge in the Ink
-  core. The 2.1.261 binary is the `@anthropic-ai/claude-code-linux-x64`
-  npm package of that version (`npm pack`), handy for a before/after.
-- `LINES` is the full terminal height (2.1.270: the hook runner copies
-  `process.stdout.rows` next to `columns`), the status line component
-  draws every row with no cap of its own, and nothing up to the REPL root
-  bounds the footer's height. What a tall status line does is the
-  renderer's business (SPEC § 2.1, read 2026-09-13, not watched on a
-  screen): the classic inline renderer lays the frame out with a width
-  constraint only (`calculateYogaLayout` passes just the width) and lets
-  the terminal scroll the frame's top into scrollback (a full reset
-  redraws from row `n.screen.height-n.viewport.height+1`, and
-  `Full reset (shrink->below)` names one of its triggers); the fullscreen
-  renderer (chosen by the function that logs `fullscreen disabled: tmux
-  -CC` and reads `tengu_pewter_brook`, `tengu_amber_creek` and
-  `fullscreenUpsellSeenCount` after the `tui` setting and
-  `CLAUDE_CODE_NO_FLICKER`) puts the bottom block in a box
-  `flexShrink:0,width:"100%",maxHeight:` of `Math.floor(rows/2)` under a
-  root as tall as the terminal, whose alternate-screen buffer clips
-  overflow with the warning `something is rendering outside
-  <AlternateScreen>. Overflow clipped.`, and gives the prompt input
-  `maxVisibleLines:` of the same `Math.floor(rows/2)` minus 5; the
-  DECSTBM split renderer (gated by `CLAUDE_CODE_DECSTBM` and
-  `tengu_marlin_porch`; `Screen-reader mode always uses the classic
-  renderer` is the `/tui` text) bounds its bottom box with `minHeight:4`
-  and `maxHeight:` of `rows-2`. Overflow of a capped box lands on its
-  last rows because Yoga's default style has `justifyContent:0`
-  (flex-start) next to `maxHeight:` in the node defaults. To re-verify
-  after an upgrade, `grep -a` the binary for those quoted strings and
-  shapes (the minified names of 2.1.270, `ts`, `Xa`, `hoe`, `rz`, `xZe`,
-  change with every build).
+- **Every row is drawn dim, and nothing garnish prints can undo it** — the
+  mechanism, and why `preview` dims its own rows while the tick does not,
+  are SPEC § 2.1. To re-verify after an upgrade, `grep -a -o` the binary (a
+  Bun executable holding minified JS) for
+  `dimColor:!0,wrap:"truncate",children:e(` next to the function that
+  splits the stdout on newlines and carries the previous rows' escape
+  sequences onto the next row; follow its child to a `memo` over a function
+  destructuring `children`, `dimColor`, `italic`, `wrap` that feeds the
+  text to a tokenizer (`.feed(`) and collects `{text, props}` pieces; then
+  find the `textStyles` merge in the Ink core. A specific version's binary
+  is the `@anthropic-ai/claude-code-linux-x64` npm package of that version
+  (`npm pack`), handy for a before/after.
+- **What a tall status line does is the renderer's business** — the three
+  renderers, their bounds and the `⌊LINES / 2⌋ − 5` ceiling are SPEC § 2.1.
+  To re-verify after an upgrade, `grep -a` the binary for these strings and
+  shapes (the minified names change with every build, so never grep those):
+  `Full reset (shrink->below)` and `calculateYogaLayout` for the classic
+  renderer; `fullscreen disabled: tmux -CC`, `tengu_pewter_brook`,
+  `tengu_amber_creek`, `fullscreenUpsellSeenCount`,
+  `flexShrink:0,width:"100%",maxHeight:` and `something is rendering
+  outside <AlternateScreen>. Overflow clipped.` for the fullscreen one;
+  `CLAUDE_CODE_DECSTBM`, `tengu_marlin_porch` and `Screen-reader mode
+  always uses the classic renderer` for the split one; `justifyContent:0`
+  next to `maxHeight:` in Yoga's node defaults for why overflow lands on a
+  box's last rows.
 - `COLUMNS`/`LINES` are `process.stdout.columns`/`rows` (the full terminal);
   OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
   ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is

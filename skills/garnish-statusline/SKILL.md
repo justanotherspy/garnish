@@ -73,9 +73,19 @@ sample (the same payload) to a temp file:
 ```
 
 Show the preview, ask whether it reads right, iterate on the draft. When
-they approve, copy it into place (`cp "$DRAFT" "$(garnish config path)"`,
-creating the directory if needed) and say that the previous file, if any,
-was replaced. Explain each key you set in one line so the person can tweak
+they approve, back the existing file up and then copy the draft into place
+— the backup is the `.bak-<epoch>` one `garnish` itself keeps (SPEC § 5:
+a file garnish rewrites always leaves one), and a plain `cp` on its own
+would keep nothing:
+
+```sh
+TARGET=$(garnish config path)
+mkdir -p "$(dirname "$TARGET")"
+[ -f "$TARGET" ] && cp "$TARGET" "$TARGET.bak-$(date +%s)"
+cp "$DRAFT" "$TARGET"
+```
+
+Say where the backup went. Explain each key you set in one line so the person can tweak
 it later (point at `docs/config.md` and the module pages). Finish with
 `garnish config check` reporting `ok`, and remind them that `preview` runs
 with the live clock, so animations move between runs (`GARNISH_ANIMATE=0`

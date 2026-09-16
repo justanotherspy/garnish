@@ -5,6 +5,57 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Audit through Phase 20** — the code read against its documents
+
+Fixed, each with a test:
+
+- A `.git/HEAD` naming a ref outside the repository (`ref: ../../../x`)
+  made `branch` show the first seven characters of that file as its short
+  SHA, and `git fetch` took the remote name from `.git/config` as a
+  positional argument, where a name starting with `-` is an option to git.
+  Both matter only in a checkout you did not create, and both are refused
+  now.
+- A module refreshed in the background lost its `⟳`/`✗` mark when it had
+  no value of its own, so `sync` with a broken git looked like an empty
+  row instead of a failure.
+- `pr` underlined its number whenever `link = true`, even when the payload
+  carried no URL to link to, so it looked clickable and was not.
+- `sync` printed `refs/heads/main` as the upstream of a branch tracking a
+  local branch, where every other case reads `origin/main`.
+- `spend` coloured its percentage from a value clamped to 100 while
+  printing the real one, so a threshold above 100 could never be reached.
+- `context.show_compaction_percent` printed nothing unless
+  `compaction_marker` was also on, which nothing documented.
+- `branch.max_length` and `session_name.max_length` cut with `…` even
+  under `icons = "ascii"`, and could split a flag or an accented letter in
+  half.
+- A bar glyph (`fill`, `empty`, `marker`) that was not exactly one cell
+  was silently replaced while `config check` said `ok`; it is reported
+  now, like `frame.fill_char`. `[frame] separator_frames = []` was
+  likewise accepted in silence.
+- `GARNISH_CONFIG=` (empty) put `⚠ config: cannot read` on every tick, and
+  `XDG_CONFIG_HOME=` made the config lookup relative to the current
+  directory, so a checkout holding `garnish/garnish.toml` became your
+  config. An empty path variable means unset everywhere now.
+- Under `color = "256"` every theme was shifted: the 6×6×6 cube's levels
+  are `0, 95, 135, 175, 215, 255`, not evenly spaced, so a colour could be
+  moved by up to 41 per channel.
+- A clipped text box of wide glyphs (CJK, emoji) could come out narrower
+  than its `width`, shifting an aligned column.
+- A background worker could hang for ever holding its module's lock when
+  something outlived `git fetch` (ssh's persistent connection does), and a
+  clock that stepped backwards froze a module's value until the wall clock
+  caught up.
+- An error in an inline `line = [...]` array named the wrong line number.
+- `GARNISH_DEBUG` now writes a line per tick, as the reference has always
+  said; it only ever logged a failed worker start.
+
+Also: the generated reference gained `GARNISH_DEBUG`, `DISABLE_COMPACT`
+and `GARNISH_MANAGED_SETTINGS` rows and the real range for the three
+`*_step` keys (`0.001`–`1000`, documented as "> 0"); `garnish doctor`
+builds its environment list from the same constants the code reads, so a
+hook cannot go missing from a bug report.
+
 **Per-module presentation** (PLAN Phase 20)
 
 - `max_width` on any built-in module cuts the whole module (label, prefix

@@ -31,7 +31,7 @@ fn schema() -> ModuleSchema {
     ModuleSchema {
         id: "text",
         summary: "Static text in a box of fixed width; define any number as `[modules.text.<name>]`.",
-        doc: "A fixed string in a box, placed on a line as `text.<name>`. `width = 0` makes the box as wide as the text; otherwise the box is `width` cells with `pad` blank cells on each side, `justify` places shorter text in it, and `overflow` decides what happens to longer text: `clip` cuts it with an ellipsis, `scroll` slides a window over it and restarts after the end has passed, `scroll-wrap` is a ticker that flows continuously with `gap` between the end and the start. Scrolling is a pure function of the clock (`floor(now × step) mod period`), so nothing is stored between ticks and `GARNISH_ANIMATE=0` freezes it. The text is plain: escape sequences and control characters are stripped. Text modules have no `preset` and no `refresh`.",
+        doc: "A fixed string in a box, placed on a line as `text.<name>`. `width = 0` makes the box as wide as the text; otherwise the box is `width` cells with `pad` blank cells on each side, `justify` places shorter text in it, and `overflow` decides what happens to longer text: `clip` cuts it with an ellipsis, `scroll` slides a window over it and restarts after the end has passed, `scroll-wrap` is a ticker that flows continuously with `gap` between the end and the start. Scrolling is a pure function of the clock (`floor(now × step) mod period`), so nothing is stored between ticks and `GARNISH_ANIMATE=0` freezes it. The text is plain: escape sequences and control characters are stripped. With an empty `text` the module has nothing to show, so `hide_when_empty` (on by default) hides it rather than drawing a dim `–`. Text modules have no `preset` and no `refresh`, and `width` sizes the box where other modules take `max_width`.",
         sources: &["the config file"],
         refresh: 0,
         opts: vec![
@@ -136,7 +136,19 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
     } else {
         let step = cfg.float("step");
         match cfg.str("overflow") {
-            "clip" => truncate(&styled, box_w, ctx.icons.ellipsis()),
+            "clip" => {
+                let mut cut = truncate(&styled, box_w, ctx.icons.ellipsis());
+                // A cut can land short of the box: the next cluster may be
+                // two cells wide with one cell left, so `truncate` stops
+                // early. `scroll` always fills its window, and a text
+                // module is a fixed-width slot next to aligned columns, so
+                // the shortfall is padded rather than left to shift them.
+                let short = box_w.saturating_sub(crate::ansi::segments_width(&cut));
+                if short > 0 {
+                    cut.push(Segment::plain(" ".repeat(short)));
+                }
+                cut
+            }
             "scroll-wrap" => {
                 let gap = cfg.str("gap");
                 let period = text_w.saturating_add(display_width(gap));
@@ -203,5 +215,73 @@ mod tests {
         assert_eq!(crate::ansi::Painter::PLAIN.paint(&centred), "  hi  ");
         assert!(linked(&centred), "{centred:?}");
         assert!(centred.len() >= 3, "fill, text, fill: {centred:?}");
+    }
+
+    /// SPEC § 9: the `text.<name>` family is the one module set outside the
+    /// schema matrix — its content is wholly user-supplied, so its options
+    /// are swept here instead, over text a user could really paste.
+    ///
+    /// The invariants are the matrix's: the box is exactly the width it was
+    /// asked for, no escape or control byte reaches a row, a cluster is
+    /// never split, and a link the painter would refuse never survives.
+    #[test]
+    fn every_text_option_holds_the_shared_invariants() {
+        use crate::icons::IconSet;
+        let payload = crate::payload::Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let hostile = [
+            ("plain", "hello"),
+            ("escape", "a\u{1b}[31mred\u{1b}[0m"),
+            ("control", "a\u{7}b\u{0}c"),
+            ("bidi", "a\u{202e}gnp.txt"),
+            ("wide", "日本語テキスト"),
+            ("flag", "🇺🇸🇫🇷ab"),
+            ("combining", "e\u{301}e\u{301}e\u{301}"),
+            ("newline", "one\ntwo"),
+        ];
+        let is_escape = |c: char| c.is_control() || c == '\u{7}';
+        for (name, text) in hostile {
+            for icons in IconSet::ALL {
+                for overflow in ["clip", "scroll", "scroll-wrap"] {
+                    for justify in ["left", "center", "right"] {
+                        for width in [0_usize, 1, 4, 9] {
+                            let cfg = format!(
+                                "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = {}\nwidth = {width}\npad = 1\noverflow = \"{overflow}\"\njustify = \"{justify}\"\n",
+                                icons.name(),
+                                crate::config::schema::toml_string(text),
+                            );
+                            let (config, errs) =
+                                crate::config::parse(&cfg, &crate::modules::SCHEMAS);
+                            assert!(errs.is_empty(), "{name}: {errs:?}");
+                            let mut clock = Clock::fixed();
+                            clock.animate = true;
+                            let label =
+                                format!("{name}/{}/{overflow}/{justify}/{width}", icons.name());
+                            let row = render_lines_at(&payload, &config, Some(80), &clock)
+                                .into_iter()
+                                .next()
+                                .unwrap_or_default();
+                            for seg in &row {
+                                assert!(
+                                    !seg.text().chars().any(is_escape),
+                                    "{label}: {:?}",
+                                    seg.text()
+                                );
+                                assert!(
+                                    seg.link.as_deref().is_none_or(crate::ansi::safe_link),
+                                    "{label}: {:?}",
+                                    seg.link
+                                );
+                            }
+                            // `width = 0` sizes the box to the text; any
+                            // other width is exactly that, plus the pads.
+                            let cells = crate::ansi::segments_width(&row);
+                            if width > 0 {
+                                assert_eq!(cells, width + 2, "{label}: {cells} cells");
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
