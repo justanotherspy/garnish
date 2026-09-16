@@ -258,8 +258,11 @@ A8):
   (`~/r/g/src`), the way the fish shell prompts: a leading `~` is not a
   segment and stays whole, the last segment is never abbreviated, a
   dot-directory keeps its dot and first letter (`.config` → `.c`, as fish
-  does), the first character is a terminal cluster (a combining mark stays
-  with its base), and a root or one-segment path is untouched. The
+  does), the first character is a terminal cluster, the same unit every cut
+  works in (a combining mark, a skin tone or the second half of a flag
+  stays with what it belongs to: cutting inside one changes the glyph
+  rather than shortening it), and a root or one-segment path is untouched.
+  The
   existing `depth` (last `N` segments, `0` = all; per-preset defaults 1, 2
   and 0) applies before the abbreviation and keeps the `~` as it always
   has, so `depth = 2` with `fish` on `~/repos/garnish/src` gives `~/g/src`
@@ -1250,14 +1253,19 @@ per-module render cost.
 - **Module matrix from the schema** (PLAN Phase 20; from FUTURE-SPEC § 15
   item 11): an in-crate rayon test generated from `ModuleSchema` renders
   every module × every preset × every icon set × `max_width ∈ {0, 1, 4,
-  12}`, alone on an unframed line, against every payload fixture and
-  asserts the shared invariants (never wider than `max_width`, a cut
-  ending in the ellipsis and an uncut module byte-identical to its
-  uncapped render, a hidden state dropping the line rather than leaving a
-  blank row while `hide_when_empty = false` always shows the placeholder,
-  no escape or control byte in `Segment::text`, OSC 8 wrappers balanced
-  in the painted output), so a new module or option gets the shared
-  behaviour checked without a hand-written test.
+  12}`, plus every switch a schema declares (both values of a `Bool`,
+  every variant of an `Enum`, at one preset and icon set), alone on an
+  unframed line, against every payload fixture, and asserts the shared
+  invariants (never wider than `max_width`, a cut ending in the ellipsis
+  and an uncut module byte-identical to its uncapped render, a hidden
+  state dropping the line rather than leaving a blank row while
+  `hide_when_empty = false` always shows the placeholder, no escape or
+  control byte in `Segment::text`, no link the painter would refuse, OSC 8
+  wrappers balanced in the painted output), so a new module or option gets
+  the shared behaviour checked without a hand-written test. The switches
+  are what make that true of an option and not only of a module (added
+  2026-09-16: without them every module-specific key sat at its schema
+  default, Phase 20's own five included).
 - **Layout matrix** (target state; PLAN Phase 21): the column shares add
   up to the line width and differ by at most one cell at every width from
   10 to 400; every line of a multi-line row is exactly the box width with

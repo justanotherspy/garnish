@@ -700,21 +700,30 @@ impl Module for SyncModule {
 
 /// Whether the forge is GitLab, whose tree URLs carry `/-/` (SPEC § 3.1):
 /// a host named after it, or an open merge request (`pr.kind = "mr"`, the
-/// payload's other GitLab signal, which covers a self-hosted name).
+/// payload's other GitLab signal, which covers a self-hosted name). A host
+/// that names GitHub wins over the `mr` signal: the host is what serves the
+/// URL, and `/-/tree/` on github.com is a 404.
 fn is_gitlab(repo: &crate::payload::Repo, payload: &crate::payload::Payload) -> bool {
-    repo.host.as_deref().is_some_and(|h| h.to_ascii_lowercase().contains("gitlab"))
-        || payload.pr.as_ref().and_then(|p| p.kind.as_deref()) == Some("mr")
+    let host = repo.host.as_deref().map(str::to_ascii_lowercase);
+    match host.as_deref() {
+        Some(h) if h.contains("gitlab") => true,
+        Some(h) if h.contains("github") => false,
+        _ => payload.pr.as_ref().and_then(|p| p.kind.as_deref()) == Some("mr"),
+    }
 }
 
 /// The page of `branch` on the forge (SPEC § 3.1): `https://<host>/<owner>/
 /// <name>/tree/<branch>`, `/-/tree/` on GitLab; `None` when the payload's
-/// repo identity is incomplete or its host is not an authority. The path
-/// parts are percent-encoded so the painter's rule (SPEC § 5: printable
-/// ASCII) holds for any name.
+/// repo identity is incomplete, its host is not an authority, or there is
+/// no branch to link to (an empty name would link to the repository root,
+/// which is not the page the row claims). The path parts are
+/// percent-encoded so the painter's rule (SPEC § 5: printable ASCII) holds
+/// for any name.
 fn branch_url(repo: &crate::payload::Repo, branch: &str, gitlab: bool) -> Option<String> {
     let host = repo.host.as_deref().and_then(authority)?;
     let owner = repo.owner.as_deref().filter(|s| !s.is_empty())?;
     let name = repo.name.as_deref().filter(|s| !s.is_empty())?;
+    let branch = Some(branch).filter(|b| !b.is_empty())?;
     let tree = if gitlab { "/-/tree/" } else { "/tree/" };
     Some(format!(
         "https://{host}/{}/{}{tree}{}",
@@ -744,14 +753,24 @@ fn authority(host: &str) -> Option<&str> {
 ///
 /// The RFC 3986 unreserved characters and `/` are kept; every other byte
 /// of the UTF-8 encoding becomes `%XX`, so `feature/#12` and a non-ASCII
-/// name make a valid, printable-ASCII link.
+/// name make a valid, printable-ASCII link. A `.` or `..` segment has its
+/// dots encoded, so a payload-supplied owner or name cannot walk the URL
+/// up to a different page when a browser normalises the path.
 #[must_use]
 pub fn percent_encode(s: &str) -> String {
+    s.split('/').map(encode_segment).collect::<Vec<_>>().join("/")
+}
+
+/// One path segment encoded: the unreserved characters kept, every other
+/// byte `%XX`, and the dots of a `.` or `..` segment encoded too.
+fn encode_segment(segment: &str) -> String {
     use std::fmt::Write as _;
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
+    let dots = matches!(segment, "." | "..");
+    let mut out = String::with_capacity(segment.len());
+    for b in segment.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+            b'.' if dots => out.push_str("%2E"),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
                 out.push(char::from(b));
             }
             _ => {
@@ -904,6 +923,19 @@ mod tests {
         ] {
             assert_eq!(branch_url(&repo(bad), "main", false), None, "{bad}");
         }
+        // No branch, no page: an empty name would link to the repository
+        // root, which is not what the row says it points at.
+        assert_eq!(branch_url(&repo("github.com"), "", false), None);
+        // A payload-supplied owner or name cannot walk the URL up to
+        // another page: a `.` or `..` segment has its dots encoded.
+        let mut dotted = repo("github.com");
+        dotted.owner = Some("a/../..".into());
+        assert_eq!(
+            branch_url(&dotted, "main", false).as_deref(),
+            Some("https://github.com/a/%2E%2E/%2E%2E/garnish/tree/main")
+        );
+        assert_eq!(percent_encode("a/./b"), "a/%2E/b");
+        assert_eq!(percent_encode("a/...b/c"), "a/...b/c", "only a whole dot segment");
         // Every URL built passes the painter's rule, whatever the name.
         for name in ["feature/#12", "ünïcode", "a b", "tab\tname", "\u{202e}rtl"] {
             let url = branch_url(&repo("github.com"), name, false).unwrap();
@@ -920,6 +952,14 @@ mod tests {
         assert!(is_gitlab(&repo("git.example.com"), &with_pr(Some("mr"))));
         assert!(!is_gitlab(&repo("git.example.com"), &with_pr(Some("pr"))));
         assert!(!is_gitlab(&repo("github.com"), &with_pr(None)));
+        // A host that names GitHub wins over the `mr` signal: `/-/tree/`
+        // on github.com is a 404, and the host is what serves the URL.
+        assert!(!is_gitlab(&repo("github.com"), &with_pr(Some("mr"))));
+        assert!(!is_gitlab(&repo("github.example.com"), &with_pr(Some("mr"))));
+        // With no host at all the `mr` signal is all there is (and the URL
+        // is dropped anyway, for want of a host).
+        let no_host = crate::payload::Repo::default();
+        assert!(is_gitlab(&no_host, &with_pr(Some("mr"))));
         // Through the module: the fixture's worktree branch, linked and
         // underlined only with `link = true`.
         let render = |extra: &str, fixture: &str| {

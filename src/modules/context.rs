@@ -95,11 +95,17 @@ impl Module for ContextModule {
         // the usage is measured against the threshold and the marker (and
         // its percentage) is implied rather than drawn; back to the window
         // when compaction is off or the threshold is too small to scale by.
-        let threshold = threshold_percent(ctx, cfg, window);
-        let usable = (cfg.str("scale") == "usable")
-            .then_some(threshold)
-            .flatten()
-            .filter(|t| *t >= MIN_USABLE_PERCENT);
+        //
+        // The threshold is read from the settings chain, which a tick touches
+        // only when something needs it (CLAUDE.md § Cache and worker
+        // invariants): with the marker off and the window scale, nothing
+        // does, so it is not read at all.
+        let usable_scale = cfg.str("scale") == "usable";
+        let threshold = (usable_scale || cfg.bool("compaction_marker"))
+            .then(|| threshold_percent(ctx, cfg, window))
+            .flatten();
+        let usable =
+            usable_scale.then_some(threshold).flatten().filter(|t| *t >= MIN_USABLE_PERCENT);
         let pct = used
             .map(crate::num::clamp_percent)
             .map(|u| usable.map_or(u, |scale| crate::num::clamp_percent(u * 100.0 / scale)));

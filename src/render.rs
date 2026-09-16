@@ -223,7 +223,7 @@ pub fn render_lines_at(
         fill: config.frame.fill,
         width,
         truncate: config.truncate,
-        ellipsis: if config.icons == IconSet::Ascii { "..".into() } else { "…".into() },
+        ellipsis: ellipsis_for(config.icons).into(),
         // The effective animation switch is decided once, on `ctx`; with it
         // off there is no ticker and an over-wide line is cut (SPEC § 4.2).
         ticker: (config.overflow == config::Overflow::Ticker && ctx.animate).then(|| Ticker {
@@ -453,6 +453,15 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
         module
     } else {
         crate::ansi::truncate(&module, max, ellipsis)
+    }
+}
+
+/// The mark a cut ends in: `…`, or `..` where the icon set is ASCII only.
+/// One rule, so the schema matrix cannot drift from what a tick draws.
+const fn ellipsis_for(icons: IconSet) -> &'static str {
+    match icons {
+        IconSet::Ascii => "..",
+        IconSet::Nerd | IconSet::Unicode | IconSet::Emoji => "…",
     }
 }
 
@@ -1233,32 +1242,55 @@ mod tests {
         });
     }
 
-    /// One module alone on an unframed line with a preset, an icon set and
-    /// a `max_width`, for the schema matrix.
+    /// One module alone on an unframed line with a preset, an icon set, a
+    /// `max_width` and one of its own options set, for the schema matrix.
     fn matrix_config(
         id: &str,
         preset: crate::config::schema::Preset,
         icons: IconSet,
         max: usize,
         hide_when_empty: bool,
+        extra: &str,
     ) -> Config {
         let text = format!(
-            "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"{id}\"]\n[modules.{id}]\npreset = \"{}\"\nmax_width = {max}\nhide_when_empty = {hide_when_empty}\n",
+            "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"{id}\"]\n[modules.{id}]\npreset = \"{}\"\nmax_width = {max}\nhide_when_empty = {hide_when_empty}\n{extra}",
             icons.name(),
             preset.name()
         );
         let (config, errs) = config::parse(&text, &SCHEMAS);
-        assert!(errs.is_empty(), "{id} {errs:?}");
+        assert!(errs.is_empty(), "{id} {extra:?} {errs:?}");
         config
     }
 
+    /// Every switch a module's schema declares, as a TOML line: both values
+    /// of a `Bool`, every variant of an `Enum`. This is what makes the
+    /// matrix cover a new *option*, not just a new module.
+    fn matrix_switches(schema: &crate::config::schema::ModuleSchema) -> Vec<String> {
+        use crate::config::schema::Kind;
+        schema
+            .opts
+            .iter()
+            .flat_map(|opt| match opt.kind {
+                Kind::Bool => {
+                    vec![format!("{} = true\n", opt.key), format!("{} = false\n", opt.key)]
+                }
+                Kind::Enum(values) => {
+                    values.iter().map(|v| format!("{} = \"{v}\"\n", opt.key)).collect()
+                }
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// One row of the schema matrix: a module id, a preset, an icon set, a
+    /// `max_width`, and one of the module's own switches as a TOML line.
+    type Case = (&'static str, crate::config::schema::Preset, IconSet, usize, String);
+
     /// SPEC § 9 module matrix from the schema: every module × every preset
-    /// × every icon set × a few `max_width` values, alone on an unframed
-    /// line, against every payload fixture, holds the invariants every
-    /// module shares. A new module or option gets them checked without a
-    /// hand-written test. Per case and fixture: the module as configured,
-    /// with `hide_when_empty = false`, uncapped for comparison, and painted
-    /// with links on.
+    /// × every icon set × a few `max_width` values, plus every switch each
+    /// schema declares, alone on an unframed line, against every payload
+    /// fixture, holds the invariants every module shares. A new module or
+    /// option gets them checked without a hand-written test.
     #[test]
     fn schema_matrix_holds_the_shared_invariants() {
         use rayon::prelude::*;
@@ -1272,29 +1304,59 @@ mod tests {
             })
             .collect();
         assert!(payloads.len() > 20, "the fixture directory moved");
-        let cases: Vec<(&str, crate::config::schema::Preset, IconSet, usize)> = SCHEMAS
+        let mut cases: Vec<Case> = SCHEMAS
             .iter()
             .flat_map(|s| {
                 crate::config::schema::Preset::ALL.into_iter().flat_map(move |preset| {
                     IconSet::ALL.into_iter().flat_map(move |icons| {
-                        [0_usize, 1, 4, 12].into_iter().map(move |max| (s.id, preset, icons, max))
+                        [0_usize, 1, 4, 12]
+                            .into_iter()
+                            .map(move |max| (s.id, preset, icons, max, String::new()))
                     })
                 })
             })
             .collect();
+        // Every switch a schema declares, at one preset and icon set: this
+        // is what makes a new *option* inherit the invariants too.
+        let switches: Vec<Case> = SCHEMAS
+            .iter()
+            .flat_map(|s| {
+                matrix_switches(s).into_iter().flat_map(move |extra| {
+                    [0_usize, 4].into_iter().map(move |max| {
+                        let preset = crate::config::schema::Preset::Default;
+                        (s.id, preset, IconSet::Unicode, max, extra.clone())
+                    })
+                })
+            })
+            .collect();
+        assert!(switches.len() > 100, "the schemas lost their switches: {}", switches.len());
+        cases.extend(switches);
+        cases.par_iter().for_each(|case| matrix_case_holds(case, &payloads));
+    }
+
+    /// One matrix case against every fixture. Per case and fixture: the
+    /// module as configured, with `hide_when_empty = false`, uncapped for
+    /// comparison, and painted with links on.
+    fn matrix_case_holds(case: &Case, payloads: &[(String, Payload)]) {
+        let (id, preset, icons, max, extra) = case;
+        let (id, preset, icons, max) = (*id, *preset, *icons, *max);
+        let extra = extra.as_str();
         let painter = Painter { mode: ColorMode::TrueColor, links: true, dim: false };
         let is_escape = |c: char| c.is_control() || c == '\u{7}';
-        cases.par_iter().for_each(|&(id, preset, icons, max)| {
-            let hidden = matrix_config(id, preset, icons, max, true);
-            let shown = matrix_config(id, preset, icons, max, false);
-            let uncapped = matrix_config(id, preset, icons, 0, true);
+        {
+            let hidden = matrix_config(id, preset, icons, max, true, extra);
+            let shown = matrix_config(id, preset, icons, max, false, extra);
+            let uncapped = matrix_config(id, preset, icons, 0, true, extra);
             // The ellipsis a cut ends in: `…`, or as much of `..` as fits.
-            let ellipsis = if icons == IconSet::Ascii { ".." } else { "…" };
-            let cut_mark: String = ellipsis.chars().take(max.max(1)).collect();
+            let cut_mark: String = ellipsis_for(icons).chars().take(max.max(1)).collect();
             let clock = Clock::fixed();
-            for (name, payload) in &payloads {
-                let label =
-                    format!("{id} {} {} max_width={max} {name}", preset.name(), icons.name());
+            for (name, payload) in payloads {
+                let label = format!(
+                    "{id} {} {} max_width={max} {name} {}",
+                    preset.name(),
+                    icons.name(),
+                    extra.trim_end()
+                );
                 let lines = render_lines_at(payload, &hidden, Some(200), &clock);
                 // A hidden state renders nothing at all: the line is dropped
                 // rather than left blank, and a shown one has visible text.
@@ -1335,6 +1397,15 @@ mod tests {
                             "{label}: escape or control byte in {:?}",
                             seg.text()
                         );
+                        // A link the painter would refuse is dropped at paint
+                        // time (SPEC § 5), so a module that builds a
+                        // malformed URL loses it silently on screen. Fail
+                        // here instead.
+                        assert!(
+                            seg.link.as_deref().is_none_or(crate::ansi::safe_link),
+                            "{label}: unsafe link {:?}",
+                            seg.link
+                        );
                     }
                     let styled = painter.paint(line);
                     // OSC 8 wrappers stay balanced: every open (`ESC ] 8 ; ;
@@ -1348,6 +1419,6 @@ mod tests {
                     assert!(!open, "{label}: OSC 8 left open in {styled:?}");
                 }
             }
-        });
+        }
     }
 }

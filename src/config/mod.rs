@@ -1057,8 +1057,8 @@ fn is_bare_key(name: &str) -> bool {
 }
 
 /// The `[modules.text.<name>]` tables (SPEC § 3.7): each is validated against
-/// the text schema under its own path. `refresh`, `preset` and `icons` do not
-/// apply to text modules, `step` must be positive, `color` is the shorthand
+/// the text schema under its own path. [`TEXT_REJECTED_KEYS`] do not apply to
+/// text modules, `step` must be positive, `color` is the shorthand
 /// for `colors.text` (an explicit `colors.text` wins), and `text` and `gap`
 /// are reduced to plain text so a scrolled window can never cut an escape
 /// sequence.
@@ -1085,12 +1085,7 @@ fn resolve_texts(
         };
         let mut table = table.clone();
         let color = table.remove("color");
-        for (key, why) in [
-            ("refresh", "text modules render every tick; remove this key"),
-            ("preset", "text modules have no presets; remove this key"),
-            ("icons", "text modules have no icons; remove this table"),
-            ("max_width", "a text module's box is sized by `width`; remove this key"),
-        ] {
+        for (key, why) in TEXT_REJECTED_KEYS {
             if table.remove(key).is_some() {
                 errors.push(problem(&format!("{base}.{key}"), why));
             }
@@ -2178,6 +2173,53 @@ x = 1
                 ("max_width", Some(MAX_CELLS)),
             ]
         );
+    }
+
+    /// `parse_overrides` looks a key up in `COMMON_OPTS` before the module's
+    /// own schema, so a schema that redeclared a common key would be silently
+    /// shadowed: its option would parse against the common spec and
+    /// `cfg.str("label")` would read the schema default for ever. The
+    /// comment there states the invariant; this is what enforces it. The
+    /// other half of the same trap is a `COMMON_OPTS` entry with no
+    /// `set_common` arm, which would be accepted and dropped into `ov.opts`.
+    #[test]
+    fn no_schema_redeclares_a_common_key_and_every_common_key_is_stored() {
+        let common: Vec<&str> = COMMON_OPTS.iter().map(|o| o.key).collect();
+        let schemas =
+            crate::modules::SCHEMAS.iter().chain(std::iter::once(&*crate::modules::text::SCHEMA));
+        for schema in schemas {
+            for opt in &schema.opts {
+                assert!(
+                    !common.contains(&opt.key),
+                    "module `{}` redeclares the common key `{}`",
+                    schema.id,
+                    opt.key
+                );
+            }
+        }
+        for opt in &COMMON_OPTS {
+            let mut ov = Overrides::default();
+            assert!(
+                set_common(&mut ov, opt.key, opt.default.clone()),
+                "`{}` is a common option with no `set_common` arm: it would be dropped",
+                opt.key
+            );
+        }
+    }
+
+    /// SPEC § 3.7: the keys a text module refuses are one table, so the
+    /// refusal and the "expected one of" list can never drift apart.
+    #[test]
+    fn every_rejected_text_key_is_refused_with_its_own_message() {
+        for (key, why) in TEXT_REJECTED_KEYS {
+            let value = if key == "icons" { "{ folder = \"x\" }" } else { "1" };
+            let text = format!("[modules.text.a]\ntext = \"hi\"\n{key} = {value}\n");
+            let (c, errs) = parse(&text, &crate::modules::SCHEMAS);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(problems, [(&*format!("modules.text.a.{key}"), why)], "{key}");
+            assert_eq!(c.texts.get("a").map(|t| t.str("text")), Some("hi"), "{key}");
+        }
     }
 
     /// SPEC § 3: `max_width` is a common option bounded like a cell count;

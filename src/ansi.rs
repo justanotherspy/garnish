@@ -293,12 +293,22 @@ pub fn char_width(c: char) -> usize {
 
 /// Split text into terminal clusters that must not be separated: a base
 /// character plus any following zero-width characters (combining marks,
-/// variation selectors), and anything joined by U+200D ZERO WIDTH JOINER.
+/// variation selectors), anything joined by U+200D ZERO WIDTH JOINER, a
+/// skin-tone modifier with the emoji it modifies, and the two regional
+/// indicators of a flag.
+///
+/// Cutting inside any of those changes the glyph rather than shortening it:
+/// half a flag is a lone letter and a dropped skin tone is a different
+/// person, so `truncate` and the fish path's initial both work in these
+/// units, not in `char`s.
 pub(crate) fn clusters(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut joined = false;
     for c in s.chars() {
-        let attach = joined || (char_width(c) == 0 && !out.is_empty());
+        let attach = joined
+            || (char_width(c) == 0 && !out.is_empty())
+            || is_emoji_modifier(c)
+            || out.last().is_some_and(|last| is_lone_regional_indicator(last) && is_regional(c));
         match out.last_mut() {
             Some(last) if attach => last.push(c),
             _ => out.push(c.to_string()),
@@ -306,6 +316,23 @@ pub(crate) fn clusters(s: &str) -> Vec<String> {
         joined = c == '\u{200d}';
     }
     out
+}
+
+/// A skin-tone modifier, which belongs to the emoji before it.
+const fn is_emoji_modifier(c: char) -> bool {
+    matches!(c, '\u{1f3fb}'..='\u{1f3ff}')
+}
+
+/// A regional indicator letter; a flag is exactly two of them.
+const fn is_regional(c: char) -> bool {
+    matches!(c, '\u{1f1e6}'..='\u{1f1ff}')
+}
+
+/// Whether a cluster so far is a single regional indicator, so the next one
+/// completes its flag rather than starting another.
+fn is_lone_regional_indicator(cluster: &str) -> bool {
+    let mut chars = cluster.chars();
+    chars.next().is_some_and(is_regional) && chars.next().is_none()
 }
 
 /// Sum of segment widths.
@@ -740,6 +767,28 @@ mod tests {
         assert_eq!(out[2].link.as_deref(), Some("https://x"));
         let out = scroll(&segs, 4, 5, " · ", true);
         assert_eq!(out[1].style, Style::PLAIN, "gap is plain: {out:?}");
+    }
+
+    /// A cut inside a flag or a skin tone changes the glyph rather than
+    /// shortening it, so those are clusters like a combining mark is.
+    #[test]
+    fn clusters_keep_flags_skin_tones_marks_and_zwj_sequences_whole() {
+        let c = |s: &str| clusters(s);
+        assert_eq!(c("ab"), ["a", "b"]);
+        assert_eq!(c("e\u{301}x"), ["e\u{301}", "x"]);
+        assert_eq!(c("👨\u{200d}💻x"), ["👨\u{200d}💻", "x"]);
+        assert_eq!(c("☁\u{fe0f}x"), ["☁\u{fe0f}", "x"]);
+        // A flag is two regional indicators; two flags are two clusters,
+        // and a lone indicator stands alone.
+        assert_eq!(c("🇺🇸ab"), ["🇺🇸", "a", "b"]);
+        assert_eq!(c("🇺🇸🇬🇧"), ["🇺🇸", "🇬🇧"]);
+        assert_eq!(c("🇺x"), ["🇺", "x"]);
+        // A skin tone belongs to the emoji before it.
+        assert_eq!(c("👍🏽ab"), ["👍🏽", "a", "b"]);
+        // Cutting therefore keeps the glyph or drops it whole.
+        let seg = |s: &str| vec![Segment::plain(s)];
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg("🇺🇸ab"), 3, "…")), "🇺🇸…");
+        assert_eq!(Painter::PLAIN.paint(&truncate(&seg("👍🏽ab"), 3, "…")), "👍🏽…");
     }
 
     #[test]

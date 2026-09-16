@@ -467,7 +467,9 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   repository root, which is how `HOME` points at a settings fixture under
   `tests/fixtures/settings/`); `# color: always` renders one with colour
   on (the row-start guards of both suites strip escape sequences first;
-  `colour-on` is the one such golden). Tests that touch the cache dir or PATH
+  `colour-on`, `branch-link` and `text-link` are the goldens in that mode,
+  the link pair because the painter emits no OSC 8 under `--color never`).
+  Tests that touch the cache dir or PATH
   shims are named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
   serially (`.config/nextest.toml`). A test that must kill a process group
   (the tick's, to prove the worker outlives it) spawns the tick with
