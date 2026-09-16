@@ -387,6 +387,19 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
     }
 }
 
+/// A trailing badge: a space and the icon in its own colour, or nothing when
+/// the icon set (or an override) leaves that glyph empty.
+///
+/// The twin of [`icon`] for a glyph that follows the value — the dirty
+/// marker, the exceeds-200k mark, a review state. Without the empty check a
+/// dropped glyph leaves a lone space, which is a segment like any other: the
+/// module gains a cell and `align = true` shifts the whole column.
+#[must_use]
+pub fn badge(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
+    let glyph = cfg.icon(icon_key);
+    if glyph.is_empty() { Vec::new() } else { vec![seg(cfg, format!(" {glyph}"), color_key)] }
+}
+
 /// The segment with its style dimmed (an overdue or failed value).
 #[must_use]
 pub const fn dimmed(mut segment: Segment) -> Segment {
@@ -401,6 +414,13 @@ pub fn muted(theme: &Theme, text: impl Into<String>) -> Segment {
 }
 
 /// Apply `label`, `prefix`, `suffix`, and staleness styling to a render.
+///
+/// An overdue or failed module always keeps its `⟳`/`✗` mark (SPEC § 3.6),
+/// even when it had nothing to say: `sync` at the default preset is built
+/// wholly from its cache entry, so a failed refresh leaves it with no
+/// segments at all, and hiding it then would report a broken git as an
+/// ordinary empty row. The placeholder `–` stands in for the value and the
+/// mark still follows.
 #[must_use]
 pub fn decorate(
     rendered: Rendered,
@@ -408,12 +428,11 @@ pub fn decorate(
     theme: &Theme,
     stale_glyphs: (&str, &str),
 ) -> Vec<Segment> {
-    let empty = rendered.is_empty();
-    if empty && cfg.hide_when_empty {
+    let fresh = rendered.freshness == Freshness::Fresh;
+    if rendered.is_empty() && fresh && cfg.hide_when_empty {
         return Vec::new();
     }
-    // The wrapping is the same either way; only the middle differs, so an
-    // empty module's placeholder carries its prefix, label and suffix.
+    // The wrapping is the same for every state; only the middle differs.
     let mut out: Vec<Segment> = Vec::new();
     if !cfg.prefix.is_empty() {
         out.push(Segment::plain(&cfg.prefix));
@@ -421,17 +440,17 @@ pub fn decorate(
     if !cfg.label.is_empty() {
         out.push(muted(theme, format!("{} ", cfg.label)));
     }
+    let value = if rendered.is_empty() { vec![muted(theme, "–")] } else { rendered.segments };
     match &rendered.freshness {
-        _ if empty => out.push(muted(theme, "–")),
-        Freshness::Fresh => out.extend(rendered.segments),
+        Freshness::Fresh => out.extend(value),
         Freshness::Stale => {
-            out.extend(rendered.segments.into_iter().map(dimmed));
+            out.extend(value.into_iter().map(dimmed));
             if !stale_glyphs.0.is_empty() {
                 out.push(muted(theme, format!(" {}", stale_glyphs.0)));
             }
         }
         Freshness::Failed(_) => {
-            out.extend(rendered.segments.into_iter().map(dimmed));
+            out.extend(value.into_iter().map(dimmed));
             if !stale_glyphs.1.is_empty() {
                 out.push(Segment::styled(
                     format!(" {}", stale_glyphs.1),
@@ -456,6 +475,57 @@ pub fn colored(text: impl Into<String>, color: Color) -> Segment {
 mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    fn module_cfg(id: &str, overrides: &str) -> ModuleCfg {
+        let text = format!("[modules.{id}]\n{overrides}");
+        let (cfg, errs) = crate::config::parse(&text, &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        cfg.modules.get(id).cloned().unwrap_or_else(|| panic!("no module {id}"))
+    }
+
+    /// A glyph set to `""` drops the badge entirely. Two of the seven
+    /// trailing-badge sites used to skip the check and emit a lone space,
+    /// which is a segment like any other: the module kept a cell and
+    /// `align = true` shifted the whole column.
+    #[test]
+    fn a_badge_with_no_glyph_takes_no_cell() {
+        let cfg = module_cfg("branch", "[modules.branch.icons]\ndirty = \"\"\n");
+        assert_eq!(badge(&cfg, "dirty", "dirty"), Vec::new());
+        let cfg = module_cfg("branch", "");
+        let marked = badge(&cfg, "dirty", "dirty");
+        assert_eq!(marked.len(), 1);
+        assert_eq!(marked.first().map(Segment::text), Some(&*format!(" {}", cfg.icon("dirty"))));
+        // The same rule as the leading icon, which has always had it.
+        assert_eq!(
+            icon(&module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n"), "folder", "icon"),
+            Vec::new()
+        );
+    }
+
+    /// SPEC § 3.6: an overdue or failed module keeps its `⟳`/`✗` mark even
+    /// when it had nothing to show. `sync` at the default preset is built
+    /// wholly out of its cache entry, so a failed refresh leaves it with no
+    /// segments, and hiding it then reported a broken git as an empty row.
+    #[test]
+    fn a_failed_module_with_no_value_still_carries_its_mark() {
+        let theme = Theme::default();
+        let marks = ("⟳", "✗");
+        let cfg = module_cfg("sync", "");
+        assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
+        let text =
+            |r: Rendered| crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, marks));
+        assert_eq!(text(Rendered::empty()), "", "a fresh empty module is still hidden");
+        assert_eq!(
+            text(Rendered { segments: Vec::new(), freshness: Freshness::Failed("boom".into()) }),
+            "– ✗"
+        );
+        assert_eq!(text(Rendered { segments: Vec::new(), freshness: Freshness::Stale }), "– ⟳");
+        // A module that did render keeps its value, dimmed, with the mark.
+        let value =
+            || Rendered { segments: vec![Segment::plain("⇡2")], freshness: Freshness::Stale };
+        assert_eq!(text(value()), "⇡2 ⟳");
+        assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
+    }
 
     /// The string literals that are direct arguments of the call starting at
     /// `open` (the byte after the `(`; literals inside a nested call such as

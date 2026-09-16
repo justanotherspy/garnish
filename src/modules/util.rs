@@ -107,6 +107,13 @@ pub fn percent_unclamped(p: f64) -> String {
     if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
 }
 
+/// [`rounded`] for a percentage that may pass 100, so a band threshold above
+/// 100 can be reached (the twin of [`percent_unclamped`], SPEC § 3.3).
+#[must_use]
+pub fn rounded_unclamped(p: f64) -> f64 {
+    crate::num::u64_to_f64(crate::num::round_to_u64(p))
+}
+
 /// Format dollars: `$0.42`, `$12.35`, `$1.2k`.
 #[must_use]
 pub fn dollars(usd: f64, decimals: usize) -> String {

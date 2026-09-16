@@ -343,11 +343,15 @@ fn worker_slow_git_never_blocks_a_tick_and_records_failure() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
 
-    // Ticks never touch git: fast even with a hanging git on PATH.
+    // Ticks never touch git: fast even with a hanging git on PATH. The
+    // bound is far above the 3 ms budget of SPEC § 8 on purpose — this
+    // proves the tick does not *wait* for the 30 s git, and a debug binary
+    // starting on a loaded shared runner is not a budget measurement
+    // (`bench/run.sh` is). A tighter bound flaked here.
     let started = Instant::now();
     let (out, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[("PATH", path.as_str())]);
     assert!(ok && out.contains("main"), "{out}");
-    assert!(started.elapsed() < Duration::from_secs(2), "tick took {:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_secs(10), "tick took {:?}", started.elapsed());
 
     // The worker gives up after its 2 s timeout and records an err entry…
     let w = env.work.to_str().unwrap().to_owned();
@@ -359,7 +363,8 @@ fn worker_slow_git_never_blocks_a_tick_and_records_failure() {
         &[("PATH", path.as_str())],
     );
     assert!(ok, "{err}");
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // Well under git's 30 s sleep: the worker's own 2 s timeout fired.
+    assert!(started.elapsed() < Duration::from_secs(20), "worker took {:?}", started.elapsed());
     let entry = std::fs::read_dir(env.cache.join("repos")).unwrap().flatten().find_map(|d| {
         let p = d.path().join("sync.cache");
         std::fs::read_to_string(p).ok()

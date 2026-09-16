@@ -5,7 +5,7 @@ use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, 
 use crate::icons::glyph;
 
 use super::util::cut_name;
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Module, Rendered, badge, icon, seg};
 
 /// `session_name`: the custom or AI-generated session title.
 pub struct SessionNameModule;
@@ -185,9 +185,8 @@ impl Module for AgentModule {
         segs.push(seg(cfg, name, "name"));
         if cfg.bool("show_thinking")
             && ctx.payload.thinking.as_ref().and_then(|t| t.enabled) == Some(true)
-            && !cfg.icon("thinking").is_empty()
         {
-            segs.push(seg(cfg, format!(" {}", cfg.icon("thinking")), "thinking"));
+            segs.extend(badge(cfg, "thinking", "thinking"));
         }
         Rendered::fresh(segs)
     }

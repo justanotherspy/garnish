@@ -5,7 +5,7 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Module, Rendered, badge, icon, seg};
 
 /// `model`: display name, fast-mode and thinking glyphs, optionally the model id.
 pub struct ModelModule;
@@ -77,17 +77,13 @@ impl Module for ModelModule {
             segs.extend(icon(cfg, "model", "icon"));
         }
         segs.push(Segment::styled(name, Style::fg(cfg.color("name")).bolded()));
-        if cfg.bool("show_fast")
-            && ctx.payload.fast_mode == Some(true)
-            && !cfg.icon("fast").is_empty()
-        {
-            segs.push(seg(cfg, format!(" {}", cfg.icon("fast")), "fast"));
+        if cfg.bool("show_fast") && ctx.payload.fast_mode == Some(true) {
+            segs.extend(badge(cfg, "fast", "fast"));
         }
         if cfg.bool("show_thinking")
             && ctx.payload.thinking.as_ref().and_then(|t| t.enabled) == Some(true)
-            && !cfg.icon("thinking").is_empty()
         {
-            segs.push(seg(cfg, format!(" {}", cfg.icon("thinking")), "thinking"));
+            segs.extend(badge(cfg, "thinking", "thinking"));
         }
         if cfg.bool("show_id")
             && let Some(id) = model.id.as_deref().filter(|id| *id != name)

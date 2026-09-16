@@ -9,7 +9,7 @@ use crate::icons::glyph;
 use crate::num::percent_of;
 
 use super::util::{percent, tokens};
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Module, Rendered, badge, icon, seg};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -213,9 +213,9 @@ impl Module for CacheModule {
                 (true, Some(cd)) => {
                     segs.push(seg(cfg, format!(" {} {cd}", cfg.icon("warm")), "warm"));
                 }
-                (true, None) => segs.push(seg(cfg, format!(" {}", cfg.icon("warm")), "warm")),
+                (true, None) => segs.extend(badge(cfg, "warm", "warm")),
                 (false, _) if pc.caching_observed == Some(true) => {
-                    segs.push(seg(cfg, format!(" {}", cfg.icon("cold")), "cold"));
+                    segs.extend(badge(cfg, "cold", "cold"));
                 }
                 _ => {}
             }

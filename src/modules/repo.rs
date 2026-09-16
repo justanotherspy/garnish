@@ -16,7 +16,7 @@ use crate::git::{self, Head};
 use crate::icons::glyph;
 
 use super::util::{cut_name, short_sha};
-use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, icon, seg};
+use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, badge, icon, seg};
 
 /// How long the worker lets a local git command run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -385,13 +385,19 @@ impl Module for PrModule {
             segs.extend(icon(cfg, if is_mr { "mr" } else { "pr" }, "icon"));
         }
         let label = if is_mr { format!("!{number}") } else { format!("#{number}") };
+        // SPEC § 3.1: underlined only when it really is linked. The payload
+        // may carry no `url` at all, or an `ssh://`/`git@` one the painter
+        // refuses (§ 5), and an underline with no link reads as clickable.
+        let url = cfg
+            .bool("link")
+            .then_some(pr.url.as_deref())
+            .flatten()
+            .filter(|u| crate::ansi::safe_link(u));
         let mut num = Segment::styled(
             label,
-            Style::fg(cfg.color("number")).bolded().underline_if(cfg.bool("link")),
+            Style::fg(cfg.color("number")).bolded().underline_if(url.is_some()),
         );
-        if cfg.bool("link")
-            && let Some(url) = pr.url.as_deref()
-        {
+        if let Some(url) = url {
             num = num.with_link(url);
         }
         segs.push(num);
@@ -400,8 +406,8 @@ impl Module for PrModule {
                 "approved" | "pending" | "changes_requested" | "draft" => state,
                 _ => "pending",
             };
-            if cfg.bool("show_state") && !cfg.icon(key).is_empty() {
-                segs.push(seg(cfg, format!(" {}", cfg.icon(key)), key));
+            if cfg.bool("show_state") {
+                segs.extend(badge(cfg, key, key));
             }
             if cfg.bool("show_state_word") {
                 segs.push(seg(cfg, format!(" {}", state.replace('_', " ")), key));
@@ -522,7 +528,7 @@ impl Module for BranchModule {
             let (lookup, fresh) =
                 ctx.cached(cfg, &scope, |e| e.get("head").is_none_or(|h| h == head_key));
             if lookup.entry.as_ref().and_then(|e| e.get("dirty")) == Some("1") {
-                segs.push(seg(cfg, format!(" {}", cfg.icon("dirty")), "dirty"));
+                segs.extend(badge(cfg, "dirty", "dirty"));
             }
             if lookup.entry.is_some() {
                 freshness = fresh;
@@ -627,7 +633,7 @@ impl Module for SyncModule {
         let Some(dirs) = ctx.git_dirs() else { return Rendered::empty() };
         let Some(Head::Branch(branch)) = git::head(dirs) else { return Rendered::empty() };
         let mut segs: Vec<Segment> = Vec::new();
-        let Some((remote, tracking)) = git::upstream(dirs, &branch) else {
+        let Some((_remote, tracking)) = git::upstream(dirs, &branch) else {
             if !cfg.icon("no_upstream").is_empty() {
                 segs.push(seg(cfg, cfg.icon("no_upstream"), "upstream"));
             }
@@ -644,8 +650,7 @@ impl Module for SyncModule {
         }
         if cfg.bool("show_upstream") {
             let sp = if segs.is_empty() { "" } else { " " };
-            let short = tracking.strip_prefix("refs/remotes/").unwrap_or(&tracking);
-            segs.push(seg(cfg, format!("{sp}{short}"), "upstream"));
+            segs.push(seg(cfg, format!("{sp}{}", upstream_label(&tracking)), "upstream"));
         }
         if cfg.bool("fetch_age")
             && let Some(age) = git::fetch_age(dirs, ctx.now.as_second())
@@ -655,7 +660,6 @@ impl Module for SyncModule {
             let hint = fetch_age_hint(cfg.icon("stale"), &ctx.duration(cfg, age), !segs.is_empty());
             segs.push(seg(cfg, hint, "stale"));
         }
-        let _ = remote;
         let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
         Rendered { segments: segs, freshness }
     }
@@ -816,6 +820,17 @@ fn count_segments(
     segs
 }
 
+/// The upstream as `sync`'s `full` preset names it: `origin/main` for a
+/// remote-tracking branch, `main` for one that tracks a local branch
+/// (`remote = .`, which [`git::upstream`] reports as `refs/heads/<name>`).
+/// Anything else is shown as given.
+fn upstream_label(tracking: &str) -> &str {
+    tracking
+        .strip_prefix("refs/remotes/")
+        .or_else(|| tracking.strip_prefix("refs/heads/"))
+        .unwrap_or(tracking)
+}
+
 /// The fetch-age hint: glyph, a space, the age (`↻ 2h13m`), preceded by a
 /// space when something already stands before it. Every other module puts a
 /// space between its glyph and its value; this one used not to (bug 9).
@@ -836,6 +851,57 @@ mod tests {
         assert_eq!(fetch_age_hint("↻", "2h13m", false), "↻ 2h13m");
         assert_eq!(fetch_age_hint("↻", "2h13m", true), " ↻ 2h13m");
         assert_eq!(fetch_age_hint("?", "12m", true), " ? 12m");
+    }
+
+    /// SPEC § 3.1: the `full` preset names the upstream short. A branch
+    /// tracking a local one (`git branch --set-upstream-to=main`) has
+    /// `remote = .`, which used to print the whole `refs/heads/main`.
+    #[test]
+    fn upstream_label_is_short_for_a_remote_and_for_a_local_branch() {
+        assert_eq!(upstream_label("refs/remotes/origin/main"), "origin/main");
+        assert_eq!(upstream_label("refs/remotes/fork/feature/x"), "fork/feature/x");
+        assert_eq!(upstream_label("refs/heads/main"), "main");
+        assert_eq!(upstream_label("main"), "main");
+    }
+
+    /// SPEC § 3.1: the number is underlined only when it really is linked.
+    /// A payload may carry no `url`, or one the painter refuses (§ 5), and
+    /// an underline with no link reads as clickable.
+    #[test]
+    fn pr_is_underlined_only_when_it_is_linked() {
+        let link_of = |pr: &str| {
+            let payload =
+                crate::payload::Payload::parse(&format!("{{\"session_id\": \"s\", \"pr\": {pr}}}"))
+                    .unwrap();
+            let text = "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"pr\"]\n";
+            let (config, errs) = crate::config::parse(text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let lines = crate::render::render_lines_at(
+                &payload,
+                &config,
+                Some(80),
+                &crate::render::Clock::fixed(),
+            );
+            let row = lines.first().cloned().unwrap_or_default();
+            let number = row
+                .iter()
+                .find(|s| s.text().starts_with('#') || s.text().starts_with('!'))
+                .cloned()
+                .unwrap_or_default();
+            (number.style.underline, number.link)
+        };
+        let good = "https://github.com/o/r/pull/42";
+        assert_eq!(
+            link_of(&format!("{{\"number\": 42, \"url\": \"{good}\"}}")),
+            (true, Some(good.to_owned()))
+        );
+        assert_eq!(link_of("{\"number\": 42}"), (false, None), "no url");
+        assert_eq!(
+            link_of("{\"number\": 42, \"url\": \"git@github.com:o/r.git\"}"),
+            (false, None),
+            "a url the painter refuses"
+        );
+        assert_eq!(link_of("{\"number\": 42, \"url\": \"\"}"), (false, None), "an empty url");
     }
 
     #[test]
