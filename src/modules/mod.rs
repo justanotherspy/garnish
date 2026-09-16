@@ -41,7 +41,7 @@ pub fn durations_opt() -> OptSpec {
 }
 
 /// How fresh a module's data is.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Freshness {
     /// Rendered from live data (payload) or a cache entry within its TTL.
     #[default]
@@ -446,7 +446,7 @@ pub fn decorate(
         out.push(muted(theme, format!("{} ", cfg.label)));
     }
     let value = if rendered.is_empty() { vec![muted(theme, "–")] } else { rendered.segments };
-    match &rendered.freshness {
+    match rendered.freshness {
         Freshness::Fresh => out.extend(value),
         Freshness::Stale => {
             out.extend(value.into_iter().map(dimmed));

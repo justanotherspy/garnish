@@ -267,8 +267,8 @@ pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, S
 }
 
 /// How long the pipes are still read after the child has exited and the
-/// timeout is already spent. Its own pipes close with it, so this only
-/// bounds the case below.
+/// timeout is already spent. The child's own ends close with it, so this
+/// bounds one case only: a descendant still holding them (see [`drain`]).
 const DRAIN_FLOOR: Duration = Duration::from_millis(250);
 
 /// Read a pipe to the end on its own thread, delivering the bytes once.
