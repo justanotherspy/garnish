@@ -261,8 +261,10 @@ A8):
   does), the first character is a terminal cluster, the same unit every cut
   works in (a combining mark, a skin tone or the second half of a flag
   stays with what it belongs to: cutting inside one changes the glyph
-  rather than shortening it), and a root or one-segment path is untouched.
-  The
+  rather than shortening it), a segment whose abbreviation would read as
+  `.`, `..` or nothing at all is kept whole instead (`...` must not show
+  the path as its own parent), and a root or one-segment path is
+  untouched. The
   existing `depth` (last `N` segments, `0` = all; per-preset defaults 1, 2
   and 0) applies before the abbreviation and keeps the `~` as it always
   has, so `depth = 2` with `fish` on `~/repos/garnish/src` gives `~/g/src`

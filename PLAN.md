@@ -182,6 +182,9 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
 - [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 - [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+- [ ] Open question from the Phase 20 review (2026-09-16): `spend` with `reset = "absolute"` prints a bare wall-clock time for an instant weeks out — the committed golden reads `$ 112% ⏱ 00:00` for a reset 27 days away, which a user reads as tonight. The no-weekday rule (SPEC § 3.3) buys steady width, which only `limit5h` really needs, and a weekday would not disambiguate at 27 days either. Options: a date form (`⏱Mar 1`) for `spend`, always or beyond ~24 h; or leave it and say in the guide that `absolute` suits the five-hour window
+- [ ] Open question from the Phase 20 review (2026-09-16): a self-hosted GitLab whose host is not named after it (`git.example.com`) and has no open merge request gets a GitHub-shaped `/tree/` URL, which 404s. SPEC § 3.1 calls `pr.kind = "mr"` the cover for a self-hosted name, but it only covers it while an MR is open. Options: a `branch.forge = "auto" | "github" | "gitlab"` key; or leave it and document the limitation
+- [ ] From the Phase 20 review (2026-09-16), cheap and uncontroversial but not done on that branch: the `text.<name>` family is outside the schema matrix (it is the one family whose content is wholly user-supplied); `branch.link`'s `!detached` guard has no test at any level (it needs a temp-repo integration test, the unit level cannot reach a detached head); no golden pins `branch.link` on the `pr-mr` fixture; `benches/tick.rs` has no `max_width` case; and `docs/modules/text.md` lost its text-specific `hide_when_empty` wording when the common options became one table
 
 ## Work log
 
@@ -433,3 +436,30 @@ was built, what the reviews found and what was decided, not how.
   for its run and stops with a PATH note instead of a bare `command not
   found`. `make install` then built and installed `garnish` 0.2.0 with no
   change needed.
+- **2026-09-16 (Phase 20 rebase and review)** — PR #51 had gone stale:
+  cut from `85fe8b4`, twelve commits behind `main` and conflicting in this
+  file. Its nine commits were replayed on `c62c03b` (one conflict, both
+  sides kept, Phase 20's entries slotted in by date) and the phase
+  protocol's step 4, which #51 never ran, was done here: three adversarial
+  lenses (correctness and the lint policy, SPEC conformance, tests and
+  performance), each in its own worktree with a no-git brief. The lint
+  policy came out clean — no `unwrap`, indexing, `as` or unchecked
+  arithmetic outside tests, and no `#[allow]` in the whole change set —
+  and a mutation pass proved all eight new goldens real (revert a feature,
+  exactly its golden fails). What they found, all fixed: the settings
+  chain was read on every `context` render where the marker used to skip
+  it; `branch.link` built a link to the repository root for an empty
+  branch name, encoded the host so a self-hosted forge on a port became
+  `…com%3A8443`, and let `pr.kind = "mr"` point github.com at a 404
+  `/-/tree/`; `percent_encode` passed `.`/`..` segments through, so a
+  payload-supplied owner could walk the URL up a level; `ansi::clusters`
+  split flags and skin tones, so a cap cut half a flag off (and `fish`
+  abbreviated `...` to `..`, showing a path as its own parent). The
+  schema matrix covered a new module but not a new option — every
+  module-specific key sat at its default, Phase 20's own five included —
+  so it now sweeps every `Bool` and `Enum` a schema declares (still
+  0.40 s) and asserts no segment carries a link the painter would refuse.
+  Two invariants that were comments became tests (no schema redeclares a
+  common key; every rejected text key is refused with its own message,
+  from one table rather than two copies). Left for Daniel (§ Backlog):
+  the `spend` absolute reset, and a self-hosted GitLab with no open MR.

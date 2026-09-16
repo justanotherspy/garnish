@@ -90,11 +90,21 @@ pub fn fish(path: &str) -> String {
 }
 
 /// The abbreviation of one directory name: its first character (a terminal
-/// cluster, so a combining mark stays with its base), or the dot and the
-/// character after it for a dot-directory.
+/// cluster, so a flag, a skin tone or a combining mark stays whole), or the
+/// dot and the character after it for a dot-directory.
+///
+/// A segment whose abbreviation would read as `.`, `..` or nothing at all
+/// is kept whole instead: `...` shortened to `..` would show the path as
+/// its own parent, and a zero-width first character would show a segment
+/// that is not there.
 fn initial(segment: &str) -> String {
     let keep = if segment.starts_with('.') { 2 } else { 1 };
-    crate::ansi::clusters(segment).into_iter().take(keep).collect()
+    let short: String = crate::ansi::clusters(segment).into_iter().take(keep).collect();
+    if matches!(short.as_str(), "" | "." | "..") || crate::ansi::display_width(&short) == 0 {
+        segment.to_owned()
+    } else {
+        short
+    }
 }
 
 /// The path of `cwd` relative to `base`, if `cwd` is inside `base`.
@@ -1013,6 +1023,14 @@ mod tests {
         assert_eq!(fish("/home/dev/.config/garnish"), "/h/d/.c/garnish");
         assert_eq!(fish("~/Übung/ü/x"), "~/Ü/ü/x", "the first character, not the first byte");
         assert_eq!(fish("/e\u{301}tude/x"), "/e\u{301}/x", "a combining mark stays with its base");
+        assert_eq!(fish("/🇺🇸flags/x"), "/🇺🇸/x", "half a flag is a different glyph");
+        // An abbreviation that would read as `.`, `..` or nothing keeps the
+        // whole segment: the path must never show as its own parent, and a
+        // zero-width initial would show a segment that is not there.
+        assert_eq!(fish("/.../x"), "/.../x");
+        assert_eq!(fish("/../x"), "/../x");
+        assert_eq!(fish("/./x"), "/./x");
+        assert_eq!(fish("/\u{200b}hidden/x"), "/\u{200b}hidden/x");
         assert_eq!(fish(&shorten("~/repos/garnish/src", 2)), "~/g/src");
         assert_eq!(fish(&shorten("/srv/repos/garnish/src", 2)), "g/src");
         assert_eq!(fish(&shorten("~/repos/garnish/src", 0)), "~/r/g/src");
