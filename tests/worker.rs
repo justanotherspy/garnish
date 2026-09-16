@@ -725,6 +725,11 @@ fn worker_fetch_failure_keeps_counts_and_is_not_retried_within_the_interval() {
 fn worker_repo_modules_render_in_every_preset_and_icon_set() {
     let env = setup();
     let w = env.work.to_str().unwrap().to_owned();
+    // A *tracked* file, changed: `git status --untracked-files=no` ignores
+    // the `garnish.toml` each `config()` call drops in, so without this the
+    // tree is clean, `dirty=0` goes into the cache and the `full` preset's
+    // dirty badge never renders in the whole suite.
+    std::fs::write(env.work.join("a.txt"), "changed\n").unwrap();
     let (_, err, ok) =
         garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
     assert!(ok, "{err}");
@@ -746,14 +751,16 @@ fn worker_repo_modules_render_in_every_preset_and_icon_set() {
             // module that rendered nothing cannot satisfy this.
             assert!(row.contains("main"), "{label}: no branch in {row:?}");
             let set = garnish::icons::IconSet::parse(icons).unwrap();
-            let glyph = garnish::modules::entry("sync")
-                .unwrap()
-                .schema
-                .icon("ahead")
-                .unwrap()
-                .glyph
-                .get(set);
+            let schema_glyph = |id: &str, key: &str| {
+                garnish::modules::entry(id).unwrap().schema.icon(key).unwrap().glyph.get(set)
+            };
+            let glyph = schema_glyph("sync", "ahead");
             assert!(row.contains(&format!("{glyph}1")), "{label}: no {glyph:?}1 in {row:?}");
+            // The dirty marker is the one badge whose only render is here.
+            if preset == "full" {
+                let dirty = schema_glyph("branch", "dirty");
+                assert!(row.contains(dirty), "{label}: no dirty {dirty:?} in {row:?}");
+            }
             assert!(
                 unicode_width::UnicodeWidthStr::width(row) <= 116,
                 "{label}: {row:?} is wider than the box"

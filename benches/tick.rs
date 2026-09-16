@@ -26,6 +26,17 @@ fn resolve_config(c: &mut Criterion) {
     });
 }
 
+/// The cache directory the whole bench uses.
+///
+/// Every render here names it through `Clock.cache`. `render_lines_at` used
+/// to build its own from the environment, so the whole-tick benchmarks read
+/// and wrote the *developer's* real cache and forked a detached worker on
+/// every miss, which polluted it and made the timings depend on whatever
+/// that machine had lying around.
+fn bench_cache_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("garnish-bench-cache")
+}
+
 /// A payload whose directories are this checkout, and a cache seeded for the
 /// repo modules, so `branch` and `sync` do the work a warm tick does.
 ///
@@ -40,7 +51,7 @@ fn repo_payload_and_cache() -> (Payload, garnish::cache::Cache) {
     let cwd = env!("CARGO_MANIFEST_DIR");
     let payload =
         Payload::parse(&PAYLOAD.replace("/home/dev/projects/garnish", cwd)).unwrap_or_default();
-    let cache = Cache::at(std::env::temp_dir().join("garnish-bench-cache"));
+    let cache = Cache::at(bench_cache_dir());
     if let Some(dirs) = garnish::git::discover(std::path::Path::new(cwd)) {
         let scope = Scope::Repo(dirs.cache_key());
         let mut sync = std::collections::BTreeMap::new();
@@ -91,11 +102,12 @@ fn render_modules(c: &mut Criterion) {
 }
 
 fn tick_in_process(c: &mut Criterion) {
-    let (payload, _cache) = repo_payload_and_cache();
+    let (payload, _seeded) = repo_payload_and_cache();
     let (cfg, _) = config::parse("", &SCHEMAS);
     // Git on: the default preset carries the repo group, and reading `.git`
-    // plus a cache entry is where a warm tick actually spends its time.
-    let clock = Clock { git: true, ..Clock::fixed() };
+    // plus a cache entry is where a warm tick actually spends its time. The
+    // cache is the seeded one, never the machine's.
+    let clock = Clock { git: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
     c.bench_function("tick_in_process_default", |b| {
         b.iter(|| render_lines_at(black_box(&payload), &cfg, Some(120), &clock));
     });
@@ -116,6 +128,7 @@ fn tick_in_process(c: &mut Criterion) {
     );
     let mut animated = Clock::fixed();
     animated.animate = true;
+    animated.cache = Some(bench_cache_dir());
     c.bench_function("tick_in_process_ticker", |b| {
         b.iter(|| render_lines_at(black_box(&payload), &ticker, Some(60), &animated));
     });

@@ -119,6 +119,13 @@ pub struct Clock {
     /// run, `None` for a pinned one (and for tests that must not see the
     /// machine's).
     pub managed: Option<std::path::PathBuf>,
+    /// The cache root, or `None` to take it from the environment.
+    ///
+    /// The last thing a render read from the process environment on its own.
+    /// A caller that must not touch the machine's cache (`benches/tick.rs`,
+    /// which otherwise read and wrote the developer's real one and forked a
+    /// worker per miss) names its own here.
+    pub cache: Option<std::path::PathBuf>,
 }
 
 impl Clock {
@@ -135,6 +142,7 @@ impl Clock {
             animate: crate::time::animate_from_env(),
             settings: true,
             managed: crate::claude_settings::managed_settings_path(),
+            cache: None,
         }
     }
 
@@ -153,6 +161,7 @@ impl Clock {
             animate: false,
             settings: false,
             managed: None,
+            cache: None,
         }
     }
 
@@ -189,7 +198,8 @@ pub fn render_lines_at(
     clock: &Clock,
 ) -> Vec<Vec<Segment>> {
     let width = config.width(columns);
-    let cache = crate::cache::Cache::from_env();
+    let cache =
+        clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
     let mut ctx = Ctx {
         payload,
         theme: &config.theme,

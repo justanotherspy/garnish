@@ -227,12 +227,17 @@ mod tests {
     }
 
     /// SPEC § 9: the `text.<name>` family is the one module set outside the
-    /// schema matrix — its content is wholly user-supplied, so its options
-    /// are swept here instead, over text a user could really paste.
+    /// schema matrix, its content being wholly user-supplied, so `text`,
+    /// `width`, `justify`, `overflow` and `url` are swept here instead, over
+    /// text a user could really paste. `pad` is pinned at 1 (it is what
+    /// makes the link boundary visible) and `step` and `gap` stay at their
+    /// defaults, so the two scrolling modes are sampled at one clock phase.
     ///
-    /// The invariants are the matrix's: the box is exactly the width it was
-    /// asked for, no escape or control byte reaches a row, a cluster is
-    /// never split, and a link the painter would refuse never survives.
+    /// The invariants are the matrix's, and each is asserted: the box is
+    /// exactly the width it was asked for, no escape or control byte reaches
+    /// a row, every cluster on the row is one of the input's (so none was
+    /// split), a `url` the painter accepts is on the row and one it refuses
+    /// does not parse at all.
     #[test]
     fn every_text_option_holds_the_shared_invariants() {
         use crate::icons::IconSet;
@@ -248,15 +253,35 @@ mod tests {
             ("newline", "one\ntwo"),
         ];
         let is_escape = |c: char| c.is_control() || c == '\u{7}';
-        for (name, text) in hostile {
+        // A URL the painter would refuse never reaches a row because the
+        // *config* refuses it first, which is the stronger rule and is
+        // asserted once here rather than swept.
+        let (_, errs) = crate::config::parse(
+            "[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = \"x\"\nurl = \"git@github.com:o/r.git\"\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(
+            errs.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            vec!["modules.text.a.url"],
+            "a URL the painter refuses must not parse"
+        );
+
+        // `url` varies with the text rather than adding a fifth loop: with a
+        // single value the link assertion below was vacuous, because nothing
+        // in the sweep set `url` and `seg.link` was `None` in all 1152 cases.
+        let urls = ["", "https://x.example/a"];
+        for (i, (name, text)) in hostile.into_iter().enumerate() {
+            let url = urls.get(i % urls.len()).copied().unwrap_or_default();
+            let linkable = !url.is_empty();
             for icons in IconSet::ALL {
                 for overflow in ["clip", "scroll", "scroll-wrap"] {
                     for justify in ["left", "center", "right"] {
                         for width in [0_usize, 1, 4, 9] {
                             let cfg = format!(
-                                "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = {}\nwidth = {width}\npad = 1\noverflow = \"{overflow}\"\njustify = \"{justify}\"\n",
+                                "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = {}\nurl = {}\nwidth = {width}\npad = 1\noverflow = \"{overflow}\"\njustify = \"{justify}\"\n",
                                 icons.name(),
                                 crate::config::schema::toml_string(text),
+                                crate::config::schema::toml_string(url),
                             );
                             let (config, errs) =
                                 crate::config::parse(&cfg, &crate::modules::SCHEMAS);
@@ -280,6 +305,29 @@ mod tests {
                                     "{label}: {:?}",
                                     seg.link
                                 );
+                            }
+                            // A URL the painter refuses never reaches a row;
+                            // one it accepts always does, so neither half of
+                            // the rule can pass by nothing happening.
+                            let linked = row.iter().any(|s| s.link.as_deref() == Some(url));
+                            assert_eq!(linked, linkable, "{label}: url {url:?}");
+                            // No cluster is ever split: every cluster on the
+                            // row is one of the input's, a pad space, or the
+                            // set's own cut mark. A half-emoji would be
+                            // neither, and so would a lone combining mark.
+                            // Against the *reduced* text: the config strips
+                            // escapes and control bytes on the way in, so the
+                            // raw literal is not what the module rendered.
+                            let source = crate::ansi::clusters(&crate::ansi::plain_text(text));
+                            let mark: Vec<String> =
+                                crate::ansi::clusters(icons.ellipsis()).into_iter().collect();
+                            for seg in &row {
+                                for c in crate::ansi::clusters(seg.text()) {
+                                    assert!(
+                                        c == " " || source.contains(&c) || mark.contains(&c),
+                                        "{label}: {c:?} is not a cluster of the input"
+                                    );
+                                }
                             }
                             // `width = 0` sizes the box to the text; any
                             // other width is exactly that, plus the pads.

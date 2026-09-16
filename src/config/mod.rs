@@ -1890,6 +1890,19 @@ x = 1
             assert_eq!(errs[0].path, path, "{text}");
             assert_eq!(c.lines.len(), 4, "{text}: the default lines stand in");
         }
+        // An inline `line = [...]`, which nothing else in the suite used.
+        // A non-table item keeps its place as a placeholder rather than being
+        // dropped: dropping it renumbered every later line, so the error
+        // named a `line[n]` that was not the one in the user's file.
+        let (c, errs) = parse("line = [1, { modules = [\"clock\", 3] }]", &schemas());
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["line[0]", "line[1].modules[1]"], "the second line is line[1]");
+        // The placeholder holds the index and nothing else, so the default
+        // `hide_empty_lines` drops it at render and the row it stands for
+        // does not become a blank line.
+        assert_eq!(c.lines.len(), 2);
+        assert!(c.lines[0].left.is_empty() && c.lines[0].right.is_empty() && !c.lines[0].spacer);
+        assert_eq!(c.lines[1].left, vec!["clock"], "the good item stays");
     }
 
     #[test]
