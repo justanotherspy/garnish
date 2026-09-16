@@ -238,6 +238,30 @@ mod tests {
         assert!(palette("nope").is_none());
     }
 
+    /// `Palette::spec` maps a role by its *index* in `Role::ALL`, so
+    /// reordering a palette's 13-entry array (or `Role::ALL`) silently hands
+    /// every role a different colour while every spec still parses. These
+    /// four roles per palette pin the mapping: `accent` opens the array,
+    /// `ok`/`danger` sit in the middle and `band4` closes it, so no swap
+    /// leaves all four in place.
+    #[test]
+    fn each_palette_keeps_its_colour_on_each_role() {
+        let expected = [
+            ("garnish", ["#7dd3a0", "#a6e3a1", "#f38ba8", "#f38ba8"]),
+            ("catppuccin-mocha", ["#cba6f7", "#a6e3a1", "#f38ba8", "#f38ba8"]),
+            ("nord", ["#88c0d0", "#a3be8c", "#bf616a", "#bf616a"]),
+            ("dracula", ["#bd93f9", "#50fa7b", "#ff5555", "#ff5555"]),
+            ("tokyonight", ["#7aa2f7", "#9ece6a", "#f7768e", "#f7768e"]),
+            ("mono", ["default", "default", "default", "default"]),
+        ];
+        assert_eq!(expected.len(), PALETTES.len(), "a palette was added or removed");
+        for (name, specs) in expected {
+            let p = palette(name).unwrap_or_else(|| panic!("no palette {name}"));
+            let got = [Role::Accent, Role::Ok, Role::Danger, Role::Band4].map(|r| p.spec(r));
+            assert_eq!(got, specs, "{name}");
+        }
+    }
+
     #[test]
     fn overrides_win_and_roles_resolve() {
         let mut o = BTreeMap::new();

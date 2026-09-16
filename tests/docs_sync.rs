@@ -63,6 +63,20 @@ fn generated_docs_match_committed_docs() {
         mismatches.is_empty(),
         "docs out of date: {mismatches:?} (run UPDATE_DOCS=1 cargo nextest run --test docs_sync)"
     );
+
+    // The other direction: a committed page nothing generates any more (a
+    // renamed module leaves its old page behind) would ship linked from
+    // nowhere, and `UPDATE_DOCS=1` only copies, it never deletes.
+    // `guide.md` is the one hand-written page (CLAUDE.md § Conventions).
+    let generated: std::collections::BTreeSet<PathBuf> =
+        files(tmp.path()).iter().map(|f| f.strip_prefix(tmp.path()).unwrap().into()).collect();
+    let orphans: Vec<String> = files(&docs)
+        .iter()
+        .map(|f| f.strip_prefix(&docs).unwrap().to_path_buf())
+        .filter(|rel| rel != Path::new("guide.md") && !generated.contains(rel))
+        .map(|rel| rel.display().to_string())
+        .collect();
+    assert!(orphans.is_empty(), "docs/ pages nothing generates (delete them): {orphans:?}");
 }
 
 /// Every rendered status line block in `README.md` is pasted from

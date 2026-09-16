@@ -40,6 +40,33 @@ pub const GC_MAX_PER_SWEEP: usize = 50;
 /// nowhere near enough to matter to a tick that reads the file.
 pub const MAX_ERROR_CHARS: usize = 500;
 
+/// The cache root for a set of environment values (SPEC § 6), highest
+/// precedence first: `GARNISH_CACHE_DIR`, `$XDG_RUNTIME_DIR/garnish`,
+/// `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish` (macOS:
+/// `~/Library/Caches/garnish`), a temp directory.
+///
+/// The lookup and the platform are parameters so the chain can be tested
+/// without setting process-wide variables — which a test cannot do at all
+/// here, `set_var` being `unsafe`. Moving the root strands the locks and
+/// entries of every worker already running against the old one, so the
+/// order is worth pinning; the macOS arm has no other coverage than CI's
+/// macOS job.
+fn root_from(lookup: impl Fn(&str) -> Option<PathBuf>, macos: bool) -> PathBuf {
+    lookup(CACHE_DIR_ENV)
+        .or_else(|| lookup("XDG_RUNTIME_DIR").map(|d| d.join("garnish")))
+        .or_else(|| lookup("XDG_CACHE_HOME").map(|d| d.join("garnish")))
+        .or_else(|| {
+            lookup("HOME").map(|h| {
+                if macos {
+                    h.join("Library").join("Caches").join("garnish")
+                } else {
+                    h.join(".cache").join("garnish")
+                }
+            })
+        })
+        .unwrap_or_else(|| std::env::temp_dir().join("garnish"))
+}
+
 /// Where an entry lives.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Scope {
@@ -319,27 +346,13 @@ impl Cache {
         Self { root }
     }
 
-    /// Resolve the root from the environment:
-    /// `GARNISH_CACHE_DIR` > `$XDG_RUNTIME_DIR/garnish` > `$XDG_CACHE_HOME/garnish`
-    /// > `~/.cache/garnish` (macOS: `~/Library/Caches/garnish`).
+    /// Resolve the root from the environment, highest precedence first:
+    /// `GARNISH_CACHE_DIR`, `$XDG_RUNTIME_DIR/garnish`,
+    /// `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish` (macOS:
+    /// `~/Library/Caches/garnish`), a temp directory.
     #[must_use]
     pub fn from_env() -> Self {
-        let env =
-            |k: &str| std::env::var_os(k).map(PathBuf::from).filter(|p| !p.as_os_str().is_empty());
-        let root = env(CACHE_DIR_ENV)
-            .or_else(|| env("XDG_RUNTIME_DIR").map(|d| d.join("garnish")))
-            .or_else(|| env("XDG_CACHE_HOME").map(|d| d.join("garnish")))
-            .or_else(|| {
-                env("HOME").map(|h| {
-                    if cfg!(target_os = "macos") {
-                        h.join("Library").join("Caches").join("garnish")
-                    } else {
-                        h.join(".cache").join("garnish")
-                    }
-                })
-            })
-            .unwrap_or_else(|| std::env::temp_dir().join("garnish"));
-        Self { root }
+        Self { root: root_from(crate::config::env_path, cfg!(target_os = "macos")) }
     }
 
     /// The root directory.
@@ -813,10 +826,41 @@ mod tests {
     }
 
     #[test]
-    fn root_resolution_prefers_explicit_env() {
+    fn key_hash_and_sanitize_are_stable() {
         assert_eq!(key_hash(&["a", "b"]), key_hash(&["a", "b"]));
         assert_ne!(key_hash(&["a", "b"]), key_hash(&["ab"]));
         assert_eq!(sanitize("../x y"), "___x_y");
         assert_eq!(sanitize(""), "_");
+    }
+
+    /// SPEC § 6: the documented order, and both platforms' home arm. The
+    /// test named for this used to assert `key_hash` and `sanitize` instead,
+    /// so the chain itself had no coverage at all.
+    #[test]
+    fn root_resolution_follows_the_documented_order() {
+        let set = |pairs: &[(&str, &str)]| {
+            let owned: Vec<(String, PathBuf)> =
+                pairs.iter().map(|(k, v)| ((*k).to_owned(), PathBuf::from(v))).collect();
+            move |k: &str| owned.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone())
+        };
+        let all = [
+            (CACHE_DIR_ENV, "/explicit"),
+            ("XDG_RUNTIME_DIR", "/run/u"),
+            ("XDG_CACHE_HOME", "/xdg"),
+            ("HOME", "/home/d"),
+        ];
+        assert_eq!(root_from(set(&all), false), PathBuf::from("/explicit"));
+        assert_eq!(root_from(set(&all[1..]), false), PathBuf::from("/run/u/garnish"));
+        assert_eq!(root_from(set(&all[2..]), false), PathBuf::from("/xdg/garnish"));
+        assert_eq!(root_from(set(&all[3..]), false), PathBuf::from("/home/d/.cache/garnish"));
+        assert_eq!(
+            root_from(set(&all[3..]), true),
+            PathBuf::from("/home/d/Library/Caches/garnish"),
+            "macOS puts it under Library/Caches"
+        );
+        // Nothing set at all: a temp directory, never the current one.
+        let root = root_from(set(&[]), false);
+        assert_eq!(root, std::env::temp_dir().join("garnish"));
+        assert!(root.is_absolute(), "{}", root.display());
     }
 }

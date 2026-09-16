@@ -124,13 +124,20 @@ fn unreadable_config_and_unwritable_cache_still_render() {
         tick(PAYLOAD.as_bytes(), &[("GARNISH_CONFIG", missing.as_str())], dir.path());
     assert!(ok && out.lines().last().unwrap().contains("cannot read"), "{out}");
 
-    let ro = dir.path().join("ro");
-    std::fs::create_dir_all(&ro).unwrap();
-    let mut perms = std::fs::metadata(&ro).unwrap().permissions();
-    perms.set_readonly(true);
-    std::fs::set_permissions(&ro, perms).unwrap();
-    let cache = ro.join("cache").to_string_lossy().into_owned();
-    let (out, _, ok) =
+    // A cache root that cannot be created for *any* uid: a regular file
+    // stands where the parent directory would be, so `create_dir_all` gets
+    // ENOTDIR. A read-only directory does not do it — root ignores the mode
+    // bits, and this project's own containers run as root, so that case
+    // silently exercised an ordinary writable cache.
+    let blocked = dir.path().join("not-a-dir");
+    std::fs::write(&blocked, "").unwrap();
+    let cache = blocked.join("cache").to_string_lossy().into_owned();
+    let (out, err, ok) =
         tick(PAYLOAD.as_bytes(), &[("GARNISH_CACHE_DIR", cache.as_str())], dir.path());
-    assert!(ok && out.lines().count() >= 4, "{out}");
+    // The promise of SPEC § 5: the normal rows render, nothing is said, and
+    // nothing was created where the file is.
+    assert!(ok, "{out}{err}");
+    assert_eq!(out.lines().count(), 4, "{out}");
+    assert!(!out.contains("⚠ garnish:") && !out.contains("! garnish:"), "{out}");
+    assert!(blocked.is_file(), "the cache root must not have been created");
 }

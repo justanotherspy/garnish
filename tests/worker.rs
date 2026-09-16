@@ -20,10 +20,20 @@ const fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_garnish")
 }
 
+/// `git` in a temp repository, cut off from the developer's own git config.
+///
+/// `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` point at `/dev/null` because this
+/// project mandates signed commits (CLAUDE.md § Session protocol), so the
+/// machines that run this suite are exactly the machines with
+/// `commit.gpgsign = true` — and a `git commit` here cannot reach a pinentry
+/// from a test process. `core.hooksPath` and `commit.template` would bite
+/// the same way.
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@t")
         .env("GIT_COMMITTER_NAME", "t")
@@ -90,12 +100,12 @@ fn payload(work: &Path) -> String {
     )
 }
 
-fn garnish(
-    env: &Env,
-    args: &[&str],
-    stdin: Option<&str>,
-    extra_env: &[(&str, &str)],
-) -> (String, String, bool) {
+/// The binary in the hermetic environment every test here needs (CLAUDE.md
+/// § Cache and worker invariants): its own cache root, a frozen clock, no
+/// spawning, no managed settings file, and a `HOME` that is not the
+/// developer's. The one builder, so a test that needs one thing different
+/// overrides only that (a hand-rolled `Command` used to drop three of these).
+fn cmd(env: &Env, args: &[&str]) -> Command {
     let mut cmd = Command::new(bin());
     cmd.args(args)
         .env("GARNISH_CACHE_DIR", &env.cache)
@@ -108,6 +118,16 @@ fn garnish(
         .env("GARNISH_MANAGED_SETTINGS", "")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    cmd
+}
+
+fn garnish(
+    env: &Env,
+    args: &[&str],
+    stdin: Option<&str>,
+    extra_env: &[(&str, &str)],
+) -> (String, String, bool) {
+    let mut cmd = cmd(env, args);
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
@@ -327,17 +347,8 @@ fn spawn_thirty_two_concurrent_ticks_produce_one_worker_per_module() {
     let p = payload(&env.work);
     let children: Vec<_> = (0..32)
         .map(|_| {
-            let mut child = Command::new(bin())
-                .env("GARNISH_CACHE_DIR", &env.cache)
-                .env("GARNISH_NOW", NOW)
-                .env("GARNISH_NO_SPAWN", "1")
-                .env("GARNISH_CONFIG", env.work.join("garnish.toml"))
-                .env("COLUMNS", "120")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap();
+            let mut child =
+                cmd(&env, &[]).stdin(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
             child.stdin.take().unwrap().write_all(p.as_bytes()).unwrap();
             child
         })
@@ -516,17 +527,10 @@ fn spawn_worker_outlives_the_ticks_process_group() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
 
-    let mut child = Command::new(bin())
-        .env("GARNISH_CACHE_DIR", &env.cache)
-        .env("GARNISH_NOW", NOW)
-        .env("GARNISH_CONFIG", env.work.join("garnish.toml"))
-        .env("COLUMNS", "120")
-        .env("NO_COLOR", "1")
+    let mut child = cmd(&env, &[])
         .env("PATH", &path)
         .env_remove("GARNISH_NO_SPAWN")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .process_group(0)
         .spawn()
         .unwrap();
@@ -681,4 +685,66 @@ fn worker_fetch_failure_keeps_counts_and_is_not_retried_within_the_interval() {
     );
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert!(out.contains("⇡1"), "{out}");
+}
+
+/// SPEC § 9: the repo modules against a real repository, at every preset and
+/// icon set.
+///
+/// Every pinned render in the suite runs with `Clock::fixed()`, whose
+/// `git: false` makes `Ctx::git_dirs()` `None`, and every payload fixture's
+/// `cwd` is a path that does not exist — so `sync` returned nothing and
+/// `branch` lost its sha and dirty halves in all 472 goldens and in the
+/// schema matrix. This is the one place they render with git on.
+///
+/// Serial (`worker_`): a shared cache root and a temp repository.
+#[test]
+fn worker_repo_modules_render_in_every_preset_and_icon_set() {
+    let env = setup();
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, err, ok) =
+        garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
+    assert!(ok, "{err}");
+    let p = payload(&env.work);
+    for preset in ["minimal", "default", "full"] {
+        for icons in ["nerd", "unicode", "emoji", "ascii"] {
+            let label = format!("{preset}/{icons}");
+            config(
+                &env,
+                &format!(
+                    "icons = \"{icons}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"path\", \"branch\", \"sync\"]\n[modules.path]\npreset = \"{preset}\"\n[modules.branch]\npreset = \"{preset}\"\n[modules.sync]\npreset = \"{preset}\"\n"
+                ),
+            );
+            let (out, _, ok) = garnish(&env, &[], Some(&p), &[]);
+            assert!(ok, "{label}: {out}");
+            let row = out.lines().next().unwrap_or_default();
+            // The repo really is read: the branch, and the commit `setup`
+            // left unpushed as one ahead.
+            assert!(row.contains("main"), "{label}: no branch in {row:?}");
+            assert!(row.contains('1'), "{label}: no ahead count in {row:?}");
+            assert!(
+                unicode_width::UnicodeWidthStr::width(row) <= 116,
+                "{label}: {row:?} is wider than the box"
+            );
+            if icons == "ascii" {
+                assert!(row.is_ascii(), "{label}: the ascii set emitted {row:?}");
+            }
+        }
+    }
+    // `max_length` cuts the branch name with the icon set's own mark, which
+    // no other test reaches: the matrix never sets it (it is an integer, and
+    // only booleans and enums are swept) and every golden runs without git.
+    for (icons, mark) in [("unicode", "…"), ("ascii", "..")] {
+        config(
+            &env,
+            &format!(
+                "icons = \"{icons}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nshow_icon = false\nmax_length = 3\n"
+            ),
+        );
+        let (out, _, ok) = garnish(&env, &[], Some(&p), &[]);
+        let row = out.lines().next().unwrap_or_default().trim_end();
+        assert!(ok && row.ends_with(mark), "{icons}: {row:?} does not end in {mark:?}");
+        if icons == "ascii" {
+            assert!(row.is_ascii(), "the ascii set emitted {row:?}");
+        }
+    }
 }

@@ -422,10 +422,16 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
     use std::process::Command;
 
+    /// `git` in a temp repository, cut off from the developer's own config:
+    /// this project mandates signed commits, so the machines that run this
+    /// suite are the machines with `commit.gpgsign = true`, and a commit
+    /// here cannot reach a pinentry.
     fn git(dir: &Path, args: &[&str]) {
         let st = Command::new("git")
             .args(args)
             .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .env("GIT_AUTHOR_NAME", "t")
             .env("GIT_AUTHOR_EMAIL", "t@t")
             .env("GIT_COMMITTER_NAME", "t")

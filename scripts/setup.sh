@@ -4,15 +4,16 @@
 #   scripts/setup.sh            rustup, the nightly toolchain from
 #                               rust-toolchain.toml (updated to the latest
 #                               nightly, with rustfmt/clippy/rust-analyzer/
-#                               rust-src), and cargo-nextest
+#                               rust-src), cargo-nextest and shellcheck
 #   scripts/setup.sh --bench    + hyperfine and jq (make bench)
 #   scripts/setup.sh --all      + watchexec (make watch)
 #
 # The host class comes from SESSION_HOST (scripts/session-host.sh) and
 # decides *how* a tool is installed, never *whether*:
 #
-#   ci      prebuilt cargo-nextest from get.nexte.st; hyperfine/jq from the
-#           runner's package manager (apt on Linux, brew on macOS)
+#   ci      prebuilt cargo-nextest from get.nexte.st; shellcheck, hyperfine
+#           and jq from the runner's package manager (apt on Linux, brew on
+#           macOS)
 #   popos   cargo install --locked (devup's cargobins section then keeps
 #           every cargo-installed crate current); rustup itself is expected
 #           to be present already (devup's rust section owns it)
@@ -126,6 +127,14 @@ elif [ "$host" = ci ]; then
 else
   log "cargo install cargo-nextest"
   cargo install --locked cargo-nextest
+fi
+
+# --- shellcheck (scripts/ci.sh gates on it) --------------------------------
+if have shellcheck; then
+  log "shellcheck present: $(shellcheck --version | awk '/^version:/ {print $2}')"
+else
+  log "shellcheck (package manager)"
+  pkg_install shellcheck || echo "setup: shellcheck not installed; ci.sh will skip that step." >&2
 fi
 
 # --- bench tools: hyperfine, jq --------------------------------------------

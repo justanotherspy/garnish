@@ -22,6 +22,12 @@ fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, b
         .env("GARNISH_CACHE_DIR", home.join("cache"))
         .env("GARNISH_NOW", "1738425600")
         .env("NO_COLOR", "1")
+        // CLAUDE.md § Cache and worker invariants: no test that runs the
+        // binary may fork a detached worker. `preview` over a directory
+        // renders every fixture, and one whose `cwd` were a real repository
+        // would spawn a worker per cached module, outliving the test and
+        // writing into a tempdir that is already gone.
+        .env("GARNISH_NO_SPAWN", "1")
         .env_remove("GARNISH_CONFIG")
         // A developer running with animations off must not turn the
         // suite red; a test that wants the switch sets it through `extra`.
@@ -389,8 +395,7 @@ fn config_show_prints_the_animate_switch_in_effect() {
     std::fs::write(&copy, &shown).unwrap();
     let render = |file: &Path| {
         let args = ["--config", file.to_str().unwrap(), "preview", payload, "--width", "80"];
-        let (out, _, ok) =
-            run(&args, home, &[("GARNISH_NO_SPAWN", "1"), ("GARNISH_NOW", "1738425601")]);
+        let (out, _, ok) = run(&args, home, &[("GARNISH_NOW", "1738425601")]);
         assert!(ok, "{out}");
         out
     };
@@ -487,7 +492,7 @@ fn config_show_round_trips_every_fixture_and_preset() {
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
         let render = |cfg: &std::path::Path| {
             let args = ["--config", cfg.to_str().unwrap(), "preview", payload, "--width", "120"];
-            let (out, _, ok) = run(&args, home, &[("GARNISH_NO_SPAWN", "1")]);
+            let (out, _, ok) = run(&args, home, &[]);
             assert!(ok, "{}: preview failed", cfg.display());
             out.lines()
                 .skip(1)
