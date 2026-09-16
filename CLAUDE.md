@@ -455,16 +455,33 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   in a key cannot render silently as an empty icon. A new helper that
   takes a key by name has to be added to that scan's pattern list.
 - **A module never spells a shared rule itself.** The leading glyph is
-  `modules::lead`, a trailing one `modules::badge`, a name cut
-  `util::cut_name`, the mark a cut ends in `IconSet::ellipsis`, the
-  overdue and failed marks `IconSet::stale_glyphs`. Each was written out
-  per module once and drifted: two badges forgot the empty-glyph guard and
-  left a stray cell, and two cuts emitted `…` under `icons = "ascii"`.
+  `modules::lead`, a trailing one `modules::badge`, a glyph built into a
+  longer string `modules::glyph_prefix`, a name cut `util::cut_name`, the
+  mark a cut ends in `IconSet::ellipsis`, the overdue and failed marks
+  `IconSet::stale_glyphs`. Each was written out per module once and
+  drifted: four badges forgot the empty-glyph guard and left a stray cell,
+  and two cuts emitted `…` under `icons = "ascii"`. **Fix the shape, not
+  the example**: the first pass at the badge guard converted the sites that
+  looked like badges and left `cache`'s countdown, which interpolates the
+  same glyph and so kept a *double* space when it was blanked.
 - **A glyph that is repeated cell by cell must be one cell.** `fill`,
   `empty` and `marker` are that vocabulary (`schema::ONE_CELL_ICONS`); the
   config rejects a wider override under the module's path, as it has always
   done for `frame.fill_char`, rather than letting `util::bar` substitute one
-  in silence.
+  in silence. Two exceptions that are easy to get wrong in either
+  direction: a *blank* `marker` is legal (`IconSpec::may_be_blank`, because
+  blanking is how the marker is turned off and `bar` honours it, while a
+  blank cell has no width to repeat), and the rule applies to a
+  `<key>_frames` list too, because a frame is the glyph for its tick.
+- **A config value is only accepted when nothing on disk already says
+  otherwise.** Tightening a rule is a breaking change for every config
+  already written: `separator_frames = []` is the line every `garnish
+  config init` has ever emitted, so rejecting it would have put a
+  `⚠ config:` row on every tick of every user's status line. Check what
+  `examples/garnish.toml` on `main` contains before making a key stricter,
+  and treat a generator changed to avoid its own new error (the key written
+  out commented) as the tell that the rule is wrong, not as the fix: it
+  hides the breakage from `docs_sync` and from nothing else.
 - `Segment.text` is private: `Segment::plain`/`styled`/`with_text`/`push_str`
   reduce text to plain text on the way in and `text()` reads it, so nothing
   can put an escape sequence on a row by assigning a field.
@@ -595,6 +612,33 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   `blank = true` on a spacer puts a braille blank (U+2800, not whitespace
   to JavaScript's `trim`) in the row so the harness keeps it either way
   (SPEC § 4.1).
+
+## The repository is not the user's file
+
+garnish reads and runs git in whatever directory the payload names, which
+may be an unpacked archive or a shared directory the user never built. The
+user typing `git status` there would hit the same things; what is different
+is that garnish does it on a *timer*, so the rules are:
+
+- **A path rule, not a name rule.** `git::joinable_ref` keeps `..` out of a
+  ref name, but the file is what matters: an archive carries symlinks, so
+  `HEAD`, a ref, or the `refs/heads` directory itself can be a link to
+  anywhere. `git::read_ref_file` resolves the path and requires it to stay
+  inside the git directory; every ref read goes through it.
+- **Every git call clears the config's command hooks.** `run_git` prepends
+  `NO_COMMAND_HOOKS` (`-c core.fsmonitor=`) and `fetch` passes
+  `--upload-pack git-upload-pack`, because `.git/config` sets both and git
+  runs them. `-c` on the command line beats the file. `core.sshCommand`,
+  `core.gitProxy` and an `ext::` URL are *not* cleared: each is a setting a
+  user may want honoured, all three need an opted-in `fetch_interval`, and
+  the decision sits in PLAN's backlog.
+- **A cached string from outside is bounded.** `cache::MAX_ERROR_CHARS`
+  applies to a failed entry's message *and* to `fetch_error`, which rides in
+  a successful one, because the tick parses that file on every render.
+- **Every stored stamp can be in the future** (a resumed VM, NTP correcting
+  a bad RTC) and a future stamp means the clock moved, never "very recent".
+  `Entry::is_fresh`, `lock_is_live` and `sync`'s `fetch_attempt` all treat
+  it as overdue; a signed age compared with `>=` silently freezes instead.
 
 ## Cache and worker invariants (learned the hard way)
 

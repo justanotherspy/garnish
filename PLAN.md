@@ -49,7 +49,7 @@ nothing else.** `main` is ready for Phase 21.
 | 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 | 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
-| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; 194 → 223 tests | 09-16 |
+| Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; then an adversarial review of the audit itself, which found four regressions it had introduced and five fixes that had stopped at the example; 194 → 225 tests | 09-16 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -178,6 +178,7 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README, and the "from the first tagged release" qualifier from README § Install and guide § 1
 - [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's fullscreen and classic renderers (`/tui`) to confirm the § 2.1 arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt; the classic frame scrolling), then drop "read, not watched" from SPEC § 2.1 and `CLAUDE.md`
 - [ ] Whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+- [ ] How far to go in refusing a hostile `.git/config`. The audit's review found that refusing a `-` remote closed one door and left others: the same file sets `core.fsmonitor` (a command `git status` runs) and `remote.<name>.uploadpack` (a command a fetch runs), and both are now overridden on the command line, which costs nothing real. Three remain, and each is a setting a user may genuinely want honoured in their own repositories: `core.sshCommand`, `core.gitProxy`, and an `ext::` remote URL. All three need `fetch_interval > 0`, which is opt-in and defaults to 0, so nothing reaches them by default. The options are to clear them too (safe against an unpacked archive, breaks a custom ssh command or proxy), to refuse to fetch at all when the repository is not owned by the user (git's own `safe.directory` answer), or to leave them and say so in the `fetch_interval` docs
 
 **Parked designs** (decided, not to be reopened without a reason)
 
@@ -460,7 +461,7 @@ was built, what the reviews found and what was decided, not how.
   fixed, and its duplication consolidated, so `main` is ready for Phase 21.
   A seven-lens read-only audit (config, render, modules, systems,
   documents, tests, simplification), each lens in its own worktree, found
-  the work below; every defect got a test, and the suite went 194 → 223.
+  the work below; every defect got a test, and the suite went 194 → 225.
 
   **Two ways out of the repository**, both reachable from a checkout the
   user did not create (an unpacked archive, a shared directory): a
@@ -553,3 +554,36 @@ was built, what the reviews found and what was decided, not how.
   Homebrew line numbers that cannot stay true; it keeps the conclusions and
   the grep anchors. This backlog lost two items that were already answered
   and gained the shape it has now: what waits on Daniel, and what is parked.
+
+  **The review of the audit** (two adversarial agents over the branch's own
+  diff, each in its own worktree) found nineteen things, and the useful half
+  of that was what the audit had got *wrong*. Four were regressions it had
+  introduced. Consolidating the frame-list rule made `separator_frames = []`
+  a hard error, which is the line every `garnish config init` has ever
+  written, so every config in the wild would have printed `⚠ config:` on
+  every tick; worse, the docs-sync test had been satisfied by changing the
+  generator to comment the key out, which hid the breakage instead of
+  showing it. Bounding `run_program`'s pipe read returned `Ok("")` on
+  giving up, and `is_dirty` reads no output as a clean tree, so the fix for
+  a hang introduced a silent lie. Fixing `decorate` for a *failed* module
+  also stopped `hide_when_empty` applying to an *overdue* one, which would
+  have flashed `– ⟳` on `sync` after every idle pause. The one-cell bar rule
+  refused `marker = ""`, the documented way to turn the marker off.
+
+  Five more were fixes that had stopped at the example: `joinable_ref` is a
+  rule about a name where the threat is a path, so a symlinked `HEAD`, ref
+  or `refs/heads` still read any file on disk; refusing a `-` remote left
+  `core.fsmonitor` and `remote.<name>.uploadpack`, which the same untrusted
+  file sets and git runs; the one-cell rule was bypassed by `<key>_frames`;
+  `MAX_ERROR_CHARS` missed `fetch_error`, the same stderr in a *successful*
+  entry; and the future-stamp rule missed `fetch_attempt`, so a backwards
+  clock froze auto-fetch. Two tests were weaker than their own doc comments
+  claimed: the drain test ran a fake git that printed nothing, so it passed
+  whether output was delivered or dropped, and the palette test sampled four
+  roles of which two are the same colour in every palette.
+
+  The lesson worth keeping is in `CLAUDE.md` now: fix the shape rather than
+  the example, and check what is already on disk before making a config rule
+  stricter. Both reproductions were run before and after the fix (a
+  symlinked HEAD rendering `SECRETVALUE`, a future stamp leaving the fetch
+  frozen). 223 → 225 tests.

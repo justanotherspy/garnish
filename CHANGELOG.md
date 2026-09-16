@@ -9,15 +9,21 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 Fixed, each with a test:
 
-- A `.git/HEAD` naming a ref outside the repository (`ref: ../../../x`)
-  made `branch` show the first seven characters of that file as its short
-  SHA, and `git fetch` took the remote name from `.git/config` as a
-  positional argument, where a name starting with `-` is an option to git.
-  Both matter only in a checkout you did not create, and both are refused
-  now.
+- A checkout you did not create (an unpacked archive, a shared directory)
+  could make garnish read files outside it or run commands. A `.git/HEAD`
+  naming a ref outside the repository (`ref: ../../../x`), or a symlinked
+  `HEAD`, ref or `refs/heads` directory, made `branch` show the first
+  seven characters of any file as its short SHA: garnish now requires the
+  file it opens to be inside the git directory. And `.git/config` could
+  run a command three ways: a remote name starting with `-` (git reads it
+  as an option), `core.fsmonitor` (`git status` runs it) and
+  `remote.<name>.uploadpack` (a fetch runs it). The name is refused and
+  the other two are overridden on every call.
 - A module refreshed in the background lost its `⟳`/`✗` mark when it had
   no value of its own, so `sync` with a broken git looked like an empty
-  row instead of a failure.
+  row instead of a failure. A `git status` whose output could not be read
+  before the timeout also reported a *clean* tree rather than a failure,
+  so the dirty marker went missing with nothing to show why.
 - `pr` underlined its number whenever `link = true`, even when the payload
   carried no URL to link to, so it looked clickable and was not.
 - `sync` printed `refs/heads/main` as the upstream of a branch tracking a
@@ -31,9 +37,13 @@ Fixed, each with a test:
   half.
 - A bar glyph (`fill` or `empty`) that was not exactly one cell was
   silently replaced while `config check` said `ok`; it is reported now,
-  like `frame.fill_char`. `marker` is exempt when it is blank, which is
-  how the marker is turned off. `[frame] separator_frames = []` keeps
-  meaning "no animation" and is still accepted.
+  like `frame.fill_char`, and the same goes for an animated one
+  (`fill_frames`). `marker` is exempt when it is blank, which is how the
+  marker is turned off. `[frame] separator_frames = []` keeps meaning "no
+  animation" and is still accepted.
+- Blanking a trailing glyph (`icons.dirty = ""`) left a stray space that
+  widened the module and shifted any aligned column beside it. The
+  `cache` countdown left two.
 - `GARNISH_CONFIG=` (empty) put `⚠ config: cannot read` on every tick, and
   `XDG_CONFIG_HOME=` made the config lookup relative to the current
   directory, so a checkout holding `garnish/garnish.toml` became your
@@ -45,8 +55,8 @@ Fixed, each with a test:
   than its `width`, shifting an aligned column.
 - A background worker could hang for ever holding its module's lock when
   something outlived `git fetch` (ssh's persistent connection does), and a
-  clock that stepped backwards froze a module's value until the wall clock
-  caught up.
+  clock that stepped backwards froze a module's value, and its automatic
+  fetch, until the wall clock caught up.
 - An error in an inline `line = [...]` array named the wrong line number.
 - `GARNISH_DEBUG` now writes a line per tick, as the reference has always
   said; it only ever logged a failed worker start.
