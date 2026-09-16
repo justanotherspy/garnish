@@ -42,13 +42,13 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
   first in Claude Code's chain, or, empty, says there is none; `doctor`
   lists it with the other hooks. The test suite sets it, so a managed
   file on the machine running `cargo test` no longer changes a golden.
-- How Claude Code 2.1.270 lays out a tall status line, read from its
-  renderers: the classic renderer cuts nothing and scrolls the frame, the
-  fullscreen renderer (the `tui` setting) gives the prompt box and the
-  status line together at most half the terminal and cuts a taller status
-  line from the bottom. garnish caps nothing; `doctor` now prints the
-  `tui` setting with what it means for the line, and the guide says how
-  many rows fit.
+- `garnish doctor` prints Claude Code's `tui` setting and what it means
+  for the line, naming a value Claude Code drops or rejects the file for,
+  and the guide's troubleshooting says how many rows fit: the fullscreen
+  renderer gives the prompt box and the status line together at most half
+  the terminal and cuts a taller status line from the bottom, the classic
+  renderer cuts nothing and scrolls. garnish itself caps nothing (read
+  from the 2.1.270 binary).
 
 **Fixes**
 

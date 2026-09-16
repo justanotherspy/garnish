@@ -509,17 +509,27 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   renderer's business (SPEC § 2.1, read 2026-09-13, not watched on a
   screen): the classic inline renderer lays the frame out with a width
   constraint only (`calculateYogaLayout` passes just the width) and lets
-  the terminal scroll the frame's top into scrollback (on a full reset
-  `function ts(n,s,c,f,h,p){let b=f?0:Math.min(h,Math.max(0,n.screen.height-n.viewport.height+1))`
-  draws the bottom rows); the fullscreen renderer (`function Xa(`: the
-  `tui` setting, `CLAUDE_CODE_NO_FLICKER`, fresh installs, the
-  `tengu_pewter_brook`/`tengu_amber_creek` gates) puts the composer in a
-  box `maxHeight:rz` with `rz=…?lI-sfe:Math.floor(lI/2)` under a root
-  `height:rows` whose alternate-screen buffer clips overflow; the DECSTBM
-  split renderer (`function hoe(){`, off unless `CLAUDE_CODE_DECSTBM` or
-  `tengu_marlin_porch`) bounds its bottom box with `minHeight:QN,maxHeight:xZe`
-  where `xZe=My-2`. To re-verify after an upgrade, `grep -a` the binary
-  for those literals.
+  the terminal scroll the frame's top into scrollback (a full reset
+  redraws from row `n.screen.height-n.viewport.height+1`, and
+  `Full reset (shrink->below)` names one of its triggers); the fullscreen
+  renderer (chosen by the function that logs `fullscreen disabled: tmux
+  -CC` and reads `tengu_pewter_brook`, `tengu_amber_creek` and
+  `fullscreenUpsellSeenCount` after the `tui` setting and
+  `CLAUDE_CODE_NO_FLICKER`) puts the bottom block in a box
+  `flexShrink:0,width:"100%",maxHeight:` of `Math.floor(rows/2)` under a
+  root as tall as the terminal, whose alternate-screen buffer clips
+  overflow with the warning `something is rendering outside
+  <AlternateScreen>. Overflow clipped.`, and gives the prompt input
+  `maxVisibleLines:` of the same `Math.floor(rows/2)` minus 5; the
+  DECSTBM split renderer (gated by `CLAUDE_CODE_DECSTBM` and
+  `tengu_marlin_porch`; `Screen-reader mode always uses the classic
+  renderer` is the `/tui` text) bounds its bottom box with `minHeight:4`
+  and `maxHeight:` of `rows-2`. Overflow of a capped box lands on its
+  last rows because Yoga's default style has `justifyContent:0`
+  (flex-start) next to `maxHeight:` in the node defaults. To re-verify
+  after an upgrade, `grep -a` the binary for those quoted strings and
+  shapes (the minified names of 2.1.270, `ts`, `Xa`, `hoe`, `rz`, `xZe`,
+  change with every build).
 - `COLUMNS`/`LINES` are `process.stdout.columns`/`rows` (the full terminal);
   OSC 8 links and ANSI colors work (`ansi-regex` strips both BEL- and
   ST-terminated OSC). `statusLine.padding` defaults to 0. Each output row is
@@ -548,7 +558,12 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
 - The harness trims the status line script's stdout and drops every row
   that is whitespace after trimming (2.1.261: `v.stdout.trim().split("\n")
   .flatMap(N => N.trim() || []).join("\n")`, found by grepping the binary
-  for `status_line_command");let D=`). The trim sees the raw bytes, escape
+  for `status_line_command");let D=`; 2.1.270: the same rule after
+  `b("status_line_command");let O=`). A non-zero exit, a spawn failure,
+  the 600 s hook timeout or empty stdout clears the status line rather
+  than keeping the last one (2.1.270), which is why `render` never exits
+  non-zero; a new trigger aborts the run in flight and keeps the previous
+  text. The trim sees the raw bytes, escape
   sequences included (2.1.263: no ANSI strip before it), so an unframed
   spacer is lost only with colour off; with colour on the rule's colour
   codes keep it. `preview --color never` shows a row the screen drops;

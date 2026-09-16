@@ -22,8 +22,9 @@ landed as designed; the sixth, the per-row dim reset, was dropped after
 the harness binary showed it cannot work and became a spec correction
 (SPEC § 2.1). Its three open questions were decided the same day
 (`preview` dims its rows, a `GARNISH_MANAGED_SETTINGS` hook, the height
-rule read from the binary; work log). **The drift between SPEC and the
-code is now Phases 20–22 below.**
+rule read from the binary; the last merged as PR #50 on 2026-09-14 and
+its review findings followed on 2026-09-16; work log). **The drift
+between SPEC and the code is now Phases 20–22 below.**
 
 ## Done — Phases 0–18, compacted
 
@@ -48,7 +49,7 @@ code is now Phases 20–22 below.**
 | 16 Animation | `animate`, `fill_pattern`, `separator_frames`, `<key>_frames`, frozen ticker cut with `…` (09-06) | 09-06 |
 | 17 Presets gallery | `presets/*.toml` embedded, `docs/presets.md`, `garnish presets`, `config init --preset <gallery>`; website dropped 09-12 for the setup | 09-06 |
 | 18 Skills, v0.2.0 | three `skills/*/SKILL.md`, `garnish skills install \| list`, issue templates, CHANGELOG, tag | 09-06 |
-| 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270 | 09-12 |
+| 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -81,9 +82,9 @@ tick-side write, the module set stays at 21.
 
 (A 24 h lock horizon from FUTURE-SPEC § 15 was on the Phase 19 list and
 was dropped in the spec review: `LOCK_STALE_MS` already bounds a lock's
-life. Phase 19's own layers are in the done table; what it could not
-settle, the on-screen height rule and the dim `preview` question, is in
-the backlog.)
+life. Phase 19's own layers are in the done table; the two things it
+could not settle, the height rule and the dim `preview` question, were
+decided on 2026-09-13 (work log).)
 
 ### Phase 20 — Per-module presentation (SPEC § 3, § 3.7, § 9)
 
@@ -181,7 +182,7 @@ gates rustdoc.
 - [ ] `phase-22/setup-shell`: the crates, `src/setup/` module tree (every `pub` item documented), `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly through `Quiet`/`ExitCode`, never `process::exit`; a `Drop` guard restores the terminal on the normal path and a panic hook chained ahead of color-eyre's does it on a panic (it runs before the release profile's abort; the unwinding test is dev-profile only); `setup` without `--preset` and without a tty on stdout exits 1 with one line; `bench/run.sh` unchanged (note the cold-start delta in the commit; a `setup` cargo feature is the fallback)
 - [ ] `phase-22/tty-pointer`: the bare `garnish` checks `std::io::IsTerminal` on stdin and prints the one-line pointer, exit 0; the explicit `render` always reads stdin; a `GARNISH_STDIN_TTY` test hook (documented in SPEC § 9) forces the decision so `tests/cli.rs` can cover both paths without a pty
 - [ ] `phase-22/setup-preview`: a second painter target in `ansi.rs` turning segments into ratatui spans (ratatui interprets no escape bytes; no new crate), with a unit test that the span text and styles agree with `Painter::paint`'s output; the preview pane over the Phase 21 `lines-per-row` output at `w − 4 − padding` with the live clock and the embedded fixtures (`f` cycles, `w` sets a terminal width, `padding` edits re-shrink), honouring the config's `color` and `NO_COLOR` with the "colours off" status line, a minimum size message below 60 × 12 and a redraw on resize; the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`, `GARNISH_NOW` frozen and `TZ=UTC` pinned, the row-start guards stripping escape prefixes), key sequences driven through the event loop
-- [ ] `phase-22/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs` and the narrower-than-declared warning; `Enter` writes with `install`'s never-clobbered backup and offers install; `e` opens the builder; `setup --preset <name> [--install]` never opens the screen, and `setup` without `--preset` and without a tty on stdout exits 1 with one line (`tests/cli.rs`)
+- [ ] `phase-22/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs`, the narrower-than-declared warning and the taller-than-the-fullscreen-budget warning (`⌊LINES / 2⌋ − 5` rows, SPEC § 2.1, with a unit test at the threshold: 7 at 24 rows, 20 at 50; the row count stated either way); `Enter` writes with `install`'s never-clobbered backup and offers install; `e` opens the builder; `setup --preset <name> [--install]` never opens the screen, and `setup` without `--preset` and without a tty on stdout exits 1 with one line (`tests/cli.rs`)
 - [ ] `phase-22/setup-builder`: the line list (add, insert, delete, clone, move, spacer), a line shown as its columns side by side (SPEC § 4.3): *Add a column* with its `width` and `justify`, *Stack* to turn a column into lines, *Add a title*, *Wrap in a box* over a selected run and *Box the column* (titles and box edges in the placement map), moves within and between columns, the module picker with fuzzy and initialism search over the 21 ids, the existing `text.<name>` tables and *New text module…* (a name checked by the § 3.7 rule, the table created with schema defaults; removing a last placement asks whether to drop the table; unit tests on the matcher), `Esc` closing the innermost layer only, the top-level and `[colors]` screens; the draft is a resolved `Config` and `s` saves it through `docs::config_toml` with `install`'s backup (the status bar says a hand-written file's comments live on in the backup only), `q` asks once on a dirty draft, a changed `(mtime, len)` on disk (or a file absent at open) asks overwrite-or-reload, a failed write shows the OS error and keeps the draft, an unparsable file is never overwritten
 - [ ] `phase-22/setup-selection`: the placement map computed from the Phase 21 `lines-per-row` output (each segment already carries its element kind; this layer adds the module id and cell ranges: several per module across a ticker wrap, the `…` cell owned by the cut module, an empty module owning none; measured through `Segment::width()`, never byte offsets; unit test that the ranges tile each row and match the painted widths for flex, multi-column, stacked and ticker lines); crossterm mouse capture on entry and off on exit (also on panic), click and wheel handling, `Tab`/`Shift-Tab`/arrows as the keyboard twins; the selection highlighted in the preview (inverse video) and on the chip; snapshot tests driving synthetic mouse events through `TestBackend`
 - [ ] `phase-22/setup-module-editor`: the overlay form generated from `ModuleSchema` (checkboxes for booleans, radio lists for `preset` and enums, steppers with `max`, colour swatches plus a validated custom entry, text-module schema on the same screen), re-rendering the preview on every change, a dot on chips that carry overrides; the unit test that every `OptSpec` kind and every top-level key has a form row
@@ -197,6 +198,8 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README
 - [ ] Parked from `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas not taken into Phases 19–20 stay in that document until asked for (A2, the `center` group, is answered by the Phase 21 layout): `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"` (A6), separator colour inheritance (A13), a `version` module (A12; it would grow the fixed set), settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1). Everything Tier B/C (workers, hooks, network, transcript, the companion, garlic) is a § 0 decision there, untouched. Once this plan's phases start, FUTURE-SPEC should lose the sections they adopted (§ 6.2, § 12.4, § 13), per its own rule
 - [ ] Open question from the 2026-09-12 code session: whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
+- [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's fullscreen and classic renderers (`/tui`) to confirm the § 2.1 arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt; the classic frame scrolling), then drop "read, not watched" from SPEC § 2.1 and `CLAUDE.md`
+- [ ] `parse_settings_json` accepts files Claude Code rejects: its schema is strict for every key (an enum's spelling, a number's type), and a user, project or local file that fails it is skipped entirely, so `doctor` can show `ok` and resolve keys from a file Claude Code never reads (the `tui` row names its own case since 2026-09-16; the general check would mean carrying Claude Code's schema, a spec decision)
 
 ## Work log
 
@@ -382,8 +385,9 @@ was built, what the reviews found and what was decided, not how.
   `GARNISH_MANAGED_SETTINGS` test hook for the goldens (a spec decision,
   in the backlog).
 - **2026-09-13 (backlog decisions)** — Daniel took the three Phase 19
-  questions as suggested and PR #49 merged mid-way; the rest went on a
-  fresh branch. `preview` draws every row faint (`Painter.dim` through
+  questions as suggested and PR #49 merged mid-way; the rest went on the
+  same branch restarted from `main` (PR #50, merged 2026-09-14). `preview`
+  draws every row faint (`Painter.dim` through
   `Request.dim`; only `preview` sets it, the tick's bytes and goldens are
   unchanged, the colour-on golden re-pinned) and SPEC § 14 has the pane
   do the same. `GARNISH_MANAGED_SETTINGS` (SPEC § 9) names the managed
@@ -403,7 +407,42 @@ was built, what the reviews found and what was decided, not how.
   the `tui` setting with what it means; SPEC § 2.1, § 7, § 11, § 14,
   `CLAUDE.md` (with the literals to grep after an upgrade), the guide and
   README carry it. Read, not watched: a nine-line status line at 24 rows
-  on a real screen would confirm the arithmetic.
+  on a real screen would confirm the arithmetic (backlog).
+- **2026-09-16 (height-rule review)** — The adversarial review of PR #50
+  (four lenses; most of its refuters and the height read's own died when
+  the account ran out of usage credits, so the findings were judged by
+  hand) landed after the merge, as a follow-up PR. Behaviour: the `tui`
+  row printed any other value as if Claude Code used it, while Claude
+  Code's schema takes only the two names and, outside the managed file,
+  rejects the whole file for one (now `Tui::Other` keeps the value as
+  written, a non-string too; the row shows the next file that sets the
+  key and names what was skipped, quoted and cut with `…` through one
+  `line_of` helper shared with the command row); the rows asserted the
+  renderer from the setting alone (now "asks for", with the environment
+  override named, and `CLAUDE_CODE_NO_FLICKER`/`CLAUDE_CODE_DECSTBM` in
+  the environment section); "fresh installs get fullscreen" was more
+  than the binary says (a new install's first sessions, then gates that
+  default to off). Spec: the `⌊LINES / 2⌋ − 5` budget was stated as the
+  rule when it is the ceiling for an empty prompt (the prompt input's
+  fullscreen viewport is `max(3, ⌊LINES / 2⌋ − 5)` draft lines, so a long
+  draft or a notice takes the status line's last rows first); the
+  renderer choice is made before the `tui` key (`CLAUDE_CODE_NO_FLICKER`,
+  a background session, screen-reader mode, tmux `-CC`, Windows over SSH,
+  a crash auto-off); the classic bullet's "only" hid two more full-reset
+  triggers and its "the prompt box among them" holds only while the
+  block fits; the suggestions float above the fullscreen block; the hint
+  line sat in two parents; "top-aligned" now says why (Yoga's default
+  `justifyContent`). Documents: the guide and README said "under" the
+  count that fits (now "at most", rounding down); the plan's Phase 19
+  note still sent both questions to the backlog, the done row lacked the
+  09-13 items, the `setup-gallery` layer lacked the height warning, the
+  on-screen check left the backlog with the rule still "read, not
+  watched" (restored, narrowed); `CLAUDE.md`'s re-verify anchors were
+  minified names (now quoted strings and shapes, and the 2.1.270 anchor
+  for the stdout trim); the CHANGELOG led with the finding rather than
+  the change. Recorded from the runner lens: a failed, timed-out (600 s)
+  or empty run clears the status line, and an aborted run keeps the
+  previous text.
 - **2026-09-14 (first macOS host)** — `make setup` on Daniel's Mac died
   with `rustc: command not found` after a clean toolchain install: the
   rustup there is Homebrew's keg-only formula, whose `cargo`/`rustc`

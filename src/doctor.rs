@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ansi::display_width;
 use crate::cache::{Cache, Entry, Status};
-use crate::claude_settings::{self, FileKeys, FileState};
+use crate::claude_settings::{self, FileKeys, FileState, Tui};
 use crate::config::{self, Config};
 use crate::icons::IconSet;
 use crate::modules::SCHEMAS;
@@ -84,10 +84,20 @@ pub fn read_chain(chain: &[(&'static str, PathBuf)]) -> Vec<ChainEntry> {
         .collect()
 }
 
-/// Most characters of a settings file's `statusLine.command` the report
-/// shows: the file may come with a cloned repository, so the value is
-/// plain text cut to a line's worth, never the row-breaking original.
-const MAX_COMMAND_CHARS: usize = 200;
+/// Most characters of a string from a settings file the report echoes
+/// (`statusLine.command`, a `tui` value that is neither name): the file may
+/// come with a cloned repository, so the value is plain text cut to a
+/// line's worth, never the row-breaking original.
+const MAX_VALUE_CHARS: usize = 200;
+
+/// `plain` cut to [`MAX_VALUE_CHARS`], with `…` when something was cut.
+fn line_of(plain: &str) -> String {
+    let mut shown: String = plain.chars().take(MAX_VALUE_CHARS).collect();
+    if plain.chars().nth(MAX_VALUE_CHARS).is_some() {
+        shown.push('…');
+    }
+    shown
+}
 
 /// The `claude settings` rows of the report (SPEC § 7).
 ///
@@ -127,11 +137,7 @@ pub fn settings_rows(
     }
     match resolved(chain, |k| k.status_line_command.clone()) {
         Some((command, from)) => {
-            let plain = crate::ansi::plain_text(&command);
-            let mut shown: String = plain.chars().take(MAX_COMMAND_CHARS).collect();
-            if plain.chars().nth(MAX_COMMAND_CHARS).is_some() {
-                shown.push('…');
-            }
+            let shown = line_of(&crate::ansi::plain_text(&command));
             rows.push(row("statusLine", &format!("command={} ({from})", tilde(Path::new(&shown)))));
         }
         None => rows.push(row("statusLine", "not configured (run `garnish install`)")),
@@ -186,27 +192,65 @@ pub fn settings_rows(
         });
     }
     rows.push(row("prefersReducedMotion", &text));
-    // Which renderer draws the screen decides what a tall status line does
-    // (SPEC § 2.1); an unset key leaves the choice to Claude Code.
-    let text = match resolved(chain, |k| k.tui.clone()) {
-        Some((tui, from)) if tui == "fullscreen" => format!(
-            "fullscreen ({from}): the prompt box and the status line share at most half the terminal's rows, and a taller status line loses its last rows"
-        ),
-        Some((tui, from)) if tui == "default" => format!(
-            "default ({from}): the classic renderer cuts nothing; every status line row costs a row of transcript"
-        ),
-        Some((tui, from)) => {
-            let plain = crate::ansi::plain_text(&tui);
-            let shown: String = plain.chars().take(MAX_COMMAND_CHARS).collect();
-            format!("{shown} ({from})")
-        }
-        None => {
-            "unset: Claude Code picks the renderer (fresh installs get fullscreen); `/tui` shows and sets it"
-                .to_owned()
-        }
-    };
-    rows.push(row("tui", &text));
+    rows.push(row("tui", &tui_row(chain)));
     rows
+}
+
+/// The `tui` row: which renderer the settings ask for, which decides what
+/// a tall status line does (SPEC § 2.1).
+///
+/// Claude Code's schema takes only the two names. Another value in the
+/// managed file is dropped on its own; in any other file it has Claude
+/// Code reject the whole file. Neither decides, so the search goes on to
+/// the next file that sets the key and the row names what was skipped.
+fn tui_row(chain: &[ChainEntry]) -> String {
+    let mut skipped = Vec::new();
+    let mut decided = None;
+    for (label, _, state) in chain {
+        let FileState::Keys(keys) = state else { continue };
+        match &keys.tui {
+            None => {}
+            Some(Tui::Fullscreen) => {
+                decided = Some((true, *label));
+                break;
+            }
+            Some(Tui::Default) => {
+                decided = Some((false, *label));
+                break;
+            }
+            Some(Tui::Other(value)) => {
+                // A string is shown quoted, so an empty or blank one is
+                // visible; another JSON value as the JSON it is.
+                let shown = value.as_str().map_or_else(
+                    || line_of(&value.to_string()),
+                    |s| format!("{:?}", line_of(&crate::ansi::plain_text(s))),
+                );
+                skipped.push(if *label == "managed" {
+                    format!(
+                        "{shown} (managed) is not `default` or `fullscreen`, so Claude Code ignores it there"
+                    )
+                } else {
+                    format!(
+                        "{shown} ({label}) is not `default` or `fullscreen`, so Claude Code rejects that file and reads none of its keys"
+                    )
+                });
+            }
+        }
+    }
+    let mut text = match decided {
+        Some((true, from)) => format!(
+            "fullscreen ({from}): asks for the alternate-screen renderer, where the prompt box and the status line share at most half the terminal's rows and a taller status line loses its last rows (more while a long prompt is being typed); an environment switch or the terminal can override it"
+        ),
+        Some((false, from)) => format!(
+            "default ({from}): asks for the classic renderer, which cuts nothing and scrolls instead; every status line row costs a row of transcript; `CLAUDE_CODE_NO_FLICKER=1` overrides it"
+        ),
+        None => "unset: Claude Code picks the renderer (a new install starts in fullscreen; after its first sessions the server gates decide, classic by default); `/tui` shows and sets it".to_owned(),
+    };
+    for note in skipped {
+        text.push_str("; ");
+        text.push_str(&note);
+    }
+    text
 }
 
 /// The first file of the chain that sets a key, with the file's label:
@@ -374,6 +418,8 @@ fn environment_section(o: &mut String) {
         "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         "DISABLE_AUTO_COMPACT",
         "DISABLE_COMPACT",
+        "CLAUDE_CODE_NO_FLICKER",
+        "CLAUDE_CODE_DECSTBM",
     ] {
         if let Ok(v) = std::env::var(key) {
             // The path-valued hooks may carry the home directory.
@@ -689,7 +735,7 @@ mod tests {
         );
         assert!(row(&rows, "prefersReducedMotion", "true (user): animations are frozen"), "{text}");
         assert!(
-            row(&rows, "tui", "fullscreen (user): the prompt box and the status line"),
+            row(&rows, "tui", "fullscreen (user): asks for the alternate-screen renderer"),
             "{text}"
         );
         // The key column is one width, so the values line up.
@@ -706,14 +752,51 @@ mod tests {
         assert!(row(&rows, "refreshInterval", "2 (local); set 1"), "{text}");
         assert!(row(&rows, "hideVimModeIndicator", "false (project)"), "{text}");
         assert!(row(&rows, "prefersReducedMotion", "false (local)"), "{text}");
-        assert!(row(&rows, "tui", "default (local): the classic renderer"), "{text}");
-        // An unknown value is shown as plain text; an unset key says so.
-        std::fs::write(&local, "{\"tui\": \"x\\u001b[31my\"}").unwrap();
-        let rows = settings_rows(&chain(Some(&proj), Some(&home)), Some(&proj), &cfg, true);
-        assert!(row(&rows, "tui", "xy (local)"), "{}", rows.join("\n"));
+        assert!(row(&rows, "tui", "default (local): asks for the classic renderer"), "{text}");
+        // A value that is neither name never decides: the next file that
+        // sets the key does (here the user's `fullscreen`), and the row
+        // says the file Claude Code rejects for it, the value quoted and
+        // reduced to plain text, or cut, so a blank or a huge one is seen.
+        let tui_row = |local_json: &str| {
+            std::fs::write(&local, local_json).unwrap();
+            let rows = settings_rows(&chain(Some(&proj), Some(&home)), Some(&proj), &cfg, true);
+            rows.iter().find(|r| r.starts_with("tui ")).cloned().unwrap()
+        };
+        let text = tui_row("{\"tui\": \"x\\u001b[31my\"}");
+        assert!(text.contains("fullscreen (user): asks"), "{text}");
+        assert!(
+            text.contains(
+                "; \"xy\" (local) is not `default` or `fullscreen`, so Claude Code rejects that file and reads none of its keys"
+            ),
+            "{text}"
+        );
+        assert!(tui_row("{\"tui\": \"\"}").contains("; \"\" (local) is not"), "empty, quoted");
+        assert!(tui_row("{\"tui\": 1}").contains("; 1 (local) is not"), "a number as JSON");
+        let long = tui_row(&format!("{{\"tui\": \"{}\"}}", "x".repeat(300)));
+        let cut = format!("; \"{}…\" (local) is not", "x".repeat(MAX_VALUE_CHARS));
+        assert!(long.contains(&cut) && !long.contains(&"x".repeat(201)), "{long}");
+        // The managed file's stray value is dropped on its own and the user
+        // file decides; with nothing else setting the key, unset.
+        let managed = dir.path().join("managed.json");
+        std::fs::write(&managed, r#"{"tui": "FULL"}"#).unwrap();
         std::fs::write(&local, "{}").unwrap();
+        std::fs::write(&user, r#"{"tui": "default"}"#).unwrap();
+        let with_managed =
+            read_chain(&claude_settings::settings_chain(Some(&managed), Some(&proj), Some(&home)));
+        let rows = settings_rows(&with_managed, Some(&proj), &cfg, true);
+        let text = rows.iter().find(|r| r.starts_with("tui ")).unwrap();
+        assert!(text.contains("default (user): asks for the classic"), "{text}");
+        assert!(
+            text.contains("; \"FULL\" (managed) is not `default` or `fullscreen`, so Claude Code ignores it there"),
+            "{text}"
+        );
         let rows = settings_rows(&chain(Some(&proj), None), Some(&proj), &cfg, true);
         assert!(row(&rows, "tui", "unset: Claude Code picks"), "{}", rows.join("\n"));
+        std::fs::write(
+            &user,
+            r#"{"statusLine": {"type": "command", "command": "garnish", "refreshInterval": 5}, "prefersReducedMotion": true, "tui": "fullscreen"}"#,
+        )
+        .unwrap();
         std::fs::write(&local, "{ broken").unwrap();
         // No ticking module and no vim: no suggestion; an explicit `animate`
         // changes the reduced-motion note.

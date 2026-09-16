@@ -1,6 +1,8 @@
-//! Reading the few Claude Code settings garnish needs (auto-compaction and
-//! reduced motion), with the same precedence Claude Code uses: env >
-//! managed > local > project > user.
+//! Reading the Claude Code settings garnish needs.
+//!
+//! Auto-compaction, reduced motion, the `statusLine` keys,
+//! `disableAllHooks` and the `tui` renderer choice, with the same
+//! precedence Claude Code uses: env > managed > local > project > user.
 
 use std::path::{Path, PathBuf};
 
@@ -152,9 +154,33 @@ pub fn settings_files(
 /// file nobody controls cannot make a tick slow.
 pub const MAX_SETTINGS_BYTES: u64 = 1 << 20;
 
-/// The keys garnish reads from one settings file (SPEC § 2.3, § 4.2 and
-/// the `doctor` report of § 7); each is `None` when the file does not set
-/// it.
+/// The `tui` key: which renderer Claude Code draws the screen with, which
+/// decides what a tall status line does (SPEC § 2.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tui {
+    /// `"fullscreen"`: the alternate-screen renderer.
+    Fullscreen,
+    /// `"default"`: the classic renderer.
+    Default,
+    /// Any other value, kept as written. Claude Code's schema takes only
+    /// the two names: it drops such a value from the managed file and
+    /// rejects any other file that carries one, so it never decides.
+    Other(serde_json::Value),
+}
+
+impl Tui {
+    fn from_json(value: &serde_json::Value) -> Self {
+        match value.as_str() {
+            Some("fullscreen") => Self::Fullscreen,
+            Some("default") => Self::Default,
+            _ => Self::Other(value.clone()),
+        }
+    }
+}
+
+/// The keys garnish reads from one settings file (SPEC § 2.1, § 2.3, § 4.2
+/// and the `doctor` report of § 7); each is `None` when the file does not
+/// set it.
 ///
 /// Claude Code merges settings objects key by key, so the `statusLine`
 /// keys are tracked one by one.
@@ -175,9 +201,8 @@ pub struct FileKeys {
     pub hide_vim_mode: Option<bool>,
     /// `disableAllHooks`.
     pub disable_all_hooks: Option<bool>,
-    /// `tui`: which renderer draws the screen (`"fullscreen"` or
-    /// `"default"`), which decides what a tall status line does (SPEC § 2.1).
-    pub tui: Option<String>,
+    /// `tui`, as written: which renderer draws the screen (SPEC § 2.1).
+    pub tui: Option<Tui>,
 }
 
 /// Parse one settings file's text into the keys garnish reads. An empty
@@ -208,7 +233,7 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                 hide_vim_mode: status_key("hideVimModeIndicator")
                     .and_then(serde_json::Value::as_bool),
                 disable_all_hooks: v.get("disableAllHooks").and_then(serde_json::Value::as_bool),
-                tui: v.get("tui").and_then(serde_json::Value::as_str).map(str::to_owned),
+                tui: v.get("tui").map(Tui::from_json),
             })
         }
         Ok(_) => Err("not a JSON object".to_owned()),
@@ -343,8 +368,16 @@ mod tests {
         assert_eq!(keys.refresh_interval, Some(2.0));
         assert_eq!(keys.hide_vim_mode, Some(true));
         assert_eq!(keys.disable_all_hooks, Some(false));
-        assert_eq!(keys.tui.as_deref(), Some("fullscreen"));
-        assert_eq!(from_settings_json(r#"{"tui": 1}"#).tui, None);
+        assert_eq!(keys.tui, Some(Tui::Fullscreen));
+        assert_eq!(from_settings_json(r#"{"tui": "default"}"#).tui, Some(Tui::Default));
+        // Anything but the two names is kept as written, a non-string too,
+        // so `doctor` can say what Claude Code does with it.
+        for other in [r#""FULLSCREEN""#, r#"" fullscreen""#, r#""""#, "1", "null", "[1]"] {
+            let value: serde_json::Value = serde_json::from_str(other).unwrap();
+            let keys = from_settings_json(&format!(r#"{{"tui": {other}}}"#));
+            assert_eq!(keys.tui, Some(Tui::Other(value)), "{other}");
+        }
+        assert_eq!(from_settings_json("{}").tui, None);
         assert!(parse_settings_json("{ broken").unwrap_err().starts_with("not valid JSON: "));
         assert_eq!(parse_settings_json("[1]").unwrap_err(), "not a JSON object");
         // An empty file is what a fresh `touch` leaves and what `install`
