@@ -133,6 +133,23 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
 /// Symbolic refs deeper than this are treated as broken (git's own limit).
 const SYMREF_MAX_DEPTH: usize = 5;
 
+/// Whether a ref name may be joined onto the git directory.
+///
+/// A ref is read by opening `<git dir>/<name>`, so a name holding `..` walks
+/// out of the repository: a `.git/HEAD` saying `ref: ../../../secret` made
+/// `branch` render the first seven characters of that file as the short SHA
+/// of a checkout the user never created (an unpacked archive, a shared
+/// directory). Every `ref:` hop goes through here, so a chain cannot smuggle
+/// one in either. This is git's own `check-ref-format` rule, narrowed to
+/// what the join needs: no empty, `.` or `..` component, and nothing
+/// absolute.
+fn joinable_ref(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('/')
+        && !name.contains('\\')
+        && name.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
 /// Resolve a full ref name (`refs/heads/main`) to a commit id.
 ///
 /// Loose refs are tried first, then `packed-refs`. `None` for reftable
@@ -145,6 +162,9 @@ pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
     }
     let mut name = refname.to_owned();
     for _ in 0..SYMREF_MAX_DEPTH {
+        if !joinable_ref(&name) {
+            return None;
+        }
         let mut next: Option<String> = None;
         for base in [&dirs.git_dir, &dirs.common_dir] {
             let Ok(text) = std::fs::read_to_string(base.join(&name)) else { continue };
@@ -246,6 +266,32 @@ pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, S
     run_program(Path::new("git"), cwd, args, timeout)
 }
 
+/// How long the pipes are still read after the child has exited and the
+/// timeout is already spent. Its own pipes close with it, so this only
+/// bounds the case below.
+const DRAIN_FLOOR: Duration = Duration::from_millis(250);
+
+/// Read a pipe to the end on its own thread, delivering the bytes once.
+///
+/// A channel rather than a join handle, so the caller can put a deadline on
+/// the read. Joining has none: the write end stays open while *any*
+/// descendant holds it, not only the child — ssh's `ControlPersist` master
+/// outlives the `git fetch` that started it — and the worker would then sit
+/// in `read_to_end` for ever with its lock held, whatever timeout was asked
+/// for. A thread left behind does not hold the process up; it is dropped
+/// when the worker exits.
+fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(mut pipe) = pipe {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = pipe.read_to_end(&mut buf);
+            let _ = tx.send(buf);
+        });
+    }
+    rx
+}
+
 /// [`run_git`] with an explicit program (tests use a fake git).
 ///
 /// # Errors
@@ -256,7 +302,6 @@ pub fn run_program(
     args: &[&str],
     timeout: Duration,
 ) -> Result<String, String> {
-    use std::io::Read as _;
     use std::process::{Command, Stdio};
     let mut child = Command::new(program)
         .args(args)
@@ -271,20 +316,8 @@ pub fn run_program(
         .map_err(|e| format!("git: {e}"))?;
     // Drain both pipes on their own threads: a child that writes more than
     // the pipe buffer (64 KiB) before exiting would otherwise block forever.
-    let stdout = child.stdout.take().map(|mut p| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = p.read_to_end(&mut buf);
-            buf
-        })
-    });
-    let stderr = child.stderr.take().map(|mut p| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = p.read_to_end(&mut buf);
-            buf
-        })
-    });
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
     let start = std::time::Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -302,8 +335,11 @@ pub fn run_program(
             Err(e) => return Err(e.to_string()),
         }
     };
-    let out = stdout.and_then(|t| t.join().ok()).unwrap_or_default();
-    let err = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
+    // What is left of the budget, never below a floor: the child has exited,
+    // so its pipes are normally closed already and both arrive at once.
+    let left = || timeout.saturating_sub(start.elapsed()).max(DRAIN_FLOOR);
+    let out = stdout.recv_timeout(left()).unwrap_or_default();
+    let err = stderr.recv_timeout(left()).unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err).trim().to_owned();
     if status.success() {
         Ok(String::from_utf8_lossy(&out).into_owned())
@@ -356,10 +392,19 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
 /// `git fetch --quiet <remote>`, killed after `timeout` (a hung network
 /// fetch must not pin the worker and its lock).
 ///
+/// The remote is the one named in the repository's own `.git/config`, which
+/// is not the user's file in a checkout they did not create. A name starting
+/// with `-` would be read by git as an option rather than a remote, and
+/// `--upload-pack=<cmd>` runs `<cmd>`, so it is refused here; it is the one
+/// git argument garnish builds that is not behind a fixed prefix.
+///
 /// # Errors
-/// Propagates git failures.
+/// Propagates git failures; refuses a remote that is not a plain name.
 pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> {
-    run_git(cwd, &["fetch", "--quiet", remote], timeout).map(|_| ())
+    if remote.is_empty() || remote.starts_with('-') {
+        return Err(format!("refusing to fetch from remote {remote:?}"));
+    }
+    run_git(cwd, &["fetch", "--quiet", "--", remote], timeout).map(|_| ())
 }
 
 /// `git --version`, for `doctor` (killed after two seconds like every other
@@ -515,6 +560,73 @@ mod tests {
             assert_eq!(head(&dirs), None, "reftable HEAD is a placeholder, never `.invalid`");
             assert_eq!(resolve_ref(&dirs, "refs/heads/main"), None);
         }
+    }
+
+    /// A ref name is joined onto the git directory, so it must never walk
+    /// out of it. A checkout the user did not create (an unpacked archive,
+    /// a shared directory) could put `ref: ../../../secret` in `.git/HEAD`
+    /// and see the first seven characters of that file rendered as the
+    /// branch's short SHA.
+    #[test]
+    fn a_ref_name_can_never_walk_out_of_the_git_directory() {
+        for bad in [
+            "refs/heads/../../../secret",
+            "refs/heads/..",
+            "../../secret",
+            "/etc/hostname",
+            "refs//heads/main",
+            "refs/heads/./main",
+            "",
+        ] {
+            assert!(!joinable_ref(bad), "{bad:?} must be refused");
+        }
+        for good in ["refs/heads/main", "refs/remotes/origin/feature/x", "HEAD", "refs/tags/v1"] {
+            assert!(joinable_ref(good), "{good:?} must be allowed");
+        }
+
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        let secret = work.join("secret.txt");
+        std::fs::write(&secret, "SECRETVALUE\n").unwrap();
+        // `.git/refs/heads/../../../secret.txt` is `<work>/secret.txt`.
+        std::fs::write(work.join(".git/HEAD"), "ref: ../../../secret.txt\n").unwrap();
+        assert_eq!(head(&dirs), Some(Head::Branch("../../../secret.txt".into())));
+        assert_eq!(head_commit(&dirs), None, "the file must not be read");
+        // Nor through a symbolic-ref hop.
+        std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/hop\n").unwrap();
+        std::fs::write(work.join(".git/refs/heads/hop"), "ref: ../../../secret.txt\n").unwrap();
+        assert_eq!(head_commit(&dirs), None, "the file must not be read through a hop");
+    }
+
+    /// The remote comes from the repository's own `.git/config`, so a name
+    /// git would read as an option (`--upload-pack=<cmd>` runs `<cmd>`) is
+    /// refused before the process starts.
+    #[test]
+    fn fetch_refuses_a_remote_that_git_would_read_as_an_option() {
+        let (_d, work) = repo();
+        for bad in ["--upload-pack=touch /tmp/pwned", "-o", ""] {
+            let err = fetch(&work, bad, Duration::from_secs(2)).unwrap_err();
+            assert!(err.starts_with("refusing to fetch"), "{bad:?}: {err}");
+        }
+        // A plain name still reaches git (there is no such remote here, so
+        // git itself reports it — the point is that it ran).
+        let err = fetch(&work, "nope", Duration::from_secs(5)).unwrap_err();
+        assert!(!err.starts_with("refusing to fetch"), "{err}");
+    }
+
+    /// The timeout bounds the whole call, not only the wait: a child that
+    /// exits while a grandchild keeps the pipes open used to leave the
+    /// worker in `read_to_end` for ever with its lock held.
+    #[test]
+    fn a_grandchild_holding_the_pipes_cannot_outlast_the_timeout() {
+        let (tmp, work) = repo();
+        let fake = tmp.path().join("git-leaky");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 30 &\nexit 0\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let out = run_program(&fake, &work, &["status"], Duration::from_millis(500));
+        assert!(out.is_ok(), "{out:?}");
+        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
     }
 
     #[test]

@@ -267,17 +267,47 @@ fn cache_live_lock_suppresses_spawn_and_dead_lock_is_reclaimed() {
         garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
     assert!(ok, "{err}");
     // Entries are past their TTL, but a live lock (this test's pid, stamped
-    // now) says a worker is already on it: the tick must not spawn.
-    let later = (NOW.parse::<u64>().unwrap() + 60).to_string();
-    let now_ms =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-    write_locks(&env, &format!("{} {now_ms}", std::process::id()));
+    // now) says a worker is already on it: the tick must not spawn. The
+    // stamp is in the tick's own frozen timeline — `GARNISH_NOW` moves
+    // `now_millis`, so a wall-clock stamp would read as a lock from the
+    // future, which is a clock that stepped backwards, not a live worker.
+    let later_secs = NOW.parse::<i64>().unwrap() + 60;
+    let later = later_secs.to_string();
+    write_locks(&env, &format!("{} {}", std::process::id(), later_secs * 1000));
     garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
     assert_eq!(spawns(&env).len(), 0, "{:?}", spawns(&env));
     // Locks stale by age are reclaimed: the tick spawns again.
     write_locks(&env, "4000000000 1");
     garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
     assert_eq!(spawns(&env).len(), 2, "{:?}", spawns(&env));
+}
+
+/// A lock and an entry stamped in the future are a clock that stepped back
+/// (a resumed VM, NTP correcting a bad RTC), not a live worker and not a
+/// fresh value. Treating a negative age as "very recent" froze the module:
+/// every tick saw a live lock and a fresh entry, so nothing refreshed and
+/// no `⟳` ever appeared, until the wall clock caught up.
+#[test]
+fn cache_a_future_stamp_is_never_live_nor_fresh() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, err, ok) =
+        garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
+    assert!(ok, "{err}");
+    // An hour ahead of the tick's clock, in both the lock and the entries.
+    let ahead_secs = NOW.parse::<i64>().unwrap() + 3_600;
+    write_locks(&env, &format!("{} {}", std::process::id(), ahead_secs * 1000));
+    for d in std::fs::read_dir(env.cache.join("repos")).unwrap().flatten() {
+        for module in ["branch", "sync"] {
+            let path = d.path().join(format!("{module}.cache"));
+            let text = std::fs::read_to_string(&path).unwrap();
+            let rest = text.split_once('\n').map(|(_, r)| r.to_owned()).unwrap_or_default();
+            std::fs::write(&path, format!("v1 {} 5000 ok\n{rest}", ahead_secs * 1000)).unwrap();
+        }
+    }
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", NOW)]);
+    assert_eq!(spawns(&env).len(), 2, "a future lock must not suppress the refresh: {out}");
 }
 
 /// Overwrite every module lock in the repo cache with `text`.

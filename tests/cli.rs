@@ -414,6 +414,23 @@ fn preview_typos_are_one_line_not_a_report() {
     }
 }
 
+/// `--lock-held` means "the caller already holds *this module's* lock" and
+/// is only ever passed beside `--module` (`spawn::Job::args`). With `--all`
+/// it would adopt a lock per module — inventing one where there was none,
+/// and taking over one a live worker still holds — so clap refuses it.
+#[test]
+fn refresh_refuses_all_together_with_lock_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let (out, err, ok) =
+        run(&["refresh", "--all", "--lock-held", "--session", "s", "--cwd", cwd], dir.path(), &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert!(err.contains("--all") && err.contains("--lock-held"), "{err}");
+    // Each on its own is still accepted.
+    let (_, err, ok) = run(&["refresh", "--all", "--session", "s", "--cwd", cwd], dir.path(), &[]);
+    assert!(ok, "{err}");
+}
+
 /// SPEC § 7: `preview <dir>` renders every `*.json` in the directory, in
 /// name order, each under a dim `── <name>` heading.
 #[test]

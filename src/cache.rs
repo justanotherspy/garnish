@@ -35,6 +35,11 @@ pub const GC_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 /// Upper bound on directories removed per sweep.
 pub const GC_MAX_PER_SWEEP: usize = 50;
 
+/// Characters of a failed refresh's error text an entry keeps (SPEC § 5:
+/// every string from outside is bounded). Enough for a git message,
+/// nowhere near enough to matter to a tick that reads the file.
+pub const MAX_ERROR_CHARS: usize = 500;
+
 /// Where an entry lives.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Scope {
@@ -112,6 +117,12 @@ impl Entry {
     }
 
     /// A failed entry computed now.
+    ///
+    /// The text is the failing command's whole stderr, which nothing else
+    /// bounds — a `git` wrapper printing a long policy message, or the
+    /// 200 KB case the worker already survives. Every warm tick then reads
+    /// and parses that file, so it is cut here like every other external
+    /// string (SPEC § 5); `doctor` prints what is kept.
     #[must_use]
     pub fn err(ttl_ms: u64, error: impl Into<String>) -> Self {
         Self {
@@ -119,20 +130,27 @@ impl Entry {
             ttl_ms,
             status: Status::Err,
             values: BTreeMap::new(),
-            error: error.into(),
+            error: error.into().chars().take(MAX_ERROR_CHARS).collect(),
         }
     }
 
-    /// Age in milliseconds (never negative).
+    /// Age in milliseconds, for display; never negative.
     #[must_use]
     pub fn age_ms(&self) -> i64 {
         now_millis().saturating_sub(self.computed_at_ms).max(0)
     }
 
     /// Whether the entry is within `ttl_ms`.
+    ///
+    /// An entry stamped in the future is never fresh. The clock can step
+    /// backwards (a VM resuming, NTP correcting a bad RTC), and clamping a
+    /// negative age to zero would have made such an entry fresh for every
+    /// TTL until the wall clock caught up — the value frozen with no `⟳`
+    /// and no worker ever spawned.
     #[must_use]
     pub fn is_fresh(&self, ttl_ms: u64) -> bool {
-        u64::try_from(self.age_ms()).is_ok_and(|age| age <= ttl_ms)
+        let age = now_millis().saturating_sub(self.computed_at_ms);
+        u64::try_from(age).is_ok_and(|age| age <= ttl_ms)
     }
 
     /// A value.
@@ -376,6 +394,10 @@ impl Cache {
         let created = !dir.exists();
         fs::create_dir_all(&dir)?;
         let tmp = dir.join(format!(".{}.tmp.{}", sanitize(module), std::process::id()));
+        // Removed on every failure path, as `lock` and `install::replace_file`
+        // do: otherwise a full disk leaves one temp file per failed refresh,
+        // and only a brand-new session directory or `garnish gc` sweeps them.
+        let _cleanup = TmpFile(tmp.clone());
         {
             let mut f = fs::File::create(&tmp)?;
             f.write_all(entry.to_text().as_bytes())?;
@@ -440,7 +462,11 @@ impl Cache {
         let pid: Option<u32> = parts.next().and_then(|p| p.parse().ok());
         let stamp: Option<i64> = parts.next().and_then(|p| p.parse().ok());
         let age = stamp.map_or(i64::MAX, |s| now_millis().saturating_sub(s));
-        if age > LOCK_STALE_MS {
+        // A stamp in the future is a clock that stepped backwards, not a
+        // live lock: without this the negative age passes the staleness
+        // check and then satisfies the grace window, so the lock reads live
+        // for ever and the module is never refreshed again.
+        if !(0..=LOCK_STALE_MS).contains(&age) {
             return false;
         }
         if age <= LOCK_GRACE_MS {
@@ -574,6 +600,50 @@ mod tests {
         ] {
             assert!(Entry::parse(bad).is_none(), "{bad:?}");
         }
+    }
+
+    /// SPEC § 5: every string from outside is bounded. A failed refresh
+    /// carries the command's whole stderr, which every later tick reads and
+    /// parses until the TTL passes — a `git` wrapper with a long policy
+    /// message used to leave hundreds of kilobytes in the entry.
+    #[test]
+    fn a_failed_entry_bounds_the_error_text() {
+        let long = "é".repeat(MAX_ERROR_CHARS * 3);
+        let entry = Entry::err(1000, long.clone());
+        assert_eq!(entry.error.chars().count(), MAX_ERROR_CHARS);
+        assert!(long.starts_with(&entry.error), "the head is kept");
+        assert_eq!(Entry::err(1000, "short").error, "short");
+        // The cut survives the file round trip.
+        let (_d, cache) = temp();
+        let scope = Scope::Session("s".into());
+        cache.write(&scope, "m", &entry).unwrap();
+        let back = cache.read(&scope, "m").unwrap();
+        assert_eq!(back.error.chars().count(), MAX_ERROR_CHARS);
+    }
+
+    /// A stamp in the future is a clock that stepped backwards, not a very
+    /// recent one: a negative age clamped to zero made such an entry fresh
+    /// for every TTL and such a lock live for ever.
+    #[test]
+    fn a_future_stamp_is_neither_fresh_nor_live() {
+        let ahead = now_millis().saturating_add(60 * 60 * 1000);
+        let entry = Entry {
+            computed_at_ms: ahead,
+            ttl_ms: 1000,
+            status: Status::Ok,
+            values: BTreeMap::new(),
+            error: String::new(),
+        };
+        assert!(!entry.is_fresh(1000));
+        assert!(!entry.is_fresh(u64::MAX));
+        assert_eq!(entry.age_ms(), 0, "the display age stays non-negative");
+        let (_d, cache) = temp();
+        let path = cache.root().join("m.lock");
+        std::fs::create_dir_all(cache.root()).unwrap();
+        std::fs::write(&path, format!("{} {ahead}\n", std::process::id())).unwrap();
+        assert!(!cache.lock_is_live(&path));
+        std::fs::write(&path, format!("{} {}\n", std::process::id(), now_millis())).unwrap();
+        assert!(cache.lock_is_live(&path));
     }
 
     #[test]

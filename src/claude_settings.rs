@@ -270,13 +270,22 @@ pub fn read_file(path: &Path) -> FileState {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileState::Absent,
         Err(e) => return FileState::Unreadable(e.to_string()),
     };
-    let mut text = String::new();
-    // One byte past the cap tells an over-long file from one exactly at it.
-    match file.take(MAX_SETTINGS_BYTES.saturating_add(1)).read_to_string(&mut text) {
-        Ok(n) if u64::try_from(n).is_ok_and(|n| n > MAX_SETTINGS_BYTES) => {
-            FileState::Invalid(format!("longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"))
-        }
-        Ok(_) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
+    // Bytes first, then UTF-8: reading straight into a `String` validates
+    // the *truncated* stream, so a file over the cap whose cut lands inside
+    // a multi-byte character failed as "unreadable: stream did not contain
+    // valid UTF-8" and sent the reader looking for corruption that was not
+    // there. One byte past the cap tells an over-long file from one at it.
+    let mut bytes = Vec::new();
+    if let Err(e) = file.take(MAX_SETTINGS_BYTES.saturating_add(1)).read_to_end(&mut bytes) {
+        return FileState::Unreadable(e.to_string());
+    }
+    if u64::try_from(bytes.len()).is_ok_and(|n| n > MAX_SETTINGS_BYTES) {
+        return FileState::Invalid(format!(
+            "longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"
+        ));
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
         Err(e) => FileState::Unreadable(e.to_string()),
     }
 }
@@ -411,6 +420,13 @@ mod tests {
         assert!(
             matches!(read_file(&at_cap), FileState::Keys(ref k) if k.reduced_motion == Some(true))
         );
+        // Over the cap and non-ASCII: the cut lands inside a multi-byte
+        // character, which used to fail UTF-8 validation first and tell the
+        // user their file was "unreadable" rather than too long.
+        let wide = dir.path().join("wide.json");
+        let fill = "é".repeat(usize::try_from(MAX_SETTINGS_BYTES).unwrap());
+        std::fs::write(&wide, format!("{{\"note\": \"{fill}\"}}")).unwrap();
+        assert!(matches!(read_file(&wide), FileState::Invalid(ref e) if e.contains("longer")));
         assert_eq!(read_keys(&[huge, at_cap, dir.path().join("none.json")]).len(), 1);
         let chain = settings_chain(
             Some(Path::new("/m/managed.json")),
