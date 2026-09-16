@@ -253,12 +253,14 @@ so the two stay in step; an explicit `animate` wins over the setting, and
   1`) and whether Claude Code's *Reduce motion* setting is freezing the
   animations; `animate = true` in the config overrides the setting.
 - **The bottom rows are missing** → in Claude Code's fullscreen renderer
-  (the `tui` setting, which `/tui` shows and sets; fresh installs get it)
-  the prompt box and the status line share at most half the terminal's
-  rows, and a taller status line loses its last rows. Keep the line count
-  under `LINES / 2 − 5` (7 rows on a 24-line terminal, 20 on 50) or use the
-  classic renderer, which cuts nothing and scrolls instead. `garnish
-  doctor` prints the `tui` setting in effect.
+  (the `tui` setting, which `/tui` shows and sets; a new install starts
+  with it) the prompt box and the status line share at most half the
+  terminal's rows, and a taller status line loses its last rows. Keep the
+  line count at most `LINES / 2 − 5`, rounding down (7 rows on a 24-line
+  terminal, 20 on 50); that keeps the line whole while the prompt is
+  empty, and a long prompt being typed takes rows from the bottom until
+  it is sent. The classic renderer cuts nothing and scrolls instead.
+  `garnish doctor` prints the `tui` setting in effect.
 - **Right edge cut with `…`** → Claude Code's status line box is 4 cells
   narrower than the terminal, plus 2 cells per unit of `statusLine.padding`.
   garnish subtracts the 4 on its own; if `statusLine.padding` is set in
