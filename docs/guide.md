@@ -218,7 +218,9 @@ its tallest column, and `valign` places a shorter one.
 right; a row with only a title is a titled spacer). `[box.<name>]` frames a
 run of adjacent rows, or a whole column, with its own corners and sides in
 place of the frame's caps — two extra lines, so a box is at least three
-tall, and `box = true` boxes one row on its own:
+tall, and `box = true` boxes one row on its own. Rows join by name inside
+a stack as they do at the top level, and a box is one run of adjacent rows
+in the whole file: a name that comes back anywhere after it is reported.
 
 ```toml
 [box.repo]

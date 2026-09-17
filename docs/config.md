@@ -204,7 +204,7 @@ modules = ["limit5h", "limit7d"]
 
 ## `[box.<name>]`
 
-A box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = "<name>"` form one box; `box = "<name>"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest, and a name that comes back after another box is reported.
+A box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = "<name>"` form one box, inside a stack as at the top level; `box = "<name>"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest. A box is one run of adjacent rows in the whole file, so a name that comes back anywhere after it is reported and that run left unboxed.
 
 | key | default | meaning |
 |---|---|---|
