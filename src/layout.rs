@@ -261,7 +261,7 @@ impl Layout<'_> {
                         let fill = if self.fill { Fill::Rule } else { Fill::Packed };
                         let inner = self.inner_width(row, *index, framed);
                         let lines = self
-                            .row_body(row, inner, height, fill, false)
+                            .row_body(row, inner, height, fill, Fit::default())
                             .into_iter()
                             .map(|drafts| {
                                 let line = self.wrap_frame(drafts, *index, framed, row, fill);
@@ -296,7 +296,7 @@ impl Layout<'_> {
         out.push((first, vec![self.edge_line(&chars, true, title, &cfg)]));
         for (at, row) in &block.rows {
             let height = self.row_height(row);
-            let body = self.row_body(row, inner, height, Fill::from_box(&cfg), false);
+            let body = self.row_body(row, inner, height, Fill::from_box(&cfg), Fit::default());
             let lines =
                 body.into_iter().map(|drafts| self.wrap_box(drafts, &chars, row.blank)).collect();
             out.push((*at, lines));
@@ -431,10 +431,11 @@ impl Layout<'_> {
         width: usize,
         height: usize,
         fill: Fill,
-        exact: bool,
+        inherit: Fit,
     ) -> Vec<Vec<Draft>> {
         let widths = self.share(row, width, fill);
         let gap = row.gap;
+        let last = row.cols.len().saturating_sub(1);
         let cols: Vec<Vec<Vec<Draft>>> = row
             .cols
             .iter()
@@ -442,8 +443,9 @@ impl Layout<'_> {
             .enumerate()
             .map(|(j, (col, w))| {
                 let fit = Fit {
-                    exact: exact || col.width == Width::Auto,
+                    exact: inherit.exact || col.width == Width::Auto,
                     pads: self.edge_pads(row, j, fill),
+                    trailing: inherit.trailing && j == last,
                 };
                 self.col_lines(col, *w, height, row, fill, fit)
             })
@@ -690,7 +692,7 @@ impl Layout<'_> {
     fn stack_row(&self, inner: &Row<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Vec<Draft>> {
         let height = self.row_height(inner);
         let Some(boxed) = inner.boxed else {
-            let mut lines = self.row_body(inner, width, height, fill, fit.exact);
+            let mut lines = self.row_body(inner, width, height, fill, fit);
             // An inner row's title goes into its own first line.
             if let (Some(title), Some(first)) = (inner.title, lines.first_mut()) {
                 self.place_title(first, title, width, fill);
@@ -703,7 +705,7 @@ impl Layout<'_> {
         let pad = self.box_pad();
         let interior =
             width.saturating_sub(side.saturating_mul(2)).saturating_sub(pad.saturating_mul(2));
-        let body = self.row_body(inner, interior, height, Fill::from_box(&cfg), fit.exact);
+        let body = self.row_body(inner, interior, height, Fill::from_box(&cfg), fit);
         // `box = true` on a row is the one way to title a one-row box.
         let title = cfg.title.as_ref().or(inner.title);
         let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
@@ -754,9 +756,9 @@ impl Layout<'_> {
     ///
     /// A group that fits is handed back untouched: measuring it costs a sum,
     /// and the copy is made only when something is actually cut.
-    fn fit_group(&self, pieces: Vec<Piece>, budget: usize) -> Vec<Piece> {
+    fn fit_group(&self, pieces: Vec<Piece>, budget: usize, cut: bool) -> Vec<Piece> {
         let width: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
-        if !self.truncate || width <= budget {
+        if !cut || width <= budget {
             return pieces;
         }
         let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
@@ -790,7 +792,7 @@ impl Layout<'_> {
         if before > 0 {
             drafts.push(Draft::Space(before, Elem::Pad));
         }
-        drafts.extend(self.compose_cells(group, inner, fill, fit.exact));
+        drafts.extend(self.compose_cells(group, inner, fill, fit));
         if after > 0 {
             drafts.push(Draft::Space(after, Elem::Pad));
         }
@@ -798,25 +800,24 @@ impl Layout<'_> {
     }
 
     /// [`Self::compose_group`] inside the column's own cells.
-    fn compose_cells(
-        &self,
-        group: &Group<'_>,
-        width: usize,
-        fill: Fill,
-        exact: bool,
-    ) -> Vec<Draft> {
+    fn compose_cells(&self, group: &Group<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Draft> {
         let Group { left, right, justify, separator } = *group;
         let pad_w = display_width(&self.chars.pad);
         let cell = self.fill_cell(fill);
         let right_pieces = self.group_pieces(right, separator);
         let right_w: usize = right_pieces.iter().map(|p| segments_width(&p.segs)).sum();
+        // `truncate = false` lets the last column run past the box; every
+        // other column is cut to its share, or it would spill into a
+        // neighbour and move the whole row (SPEC § 4.3).
+        let cut = self.truncate || !fit.trailing;
+        let exact = fit.exact;
 
         if fill == Fill::Packed || exact {
             // Left-packed: the right group follows the left one after a
             // separator, and nothing fills the rest (SPEC § 4.1).
             let sep_w = if right_w == 0 { 0 } else { display_width(separator) };
             let budget = width.saturating_sub(right_w).saturating_sub(sep_w);
-            let mut pieces = self.fit_group(self.group_pieces(left, separator), budget);
+            let mut pieces = self.fit_group(self.group_pieces(left, separator), budget, cut);
             if right_w > 0 {
                 if !pieces.is_empty() && !separator.is_empty() {
                     pieces.push(Piece {
@@ -852,7 +853,7 @@ impl Layout<'_> {
             let has_left = !left_pieces.is_empty();
             let join = cell.saturating_add(if has_left { pad_w } else { 0 });
             let budget = width.saturating_sub(right_block).saturating_sub(join);
-            let left_pieces = self.fit_group(left_pieces, budget);
+            let left_pieces = self.fit_group(left_pieces, budget, cut);
             let left_w: usize = left_pieces.iter().map(|p| segments_width(&p.segs)).sum();
             let left_pad = if left_pieces.is_empty() { 0 } else { pad_w };
             let rule =
@@ -871,7 +872,7 @@ impl Layout<'_> {
         let sides = if justify == Justify::Center { 2 } else { 1 };
         let pieces = self.group_pieces(left, separator);
         let budget = width.saturating_sub(cell.saturating_add(pad_w).saturating_mul(sides));
-        let pieces = self.fit_group(pieces, budget);
+        let pieces = self.fit_group(pieces, budget, cut);
         let text_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
         let pad_w = if pieces.is_empty() { 0 } else { pad_w };
         let space = width.saturating_sub(text_w).saturating_sub(pad_w.saturating_mul(sides));
@@ -925,7 +926,7 @@ impl Group<'_> {
 }
 
 /// How a column is laid out to its width (SPEC § 4.3).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct Fit {
     /// The column is exactly its content (`width = "auto"`, or an inner row
     /// of one): it draws no rule, so nothing is cut to make room for cells
@@ -935,6 +936,17 @@ struct Fit {
     /// runs into its text. Only an `exact` column needs them: every other
     /// column's own composition pads its groups already.
     pads: (usize, usize),
+    /// Nothing of the row is to this column's right, so `truncate = false`
+    /// lets its content run past the box. Every other column is cut to its
+    /// share whatever `truncate` says, or it would spill into a neighbour
+    /// (SPEC § 4.3).
+    trailing: bool,
+}
+
+impl Default for Fit {
+    fn default() -> Self {
+        Self { exact: false, pads: (0, 0), trailing: true }
+    }
 }
 
 /// The glyphs a box is drawn with (SPEC § 4.3).
@@ -1410,7 +1422,7 @@ mod tests {
             let l = self.layout();
             let fill = if self.fill { Fill::Rule } else { Fill::Packed };
             let inner = l.inner_width(&row, index, count);
-            let mut body = l.row_body(&row, inner, 1, fill, false);
+            let mut body = l.row_body(&row, inner, 1, fill, Fit::default());
             let drafts = body.pop().unwrap_or_default();
             Painter::PLAIN.paint(&l.wrap_frame(drafts, index, count, &row, fill).segments())
         }
@@ -1663,6 +1675,31 @@ mod tests {
                         crate::ansi::Painter::PLAIN.paint(&line.segments())
                     );
                 }
+            }
+        }
+    }
+
+    /// SPEC § 4.3: `truncate = false` lets the last column's content run
+    /// past the box; every other column is still cut to its share, or it
+    /// would spill into its neighbour and move the whole row.
+    #[test]
+    fn truncate_false_lets_only_the_last_column_run_past_the_box() {
+        let long = "a module far wider than any share of this row";
+        for truncate in [true, false] {
+            let mut f = Fixture::new(FrameStyle::Rounded, true, 40);
+            f.truncate = truncate;
+            let l = f.layout();
+            let r = row(vec![col(Width::Fr(1), long), col(Width::Fr(1), long)], 1);
+            let lines = l.lines(&[r]);
+            let line = lines.into_iter().flatten().next().unwrap_or_default();
+            let text = crate::ansi::Painter::PLAIN.paint(&line.segments());
+            if truncate {
+                assert_eq!(line.width(), 40, "{text}");
+                assert_eq!(text.matches('…').count(), 2, "both columns are cut: {text}");
+            } else {
+                assert!(line.width() > 40, "the last column runs past the box: {text}");
+                assert_eq!(text.matches('…').count(), 1, "only the first is cut: {text}");
+                assert!(text.contains(long), "the last column is whole: {text}");
             }
         }
     }
