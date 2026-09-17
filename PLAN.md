@@ -19,10 +19,11 @@ Phases 19 (harness fidelity) and 20 (per-module presentation) landed on
 2026-09-13 and 2026-09-16, and an audit of everything through Phase 20
 followed the same day: the code was read against the documents, the
 defects it found were fixed with a test each, and the rules that had been
-written out more than once were given one home.
+written out more than once were given one home. Phase 21 (the layout
+model: rows, columns, stacks, titles and boxes) landed on 2026-09-17.
 
-**The drift between SPEC and the code is now Phases 21–22 below, and
-nothing else.** `main` is ready for Phase 21.
+**The drift between SPEC and the code is now Phase 22 below, and nothing
+else.** `main` is ready for Phase 22.
 
 ## Done — Phases 0–18, compacted
 
@@ -50,6 +51,7 @@ nothing else.** `main` is ready for Phase 21.
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 | 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
 | Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; then an adversarial review of the audit itself, which found four regressions it had introduced, five fixes that had stopped at the example, five tests that checked less than they claimed and four documents that had gone out of date with the code; 194 → 227 tests | 09-16 |
+| 21 Layout | `[[row]]` with `[[line]]` as a permanent alias; `[[row.col]]` with `width = "<n>fr" \| "auto" \| cells`, `gap`, `justify` and `valign`; `[[row.col.row]]` stacks; `title*` on a row; `[box.<name>]` and `box = true` with the five box glyphs per frame style; `src/layout.rs` in place of `frame::compose_line`, `render_rows_at` returning the lines of each row as typed pieces; four presets, nine config goldens, the reference, guide, README and skill | 09-17 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -66,7 +68,7 @@ Phases 19–22 are the 2026-09-12 review of `FUTURE-SPEC.md` (PR #27) with
 Daniel: the cheap, invariant-safe ideas moved into `SPEC.md` (each
 paragraph there names its FUTURE-SPEC section and proposal id), his layout
 model, and the interactive setup he chose in place of the website.
-**Order: 19 → 20 → 21 → 22; 19 and 20 are done (the table above).**
+**Order: 19 → 20 → 21 → 22; 19, 20 and 21 are done (the table above).**
 Phase 19 went first because it was meant to change every colour-on render
 (the dim reset, which the harness binary then ruled out, see the work log)
 and because it brought the colour-on golden mode the later phases use
@@ -91,52 +93,6 @@ life. Phase 19's own layers are in the done table; the two things it
 could not settle, the height rule and the dim `preview` question, were
 decided on 2026-09-13 (work log).)
 
-### Phase 21 — Layout: lines, columns and boxes (SPEC § 4.3)
-
-Daniel's ideas, 2026-09-12, consolidated the same day into one model: a
-**row** (`[[row]]`, the addressable unit, one or more terminal **lines**
-tall) is columns side by side (a plain row is one column, today's flex
-rule inside it), a column holds its own modules or a stack of rows,
-columns share the width by `width` (`fr`, `auto`, cells) and place a lone
-group by `justify`; titles decorate rules and boxes decorate rows and
-columns; two levels, never deeper. `[[line]]` and `hide_empty_lines`
-stay as permanent aliases. Supersedes FUTURE-SPEC A2. The layers build
-the model inside out so each one ships with goldens and a byte-identical
-default render. In the code map below the names are today's (`LineCfg`,
-`resolve_lines`, `render_lines_at`); the rename layer gives them their
-row names.
-
-Code map (2026-09-12): `LineCfg` (`src/config/mod.rs:48-62`) is flat;
-`RawConfig::from_table` handles an array of tables only for `line`
-(`:414-427`) and `RawLine::from_table` (`:556-585`) matches keys by name
-with a literal unknown-key list, so `[[row.col]]` and
-`[[row.col.row]]` need hand-written recursion with the `field()`
-discipline (`:590-609`: report the path, keep the rest; a serde-derived
-column would discard a whole row on one bad key); `resolve_lines`
-(`:861`) is a 1:1 map with the spacer rule and the `bad_list` guard
-(`:549`); `frame::FrameChars` (`src/frame.rs:66-89`) has caps only,
-`ends(index, count)` (`:160`) assumes one terminal line per config entry, `Rule::paint`
-(`:202`) returns a `String` with no cell ranges, and `compose_line`
-(`:246-358`) owns the left budget, the truncate-or-scroll choice and the
-final row cut; `render_lines_at` (`src/render.rs:154-259`) applies
-`align_columns` (`:336`) and the `fill = false` splice (`:214-233`) over
-`lefts`/`rights`, then `hide_empty_lines`, `keep_blank` and the cap index
-per composed line; `docs::config_toml` writes `[[line]]` at
-`src/docs.rs:167-185`; `gallery::FILES` is a fixed-size sorted array
-(`src/gallery.rs:14`); config goldens are keyed by `(name, now)` with one
-`# columns:` per file and orphans deleted (`tests/config_golden.rs:225`).
-
-- [ ] `phase-21/row-rename`: `[[row]]` accepted beside `[[line]]` in `RawConfig::from_table` (both present in one file is reported and the file's `[[line]]` array ignored, since the two arrays cannot be ordered against each other), `hide_empty_rows` beside `hide_empty_lines`; `config show` writes the new names; `LineCfg`/`RawLine`/`resolve_lines` become `RowCfg`/`RawRow`/`resolve_rows` and `render_lines_at` keeps its name (it returns terminal lines); every preset, `examples/garnish.toml`, `docs/`, README, guide and the three skills say `[[row]]`, while two config-golden fixtures keep `[[line]]` to pin the alias; goldens byte-identical (`UPDATE_DOCS=1` for the regenerated files only)
-- [ ] `phase-21/layout-types`: `ColCfg { width: Width::{Fr(n), Auto, Cells(n)}, modules, right, justify, valign, box, rows: Vec<RowCfg> }`, `RowCfg` gains `cols`, `gap`, the four `title*` keys and `box`, `Config` gains `boxes`; `RawRow::from_table` gains `col` (and inner `row`) with hand-written per-key fallback and paths `row[i].col[j].row[k]`, the unknown-key list extended; `[box.<name>]` parsed like `[modules.text.<name>]` with bare-key names; validation as SPEC § 4.3 lists (words, the `width` grammar as integer-or-string, `gap`, the caps on columns, inner rows and `title_pad`, unknown or unjoined box names, both forms on a row or a column, nesting, non-adjacent reuse, a title on a boxed row), each with its TOML path; the `bad_list` rule holds for `[[row.col]]` too
-- [ ] `phase-21/layout-normalise`: `resolve_rows` turns a row without columns into one `1fr` column carrying its `modules`/`right` so the resolved tree is always the same shape, with `justify` defaulted by position and all-empty columns making a spacer; `docs::config_toml` writes `[[row.col]]`, `[[row.col.row]]` and `[box.<name>]` back and keeps skipping emptied non-spacer rows; a test over every fixture and preset shows the resolved config and the render byte-identical; `config show` round-trips a fixture config that uses every form
-- [ ] `phase-21/lines-per-row`: `render_lines_at` returns terminal lines grouped per configured row (a `Vec<Line>` per row, each line a segment list with the element kinds cap, rule, gap, module, separator, title, box edge, which is also what Phase 22's placement map reads), `ends()` takes a block index and count instead of a line index, `keep_blank`, `hide_empty_rows` and the cap choice move to the grouped form, and `Rule::paint` produces segments with known cell ranges; `render_loaded`, `render_plain_at` and `benches/tick.rs` keep their outputs byte-identical (goldens and docs unchanged)
-- [ ] `phase-21/layout-columns`: `compose_line` split into lay out columns (`auto` and cell widths first, the free width shared by `fr` with the remainder to the first columns; `checked_div`/`checked_rem` and the `num.rs` helpers, no `as`), compose each column (the flex rule with `right`, `justify` for a lone group, `…` cut or a per-column ticker window: the § 4.1 rule inside a flex column, a lone group as the window, `auto` never scrolling), then join with `gap` and caps with the fill glyph or pattern in every empty cell of a one-line row; left-to-right clamping when the width runs out (gap then column; a column whose gap plus one cell does not fit renders nothing with everything to its right, `GARNISH_DEBUG` logs it), `truncate = false` letting only the last column run past the box, no `fr` column meaning a rule after the last, the fill pattern phased over the whole line; `align_columns` and the `fill = false` splice ported to columns in the same commit (`align = true` per module position, counted from the left in left- and centre-justified columns and from the right in right-justified columns and `right` groups, only between rows with the same column count; `right_justify` a per-column property), so there is never a second alignment implementation; the two-group path deleted with a one-column fast path kept (goldens byte-identical; unit test that shares add up to the width at every width from 10 to 400 and differ by at most one cell); config goldens `columns-one` (each `justify`), `columns-three`, `columns-six`, `columns-widths` (`auto`, cells and `fr` mixed), `columns-ticker` at two instants, each at 80 and 160 columns (one file per width, both files present since orphans are deleted)
-- [ ] `phase-21/titles`: the `title*` keys reduced to plain text and capped like `label`; the rule segments from `lines-per-row` carry the title after the left cap, before the right cap, or centred in the widest empty gap; plain text at the same place under `fill = false` or `style = "none"`; the first line of a multi-line row; the `title*` keys of a `box = true` row titling that box; cut with `…` when wider than its space, never widening the line; a title-only row is a titled spacer; config goldens `title-rows` (each `title_justify` on a spacer and on a module row, at 60 and 120 columns)
-- [ ] `phase-21/boxes`: `[box.<name>]` (`title*`, `style` and `color` inheriting from `[frame]`, `fill` defaulting to `false`, an unstyled box `rounded` when the frame has no box shape, an unjoined box reported); adjacent rows with one name form a box, `box = true` boxes a row alone, a column-level `box` (name or `true`) spans the outer row's height, a boxed one-line column is a three-line box; drawn as a corner-capped top rule with the title, side glyphs at both ends of each line in place of the frame's caps, and a bottom rule (two extra lines, so a box is at least three lines); `FrameChars` gains corners and `side` per built-in style in `for_style` (`none` invisible, `powerline` reported and drawn rounded), `RawFrame::from_table` and `FRAME_KEYS` the five `custom` keys, reduced to plain text and one-cell-checked like the caps (`src/config/mod.rs:520`); the frame's first/last caps treat a multi-line row as one block; nesting reported in both directions; `hide_empty_rows` drops a box whose rows all went; config goldens `boxes-two` (two titled boxes around unboxed rows), `box-columns` (a three-column row inside a box) and `box-column` (a boxed column beside a bare one) at two widths; a unit test that every box line is exactly the box width
-- [ ] `phase-21/stacks`: `[[row.col.row]]` laid out to the column's width (inner `justify` overriding the column's), the outer row's height as the tallest column (a row's height its content's lines, a column's the sum of its rows'), `valign` padding, spaces in gap cells and padding lines of a multi-line row, `blank` on the outer row keeping every line, the outer caps on every non-box line; `hide_empty_rows` per inner row and for the whole row, an emptied column keeping its share beside a sibling that stayed; unit test that every line is exactly the box width over widths 10–400 with stacks of unequal height; config goldens `dashboard` (the SPEC sample: a full-height double box, a bare centred column, three stacked boxes) at 60 and 120 columns, `stack-valign` and `stack-hidden` (an inner row that renders nothing)
-- [ ] Presets `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` (declared widths chosen from the rendered fixture so every column holds its widest render without `…` at three instants, none of them scrolling, since `tests/presets.rs` fails on any `…` and its ticker-advance check assumes one window; `gallery::FILES` grows to 19 in alphabetical order, its unit test compares it with the directory); `docs/config.md` gains a `[[row.col]]` section (widths, `justify`, stacks), `title` rows and a `[box.<name>]` section, each with a sample at two widths; README layout paragraph and guide § 5 rewritten around "a row is columns, one or more lines tall"; the `garnish-statusline` skill's question table and examples updated for columns, `width`, `justify`, titles and boxes (it hand-writes the TOML, so nothing else would catch it going stale); CHANGELOG
-- [ ] Bench: `tick_in_process_columns` (six columns), `tick_in_process_boxes` (two boxes) and `tick_in_process_dashboard`; layout is arithmetic over the rendered segments, so the warm default tick is untouched (a criterion comparison of the in-process tick before and after, where a 0.05 ms difference is measurable; hyperfine stays the budget gate); adversarial review (a column narrower than a module, `fr` totals and cell widths overflowing the box, zero free width, `auto` columns wider than the box, a row under `hide_empty_rows` and `stale_style = "hide"`, a title wider than the line, a box at the minimum width of 10, a box whose title is a module id, `blank` on a titled spacer, a multi-line row of bare columns with colour off, a boxed column with no rows, a stack that scrolls under `overflow = "ticker"`, a file mixing `[[line]]` and `[[row]]`); work log
-
 ### Phase 22 — Interactive setup (SPEC § 14)
 
 Decided 2026-09-12 with Daniel: a full-screen `garnish setup` in the
@@ -160,10 +116,10 @@ gates rustdoc.
 - [ ] `phase-22/fixtures`: the embedded fixture table moves out of `docs.rs` into a `pub` `fixtures.rs` (name, `include_str!`) shared by the docs samples, `benches/tick.rs` and the preview pane, listing the fixtures SPEC § 14 names; a unit test that every embedded file equals the one on disk
 - [ ] `phase-22/setup-shell`: the crates, `src/setup/` module tree (every `pub` item documented), `garnish setup` opens a home screen (*Pick a preset*, *Build a custom layout*, *Install*, *Quit*) and quits cleanly through `Quiet`/`ExitCode`, never `process::exit`; a `Drop` guard restores the terminal on the normal path and a panic hook chained ahead of color-eyre's does it on a panic (it runs before the release profile's abort; the unwinding test is dev-profile only); `setup` without `--preset` and without a tty on stdout exits 1 with one line; `bench/run.sh` unchanged (note the cold-start delta in the commit; a `setup` cargo feature is the fallback)
 - [ ] `phase-22/tty-pointer`: the bare `garnish` checks `std::io::IsTerminal` on stdin and prints the one-line pointer, exit 0; the explicit `render` always reads stdin; a `GARNISH_STDIN_TTY` test hook (documented in SPEC § 9) forces the decision so `tests/cli.rs` can cover both paths without a pty
-- [ ] `phase-22/setup-preview`: a second painter target in `ansi.rs` turning segments into ratatui spans (ratatui interprets no escape bytes; no new crate), with a unit test that the span text and styles agree with `Painter::paint`'s output; the preview pane over the Phase 21 `lines-per-row` output at `w − 4 − padding` with the live clock and the embedded fixtures (`f` cycles, `w` sets a terminal width, `padding` edits re-shrink), honouring the config's `color` and `NO_COLOR` with the "colours off" status line, a minimum size message below 60 × 12 and a redraw on resize; the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`, `GARNISH_NOW` frozen and `TZ=UTC` pinned, the row-start guards stripping escape prefixes), key sequences driven through the event loop
+- [ ] `phase-22/setup-preview`: a second painter target in `ansi.rs` turning segments into ratatui spans (ratatui interprets no escape bytes; no new crate), with a unit test that the span text and styles agree with `Painter::paint`'s output; the preview pane over Phase 21's `render_rows_at` output (`layout::Line`) at `w − 4 − padding` with the live clock and the embedded fixtures (`f` cycles, `w` sets a terminal width, `padding` edits re-shrink), honouring the config's `color` and `NO_COLOR` with the "colours off" status line, a minimum size message below 60 × 12 and a redraw on resize; the snapshot harness over ratatui's `TestBackend` with goldens under `tests/golden/setup/` at 80×24 and 140×40 (`UPDATE_GOLDEN=1`, `GARNISH_NOW` frozen and `TZ=UTC` pinned, the row-start guards stripping escape prefixes), key sequences driven through the event loop
 - [ ] `phase-22/setup-gallery`: the preset picker (built-ins plus `gallery::PRESETS`) with summary, declared width, `needs`, the narrower-than-declared warning and the taller-than-the-fullscreen-budget warning (`⌊LINES / 2⌋ − 5` rows, SPEC § 2.1, with a unit test at the threshold: 7 at 24 rows, 20 at 50; the row count stated either way); `Enter` writes with `install`'s never-clobbered backup and offers install; `e` opens the builder; `setup --preset <name> [--install]` never opens the screen, and `setup` without `--preset` and without a tty on stdout exits 1 with one line (`tests/cli.rs`)
 - [ ] `phase-22/setup-builder`: the line list (add, insert, delete, clone, move, spacer), a line shown as its columns side by side (SPEC § 4.3): *Add a column* with its `width` and `justify`, *Stack* to turn a column into lines, *Add a title*, *Wrap in a box* over a selected run and *Box the column* (titles and box edges in the placement map), moves within and between columns, the module picker with fuzzy and initialism search over the 21 ids, the existing `text.<name>` tables and *New text module…* (a name checked by the § 3.7 rule, the table created with schema defaults; removing a last placement asks whether to drop the table; unit tests on the matcher), `Esc` closing the innermost layer only, the top-level and `[colors]` screens; the draft is a resolved `Config` and `s` saves it through `docs::config_toml` with `install`'s backup (the status bar says a hand-written file's comments live on in the backup only), `q` asks once on a dirty draft, a changed `(mtime, len)` on disk (or a file absent at open) asks overwrite-or-reload, a failed write shows the OS error and keeps the draft, an unparsable file is never overwritten
-- [ ] `phase-22/setup-selection`: the placement map computed from the Phase 21 `lines-per-row` output (each segment already carries its element kind; this layer adds the module id and cell ranges: several per module across a ticker wrap, the `…` cell owned by the cut module, an empty module owning none; measured through `Segment::width()`, never byte offsets; unit test that the ranges tile each row and match the painted widths for flex, multi-column, stacked and ticker lines); crossterm mouse capture on entry and off on exit (also on panic), click and wheel handling, `Tab`/`Shift-Tab`/arrows as the keyboard twins; the selection highlighted in the preview (inverse video) and on the chip; snapshot tests driving synthetic mouse events through `TestBackend`
+- [ ] `phase-22/setup-selection`: the placement map computed from Phase 21's `render_rows_at` output (each `layout::Piece` already carries its element kind and `Line::spans` its cell ranges; this layer adds the module id: several per module across a ticker wrap, the `…` cell owned by the cut module, an empty module owning none; measured through `Segment::width()`, never byte offsets; unit test that the ranges tile each row and match the painted widths for flex, multi-column, stacked and ticker lines); crossterm mouse capture on entry and off on exit (also on panic), click and wheel handling, `Tab`/`Shift-Tab`/arrows as the keyboard twins; the selection highlighted in the preview (inverse video) and on the chip; snapshot tests driving synthetic mouse events through `TestBackend`
 - [ ] `phase-22/setup-module-editor`: the overlay form generated from `ModuleSchema` (checkboxes for booleans, radio lists for `preset` and enums, steppers with `max`, colour swatches plus a validated custom entry, text-module schema on the same screen), re-rendering the preview on every change, a dot on chips that carry overrides; the unit test that every `OptSpec` kind and every top-level key has a form row
 - [ ] `phase-22/setup-pickers`: the string picker seeded from the distinct values in the built-in presets, the frame tables and `gallery::PRESETS` (deduplicated at start-up, each drawn as it renders) plus *custom…* through the config parser's plain-text and width checks; the glyph picker with one row per icon set, the schema's `IconSpec.suggestions` per key, `doctor`'s two-cell `|` marker on every candidate and *custom…*, writing per-key `[modules.<id>.icons]` overrides; `suggestions` added to the schemas for every icon key (a few per set) and covered by the existing glyph guard test; `garnish docs` lists them as *also try* on each module page (`make docs`, `docs_sync`)
 - [ ] `phase-22/setup-install`: the plan-and-apply core of `cli::install` extracted from its stdout reporting (a `Plan` the CLI prints and the screen lists) so the install screen runs the same code (`--dry-run` summary, one confirmation) and `setup --preset … --install` needs no shell-out; the doctor's settings report in the status bar; `garnish-statusline` skill names `setup`; README "Set up" section and guide § 2 rewritten around it; CHANGELOG
@@ -627,3 +583,40 @@ was built, what the reviews found and what was decided, not how.
   dimension on a large diff and never to end without its summary. The
   checkout also names the pull request's head, which it had to stop doing
   when the fix was pulled out of #66 to let that branch be reviewed at all.
+- **2026-09-17 (Phase 21)** — The layout model, on one branch as a commit
+  per layer. `[[row]]` first, with `[[line]]` and `hide_empty_lines` kept
+  for ever: the existing config fixtures stayed on the old names, so every
+  golden they pin covers the alias, and a unit test parses the same file
+  under both names and compares the resolved configs. Then the config model
+  (`ColCfg`, `Width`, `Justify`, `VAlign`, `TitleCfg`, `BoxRef`, `BoxCfg`)
+  with hand-written per-key fallback three levels deep and each of SPEC
+  § 4.3's validation rules under its own path, then `src/layout.rs`.
+
+  The engine replaces `frame::compose_line` outright rather than growing a
+  second composer beside it, and the proof is that all 227 goldens came out
+  byte-identical on the first green run: a row of one `1fr` column *is* the
+  flex line, and the composition tests that pinned `compose_line` moved over
+  unchanged. `render_rows_at` returns each configured row's lines as typed
+  pieces (cap, box edge, rule, gap, pad, module, separator, title), which is
+  what Phase 22's placement map reads; `render_lines_at` kept its signature.
+
+  Six bugs, each found by writing the thing that would show it. A golden
+  for mixed widths showed a rule running into a module's text, because only
+  a column's *interior* was padded: a column now keeps a pad on the ends its
+  content reaches and nowhere else. A `hide_empty_rows` fixture showed an
+  emptied stack drawing a rule on its first line and spaces below, because
+  the column had become a flex column when its rows went. `truncate = false`
+  let *every* column run past the box, where SPEC gives that to the last
+  one alone. A text module one cell wide lost its link, twice: `paint` threw
+  away a piece whose text was empty, and the packed-row trim then threw away
+  a piece that was only pad. And the benches found two copies worth
+  removing (a group flattened only to be measured, every line copied again
+  on its way to the painter), which took the in-process default tick from
+  85 µs to 71 µs against 49 µs before the phase — 0.08 ms end to end, inside
+  the 0.2 ms a change has to justify.
+
+  Decided while building, and written into SPEC § 4.3: the frame's caps are
+  chosen over the lines that carry them (an earlier wording would have put
+  `╭─` on every line of a tall row); the pad rule above; a box's interior
+  pad is the frame's or one cell, so a box drawn inside a `style = "none"`
+  frame still has room; a box's own edges do not animate.
