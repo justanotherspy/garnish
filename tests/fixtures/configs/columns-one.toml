@@ -1,0 +1,26 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# One column per row, each with a different `justify` (SPEC § 4.3): a lone
+# group sits where the column says, and the rule fills what is left. The
+# fourth row is the flex form, which is what a plain row has always been.
+
+[[row]]
+[[row.col]]
+justify = "left"
+modules = ["model", "context"]
+
+[[row]]
+[[row.col]]
+justify = "center"
+modules = ["model", "context"]
+
+[[row]]
+[[row.col]]
+justify = "right"
+modules = ["model", "context"]
+
+[[row]]
+modules = ["session", "api"]
+right   = ["clock"]

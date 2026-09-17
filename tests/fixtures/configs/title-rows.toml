@@ -1,0 +1,23 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# A title is plain text set into the row's rule (SPEC § 4.3): after the left
+# cap, centred in the widest empty gap of the line, or before the right cap.
+# A row with only a title is a titled spacer, always kept.
+
+[[row]]
+title = "Session"
+modules = []
+
+[[row]]
+title = "Repo"
+title_justify = "center"
+modules = ["model", "context"]
+right   = ["clock"]
+
+[[row]]
+title = "Usage"
+title_justify = "right"
+title_pad = 2
+modules = ["limit5h"]
