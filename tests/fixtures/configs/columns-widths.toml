@@ -22,6 +22,22 @@ width = "2fr"
 modules = ["session", "api"]
 right   = ["clock"]
 
+# No `fr` column at all: the columns take exactly what they asked for and the
+# free width is a rule after the last of them, which is why that column still
+# keeps a pad on its right.
+[[row]]
+gap = 2
+[[row.col]]
+width = "auto"
+modules = ["session"]
+[[row.col]]
+width = 20
+modules = ["api"]
+[[row.col]]
+width = "auto"
+justify = "right"
+modules = ["clock"]
+
 # Six equal columns: the shares differ by at most one cell and add up.
 [[row]]
 [[row.col]]

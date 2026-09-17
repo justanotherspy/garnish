@@ -1,0 +1,33 @@
+# fixture: subscription-full
+# columns: 70
+# now: 1738425600
+# icons: unicode
+# A `custom` frame carries its own five box glyphs, and a box under it draws
+# with those rather than borrowing the rounded shape (SPEC § 4.3). The rule
+# inside the box is off, as it is in every box that does not ask for it.
+
+[frame]
+style        = "custom"
+first        = "/ "
+middle       = "| "
+last         = "\\ "
+single       = "= "
+right_first  = " \\"
+right_middle = " |"
+right_last   = " /"
+right_single = " ="
+fill_char    = "="
+top_left     = "+"
+top_right    = "+"
+bottom_left  = "+"
+bottom_right = "+"
+side         = "!"
+
+[[row]]
+box     = true
+title   = "Custom"
+modules = ["model", "context"]
+
+[[row]]
+modules = ["session"]
+right   = ["clock"]

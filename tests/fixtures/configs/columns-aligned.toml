@@ -1,0 +1,46 @@
+# fixture: subscription-full
+# columns: 130
+# now: 1738425600
+# icons: unicode
+# `align = true` across rows of columns (SPEC § 4): a module is padded to the
+# widest module in the same *position of the same shape*, so the two
+# three-column rows stack column by column, the two-column row below them
+# keeps its own widths, and a stacked column's inner rows align among
+# themselves rather than with the row that holds them.
+align     = true
+durations = "fixed"
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["session", "api"]
+[[row.col]]
+modules = ["lines", "cache"]
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["session", "api"]
+[[row.col]]
+modules = ["clock", "effort"]
+[[row.col]]
+modules = ["model", "cache"]
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["clock", "cache"]
+[[row.col]]
+modules = ["lines", "api"]
+
+[[row]]
+gap = 2
+[[row.col]]
+[[row.col.row]]
+modules = ["model", "effort"]
+[[row.col.row]]
+modules = ["session", "api"]
+[[row.col]]
+modules = ["cache", "lines"]
