@@ -1530,6 +1530,18 @@ fn resolve_row(
         theme,
         errors,
     );
+    // Boxes never nest, in either direction (SPEC § 4.3): a column inside a
+    // boxed row keeps its place but loses its own box.
+    if boxed.is_some() {
+        for (j, col) in cols.iter_mut().enumerate() {
+            if col.boxed.take().is_some() {
+                errors.push(problem(
+                    &format!("{path}.col[{j}].box"),
+                    "boxes never nest: this column is already inside its row's box",
+                ));
+            }
+        }
+    }
     // A row inside a named box gets no title of its own: the box has one.
     let title = match (&boxed, title) {
         (Some(BoxRef::Named(name)), Some(_)) => {
@@ -2697,7 +2709,7 @@ mod tests {
             assert_eq!(errs[0].path, path, "{what}: {errs:?}");
         }
 
-        // Boxes never nest, and the inner one is the one that goes.
+        // Boxes never nest, in either direction, and the inner one goes.
         let (c, errs) = parse(
             "[box.a]\n[[row]]\n[[row.col]]\nbox = \"a\"\n[[row.col.row]]\nbox = true\nmodules = [\"path\"]\n",
             &schemas,
@@ -2706,6 +2718,14 @@ mod tests {
         assert_eq!(errs[0].path, "row[0].col[0].row[0].box");
         assert_eq!(c.rows[0].cols[0].boxed, Some(BoxRef::Named("a".into())));
         assert_eq!(c.rows[0].cols[0].rows[0].boxed, None, "the inner box is dropped");
+        let (c, errs) = parse(
+            "[box.a]\n[[row]]\nbox = \"a\"\n[[row.col]]\nbox = true\nmodules = [\"path\"]\n",
+            &schemas,
+        );
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "row[0].col[0].box");
+        assert_eq!(c.rows[0].boxed, Some(BoxRef::Named("a".into())));
+        assert_eq!(c.rows[0].cols[0].boxed, None, "a column inside a boxed row loses its box");
 
         // A second run of the same name is unboxed, the first keeps its box.
         let (c, _) = parse(
