@@ -1702,6 +1702,12 @@ mod tests {
                     widths.iter().max().copied().unwrap_or(0),
                 );
                 assert!(max - min <= 1, "{n} columns at {width}: {widths:?}");
+                // The leftover goes to the *first* columns, so the shares
+                // never rise from left to right.
+                assert!(
+                    widths.windows(2).all(|w| w.first() >= w.last()),
+                    "{n} columns at {width}: {widths:?}"
+                );
             }
         }
         // `fr` weights are shares, not equal parts.
@@ -1814,6 +1820,23 @@ mod tests {
         assert_eq!(l.row_height(&r), 3);
         let r = row(vec![stack(2, VAlign::Top, Some(&BoxRef::Anon))], 1);
         assert_eq!(l.row_height(&r), 4, "a boxed column is its content plus two edge lines");
+        // A stack is the *sum* of its rows' heights, not their count: three
+        // boxed inner rows are three cells of content and six edge lines.
+        let boxed_stack = Col {
+            width: Width::Fr(1),
+            justify: Justify::Left,
+            valign: VAlign::Top,
+            boxed: None,
+            content: Content::Stack(
+                (0..3)
+                    .map(|i| Row {
+                        boxed: Some(&BoxRef::Anon),
+                        ..row(vec![col(Width::Fr(1), &format!("r{i}"))], 1)
+                    })
+                    .collect(),
+            ),
+        };
+        assert_eq!(l.row_height(&row(vec![boxed_stack], 1)), 9);
 
         // The short column's own line sits where `valign` says.
         let text = |rows: &[Row<'_>]| {
@@ -1873,5 +1896,118 @@ mod tests {
         let right = Row { title: Some(&t), ..row(vec![col(Width::Fr(1), "x")], 1) };
         let out = line(&right);
         assert!(out.contains("Repo"), "{out}");
+    }
+
+    /// SPEC § 4.3: a title is cut to the room it has and never widens the
+    /// line. This used to be a `debug_assert!`, which is a panic path on the
+    /// render path: a title wider than its box aborted the tick.
+    #[test]
+    fn an_over_wide_title_is_cut_and_the_line_keeps_its_width() {
+        let long = "a title far wider than any line this row will ever be given";
+        let t = crate::config::TitleCfg {
+            text: long.to_owned(),
+            justify: Justify::Center,
+            pad: 1,
+            color: None,
+        };
+        for width in [12_usize, 20, 40] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let mut boxed = row(vec![col(Width::Fr(1), "x")], 1);
+            boxed.boxed = Some(&BoxRef::Anon);
+            for r in [Row { title: Some(&t), ..row(vec![col(Width::Fr(1), "x")], 1) }, boxed] {
+                for line in l.lines(std::slice::from_ref(&r)).into_iter().flatten() {
+                    let text = Painter::PLAIN.paint(&line.segments());
+                    assert_eq!(line.width(), width, "{text:?}");
+                    assert!(!text.contains(long), "{text:?}");
+                }
+            }
+        }
+    }
+
+    /// SPEC § 4.3: a line's rule cells are numbered together, so a
+    /// `fill_pattern` travels across a column boundary instead of restarting
+    /// in every column.
+    #[test]
+    fn a_rule_pattern_runs_across_a_column_boundary() {
+        let mut f = Fixture::new(FrameStyle::None, true, 30);
+        f.rule = Some(Rule { cells: vec!["a".into(), "b".into(), "c".into()], offset: 0 });
+        let l = f.layout();
+        // Two columns with a module each: the rule is broken into runs by
+        // the modules, and the pattern picks up where the previous run left
+        // off rather than starting at `a` again.
+        let r = row(vec![col(Width::Fr(1), "LL"), col(Width::Fr(1), "RR")], 2);
+        let line = l
+            .lines(std::slice::from_ref(&r))
+            .into_iter()
+            .flatten()
+            .next()
+            .unwrap_or_else(|| Line { pieces: Vec::new() });
+        let runs: Vec<String> = line
+            .pieces
+            .iter()
+            .filter(|p| p.elem == Elem::Rule)
+            .map(|p| Painter::PLAIN.paint(&p.segs))
+            .collect();
+        assert!(runs.len() >= 2, "the modules break the rule into runs: {runs:?}");
+        let joined = runs.concat();
+        let want: String = "abc".chars().cycle().take(joined.chars().count()).collect();
+        assert_eq!(joined, want, "the runs of {:?}", Painter::PLAIN.paint(&line.segments()));
+    }
+
+    /// SPEC § 4.3: a box under a frame that has no shape (`none`,
+    /// `powerline`) borrows the rounded glyphs, or it would silently become
+    /// indentation — powerline's corners and side are empty strings.
+    #[test]
+    fn a_box_under_a_shapeless_frame_borrows_the_rounded_glyphs() {
+        for style in [FrameStyle::Powerline, FrameStyle::None] {
+            let f = Fixture::new(style, true, 40);
+            let l = f.layout();
+            let r = Row { boxed: Some(&BoxRef::Anon), ..row(vec![col(Width::Fr(1), "x")], 1) };
+            let lines = l
+                .lines(std::slice::from_ref(&r))
+                .into_iter()
+                .flatten()
+                .map(|line| Painter::PLAIN.paint(&line.segments()))
+                .collect::<Vec<_>>();
+            let (first, last) = (lines.first().cloned().unwrap_or_default(), lines.last().cloned());
+            assert!(first.starts_with('╭') && first.ends_with('╮'), "{style:?}: {lines:?}");
+            let last = last.unwrap_or_default();
+            assert!(last.starts_with('╰') && last.ends_with('╯'), "{style:?}: {lines:?}");
+            assert!(lines.len() >= 3, "{style:?}: {lines:?}");
+        }
+    }
+
+    /// SPEC § 14: the placement map is the line's pieces with the cells they
+    /// occupy, so a click lands on the thing under it. The spans tile the
+    /// line: they start at zero, touch, and end at its width.
+    #[test]
+    fn the_placement_map_tiles_the_line_with_the_kinds_it_drew() {
+        let f = Fixture::new(FrameStyle::Rounded, true, 60);
+        let l = f.layout();
+        let t =
+            crate::config::TitleCfg { text: "T".to_owned(), ..crate::config::TitleCfg::default() };
+        let rows = vec![
+            Row {
+                title: Some(&t),
+                ..row(vec![col(Width::Fr(1), "one"), col(Width::Fr(1), "two")], 2)
+            },
+            Row { boxed: Some(&BoxRef::Anon), ..row(vec![col(Width::Fr(1), "three")], 1) },
+        ];
+        let mut kinds: Vec<Elem> = Vec::new();
+        for line in l.lines(&rows).into_iter().flatten() {
+            let spans = line.spans();
+            let mut at = 0_usize;
+            for (elem, range) in spans {
+                assert_eq!(range.start, at, "the spans touch: {:?}", line.spans());
+                at = range.end;
+                kinds.push(elem);
+            }
+            assert_eq!(at, line.width(), "the spans cover the line: {:?}", line.spans());
+            assert_eq!(at, f.width);
+        }
+        for want in [Elem::Cap, Elem::Pad, Elem::Module, Elem::Rule, Elem::Title, Elem::BoxEdge] {
+            assert!(kinds.contains(&want), "{want:?} never drawn: {kinds:?}");
+        }
     }
 }
