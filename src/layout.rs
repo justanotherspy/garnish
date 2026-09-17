@@ -298,7 +298,7 @@ impl Layout<'_> {
             let height = self.row_height(row);
             let body = self.row_body(row, inner, height, Fill::from_box(&cfg), Fit::default());
             let lines =
-                body.into_iter().map(|drafts| self.wrap_box(drafts, &chars, row.blank)).collect();
+                body.into_iter().map(|d| self.wrap_box(d, &chars, &cfg, row.blank)).collect();
             out.push((*at, lines));
         }
         out.push((last, vec![self.edge_line(&chars, false, None, &cfg)]));
@@ -638,7 +638,7 @@ impl Layout<'_> {
         let body = self.col_body(col, inner, interior, row, Fill::from_box(&cfg), inside);
         let mut lines = vec![self.edge_drafts(&chars, width, true, cfg.title.as_ref(), &cfg)];
         for drafts in body {
-            lines.push(self.side_drafts(drafts, &chars));
+            lines.push(self.side_drafts(drafts, &chars, &cfg));
         }
         lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
         lines.truncate(height.max(1));
@@ -709,7 +709,7 @@ impl Layout<'_> {
         // `box = true` on a row is the one way to title a one-row box.
         let title = cfg.title.as_ref().or(inner.title);
         let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
-        lines.extend(body.into_iter().map(|drafts| self.side_drafts(drafts, &chars)));
+        lines.extend(body.into_iter().map(|drafts| self.side_drafts(drafts, &chars, &cfg)));
         lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
         lines
     }
@@ -1086,8 +1086,11 @@ impl Layout<'_> {
     }
 
     /// One interior line of a box: the sides, and a pad inside each.
-    fn side_drafts(&self, drafts: Vec<Draft>, chars: &BoxChars) -> Vec<Draft> {
-        let style = Style::fg(self.theme.role(Role::Frame));
+    ///
+    /// A side is one of the box's glyphs, so it takes the box's `color`
+    /// (SPEC § 4.3) — the same colour its corners and rules are drawn in.
+    fn side_drafts(&self, drafts: Vec<Draft>, chars: &BoxChars, cfg: &BoxCfg) -> Vec<Draft> {
+        let style = Style::fg(cfg.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
         let pad = self.box_pad();
         let mut out: Vec<Draft> = Vec::new();
         if !chars.side.is_empty() {
@@ -1112,9 +1115,9 @@ impl Layout<'_> {
         out
     }
 
-    /// A box's interior line, coloured by the box rather than the frame.
-    fn wrap_box(&self, drafts: Vec<Draft>, chars: &BoxChars, blank: bool) -> Line {
-        self.paint(self.side_drafts(drafts, chars), blank)
+    /// A box's interior line, its sides coloured by the box.
+    fn wrap_box(&self, drafts: Vec<Draft>, chars: &BoxChars, cfg: &BoxCfg, blank: bool) -> Line {
+        self.paint(self.side_drafts(drafts, chars, cfg), blank)
     }
 
     /// A box's top or bottom line as a finished line.

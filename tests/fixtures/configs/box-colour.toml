@@ -1,0 +1,22 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600
+# icons: unicode
+# color: always
+# The painter's escapes around a box: its glyphs take the box's `color` when
+# it names one and the frame's otherwise, and its title takes `title_color`
+# (SPEC § 4.3). Colour on is the only mode that pins them.
+
+[box.repo]
+title = "Repository"
+title_color = "accent2"
+color = "warn"
+
+[[row]]
+box = "repo"
+modules = ["model"]
+right   = ["clock"]
+
+[[row]]
+title = "Usage"
+modules = ["limit5h"]
