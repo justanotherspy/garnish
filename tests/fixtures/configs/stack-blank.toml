@@ -1,0 +1,22 @@
+# fixture: subscription-full
+# columns: 44
+# now: 1738425600
+# icons: unicode
+# An inner row asks for the cell that keeps its line on screen (SPEC § 4.1):
+# with no frame and colour off, Claude Code drops a row that is whitespace
+# after trimming, so the middle line carries a braille blank (U+2800) that
+# the trim does not count as whitespace.
+
+[frame]
+style = "none"
+fill = false
+
+[[row]]
+[[row.col]]
+[[row.col.row]]
+modules = ["model"]
+[[row.col.row]]
+modules = []
+blank = true
+[[row.col.row]]
+modules = ["clock"]

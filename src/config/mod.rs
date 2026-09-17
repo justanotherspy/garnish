@@ -1557,10 +1557,15 @@ fn resolve_row(
     // and an empty row, which `hide_empty_rows` then drops like any other.
     let bad_list = raw.bad_list || raw.cols.iter().flatten().any(|c| c.bad_list);
     let spacer = cols.iter().all(ColCfg::is_empty) && !bad_list;
-    if raw.blank && !spacer {
+    // A spacer asks for the cell because it *is* empty; a row with columns
+    // asks for it because it can be several lines tall and its padding
+    // lines are whitespace (SPEC § 4.3). A plain row of modules can be
+    // neither, so `blank` on one is a mistake.
+    let can_blank = spacer || explicit_cols;
+    if raw.blank && !can_blank {
         errors.push(problem(
             &format!("{path}.blank"),
-            "only a spacer (modules = [] with no right) can be marked blank",
+            "only a spacer (modules = [] with no right) or a row with columns can be marked blank",
         ));
     }
     let gap = raw.gap.unwrap_or(DEFAULT_GAP);
@@ -1572,7 +1577,7 @@ fn resolve_row(
         title,
         boxed,
         spacer,
-        blank: raw.blank && spacer,
+        blank: raw.blank && can_blank,
     }
 }
 
@@ -1704,11 +1709,13 @@ fn resolve_title(
     })
 }
 
-/// Whether `name` is joined anywhere in this row: by the row itself, or by
-/// one of its columns (a box never reaches deeper, since boxes do not nest).
+/// Whether `name` is joined anywhere in this row: by the row itself, by one
+/// of its columns, or by a row of one of its stacks (an inner row may name a
+/// box, and drawing one there is what `dashboard-panels` does).
 fn joins_box(row: &RowCfg, name: &str) -> bool {
     let joins = |b: &Option<BoxRef>| b.as_ref().and_then(BoxRef::name) == Some(name);
-    joins(&row.boxed) || row.cols.iter().any(|c| joins(&c.boxed))
+    joins(&row.boxed)
+        || row.cols.iter().any(|c| joins(&c.boxed) || c.rows.iter().any(|r| joins_box(r, name)))
 }
 
 /// The `[box.<name>]` tables (SPEC § 4.3), each validated under its own path.
@@ -2589,6 +2596,15 @@ mod tests {
         let blanks: Vec<bool> = c.rows.iter().map(|l| l.blank).collect();
         assert_eq!(blanks, vec![true, false, false, false]);
         assert!(c.rows.iter().all(|r| r.blank || r.spacer || !r.cols[0].left.is_empty()));
+        // A row with columns can be several lines tall, and its padding
+        // lines are whitespace, so it may ask for the cell too (SPEC § 4.3).
+        let (tall, errs) = parse(
+            "[[row]]\nblank = true\n[[row.col]]\n[[row.col.row]]\nmodules = [\"path\"]\n[[row.col.row]]\nmodules = []\nblank = true\n",
+            &schemas,
+        );
+        assert_eq!(errs, Vec::new());
+        assert!(tall.rows[0].blank, "a row with columns may be blank");
+        assert!(tall.rows[0].cols[0].rows[1].blank, "and so may an inner spacer");
     }
 
     /// A row without `[[row.col]]` resolves to exactly one `1fr` column

@@ -431,11 +431,17 @@ fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
             .map(|c| std::mem::take(if right { &mut c.right } else { &mut c.left }))
             .collect()
     };
+    // A right-justified column hangs off the right edge, so its positions
+    // count from the right end as a `right` group's do, and `right_justify`
+    // picks the pad side for both (SPEC § 4, § 4.3). The columns of a bucket
+    // are at the same position in rows with the same column count, so the
+    // first one's justification is the bucket's.
+    let from_right = cols.first().is_some_and(|c| c.justify == config::Justify::Right);
+    let pad_left = config.right_justify == config::RightJustify::End;
     if config.frame.fill {
         let mut lefts = take(&mut cols, false);
-        align_columns(&mut lefts, false, false);
+        align_columns(&mut lefts, from_right, from_right && pad_left);
         let mut rights = take(&mut cols, true);
-        let pad_left = config.right_justify == config::RightJustify::End;
         align_columns(&mut rights, true, pad_left);
         for ((col, left), right) in cols.iter_mut().zip(lefts).zip(rights) {
             col.left = left;
