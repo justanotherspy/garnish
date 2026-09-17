@@ -51,7 +51,7 @@ else.** `main` is ready for Phase 22.
 | 19 Harness fidelity | `animate` as `Option<bool>` following `prefersReducedMotion` over the settings chain, never rewriting an unparsable `settings.json`/`garnish.toml` (`install::replace_file`, backups for `config init --force`), the doctor's settings-chain report with suggestions, the `# color:` golden mode (`colour-on`), `$ROOT` in `# env:`; the dim reset dropped as impossible (SPEC § 2.1), the 13 000 constant re-read in 2.1.270; then (09-13) `preview` drawing its rows faint, `GARNISH_MANAGED_SETTINGS` (SPEC § 9), the three-renderer height rule (SPEC § 2.1) and the `tui` row in `doctor` | 09-12/13 |
 | 20 Presentation | `COMMON_OPTS` (the common keys as bounded specs) with `max_width` cutting the decorated module before alignment, the schema-generated module matrix test, `path.style = "fish"`, `branch.link` and `text.url` through a hand-written percent-encoder with GitLab's `/-/tree/`, `context.scale = "usable"`, `reset = absolute \| both` on the limit modules; seven config goldens | 09-13 |
 | Audit through 20 | the code read against the documents: two path/argument escapes out of the repository, four unbounded things, nine silent or wrong renders, one rule per thing in place of the copies, five blind spots in the tests, shellcheck and least-privilege in CI, the documents' drift; then an adversarial review of the audit itself, which found four regressions it had introduced, five fixes that had stopped at the example, five tests that checked less than they claimed and four documents that had gone out of date with the code; 194 → 227 tests | 09-16 |
-| 21 Layout | `[[row]]` with `[[line]]` as a permanent alias; `[[row.col]]` with `width = "<n>fr" \| "auto" \| cells`, `gap`, `justify` and `valign`; `[[row.col.row]]` stacks; `title*` on a row; `[box.<name>]` and `box = true` with the five box glyphs per frame style; `src/layout.rs` in place of `frame::compose_line`, `render_rows_at` returning the lines of each row as typed pieces; four presets, nine config goldens, the reference, guide, README and skill | 09-17 |
+| 21 Layout | `[[row]]` with `[[line]]` as a permanent alias; `[[row.col]]` with `width = "<n>fr" \| "auto" \| cells`, `gap`, `justify` and `valign`; `[[row.col.row]]` stacks; `title*` on a row; `[box.<name>]` and `box = true` with the five box glyphs per frame style; `src/layout.rs` in place of `frame::compose_line`, `render_rows_at` returning the lines of each row as typed pieces; four presets, seventeen config goldens, the reference, guide, README and skill; two adversarial reviews (a correctness pass and a mutation pass over the tests) | 09-17 |
 
 Between 17 and 18 a whole-stack review added row hardening (every string
 reduced to plain text by the `Segment` constructors, bounded sizes, OSC 8
@@ -620,3 +620,44 @@ was built, what the reviews found and what was decided, not how.
   `╭─` on every line of a tall row); the pad rule above; a box's interior
   pad is the frame's or one cell, so a box drawn inside a `style = "none"`
   frame still has room; a box's own edges do not animate.
+
+  Two adversarial reviews then ran, one for correctness and one a mutation
+  pass over the new tests. The correctness one found a `debug_assert!` in
+  `place_title` — a panic path on the render path, so a title wider than
+  its box exited 101 and cleared the status line — and six renders that
+  went wrong rather than badly: a column's `right` group never cut to its
+  column, a boxed column narrower than its own frame drawing past itself,
+  `fill = false` padding lines emitting nothing so every later column
+  shifted, a box joined only by inner rows reported as unused, a boxed
+  column inside a boxed row nesting, and a left title taken literally into
+  the one-cell gap between two columns and cut to its ellipsis. It also
+  caught the `fr` remainder: `free % Σfr` hands out a cell per *weight*,
+  not per column, so two `2fr` columns at 103 cells differed by two.
+
+  The mutation pass broke one rule at a time and reported which test went
+  red. Ten rules had none: the rule pattern's phase across a line, `align`
+  with columns, the choice of run for a title, an over-wide title, an inner
+  row's own `title` and `separator`, a box under a shapeless frame, a row
+  with no `fr` column, packed columns, a box title against the right
+  corner, and a `custom` frame's box glyphs. Six are now unit tests and six
+  config goldens (`columns-pattern`, `columns-aligned`, `columns-packed`,
+  `box-custom`, `stack-boxes`, plus rows added to `boxes-two`,
+  `columns-widths` and `stack-valign`), each checked by re-applying the
+  mutation and watching that fixture alone go red. It also found two of the
+  phase's own tests too weak to see their rule: the share test did not pin
+  *which* columns take the leftover, and `every_line_of_a_row_is_exactly_
+  the_box_width` cannot see a boxed column one cell short, because the
+  row's fill absorbs it — that one is pinned by the placement map instead,
+  the `BoxEdge` spans having to stand in the same cells on every line.
+
+  Two rules were only half implemented and are finished here. A box is one
+  run of adjacent rows *wherever* they are: a stack's rows now join by name
+  exactly as top-level rows do, and `check_box_runs` walks the whole tree,
+  a stack being a run of its own and a column's own `box` taking the name.
+  And a row's columns were sized from the caps of its first line, so a tall
+  row under a `custom` frame whose `last` cap is wider lost that cap to the
+  recut; the row now takes the room the widest pair leaves. Three SPEC
+  wordings the build proved wrong were corrected with them: the pattern's
+  phase is a rule-cell index, a title takes the first (or last) run that
+  can *hold* it and otherwise the widest, and a row-level `right` is
+  reported only beside `[[row.col]]`. 227 → 248 tests.

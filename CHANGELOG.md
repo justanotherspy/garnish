@@ -29,6 +29,9 @@ New, all optional:
   column, with its own corners and sides in place of the frame's caps;
   `box = true` boxes a single row. A box takes its style from `[frame]`
   unless it names one, and its interior is clean unless `fill = true`.
+  Adjacent rows of a stack join a box by name as top-level rows do, and a
+  name that comes back anywhere else in the file is reported, since a box
+  is one run of adjacent rows.
 - Four gallery presets to copy from: `grid-three`, `grid-six`,
   `boxed-panels` and `dashboard-panels`.
 
