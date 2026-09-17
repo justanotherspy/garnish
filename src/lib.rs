@@ -16,6 +16,7 @@ pub mod gallery;
 pub mod git;
 pub mod icons;
 pub mod install;
+pub mod layout;
 pub mod modules;
 pub mod num;
 pub mod payload;
