@@ -1,0 +1,34 @@
+# name: grid-three
+# summary: three columns side by side — repo, model, usage — reading left, centre, right
+# columns: 140
+# needs: nerd-font
+
+# A row is columns side by side (SPEC § 4.3). With no `justify` anywhere, the
+# first column reads left, the last right and the middle one centre, so the
+# three groups sit where you would put them by hand. The second row is the
+# plain form, which is one column filling the width.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "branch", "sync"]
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+
+[[row]]
+modules = ["limit5h", "limit7d", "cost"]
+right   = ["clock"]
+
+[modules.context]
+width = 20

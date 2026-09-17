@@ -167,6 +167,24 @@ so a config written before rows existed keeps working.)
 ╰─ ⏱ 1h12m        │ ⇄ 8m20s │ ⛁ 91% 1h ✦ 47m00s ───────────────────────────╯
 ```
 
+A row can also be **columns side by side**, and a column can hold a stack of
+rows of its own. `width` is `"1fr"` (a share of what is left), `"auto"` (the
+column's content) or a number of cells; `justify` places a column's modules
+and follows the column's position when you leave it out, so three bare
+columns read left / centre / right. `title` sets text into a row's rule, and
+`[box.<name>]` frames a run of rows — or a whole column — with its own
+corners and sides:
+
+```text
+╔═ Repository ═════════════════════════════════════════╗
+║ ❒ ~/projects/garnish │ ❖ Opus             ⠋ 16:00:00 ║
+║ ⊞ ████████▍░░░░░░░░░░▏ 42%                           ║
+╚══════════════════════════════════════════════════════╝
+```
+
+The `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` presets
+are working examples; [docs/config.md](docs/config.md#row-col) has the keys.
+
 | group | modules |
 |---|---|
 | repo | `path` `branch` `sync` `worktree` `pr` |

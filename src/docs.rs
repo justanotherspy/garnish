@@ -972,6 +972,64 @@ fn align_sample(align: bool) -> String {
     render_plain_at(&fixture("subscription-full"), &cfg, Some(80), &Clock::fixed())
 }
 
+/// One sample config rendered at a width, for the layout sections.
+fn layout_sample(text: &str, columns: usize) -> String {
+    let (cfg, _) = config::parse(text, &SCHEMAS);
+    render_plain_at(&fixture("subscription-full"), &cfg, Some(columns), &Clock::fixed())
+}
+
+/// `[[row.col]]`: widths, `justify`, and stacks (SPEC § 4.3).
+fn columns_section(o: &mut String) {
+    let _ = writeln!(
+        o,
+        "## `[[row.col]]`\n\nA row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:\n\n| value | meaning |\n|---|---|\n| `\"<n>fr\"` | a share of the width left over once the others are placed (`\"1fr\"` by default, so three bare columns are thirds and six are sixths) |\n| `\"auto\"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = \"fixed\"`, a module with `max_width`), not for branch names |\n| an integer | that many cells |\n\n`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` (`left` \\| `center` \\| `right`) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = \"ticker\"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.\n"
+    );
+    let _ = writeln!(
+        o,
+        "```toml\n[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n```\n\n```text\n{}\n```\n",
+        layout_sample(
+            "icons = \"unicode\"\n[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n",
+            120,
+        )
+    );
+    let _ = writeln!(
+        o,
+        "A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` (`top` \\| `center` \\| `bottom`) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.\n"
+    );
+}
+
+/// Titles on a row's rule (SPEC § 4.3).
+fn titles_section(o: &mut String) {
+    let _ = writeln!(
+        o,
+        "## Titles\n\n`title` is plain text set into a row's rule in the frame colour, with `title_pad` spaces on each side (1 by default) and `title_color` for another role or literal. `title_justify` puts it right after the left cap, centred in the widest empty gap of the line, or right before the right cap. A title wider than its space is cut with `…` and never widens the line, and a row with only a title is a titled spacer that is always kept.\n"
+    );
+    let _ = writeln!(
+        o,
+        "```toml\n[[row]]\ntitle = \"Session\"\nmodules = []\n\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n```\n\n```text\n{}\n```\n",
+        layout_sample(
+            "icons = \"unicode\"\n[[row]]\ntitle = \"Session\"\nmodules = []\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n",
+            80,
+        )
+    );
+}
+
+/// `[box.<name>]` (SPEC § 4.3).
+fn boxes_section(o: &mut String) {
+    let _ = writeln!(
+        o,
+        "## `[box.<name>]`\n\nA box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = \"<name>\"` form one box; `box = \"<name>\"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest, and a name that comes back after another box is reported.\n\n| key | default | meaning |\n|---|---|---|\n| `title` `title_justify` `title_pad` `title_color` | none | the title set into the box's top rule, as for a row |\n| `style` | the `[frame]` style | `none` \\| `rounded` \\| `square` \\| `double` \\| `heavy` \\| `custom`; when the frame's style has no box shape (`none`, `powerline`) an unstyled box is `rounded`, and a box that asks for `none` itself is invisible |\n| `fill` | `false` | draw the rule between a row's groups inside the box; off by default, because a clean interior is what a box is for |\n| `color` | the frame colour | role or literal for the box's glyphs |\n"
+    );
+    let _ = writeln!(
+        o,
+        "```toml\n[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright   = [\"clock\"]\n\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n```\n\n```text\n{}\n```\n",
+        layout_sample(
+            "icons = \"unicode\"\n[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright = [\"clock\"]\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n",
+            60,
+        )
+    );
+}
+
 fn presets_section(o: &mut String) {
     let _ = writeln!(
         o,
@@ -981,6 +1039,9 @@ fn presets_section(o: &mut String) {
         o,
         "```toml\n[[row]]\nmodules = [\"path\", \"branch\", \"sync\", \"pr\"]\nright   = [\"clock\"]\nseparator = \"  \"\n\n[[row]]\nmodules = []          # a spacer\nblank = true          # keep it on screen even without a frame\n```\n"
     );
+    columns_section(o);
+    titles_section(o);
+    boxes_section(o);
 
     let _ = writeln!(o, "## Top-level presets\n");
     for preset in config::presets::TopPreset::ALL {

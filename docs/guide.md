@@ -188,6 +188,53 @@ module to a line of its own. On the right side the pad goes before the text
 by default so it hugs the cap; `right_justify = "start"` puts it after, so
 the text stays next to the separator.
 
+### Columns, titles and boxes
+
+A row is the addressable unit of the config and can be more than one
+terminal line tall. Everything above is the base case: a row with `modules`
+and `right` is one column filling the width. Add `[[row.col]]` tables and
+the row becomes columns side by side, sharing the width by `width` —
+`"1fr"` (a share of what is left), `"auto"` (the column's own content) or a
+number of cells — with `gap` empty cells between them:
+
+```toml
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "branch"]
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+```
+
+`justify` says where a column's modules sit when it has no `right` group,
+and its default follows the column's position, so those three read left,
+centre and right without being told. A column can hold a stack of rows of
+its own (`[[row.col.row]]`) instead of modules; the row is then as tall as
+its tallest column, and `valign` places a shorter one.
+
+`title` sets plain text into a row's rule (`title_justify` left, centred or
+right; a row with only a title is a titled spacer). `[box.<name>]` frames a
+run of adjacent rows, or a whole column, with its own corners and sides in
+place of the frame's caps — two extra lines, so a box is at least three
+tall, and `box = true` boxes one row on its own:
+
+```toml
+[box.repo]
+title = "Repository"
+style = "double"      # inherits [frame] style when absent
+
+[[row]]
+box = "repo"
+modules = ["path", "model"]
+right   = ["clock"]
+```
+
+The keys are in [config.md § `[[row.col]]`](config.md#row-col) and
+§ `[box.<name>]`; `grid-three`, `grid-six`, `boxed-panels` and
+`dashboard-panels` in the gallery are working examples to copy from.
+
 ## 6. Presets, icons, colors
 
 Each module has three presets: `minimal` (bare value), `default`, and `full`

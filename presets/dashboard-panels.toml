@@ -1,0 +1,54 @@
+# name: dashboard-panels
+# summary: a full-height repo box, a centred column, and three stacked panels
+# columns: 150
+# needs: nerd-font
+
+# The SPEC § 4.3 dashboard: one row, three columns. The first is a box the
+# row's full height over a stack of two rows, the second a bare centred
+# column, the third a stack of three boxes. The frame has no box shape, so an
+# unstyled box is drawn rounded.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "none"
+
+[box.repo]
+title = "Repository"
+style = "double"
+
+[[row]]
+gap = 2
+
+[[row.col]]
+box = "repo"
+[[row.col.row]]
+modules = ["path", "branch"]
+[[row.col.row]]
+modules = ["sync", "pr"]
+
+[[row.col]]
+width = "auto"
+justify = "center"
+valign = "center"
+[[row.col.row]]
+modules = ["model", "effort"]
+
+[[row.col]]
+justify = "center"
+[[row.col.row]]
+box = true
+modules = ["context"]
+[[row.col.row]]
+box = true
+modules = ["limit5h"]
+[[row.col.row]]
+box = true
+modules = ["cost", "clock"]
+
+[modules.context]
+width = 20

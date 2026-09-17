@@ -153,6 +153,88 @@ modules = []          # a spacer
 blank = true          # keep it on screen even without a frame
 ```
 
+## `[[row.col]]`
+
+A row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:
+
+| value | meaning |
+|---|---|
+| `"<n>fr"` | a share of the width left over once the others are placed (`"1fr"` by default, so three bare columns are thirds and six are sixths) |
+| `"auto"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = "fixed"`, a module with `max_width`), not for branch names |
+| an integer | that many cells |
+
+`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` (`left` \| `center` \| `right`) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = "ticker"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.
+
+```toml
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "branch"]
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+```
+
+```text
+── ❒ ~/projects/garnish ───────────────────────── ❖ Opus │ ⚙ ▁▃▅▇█ ─────────────────── ⊞ ████████▍░░░░░░░░░░▏ 42% ──
+```
+
+A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` (`top` \| `center` \| `bottom`) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.
+
+## Titles
+
+`title` is plain text set into a row's rule in the frame colour, with `title_pad` spaces on each side (1 by default) and `title_color` for another role or literal. `title_justify` puts it right after the left cap, centred in the widest empty gap of the line, or right before the right cap. A title wider than its space is cut with `…` and never widens the line, and a row with only a title is a titled spacer that is always kept.
+
+```toml
+[[row]]
+title = "Session"
+modules = []
+
+[[row]]
+title = "Usage"
+title_justify = "right"
+modules = ["limit5h", "limit7d"]
+```
+
+```text
+╭─ Session ────────────────────────────────────────────────────────────────╮
+╰─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d4h ────────────────────────────────── Usage ─╯
+```
+
+## `[box.<name>]`
+
+A box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = "<name>"` form one box; `box = "<name>"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest, and a name that comes back after another box is reported.
+
+| key | default | meaning |
+|---|---|---|
+| `title` `title_justify` `title_pad` `title_color` | none | the title set into the box's top rule, as for a row |
+| `style` | the `[frame]` style | `none` \| `rounded` \| `square` \| `double` \| `heavy` \| `custom`; when the frame's style has no box shape (`none`, `powerline`) an unstyled box is `rounded`, and a box that asks for `none` itself is invisible |
+| `fill` | `false` | draw the rule between a row's groups inside the box; off by default, because a clean interior is what a box is for |
+| `color` | the frame colour | role or literal for the box's glyphs |
+
+```toml
+[box.repo]
+title = "Repository"
+style = "double"
+
+[[row]]
+box = "repo"
+modules = ["path", "model"]
+right   = ["clock"]
+
+[[row]]
+box = "repo"
+modules = ["context"]
+```
+
+```text
+╔═ Repository ═════════════════════════════════════════╗
+║ ❒ ~/projects/garnish │ ❖ Opus             ⠋ 16:00:00 ║
+║ ⊞ ████████▍░░░░░░░░░░▏ 42%                           ║
+╚══════════════════════════════════════════════════════╝
+```
+
 ## Top-level presets
 
 ### `default`

@@ -1,0 +1,42 @@
+# name: grid-six
+# summary: six equal columns, one module each, over a full-width flex row
+# columns: 170
+# needs: nerd-font
+
+# Six `1fr` columns share the width equally (the leftover cells go one each to
+# the first of them, so the shares differ by at most one), and each holds a
+# single module. `durations = "fixed"` keeps the timers from changing width as
+# they tick, which is what keeps a grid from shuffling.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+[[row.col]]
+modules = ["path"]
+[[row.col]]
+modules = ["branch"]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["context"]
+[[row.col]]
+modules = ["limit5h"]
+[[row.col]]
+modules = ["clock"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["lines"]
+
+[modules.path]
+max_width = 20
+
+[modules.context]
+width = 10
