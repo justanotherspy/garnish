@@ -105,10 +105,18 @@ jobs:
             echo "Skipping: a review runs only on an open, ready-for-review pull request." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The pull request's own head, named explicitly. Three of the four
+      # triggers are comment events, whose `GITHUB_REF` is the default
+      # branch, not the pull request, so without a `ref:` the review reads
+      # `main`'s tree while reasoning about the pull request's diff, which
+      # is exactly what the prompt below assumes away ("The PR branch is
+      # already checked out"). The `labeled` trigger is a `pull_request`
+      # event and was unaffected, which is why this went unnoticed.
       - name: Checkout repository
         if: steps.gate.outputs.review == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head
           fetch-depth: 1
 
       - name: Review
@@ -186,11 +194,19 @@ jobs:
             list, one line per finding, blocking ones first. A reviewer should
             be able to read the whole review in a minute.
 
-            You have a turn budget, and every inline comment and every progress
-            update spends one. The summary comment is the most useful thing you
-            produce, so protect it: as the budget runs low, fold your remaining
-            findings into the summary rather than posting them one by one. Run
-            short on inline comments, never on the summary.
+            You may fan the review out with subagents, one per dimension, and
+            on a large diff you should. Give each a narrow brief and have it
+            report findings back to you; you post them, since a subagent
+            cannot.
+
+            You have a turn budget, and every inline comment, every progress
+            update and every subagent spends from it. The summary comment is
+            the most useful thing you produce, so protect it: as the budget
+            runs low, fold your remaining findings into the summary rather
+            than posting them one by one. Run short on inline comments, never
+            on the summary. **Never end without posting the summary** - a run
+            that finishes having posted nothing has wasted everything it
+            spent, whatever its checklist says.
 
             Keep the review to the diff and the code it touches. Do NOT run
             `cargo build`, `cargo test`, `cargo clippy` or `make check` - CI
@@ -205,15 +221,24 @@ jobs:
           # (run 34879256227) died on error_max_turns three seconds after its
           # second inline comment, with the summary still unwritten.
           # `track_progress` is part of that cost, since each checklist update
-          # is a turn, and so is each inline comment. 50 is deliberately
-          # generous: a truncated review wastes everything it already spent.
+          # is a turn, and so is each inline comment. 50 was not enough
+          # either, for a different reason: see Task below. 100 is the cap
+          # now, because a truncated review wastes everything it has spent
+          # and a fanned-out one spends turns faster.
+          #
+          # Task: the review fans out. Without it, a review of a 51-file diff
+          # delegated four of its six dimensions, had all four refused, and
+          # posted nothing at all - no summary, no inline comments - while
+          # still reporting success after 44 turns and $2.43 (PR #66). A
+          # subagent's turns come out of this same budget, which is the other
+          # half of why the cap doubled.
           #
           # --model / --effort: Sonnet 5 at high effort. Sonnet is ~2.5x
-          # cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), which is
-          # what pays for doubling the turn ceiling - 16 Opus turns cost $0.95,
-          # so 50 Sonnet turns land in the same place rather than above it.
+          # cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), which
+          # is what pays for the ceiling: 16 Opus turns cost $0.95, so even
+          # 100 Sonnet turns stay in the same range.
           claude_args: |
             --model claude-sonnet-5
             --effort high
-            --max-turns 50
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
+            --max-turns 100
+            --allowedTools "Task,mcp__github_inline_comment__create_inline_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"

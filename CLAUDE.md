@@ -198,18 +198,25 @@ minutes for nothing. Cost is held down by the narrow triggers, a
 with no build tools in it.
 
 **Turns are the binding constraint, not money.** Every inline comment is a
-turn and so is every `track_progress` checklist update, so progress tracking
-and a tight `--max-turns` pull against each other; at 15 a review of a
-two-file diff died on `error_max_turns` with its summary unwritten. The cap
-is **50**, deliberately generous: a truncated review wastes everything it
-already spent, so raise the cap before trimming the review.
+turn, so is every `track_progress` checklist update, and so is every
+subagent, so progress tracking, fanning out and a tight `--max-turns` all
+pull against each other; at 15 a review of a two-file diff died on
+`error_max_turns` with its summary unwritten. The cap is **100**: a
+truncated review wastes everything it already spent, so raise the cap
+before trimming the review.
+
+**The review fans out.** `Task` is in the allowlist and the prompt tells it
+to use one subagent per dimension on a large diff, which is the other half
+of why the cap is 100. A subagent cannot post, so it reports back and the
+parent posts; the prompt's standing rule is that a run never ends without
+its summary.
 
 **Sonnet 5 at `--effort high` is what pays for that ceiling.** Sonnet is
-about 2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so 50
-Sonnet turns cost roughly what 25 Opus turns would. Note that `high` is not
-the top of the range (`xhigh` sits between it and `max` and is Claude
-Code's own default for Sonnet 5), so this is a deliberate setting, not a
-maximum.
+about 2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so
+even 100 Sonnet turns stay in the range 16 Opus turns cost ($0.95). Note
+that `high` is not the top of the range (`xhigh` sits between it and `max`
+and is Claude Code's own default for Sonnet 5), so this is a deliberate
+setting, not a maximum.
 
 Two prompt rules keep the output usable. The review folds leftover findings
 into the summary rather than spending its last turns posting them one by one,
@@ -233,14 +240,15 @@ and was then skipped. Two guards keep it dead: the group sits on the job,
 where a skipped job never joins it, and the `if` excludes bot authors so
 those comments are never candidates.
 
-**A review that delegates spends the budget and posts nothing.** On PR #66
-the run ended `"subtype": "success"` after 44 of its 50 turns and $2.43 with
-no summary and no inline comments, its checklist showing four of six
-dimensions as "delegated, running"; `permission_denials_count` was 4 and
-`--allowedTools` carries no `Task`. A green job and a half-ticked checklist
-are the only signal, so read the tracking comment rather than the check
-mark. The fix is in PLAN's backlog with the one below, since both change
-this file and so must land on `main` first.
+**A review can spend its whole budget and post nothing, and still go
+green.** On PR #66 the run ended `"subtype": "success"` after 44 of its 50
+turns and $2.43 with no summary and no inline comments, its checklist
+showing four of six dimensions as "delegated, running": it had tried to
+fan out with `Task`, which was not then in the allowlist, and
+`permission_denials_count` was 4. Both halves are fixed (the allowlist and
+the cap above, and a prompt rule never to end without the summary), but
+the tell is worth keeping: a green check says only that the job ran, so
+read the tracking comment's checkboxes to know whether a review happened.
 
 **A pull request that edits this file cannot be reviewed by it.** The action
 exchanges its OIDC token only when the workflow file is byte-identical to the
@@ -248,14 +256,8 @@ copy on the default branch, and refuses with `Workflow validation failed`
 otherwise: the job goes green in about twelve seconds having done nothing, so
 the tell is the duration, not a red check. A change here therefore lands in
 its own pull request, before the branch that wants the review, and never
-alongside it.
-
-That is why the checkout still does not name the pull request's head. Three
-of the four triggers are comment events, whose `GITHUB_REF` is the default
-branch, so without `ref: refs/pull/<n>/head` a review asked for by `@claude`
-reads `main`'s tree while reasoning about the pull request's diff. The
-`labeled` trigger is a `pull_request` event and is unaffected, which is why
-this has gone unnoticed. PLAN's backlog carries the fix.
+alongside it. That is the whole reason this file's fixes ship separately
+from the work that wants them.
 
 ## Release process
 
