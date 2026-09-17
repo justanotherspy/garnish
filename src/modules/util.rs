@@ -1,6 +1,7 @@
 //! Shared rendering helpers: smooth bars, percent formatting.
 
 use crate::ansi::{Color, Segment, Style};
+use crate::icons::IconSet;
 use crate::num::{floor_to_u64, u64_to_usize, usize_to_f64};
 
 /// Eighth-block characters for sub-cell precision, from 1/8 to 7/8.
@@ -106,6 +107,13 @@ pub fn percent_unclamped(p: f64) -> String {
     if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
 }
 
+/// [`rounded`] for a percentage that may pass 100, so a band threshold above
+/// 100 can be reached (the twin of [`percent_unclamped`], SPEC § 3.3).
+#[must_use]
+pub fn rounded_unclamped(p: f64) -> f64 {
+    crate::num::u64_to_f64(crate::num::round_to_u64(p))
+}
+
 /// Format dollars: `$0.42`, `$12.35`, `$1.2k`.
 #[must_use]
 pub fn dollars(usd: f64, decimals: usize) -> String {
@@ -119,6 +127,46 @@ pub fn dollars(usd: f64, decimals: usize) -> String {
     // here: the formatter allocates one byte per place.
     let decimals = decimals.min(crate::config::MAX_DECIMALS);
     format!("${usd:.decimals$}")
+}
+
+/// Cut a name to at most `max` characters, ending in the icon set's ellipsis
+/// ([`IconSet::ellipsis`]); `0` means no limit.
+///
+/// The `max_length` of `branch` and `session_name` (SPEC § 3.1, § 3.5). A
+/// character here is a terminal cluster, the unit [`crate::ansi::truncate`]
+/// cuts in, so a flag, a skin tone or a combining mark is never split in
+/// half. The ellipsis is counted into the budget and is itself cut when
+/// `max` is smaller than it, so the result is never wider than asked.
+#[must_use]
+pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
+    if max == 0 {
+        return name.to_owned();
+    }
+    // A cluster is at least one char, so a name with no more chars than the
+    // budget cannot need cutting and never reaches `clusters`, which
+    // allocates a `String` per grapheme. That only covers the short names;
+    // the long ones are bounded at the source instead (`git::MAX_REF_BYTES`
+    // caps what `.git/HEAD` can make a branch name in a checkout garnish did
+    // not create), because there is no cheap way to count clusters without
+    // building them.
+    if name.chars().take(max.saturating_add(1)).count() <= max {
+        return name.to_owned();
+    }
+    let clusters = crate::ansi::clusters(name);
+    if clusters.len() <= max {
+        return name.to_owned();
+    }
+    let ellipsis: String = icons.ellipsis().chars().take(max).collect();
+    let mut out: String =
+        clusters.into_iter().take(max.saturating_sub(ellipsis.chars().count())).collect();
+    out.push_str(&ellipsis);
+    out
+}
+
+/// The first seven characters of a commit hash, as git abbreviates one.
+#[must_use]
+pub fn short_sha(sha: &str) -> String {
+    sha.chars().take(7).collect()
 }
 
 /// Format a token count compactly: `12k`, `1.0M`, `200k`.
@@ -140,6 +188,45 @@ mod tests {
 
     fn text(segs: &[Segment]) -> String {
         Painter::PLAIN.paint(segs)
+    }
+
+    /// SPEC § 3.1, § 3.5: `max_length` counts terminal clusters, never
+    /// splits one, ends in the icon set's own ellipsis, and the ellipsis is
+    /// inside the budget — so an ascii-only line never grows a `…` and half
+    /// a flag never reaches a row.
+    #[test]
+    fn cut_name_counts_clusters_and_follows_the_icon_set() {
+        use IconSet::{Ascii, Unicode};
+        assert_eq!(cut_name("feature/long-branch", 0, Unicode), "feature/long-branch");
+        assert_eq!(cut_name("short", 5, Unicode), "short");
+        assert_eq!(cut_name("abcdef", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("abcdef", 5, Ascii), "abc..");
+        // The ellipsis itself is cut when the budget is smaller than it.
+        assert_eq!(cut_name("abcdef", 1, Ascii), ".");
+        assert_eq!(cut_name("abcdef", 1, Unicode), "…");
+        assert_eq!(cut_name("abcdef", 2, Ascii), "..");
+        // A flag is two code points and one cluster; `é` as e + U+0301 is
+        // two code points and one cluster. Neither is ever split.
+        assert_eq!(cut_name("🇺🇸🇫🇷🇩🇪", 2, Unicode), "🇺🇸…");
+        assert_eq!(cut_name("e\u{301}e\u{301}e\u{301}", 3, Unicode), "e\u{301}e\u{301}e\u{301}");
+        assert_eq!(cut_name("e\u{301}e\u{301}e\u{301}", 2, Unicode), "e\u{301}…");
+        for icons in IconSet::ALL {
+            for max in 1..8_usize {
+                let cut = cut_name("🇺🇸abcdef", max, icons);
+                assert!(
+                    crate::ansi::clusters(&cut).len() <= max,
+                    "{} max={max}: {cut:?}",
+                    icons.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn short_sha_abbreviates_like_git() {
+        assert_eq!(short_sha("0123456789abcdef"), "0123456");
+        assert_eq!(short_sha("abc"), "abc");
+        assert_eq!(short_sha(""), "");
     }
 
     #[test]

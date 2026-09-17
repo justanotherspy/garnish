@@ -7,7 +7,7 @@ use jiff::Timestamp;
 
 use std::collections::BTreeMap;
 
-use crate::ansi::{Color, Segment, Style};
+use crate::ansi::{Segment, Style};
 use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
 use crate::config::schema::{Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
@@ -41,15 +41,16 @@ pub fn durations_opt() -> OptSpec {
 }
 
 /// How fresh a module's data is.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Freshness {
     /// Rendered from live data (payload) or a cache entry within its TTL.
     #[default]
     Fresh,
     /// Rendered from a cache entry past its TTL; a refresh is under way.
     Stale,
-    /// The last refresh failed; the message is kept for `doctor`.
-    Failed(String),
+    /// The last refresh failed. The message is not carried: `doctor`
+    /// re-reads the `err` entries from disk, and a row shows only the mark.
+    Failed,
 }
 
 /// A module's output for one tick.
@@ -220,7 +221,7 @@ impl Ctx<'_> {
         }
         let failed = lookup.entry.as_ref().filter(|e| e.status == crate::cache::Status::Err);
         if lookup.fresh {
-            let freshness = failed.map_or(Freshness::Fresh, |e| Freshness::Failed(e.error.clone()));
+            let freshness = if failed.is_some() { Freshness::Failed } else { Freshness::Fresh };
             return (lookup, freshness);
         }
         if !lookup.in_progress {
@@ -229,7 +230,7 @@ impl Ctx<'_> {
         let grace_ms = ttl_ms.saturating_mul(u64::from(self.stale_after.max(1)));
         let overdue = mismatched || lookup.entry.as_ref().is_none_or(|e| !e.is_fresh(grace_ms));
         let freshness = match failed {
-            Some(e) => Freshness::Failed(e.error.clone()),
+            Some(_) => Freshness::Failed,
             None if overdue => Freshness::Stale,
             None => Freshness::Fresh,
         };
@@ -364,12 +365,6 @@ pub fn entry(id: &str) -> Option<&'static Entry> {
     REGISTRY.iter().find(|e| e.schema.id == id)
 }
 
-/// All module ids, in documentation order.
-#[must_use]
-pub fn ids() -> Vec<&'static str> {
-    REGISTRY.iter().map(|e| e.schema.id).collect()
-}
-
 /// A styled text segment using a module color key.
 #[must_use]
 pub fn seg(cfg: &ModuleCfg, text: impl Into<String>, color_key: &str) -> Segment {
@@ -387,6 +382,42 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
     }
 }
 
+/// A module's leading icon: its `show_icon` option and its `icon` colour,
+/// which is how all seventeen of them open.
+///
+/// The one place the option and the colour key are spelled, so a module
+/// cannot quietly ignore `show_icon` or reach for a different colour.
+#[must_use]
+pub fn lead(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
+    if cfg.bool("show_icon") { icon(cfg, icon_key, "icon") } else { Vec::new() }
+}
+
+/// A trailing badge: a space and the icon in its own colour, or nothing when
+/// the icon set (or an override) leaves that glyph empty.
+///
+/// The twin of [`icon`] for a glyph that follows the value — the dirty
+/// marker, the exceeds-200k mark, a review state. Without the empty check a
+/// dropped glyph leaves a lone space, which is a segment like any other: the
+/// module gains a cell and `align = true` shifts the whole column.
+#[must_use]
+pub fn badge(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
+    let glyph = cfg.icon(icon_key);
+    if glyph.is_empty() { Vec::new() } else { vec![seg(cfg, format!(" {glyph}"), color_key)] }
+}
+
+/// A glyph and the space after it, ready to be interpolated before text, or
+/// the empty string when that glyph is blank.
+///
+/// [`badge`] covers a glyph that is a segment of its own; this covers the
+/// other shape, a glyph built into a longer string (`⚡ 1h`). It exists for
+/// the same reason: written by hand the emptiness check gets forgotten, and
+/// the leftover space is a cell that shifts an aligned column.
+#[must_use]
+pub fn glyph_prefix(cfg: &ModuleCfg, icon_key: &str) -> String {
+    let glyph = cfg.icon(icon_key);
+    if glyph.is_empty() { String::new() } else { format!("{glyph} ") }
+}
+
 /// The segment with its style dimmed (an overdue or failed value).
 #[must_use]
 pub const fn dimmed(mut segment: Segment) -> Segment {
@@ -401,6 +432,16 @@ pub fn muted(theme: &Theme, text: impl Into<String>) -> Segment {
 }
 
 /// Apply `label`, `prefix`, `suffix`, and staleness styling to a render.
+///
+/// A *failed* module keeps its `✗` (SPEC § 3.6) even when it had nothing to
+/// say: `sync` at the default preset is built wholly from its cache entry,
+/// so a failed refresh leaves it with no segments at all, and hiding it
+/// then would report a broken git as an ordinary empty row. The placeholder
+/// `–` stands in for the value and the mark follows it.
+///
+/// An *overdue* module with nothing to say still hides, because its last
+/// value really was nothing and a `– ⟳` would flicker in every idle pause.
+/// Only a value that exists is dimmed and marked with `⟳`.
 #[must_use]
 pub fn decorate(
     rendered: Rendered,
@@ -408,23 +449,15 @@ pub fn decorate(
     theme: &Theme,
     stale_glyphs: (&str, &str),
 ) -> Vec<Segment> {
-    if rendered.is_empty() {
-        if cfg.hide_when_empty {
-            return Vec::new();
-        }
-        let mut out: Vec<Segment> = Vec::new();
-        if !cfg.prefix.is_empty() {
-            out.push(Segment::plain(&cfg.prefix));
-        }
-        if !cfg.label.is_empty() {
-            out.push(muted(theme, format!("{} ", cfg.label)));
-        }
-        out.push(muted(theme, "–"));
-        if !cfg.suffix.is_empty() {
-            out.push(Segment::plain(&cfg.suffix));
-        }
-        return out;
+    // A failed module with nothing of its own is the one case `hide_when_empty`
+    // must not swallow: hiding it reports a broken git as an ordinary empty
+    // row. An *overdue* one still hides, because its last value really was
+    // nothing (an in-sync `sync` renders no segments), and showing `– ⟳` for
+    // it would flicker a row in every idle pause.
+    if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hide_when_empty {
+        return Vec::new();
     }
+    // The wrapping is the same for every state; only the middle differs.
     let mut out: Vec<Segment> = Vec::new();
     if !cfg.prefix.is_empty() {
         out.push(Segment::plain(&cfg.prefix));
@@ -432,16 +465,17 @@ pub fn decorate(
     if !cfg.label.is_empty() {
         out.push(muted(theme, format!("{} ", cfg.label)));
     }
-    match &rendered.freshness {
-        Freshness::Fresh => out.extend(rendered.segments),
+    let value = if rendered.is_empty() { vec![muted(theme, "–")] } else { rendered.segments };
+    match rendered.freshness {
+        Freshness::Fresh => out.extend(value),
         Freshness::Stale => {
-            out.extend(rendered.segments.into_iter().map(dimmed));
+            out.extend(value.into_iter().map(dimmed));
             if !stale_glyphs.0.is_empty() {
                 out.push(muted(theme, format!(" {}", stale_glyphs.0)));
             }
         }
-        Freshness::Failed(_) => {
-            out.extend(rendered.segments.into_iter().map(dimmed));
+        Freshness::Failed => {
+            out.extend(value.into_iter().map(dimmed));
             if !stale_glyphs.1.is_empty() {
                 out.push(Segment::styled(
                     format!(" {}", stale_glyphs.1),
@@ -456,16 +490,78 @@ pub fn decorate(
     out
 }
 
-/// Convenience: a plain-colored segment.
-#[must_use]
-pub fn colored(text: impl Into<String>, color: Color) -> Segment {
-    Segment::styled(text, Style::fg(color))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    fn module_cfg(id: &str, overrides: &str) -> ModuleCfg {
+        let text = format!("[modules.{id}]\n{overrides}");
+        let (cfg, errs) = crate::config::parse(&text, &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        cfg.modules.get(id).cloned().unwrap_or_else(|| panic!("no module {id}"))
+    }
+
+    /// A glyph set to `""` leaves no cell behind, in either shape a trailing
+    /// glyph takes.
+    ///
+    /// Four of the nine trailing-badge sites used to skip the check (branch
+    /// dirty, context exceeds, cache warm, cache cold) and emit a lone space,
+    /// which is a segment like any other: the module kept a cell and
+    /// `align = true` shifted the whole column. [`glyph_prefix`] is the same
+    /// rule for a glyph built into a longer string, where the leftover was a
+    /// *double* space (`cache`'s countdown arm, which the first pass at this
+    /// missed because it fixed the example rather than the class).
+    #[test]
+    fn a_badge_with_no_glyph_takes_no_cell() {
+        let cfg = module_cfg("branch", "[modules.branch.icons]\ndirty = \"\"\n");
+        assert_eq!(badge(&cfg, "dirty", "dirty"), Vec::new());
+        let cfg = module_cfg("branch", "");
+        let marked = badge(&cfg, "dirty", "dirty");
+        assert_eq!(marked.len(), 1);
+        assert_eq!(marked.first().map(Segment::text), Some(&*format!(" {}", cfg.icon("dirty"))));
+        // The same rule as the leading icon, which has always had it.
+        assert_eq!(
+            icon(&module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n"), "folder", "icon"),
+            Vec::new()
+        );
+        // The interpolated shape: glyph and its space, or nothing at all.
+        let cfg = module_cfg("cache", "");
+        assert_eq!(glyph_prefix(&cfg, "warm"), format!("{} ", cfg.icon("warm")));
+        assert_eq!(
+            glyph_prefix(&module_cfg("cache", "[modules.cache.icons]\nwarm = \"\"\n"), "warm"),
+            ""
+        );
+    }
+
+    /// SPEC § 3.6: a *failed* module keeps its `✗` even when it had nothing
+    /// to show. `sync` at the default preset is built wholly out of its cache
+    /// entry, so a failed refresh leaves it with no segments, and hiding it
+    /// then reported a broken git as an empty row.
+    ///
+    /// An *overdue* one is the opposite case and still hides: its last value
+    /// really was nothing (a repository in sync renders no segments), and
+    /// `sync`'s 5 s TTL times the default `stale_after = 5` means every idle
+    /// pause over 25 s would otherwise flash a `– ⟳` row until the worker
+    /// lands. That is the flicker `stale_after` exists to remove.
+    #[test]
+    fn a_failed_module_with_no_value_still_carries_its_mark() {
+        let theme = Theme::default();
+        let marks = ("⟳", "✗");
+        let cfg = module_cfg("sync", "");
+        assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
+        let text =
+            |r: Rendered| crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, marks));
+        let empty = |f: Freshness| Rendered { segments: Vec::new(), freshness: f };
+        assert_eq!(text(Rendered::empty()), "", "a fresh empty module is hidden");
+        assert_eq!(text(empty(Freshness::Stale)), "", "so is an overdue one with no value");
+        assert_eq!(text(empty(Freshness::Failed)), "– ✗", "a broken one is never silent");
+        // A module that did render keeps its value, dimmed, with the mark.
+        let value =
+            || Rendered { segments: vec![Segment::plain("⇡2")], freshness: Freshness::Stale };
+        assert_eq!(text(value()), "⇡2 ⟳");
+        assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
+    }
 
     /// The string literals that are direct arguments of the call starting at
     /// `open` (the byte after the `(`; literals inside a nested call such as
@@ -606,12 +702,33 @@ mod tests {
                     check(key, at);
                 }
             }
-            // `icon(cfg, "icon", "color")`: both literals are keys.
-            for call in [" icon(", "(icon("] {
+            // `icon(cfg, "icon", "color")` and `badge(cfg, "icon", "color")`:
+            // both literals are keys. The space or `(` before the name keeps
+            // the pattern from matching inside another word.
+            for call in [" icon(", "(icon(", " badge(", "(badge("] {
                 for (at, _) in src.match_indices(call) {
                     for key in literal_arguments(&src, at + call.len()).0 {
                         check(&key, at);
                     }
+                }
+            }
+            // `glyph_prefix(cfg, "icon")`: one icon key, no colour of its
+            // own (the caller's `seg` carries that).
+            for call in [" glyph_prefix(", "(glyph_prefix("] {
+                for (at, _) in src.match_indices(call) {
+                    for key in literal_arguments(&src, at + call.len()).0 {
+                        check(&key, at);
+                    }
+                }
+            }
+            // `lead(cfg, "icon")` carries the icon key and, implicitly, the
+            // `icon` colour every module's leading glyph takes.
+            for call in [" lead(", "(lead("] {
+                for (at, _) in src.match_indices(call) {
+                    for key in literal_arguments(&src, at + call.len()).0 {
+                        check(&key, at);
+                    }
+                    check("icon", at);
                 }
             }
         }
@@ -702,5 +819,33 @@ mod tests {
         {
             assert_eq!(glyph_problem(good), None, "{good:?} must be accepted");
         }
+    }
+
+    /// The `fill`/`empty`/`marker` vocabulary belongs to the bar: every
+    /// schema that declares one of those keys declares a one-cell glyph in
+    /// every icon set, which is what lets the config reject a wider
+    /// override outright (`IconSpec::one_cell`). Reusing one of the names
+    /// for something that is not a bar cell fails here.
+    #[test]
+    fn bar_glyph_keys_are_one_cell_in_every_set() {
+        use crate::config::schema::ONE_CELL_ICONS;
+        let mut seen = 0_usize;
+        for schema in SCHEMAS.iter() {
+            for icon in schema.icons.iter().filter(|i| i.one_cell()) {
+                seen = seen.saturating_add(1);
+                for set in IconSet::ALL {
+                    let g = icon.glyph.get(set);
+                    assert_eq!(
+                        crate::ansi::display_width(g),
+                        1,
+                        "{}.{} in {}: {g:?}",
+                        schema.id,
+                        icon.key,
+                        set.name()
+                    );
+                }
+            }
+        }
+        assert!(seen >= ONE_CELL_ICONS.len(), "the bar keys vanished from the schemas: {seen}");
     }
 }

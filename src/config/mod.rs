@@ -17,7 +17,7 @@ pub mod schema;
 
 use presets::TopPreset;
 use schema::{
-    COMMON_KEYS, COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
+    COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value, common_keys,
 };
 
 /// Environment variable naming the config file.
@@ -74,6 +74,18 @@ pub enum StaleStyle {
     Hide,
     /// Show stale values unchanged.
     Plain,
+}
+
+impl StaleStyle {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Dim => "dim",
+            Self::Hide => "hide",
+            Self::Plain => "plain",
+        }
+    }
 }
 
 /// Where a padded right-group module's text sits (`right_justify`, SPEC § 4.1).
@@ -140,6 +152,18 @@ pub enum ColorChoice {
 }
 
 impl ColorChoice {
+    /// Config name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Always => "always",
+            Self::Never => "never",
+            Self::Ansi256 => "256",
+            Self::TrueColor => "truecolor",
+        }
+    }
+
     /// Resolve to a concrete mode given the environment.
     #[must_use]
     pub const fn mode(self, no_color_env: bool) -> ColorMode {
@@ -419,12 +443,19 @@ impl RawConfig {
                     toml::Value::Array(items) => {
                         for (i, item) in items.into_iter().enumerate() {
                             let path = format!("line[{i}]");
-                            match item {
-                                toml::Value::Table(t) => {
-                                    raw.line.push(RawLine::from_table(&path, t, errors));
-                                }
-                                _ => errors.push(problem(&path, "expected a [[line]] table")),
-                            }
+                            // A non-table keeps its place as a `bad_list`
+                            // placeholder, so every later line keeps the
+                            // index it has in the file: dropping it would
+                            // renumber the survivors and send the user to a
+                            // `line[n]` that is not theirs. The flag stops
+                            // it reading as a spacer, and it renders nothing.
+                            let line = if let toml::Value::Table(t) = item {
+                                RawLine::from_table(&path, t, errors)
+                            } else {
+                                errors.push(problem(&path, "expected a [[line]] table"));
+                                RawLine { bad_list: true, ..RawLine::default() }
+                            };
+                            raw.line.push(line);
                         }
                     }
                     _ => errors.push(problem("line", "expected [[line]] tables")),
@@ -675,24 +706,40 @@ fn problem(path: &str, message: &str) -> ConfigError {
     ConfigError { path: path.to_owned(), message: message.to_owned(), line: None }
 }
 
+/// An environment variable holding a path, or `None` when it is unset *or
+/// empty*.
+///
+/// An empty value is the shell's idiom for "unset" (`FOO= cmd`), and the two
+/// mean the same thing here: `GARNISH_CONFIG=` once named the empty path,
+/// which put `⚠ config: cannot read` on every tick, and `XDG_CONFIG_HOME=`
+/// once made the candidate the *relative* `garnish/garnish.toml`, so a
+/// checkout holding that file became the user's config for every session
+/// started in it. [`crate::claude_settings::home_dir`] is the same rule for
+/// `HOME`.
+pub(crate) fn env_path(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// The XDG base for garnish's own files: `XDG_CONFIG_HOME`, else `~/.config`.
+fn config_home() -> Option<PathBuf> {
+    env_path("XDG_CONFIG_HOME")
+        .or_else(|| crate::claude_settings::home_dir().map(|h| h.join(".config")))
+}
+
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
 #[must_use]
 pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = explicit {
         return Some(p.to_path_buf());
     }
-    if let Some(p) = std::env::var_os(CONFIG_ENV) {
-        return Some(PathBuf::from(p));
+    if let Some(p) = env_path(CONFIG_ENV) {
+        return Some(p);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let xdg = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| home.as_ref().map(|h| h.join(".config")))
-        .map(|d| d.join("garnish").join("garnish.toml"));
+    let xdg = config_home().map(|d| d.join("garnish").join("garnish.toml"));
     if let Some(p) = xdg.filter(|p| p.is_file()) {
         return Some(p);
     }
-    home.map(|h| h.join(".garnish.toml")).filter(|p| p.is_file())
+    crate::claude_settings::home_dir().map(|h| h.join(".garnish.toml")).filter(|p| p.is_file())
 }
 
 /// The default location a new config should be written to.
@@ -700,15 +747,7 @@ pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
 pub fn default_path() -> Option<PathBuf> {
     // Without a home there is no default: guessing `.` would write into
     // whatever directory garnish happens to run from (a repository, say).
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .filter(|v| !v.is_empty())
-                .map(|h| PathBuf::from(h).join(".config"))
-        })?;
-    Some(base.join("garnish").join("garnish.toml"))
+    Some(config_home()?.join("garnish").join("garnish.toml"))
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported
@@ -1130,10 +1169,16 @@ fn resolve_texts(
     texts
 }
 
-/// The steps an animation may take per tick. Below the range the frame
-/// never changes in a lifetime; above it `now × step` saturates and freezes
-/// (`1e308`), so both ends are rejected rather than silently still.
-const STEP_RANGE: std::ops::RangeInclusive<f64> = 0.001..=1000.0;
+/// The steps an animation may take per tick.
+///
+/// Below the range the frame never changes in a lifetime; above it
+/// `now × step` saturates and freezes (`1e308`), so both ends are rejected
+/// rather than silently still. Public so the generated reference prints the
+/// bound the parser enforces rather than a looser "> 0" of its own.
+pub const STEP_RANGE: std::ops::RangeInclusive<f64> = 0.001..=1000.0;
+
+/// [`STEP_RANGE`] as the reference and the `*_step` error message spell it.
+pub const STEP_BOUNDS: &str = "0.001–1000";
 const STEP_MESSAGE: &str =
     "must be a number between 0.001 and 1000: cells per tick (0.5 = every second tick)";
 
@@ -1230,17 +1275,9 @@ fn resolve_frame(
     };
     let separator_frames: Vec<String> =
         raw.and_then(|f| f.separator_frames.as_deref()).map_or_else(Vec::new, |frames| {
-            let frames: Vec<String> = frames.iter().map(|s| crate::ansi::plain_text(s)).collect();
-            let width = frames.first().map_or(0, |f| crate::ansi::display_width(f));
-            if frames.iter().all(|f| crate::ansi::display_width(f) == width) {
-                frames
-            } else {
-                errors.push(problem(
-                    "frame.separator_frames",
-                    "every frame must have the same width, or the columns would jitter",
-                ));
-                Vec::new()
-            }
+            equal_width_frames(frames.iter().map(String::as_str), "the columns", true)
+                .inspect_err(|msg| errors.push(problem("frame.separator_frames", msg)))
+                .unwrap_or_default()
         });
     FrameCfg {
         style,
@@ -1343,15 +1380,46 @@ fn unknown_option_message(schema: &ModuleSchema) -> String {
     let is_text = schema.id == crate::modules::text::SCHEMA.id;
     format!(
         "unknown option; expected one of {}",
-        COMMON_KEYS
-            .iter()
-            .copied()
+        common_keys()
             .filter(|k| !is_text || !TEXT_REJECTED_KEYS.iter().any(|(r, _)| r == k))
             .chain(std::iter::once("colors"))
             .chain(schema.opts.iter().map(|o| o.key))
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+/// An animation frame list (SPEC § 4.2): plain text, at least one frame, and
+/// every frame the same width, or whatever it decorates jitters as the
+/// frames cycle. `what` names that thing in the message.
+///
+/// One rule for the frame's `separator_frames` and every icon table's
+/// `<key>_frames`: every frame is the same width, or the thing they draw
+/// jitters from tick to tick.
+///
+/// `allow_empty` is what the two keys disagree on, and it is a
+/// compatibility rule rather than a design one: `[]` is the line every
+/// `garnish config init` has ever written for `separator_frames` (it means
+/// "no animation, keep the static separator"), so rejecting it would put a
+/// `⚠ config:` row on every tick of every config in the wild. An icon's
+/// `<key>_frames = []` has always been reported and nothing generates it.
+fn equal_width_frames<'a>(
+    frames: impl IntoIterator<Item = &'a str>,
+    what: &str,
+    allow_empty: bool,
+) -> Result<Vec<String>, String> {
+    let frames: Vec<String> = frames.into_iter().map(crate::ansi::plain_text).collect();
+    if frames.is_empty() && allow_empty {
+        return Ok(frames);
+    }
+    let Some(width) = frames.first().map(|f| crate::ansi::display_width(f)) else {
+        return Err("expected at least one frame".to_owned());
+    };
+    if frames.iter().all(|f| crate::ansi::display_width(f) == width) {
+        Ok(frames)
+    } else {
+        Err(format!("every frame must have the same width, or {what} would jitter"))
+    }
 }
 
 fn parse_icons(
@@ -1363,33 +1431,49 @@ fn parse_icons(
     for (ik, iv) in table {
         // `<key>_frames`: equal-width frames cycled one per tick (SPEC § 4.2).
         if let Some(base) = ik.strip_suffix("_frames")
-            && schema.icon(base).is_some()
+            && let Some(spec) = schema.icon(base)
         {
-            let frames: Option<Vec<String>> = iv.as_array().and_then(|items| {
-                items.iter().map(|f| f.as_str().map(crate::ansi::plain_text)).collect()
-            });
-            match frames {
-                Some(frames) if frames.is_empty() => {
-                    err(&format!("icons.{ik}"), "expected at least one frame".into());
-                }
-                Some(frames) => {
-                    let width = frames.first().map_or(0, |f| crate::ansi::display_width(f));
-                    if frames.iter().all(|f| crate::ansi::display_width(f) == width) {
-                        ov.icon_frames.insert(base.to_owned(), frames);
-                    } else {
-                        err(
-                            &format!("icons.{ik}"),
-                            "every frame must have the same width, or the row would jitter".into(),
-                        );
+            let given: Option<Vec<&str>> =
+                iv.as_array().and_then(|items| items.iter().map(toml::Value::as_str).collect());
+            match given {
+                Some(frames) => match equal_width_frames(frames, "the row", false) {
+                    // A frame becomes the glyph for that tick, so the bar's
+                    // one-cell rule applies to every frame too. Checking only
+                    // the static arm below left the same defect reachable
+                    // through `fill_frames`, equal widths and all.
+                    Ok(frames)
+                        if spec.one_cell()
+                            && frames.iter().any(|f| {
+                                !(f.is_empty() && spec.may_be_blank())
+                                    && crate::ansi::display_width(f) != 1
+                            }) =>
+                    {
+                        err(&format!("icons.{ik}"), "must be exactly one cell wide".into());
                     }
-                }
+                    Ok(frames) => {
+                        ov.icon_frames.insert(base.to_owned(), frames);
+                    }
+                    Err(msg) => err(&format!("icons.{ik}"), msg),
+                },
                 None => err(&format!("icons.{ik}"), "expected a list of strings".into()),
             }
             continue;
         }
         match (schema.icon(ik), iv.as_str()) {
-            (Some(_), Some(s)) => {
-                ov.icons.insert(ik.clone(), crate::ansi::plain_text(s));
+            (Some(spec), Some(s)) => {
+                let glyph = crate::ansi::plain_text(s);
+                // A bar glyph is repeated cell by cell, so anything but one
+                // cell breaks the row's arithmetic; `bar` would swap in a
+                // safe glyph and the override would vanish in silence. Same
+                // rule, same message as `frame.fill_char`. Blanking the
+                // marker is not that case: it is how the marker is turned
+                // off, and `bar` honours it (`IconSpec::may_be_blank`).
+                let blanked = glyph.is_empty() && spec.may_be_blank();
+                if spec.one_cell() && !blanked && crate::ansi::display_width(&glyph) != 1 {
+                    err(&format!("icons.{ik}"), "must be exactly one cell wide".into());
+                } else {
+                    ov.icons.insert(ik.clone(), glyph);
+                }
             }
             (None, _) => err(
                 &format!("icons.{ik}"),
@@ -1681,6 +1765,42 @@ format = "12h"
         assert_eq!(c.width(Some(100)), 94);
     }
 
+    /// Every `*_step` key takes the same range, the reference prints the
+    /// bound the parser enforces, and both ends are rejected. The reference
+    /// used to say "must be > 0", so `ticker_step = 0.0001` was documented
+    /// as valid and reported as a mistake on every tick.
+    #[test]
+    fn every_step_key_shares_one_range_and_the_reference_prints_it() {
+        assert_eq!(STEP_BOUNDS, format!("{}–{}", STEP_RANGE.start(), STEP_RANGE.end()));
+        assert!(STEP_MESSAGE.contains(&STEP_RANGE.start().to_string()));
+        assert!(STEP_MESSAGE.contains(&STEP_RANGE.end().to_string()));
+        let reference = crate::docs::config_page();
+        for key in ["ticker_step", "fill_step", "separator_step"] {
+            let row = reference
+                .lines()
+                .find(|l| l.starts_with(&format!("| `{key}` ")))
+                .unwrap_or_else(|| panic!("{key} has no row in the reference"));
+            assert!(row.contains(STEP_BOUNDS), "{row}");
+        }
+        assert!(
+            crate::modules::text::SCHEMA.opt("step").unwrap().doc.contains(STEP_BOUNDS),
+            "text.step"
+        );
+        let below = format!("ticker_step = {}", STEP_RANGE.start() / 10.0);
+        let above = format!("fill_step = {}", STEP_RANGE.end() * 10.0);
+        for (text, path) in
+            [(below, "ticker_step"), (format!("[frame]\n{above}"), "frame.fill_step")]
+        {
+            let (cfg, errs) = parse(&text, &schemas());
+            assert_eq!(errs.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), [path], "{text}");
+            assert!((cfg.ticker_step - 1.0).abs() < f64::EPSILON);
+            assert!((cfg.frame.fill_step - 1.0).abs() < f64::EPSILON);
+        }
+        // Both ends themselves are in range.
+        let ends = format!("ticker_step = {}\n[frame]\nfill_step = {}", 0.001, 1000);
+        assert_eq!(parse(&ends, &schemas()).1, Vec::new());
+    }
+
     /// SPEC § 5: every bad key is reported under its TOML path and falls back
     /// to its default on its own; everything valid around it stays in effect
     /// (walkthrough bug 8: one bad colour used to discard the whole file).
@@ -1773,6 +1893,19 @@ x = 1
             assert_eq!(errs[0].path, path, "{text}");
             assert_eq!(c.lines.len(), 4, "{text}: the default lines stand in");
         }
+        // An inline `line = [...]`, which nothing else in the suite used.
+        // A non-table item keeps its place as a placeholder rather than being
+        // dropped: dropping it renumbered every later line, so the error
+        // named a `line[n]` that was not the one in the user's file.
+        let (c, errs) = parse("line = [1, { modules = [\"clock\", 3] }]", &schemas());
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["line[0]", "line[1].modules[1]"], "the second line is line[1]");
+        // The placeholder holds the index and nothing else, so the default
+        // `hide_empty_lines` drops it at render and the row it stands for
+        // does not become a blank line.
+        assert_eq!(c.lines.len(), 2);
+        assert!(c.lines[0].left.is_empty() && c.lines[0].right.is_empty() && !c.lines[0].spacer);
+        assert_eq!(c.lines[1].left, vec!["clock"], "the good item stays");
     }
 
     #[test]
@@ -1957,6 +2090,30 @@ x = 1
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].path, "frame.fill_pattern");
         assert_eq!(c.frame.fill_pattern, Vec::<String>::new());
+    }
+
+    /// `separator_frames = []` is the line every `garnish config init` has
+    /// written, and it means "no animation". Rejecting it would put a
+    /// `⚠ config:` row on every tick of every config already on disk, so the
+    /// empty list is legal there and reported for an icon, which nothing
+    /// generates.
+    #[test]
+    fn an_empty_frame_list_is_legal_for_the_separator_and_not_for_an_icon() {
+        // The real schema set: `config show` writes every module, so a round
+        // trip through a reduced one would fail on the modules it omits.
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse("[frame]\nseparator_frames = []\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_frames, Vec::<String>::new());
+        // What `config init` writes still parses clean after a round trip.
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(shown.contains("separator_frames = []"), "{shown}");
+        assert_eq!(parse(&shown, all).1, Vec::new());
+
+        let (_, errs) = parse("[modules.model.icons]\nmodel_frames = []\n", all);
+        let problems: Vec<(&str, &str)> =
+            errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+        assert_eq!(problems, [("modules.model.icons.model_frames", "expected at least one frame")]);
     }
 
     #[test]
@@ -2184,7 +2341,12 @@ x = 1
     /// `set_common` arm, which would be accepted and dropped into `ov.opts`.
     #[test]
     fn no_schema_redeclares_a_common_key_and_every_common_key_is_stored() {
-        let common: Vec<&str> = COMMON_OPTS.iter().map(|o| o.key).collect();
+        // Every key `parse_overrides` handles before the schema, not just
+        // the `COMMON_OPTS` five: `enabled`, `preset`, `refresh`, `icons`
+        // and `colors` are matched by name too, so a schema option with one
+        // of those keys would be parsed by the hand-written arm and its
+        // `cfg.bool(..)`/`cfg.int(..)` reader would see the default for ever.
+        let common: Vec<&str> = common_keys().chain(std::iter::once("colors")).collect();
         let schemas =
             crate::modules::SCHEMAS.iter().chain(std::iter::once(&*crate::modules::text::SCHEMA));
         for schema in schemas {
@@ -2203,6 +2365,112 @@ x = 1
                 set_common(&mut ov, opt.key, opt.default.clone()),
                 "`{}` is a common option with no `set_common` arm: it would be dropped",
                 opt.key
+            );
+        }
+
+        // The whole chain, end to end, so the tripwire covers all four edits
+        // a sixth common option needs rather than only the `set_common` arm:
+        // every key is written into a config, and the value that comes back
+        // out of the resolved `ModuleCfg` must be the one that went in. A
+        // missing `Overrides` field, `resolve` arm or `common` arm all show
+        // up here as the default coming back.
+        let not_the_default = |opt: &OptSpec| match &opt.default {
+            Value::Bool(b) => Value::Bool(!b),
+            Value::Int(n) => Value::Int(n.saturating_add(1)),
+            Value::Float(f) => Value::Float(f + 0.5),
+            Value::Str(s) => Value::Str(format!("{s}x")),
+            other => other.clone(),
+        };
+        let rows = COMMON_OPTS.iter().map(|opt| {
+            let value = match not_the_default(opt) {
+                Value::Bool(b) => b.to_string(),
+                Value::Int(n) => n.to_string(),
+                Value::Float(f) => f.to_string(),
+                Value::Str(s) => crate::config::schema::toml_string(&s),
+                other => panic!("no literal for {other:?}"),
+            };
+            format!("{} = {value}\n", opt.key)
+        });
+        let text: String = std::iter::once("[modules.clock]\n".to_owned()).chain(rows).collect();
+        let (cfg, errs) = parse(&text, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new(), "{text}");
+        let clock = cfg.modules.get("clock").expect("the clock module");
+        for opt in &COMMON_OPTS {
+            assert_eq!(
+                clock.common(opt.key),
+                Some(not_the_default(opt)),
+                "`{}` did not survive the config → `ModuleCfg` chain ({text})",
+                opt.key
+            );
+        }
+    }
+
+    /// SPEC § 4.1: a bar glyph is repeated cell by cell, so an override
+    /// that is not one cell is reported and the schema glyph stays — the
+    /// same rule `frame.fill_char` has always had. It used to be swallowed:
+    /// `config check` said `ok`, `config show` echoed the glyph, and the
+    /// tick drew `█` because `util::bar` substituted one.
+    #[test]
+    fn a_bar_glyph_override_must_be_one_cell() {
+        for (id, key) in [("context", "fill"), ("context", "marker"), ("limit5h", "empty")] {
+            let text = format!("[modules.{id}.icons]\n{key} = \"🟩\"\n");
+            let (cfg, errs) = parse(&text, &crate::modules::SCHEMAS);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(
+                problems,
+                [(&*format!("modules.{id}.icons.{key}"), "must be exactly one cell wide")],
+                "{text}"
+            );
+            let module = cfg.modules.get(id).unwrap();
+            assert_eq!(crate::ansi::display_width(module.icon(key)), 1, "{text}");
+        }
+        // A one-cell override is still taken, and a key that is not a bar
+        // cell may be any width.
+        let (cfg, errs) = parse(
+            "[modules.context.icons]\nfill = \"▓\"\ncontext = \"ctx:\"\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new());
+        let context = cfg.modules.get("context").unwrap();
+        assert_eq!((context.icon("fill"), context.icon("context")), ("▓", "ctx:"));
+
+        // An animated bar glyph is the same rule: a frame is the glyph for
+        // its tick, so equal widths are not enough.
+        let (_, errs) = parse(
+            "[modules.context.icons]\nfill_frames = [\"🟩\", \"🟥\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        let problems: Vec<(&str, &str)> =
+            errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+        assert_eq!(
+            problems,
+            [("modules.context.icons.fill_frames", "must be exactly one cell wide")]
+        );
+        let (cfg, errs) = parse(
+            "[modules.context.icons]\nfill_frames = [\"▓\", \"▒\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new(), "one-cell frames are still taken");
+        assert!(cfg.modules.contains_key("context"));
+
+        // Blanking the marker is how it is turned off, and `util::bar`
+        // honours it, so the width rule must not refuse it. The cells
+        // themselves cannot be blanked: a zero-width cell has no width to
+        // repeat.
+        let (cfg, errs) =
+            parse("[modules.context.icons]\nmarker = \"\"\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(cfg.modules.get("context").map(|m| m.icon("marker")), Some(""));
+        for key in ["fill", "empty"] {
+            let text = format!("[modules.context.icons]\n{key} = \"\"\n");
+            let (_, errs) = parse(&text, &crate::modules::SCHEMAS);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(
+                problems,
+                [(&*format!("modules.context.icons.{key}"), "must be exactly one cell wide")],
+                "{text}"
             );
         }
     }

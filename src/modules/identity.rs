@@ -4,7 +4,8 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::util::cut_name;
+use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// `session_name`: the custom or AI-generated session title.
 pub struct SessionNameModule;
@@ -30,7 +31,7 @@ impl Module for SessionNameModule {
                 OptSpec::new(
                     "max_length",
                     Kind::Int,
-                    "Truncate longer names (0 = no limit).",
+                    "Cut a longer name to this many characters with `…` (`..` in the ascii set; 0 = no limit).",
                     Value::Int(32),
                 ),
             ],
@@ -51,16 +52,8 @@ impl Module for SessionNameModule {
         let Some(name) = ctx.payload.session_name.as_deref().filter(|n| !n.is_empty()) else {
             return Rendered::empty();
         };
-        let max = cfg.size("max_length");
-        let shown: String = if max > 0 && name.chars().count() > max {
-            name.chars().take(max.saturating_sub(1)).chain(std::iter::once('…')).collect()
-        } else {
-            name.to_owned()
-        };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "name", "icon"));
-        }
+        let shown = cut_name(name, cfg.size("max_length"), ctx.icons);
+        let mut segs: Vec<Segment> = lead(cfg, "name");
         segs.push(seg(cfg, shown, "name"));
         if cfg.bool("show_id")
             && let Some(id) = ctx.payload.session_id.as_deref()
@@ -125,10 +118,7 @@ impl Module for VimModule {
         } else {
             mode.to_owned()
         };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "vim", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "vim");
         segs.push(Segment::styled(text, Style::fg(cfg.color(color_key)).bolded()));
         Rendered::fresh(segs)
     }
@@ -182,16 +172,12 @@ impl Module for AgentModule {
         else {
             return Rendered::empty();
         };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "agent", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "agent");
         segs.push(seg(cfg, name, "name"));
         if cfg.bool("show_thinking")
             && ctx.payload.thinking.as_ref().and_then(|t| t.enabled) == Some(true)
-            && !cfg.icon("thinking").is_empty()
         {
-            segs.push(seg(cfg, format!(" {}", cfg.icon("thinking")), "thinking"));
+            segs.extend(badge(cfg, "thinking", "thinking"));
         }
         Rendered::fresh(segs)
     }
@@ -249,10 +235,7 @@ impl Module for LinesModule {
         if cfg.bool("hide_zero") && added == 0 && removed == 0 {
             return Rendered::empty();
         }
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "lines", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "lines");
         segs.push(seg(cfg, format!("{}{added}", cfg.icon("added")), "added"));
         segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
         if cfg.bool("show_net") {

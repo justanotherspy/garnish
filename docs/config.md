@@ -20,7 +20,7 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 | `right_justify` | `end` \| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |
 | `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = "hide"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |
 | `overflow` | `truncate` \| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |
-| `ticker_step` | number | `1` | Cells the ticker advances per tick (must be > 0; `0.5` = every second tick). |
+| `ticker_step` | number | `1` | Cells the ticker advances per tick (0.001–1000; `0.5` = every second tick). |
 | `ticker_gap` | string | `"   "` | Text between the end of a scrolled group and its wrapped-around start. |
 | `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |
 | `durations` | `compact` \| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = "ticker"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \| `compact` \| `fixed`) to pin one module. |
@@ -68,10 +68,10 @@ Every module color defaults to a role; override a role here to restyle every mod
 | `fill_char` | style-dependent | The rule character (must be one cell wide). |
 | `pad` | style-dependent | Text between prefix/content and content/rule. |
 | `fill_pattern` | `""` | One-cell glyphs repeated across the rule instead of `fill_char`; each tick the pattern shifts `fill_step` cells in `fill_direction`, so dots appear to travel along the rule. The rule's width never changes, only which glyph lands in each cell. Empty keeps the static rule. |
-| `fill_step` | `1` | Cells the pattern shifts per tick (0.5 = every second tick). |
+| `fill_step` | `1` | Cells the pattern shifts per tick (0.001–1000; 0.5 = every second tick). |
 | `fill_direction` | `right` | `left` \| `right`: which way the pattern travels. |
 | `separator_frames` | `[]` | Separator strings cycled one per tick; every frame must have the same width (validation rejects a mismatch so columns cannot jitter). A per-line `separator` wins over the frames. Empty keeps the static `separator`. |
-| `separator_step` | `1` | Frames the separator advances per tick. |
+| `separator_step` | `1` | Frames the separator advances per tick (0.001–1000). |
 
 Animations follow the clock rule of [Animation](guide.md#animation): frame = `floor(now × step) mod period`, so `animate = false` or `GARNISH_ANIMATE=0` freezes them at frame 0, which is also what these generated samples show.
 
@@ -230,4 +230,6 @@ Every module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`
 | `GARNISH_NOW` | Freeze the clock (epoch seconds or RFC 3339) for reproducible renders. |
 | `GARNISH_NO_SPAWN` | Log intended background refreshes to `<cache>/spawns.log` instead of spawning them (tests). |
 | `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |
-| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact. |
+| `GARNISH_DEBUG` | `1` appends a line per tick to `<cache>/debug.log`, rotated at 1 MiB; `garnish doctor` shows the tail. Nothing is written otherwise. |
+| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's; empty means there is none. |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact; the last two turn compaction off, so the marker goes with it. |

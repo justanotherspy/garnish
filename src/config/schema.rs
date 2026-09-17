@@ -176,7 +176,10 @@ impl OptSpec {
     pub fn over_max(&self, value: &Value) -> Option<String> {
         let max = self.max?;
         match value {
-            Value::Int(n) if usize::try_from(*n).is_ok_and(|n| n > max) => {
+            // `is_none_or`, not `is_ok_and`: a value too large for `usize`
+            // (a 32-bit build) is over any `max` by definition, and letting
+            // it through is what SPEC § 5 records as an aborted tick.
+            Value::Int(n) if usize::try_from(*n).ok().is_none_or(|n| n > max) => {
                 Some(format!("must be at most {max}"))
             }
             Value::Str(s) if s.chars().count() > max => {
@@ -221,6 +224,36 @@ pub struct IconSpec {
     /// Default glyph per icon set.
     pub glyph: Glyph,
 }
+
+impl IconSpec {
+    /// Whether an override for this key has to be exactly one cell wide.
+    ///
+    /// True for the glyphs [`crate::modules::util::bar`] repeats cell by
+    /// cell: a wider one would break the width arithmetic of the whole row,
+    /// so `bar` substitutes a safe glyph and the user's choice vanishes with
+    /// nothing said. The config reports it instead, as it does for
+    /// `frame.fill_char`, which is the same rule for the rule's own glyph.
+    /// A unit test pins the vocabulary: a schema that declares one of these
+    /// keys declares a one-cell glyph in every icon set.
+    #[must_use]
+    pub fn one_cell(&self) -> bool {
+        ONE_CELL_ICONS.contains(&self.key)
+    }
+
+    /// True when blanking this glyph is how the user turns the thing off.
+    ///
+    /// An empty glyph means "draw nothing" everywhere in garnish, and the
+    /// marker is the one bar glyph that can be left out: `util::bar` skips
+    /// it and the bar is still the same width. `fill` and `empty` are the
+    /// cells themselves, so blanking either would collapse the row.
+    #[must_use]
+    pub fn may_be_blank(&self) -> bool {
+        self.key == "marker"
+    }
+}
+
+/// The icon keys that are drawn one per bar cell (see [`IconSpec::one_cell`]).
+pub const ONE_CELL_ICONS: [&str; 3] = ["fill", "empty", "marker"];
 
 /// One color the module uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,18 +340,16 @@ impl ModuleSchema {
     }
 }
 
-/// Keys every module accepts in addition to its own options.
-pub const COMMON_KEYS: [&str; 9] = [
-    "enabled",
-    "preset",
-    "refresh",
-    "label",
-    "prefix",
-    "suffix",
-    "hide_when_empty",
-    "max_width",
-    "icons",
-];
+/// The keys every module accepts besides its own options, in the order the
+/// "expected one of" message names them.
+///
+/// Derived from [`COMMON_OPTS`] rather than listed again, so adding a common
+/// option cannot leave it out of the message: only the three hand-parsed
+/// keys and the two tables are spelled here.
+pub fn common_keys() -> impl Iterator<Item = &'static str> {
+    const HAND_PARSED: [&str; 3] = ["enabled", "preset", "refresh"];
+    HAND_PARSED.into_iter().chain(COMMON_OPTS.iter().map(|o| o.key)).chain(std::iter::once("icons"))
+}
 
 /// The common options every module takes besides its own, as specs.
 ///
@@ -328,7 +359,7 @@ pub const COMMON_KEYS: [&str; 9] = [
 /// `refresh` depends on whether the module is cached. Text modules
 /// (SPEC § 3.7) take every entry but `max_width`, which `config check`
 /// rejects there in favour of `width`.
-pub const COMMON_OPTS: [OptSpec; 5] = [
+pub static COMMON_OPTS: [OptSpec; 5] = [
     OptSpec::new("label", Kind::Str, "Dim text before the value.", Value::Str(String::new()))
         .max(crate::config::MAX_TEXT_CHARS),
     OptSpec::new("prefix", Kind::Str, "Text before the module.", Value::Str(String::new()))

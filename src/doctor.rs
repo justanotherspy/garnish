@@ -399,28 +399,33 @@ fn cache_section(o: &mut String, cache: &Cache) {
     let _ = writeln!(o);
 }
 
+/// Every `GARNISH_*` test hook, named by the constant each reader uses so a
+/// new hook cannot be added without a row here (SPEC § 9 Test hooks; a unit
+/// test scans the source for a hook this list forgot).
+pub const TEST_HOOKS: [&str; 8] = [
+    config::CONFIG_ENV,
+    crate::cache::CACHE_DIR_ENV,
+    crate::time::NOW_ENV,
+    crate::spawn::NO_SPAWN_ENV,
+    crate::cli::COLUMNS_ENV,
+    crate::debug::DEBUG_ENV,
+    crate::time::ANIMATE_ENV,
+    crate::claude_settings::MANAGED_SETTINGS_ENV,
+];
+
 fn environment_section(o: &mut String) {
     let _ = writeln!(o, "environment");
-    for key in [
-        "COLUMNS",
-        "LINES",
-        "NO_COLOR",
-        "TZ",
-        "GARNISH_CONFIG",
-        "GARNISH_CACHE_DIR",
-        "GARNISH_NOW",
-        "GARNISH_NO_SPAWN",
-        "GARNISH_COLUMNS",
-        "GARNISH_DEBUG",
-        "GARNISH_ANIMATE",
-        "GARNISH_MANAGED_SETTINGS",
+    // The terminal's own variables, garnish's test hooks, then the settings
+    // and renderer switches Claude Code reads (SPEC § 2.1, § 2.3, § 4.2).
+    let keys = ["COLUMNS", "LINES", "NO_COLOR", "TZ"].into_iter().chain(TEST_HOOKS).chain([
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         "DISABLE_AUTO_COMPACT",
         "DISABLE_COMPACT",
         "CLAUDE_CODE_NO_FLICKER",
         "CLAUDE_CODE_DECSTBM",
-    ] {
+    ]);
+    for key in keys {
         if let Ok(v) = std::env::var(key) {
             // The path-valued hooks may carry the home directory.
             let v = if key.ends_with("_CONFIG")
@@ -577,6 +582,53 @@ mod tests {
     use super::*;
     use crate::cache::Scope;
     use std::collections::BTreeMap;
+
+    /// Every `GARNISH_*` hook the code reads is in [`TEST_HOOKS`] (so
+    /// `doctor` prints it when it is set) and in the SPEC § 9 table (so a
+    /// reader can find out what it does). The source scan is the guard: a
+    /// hook added with its own constant but no row here would otherwise be
+    /// invisible in a bug report.
+    ///
+    /// One-directional on SPEC: § 9 also lists hooks of the target state
+    /// (`GARNISH_STDIN_TTY`, Phase 22) that nothing reads yet.
+    #[test]
+    fn every_garnish_hook_is_reported_and_specified() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut found: Vec<String> = Vec::new();
+        let mut files = vec![root.join("src")];
+        while let Some(dir) = files.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    files.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let source = std::fs::read_to_string(&path).unwrap();
+                for part in source.split("\"GARNISH_").skip(1) {
+                    let tail: String = part
+                        .chars()
+                        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                        .collect();
+                    // The scan's own pattern in this file has nothing after
+                    // the prefix; a real hook always does.
+                    let name = format!("GARNISH_{tail}");
+                    if !tail.is_empty() && !found.contains(&name) {
+                        found.push(name);
+                    }
+                }
+            }
+        }
+        found.sort();
+        assert!(found.len() >= TEST_HOOKS.len(), "the scan found nothing: {found:?}");
+        let spec = std::fs::read_to_string(root.join("SPEC.md")).unwrap();
+        for hook in &found {
+            assert!(TEST_HOOKS.contains(&hook.as_str()), "{hook} is not in doctor::TEST_HOOKS");
+            assert!(spec.contains(&format!("`{hook}`")), "{hook} is not in SPEC § 9");
+        }
+    }
 
     #[test]
     fn failed_entries_lists_only_err_entries() {

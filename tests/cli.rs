@@ -22,6 +22,12 @@ fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, b
         .env("GARNISH_CACHE_DIR", home.join("cache"))
         .env("GARNISH_NOW", "1738425600")
         .env("NO_COLOR", "1")
+        // CLAUDE.md § Cache and worker invariants: no test that runs the
+        // binary may fork a detached worker. `preview` over a directory
+        // renders every fixture, and one whose `cwd` were a real repository
+        // would spawn a worker per cached module, outliving the test and
+        // writing into a tempdir that is already gone.
+        .env("GARNISH_NO_SPAWN", "1")
         .env_remove("GARNISH_CONFIG")
         // A developer running with animations off must not turn the
         // suite red; a test that wants the switch sets it through `extra`.
@@ -389,8 +395,7 @@ fn config_show_prints_the_animate_switch_in_effect() {
     std::fs::write(&copy, &shown).unwrap();
     let render = |file: &Path| {
         let args = ["--config", file.to_str().unwrap(), "preview", payload, "--width", "80"];
-        let (out, _, ok) =
-            run(&args, home, &[("GARNISH_NO_SPAWN", "1"), ("GARNISH_NOW", "1738425601")]);
+        let (out, _, ok) = run(&args, home, &[("GARNISH_NOW", "1738425601")]);
         assert!(ok, "{out}");
         out
     };
@@ -412,6 +417,23 @@ fn preview_typos_are_one_line_not_a_report() {
         assert!(err.contains(value) && err.contains(expected), "{flag}: {err}");
         assert!(!err.contains("Location:") && !err.contains("Error:"), "{flag}: {err}");
     }
+}
+
+/// `--lock-held` means "the caller already holds *this module's* lock" and
+/// is only ever passed beside `--module` (`spawn::Job::args`). With `--all`
+/// it would adopt a lock per module — inventing one where there was none,
+/// and taking over one a live worker still holds — so clap refuses it.
+#[test]
+fn refresh_refuses_all_together_with_lock_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let (out, err, ok) =
+        run(&["refresh", "--all", "--lock-held", "--session", "s", "--cwd", cwd], dir.path(), &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert!(err.contains("--all") && err.contains("--lock-held"), "{err}");
+    // Each on its own is still accepted.
+    let (_, err, ok) = run(&["refresh", "--all", "--session", "s", "--cwd", cwd], dir.path(), &[]);
+    assert!(ok, "{err}");
 }
 
 /// SPEC § 7: `preview <dir>` renders every `*.json` in the directory, in
@@ -470,7 +492,7 @@ fn config_show_round_trips_every_fixture_and_preset() {
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
         let render = |cfg: &std::path::Path| {
             let args = ["--config", cfg.to_str().unwrap(), "preview", payload, "--width", "120"];
-            let (out, _, ok) = run(&args, home, &[("GARNISH_NO_SPAWN", "1")]);
+            let (out, _, ok) = run(&args, home, &[]);
             assert!(ok, "{}: preview failed", cfg.display());
             out.lines()
                 .skip(1)
@@ -624,6 +646,42 @@ fn managed_settings_hook_names_the_first_file_of_the_chain() {
     assert_ne!(plain(&hook), plain(&[]), "the managed file changes the tick");
 }
 
+/// SPEC § 5, § 9: `GARNISH_DEBUG` appends a line per tick to
+/// `<cache>/debug.log` and `doctor` shows its tail; with the hook off the
+/// file is never created, and nothing the hook does reaches stdout.
+///
+/// Serial: the hook and the cache root are per-process environment, and the
+/// log is shared with whatever else writes to that root.
+#[test]
+fn cache_debug_hook_logs_one_line_per_tick_and_nothing_without_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "[[line]]\nmodules = [\"model\"]\n").unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    let log = home.join("cache").join("debug.log");
+
+    let quiet = tick(&cfg, home, payload, &[]);
+    assert!(!log.exists(), "the hook is off: {}", log.display());
+
+    let noisy = tick(&cfg, home, payload, &[("GARNISH_DEBUG", "1")]);
+    assert_eq!(noisy, quiet, "the hook must not change what a tick prints");
+    tick(&cfg, home, payload, &[("GARNISH_DEBUG", "1")]);
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(text.lines().count(), 2, "one line per tick: {text}");
+    for line in text.lines() {
+        assert!(line.contains(" pid="), "{line}");
+        assert!(line.contains("columns=84"), "{line}");
+        assert!(line.contains("rows=1"), "{line}");
+    }
+
+    let (report, _, ok) =
+        run(&["doctor"], home, &[("GARNISH_CACHE_DIR", home.join("cache").to_str().unwrap())]);
+    assert!(ok, "{report}");
+    assert!(report.contains("debug.log (last 2 of 2 lines)"), "{report}");
+    assert!(report.contains("GARNISH_CACHE_DIR="), "{report}");
+}
+
 /// SPEC § 2.1: `preview` paints every row faint, as Claude Code draws the
 /// status line on screen; the tick does not, since the harness adds it.
 #[test]
@@ -658,4 +716,70 @@ fn preview_draws_every_row_faint_and_the_tick_does_not() {
     let out = tick(&cfg, home, include_str!("fixtures/payloads/subscription-full.json"), &[]);
     let params = sgr(&out);
     assert!(!params.is_empty() && !params.iter().any(|p| faint(p)), "{out:?}");
+}
+
+/// CLAUDE.md § Conventions: a path variable that is *set but empty* means
+/// unset, which is the shell's `FOO= cmd` idiom.
+///
+/// Both halves used to break, and neither was covered: `GARNISH_CONFIG=`
+/// named the empty path, so every tick carried `⚠ config: cannot read` and
+/// the real config went unread; `XDG_CONFIG_HOME=` made the candidate the
+/// *relative* `garnish/garnish.toml`, so a checkout holding that file became
+/// the config for every session started in it. The whole suite used
+/// `env_remove` and so could not see either.
+#[test]
+fn an_empty_path_variable_is_unset_not_a_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    let marker = |name: &str| {
+        format!("[[line]]\nmodules = [\"text.marker\"]\n[modules.text.marker]\ntext = \"{name}\"\n")
+    };
+    // `--config` is deliberately not passed: it short-circuits `locate`
+    // before either variable is read, which is what made the first version
+    // of this test pass with the rule reverted.
+    let render = |extra: &[(&str, &str)]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+        cmd.current_dir(home)
+            .env("HOME", home)
+            .env("GARNISH_CACHE_DIR", home.join("cache"))
+            .env("GARNISH_NOW", "1738425600")
+            .env("GARNISH_NO_SPAWN", "1")
+            .env("GARNISH_MANAGED_SETTINGS", "")
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", "84")
+            .env_remove("GARNISH_ANIMATE")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (k, v) in extra {
+            cmd.env(k, v);
+        }
+        let mut child = cmd.spawn().unwrap();
+        child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    // The real config, found through `XDG_CONFIG_HOME`.
+    let xdg = home.join(".config");
+    std::fs::create_dir_all(xdg.join("garnish")).unwrap();
+    std::fs::write(xdg.join("garnish").join("garnish.toml"), marker("REAL")).unwrap();
+    let out = render(&[("XDG_CONFIG_HOME", xdg.to_str().unwrap())]);
+    assert!(out.contains("REAL"), "the fixture itself is wrong: {out:?}");
+
+    // `GARNISH_CONFIG=` named the *empty path*, so the tick printed
+    // `⚠ config:  cannot read` and never consulted the real config.
+    let out = render(&[("XDG_CONFIG_HOME", xdg.to_str().unwrap()), ("GARNISH_CONFIG", "")]);
+    assert!(!out.contains("config"), "an empty variable named a file: {out:?}");
+    assert!(out.contains("REAL"), "the real config was skipped: {out:?}");
+
+    // `XDG_CONFIG_HOME=` made the candidate the *relative* path
+    // `garnish/garnish.toml`, so a working directory holding one became the
+    // config for every session started there.
+    let trap = home.join("garnish");
+    std::fs::create_dir_all(&trap).unwrap();
+    std::fs::write(trap.join("garnish.toml"), marker("TRAP")).unwrap();
+    let out = render(&[("XDG_CONFIG_HOME", "")]);
+    assert!(!out.contains("TRAP"), "the working directory became the config: {out:?}");
 }

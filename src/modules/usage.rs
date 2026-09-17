@@ -6,8 +6,10 @@ use crate::icons::{Glyph, glyph};
 use crate::payload::RateWindow;
 use crate::time::WallClock;
 
-use super::util::{BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded};
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::util::{
+    BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded, rounded_unclamped,
+};
+use super::{Ctx, Module, Rendered, glyph_prefix, lead, seg};
 
 /// Which rate-limit window a limit module shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,11 +180,12 @@ impl Module for LimitModule {
         let Some(used) = w.used_percentage else { return Rendered::empty() };
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
-        let color = ctx.theme.band(rounded(used), &thresholds, &bands);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "window", "icon"));
-        }
+        // The band follows the number the row prints, which for `spend` may
+        // pass 100 (SPEC § 3.3). Clamping it there capped the band at the
+        // one holding 100, so a threshold above 100 could never be reached.
+        let shown = if self.0 == Window::Spend { rounded_unclamped(used) } else { rounded(used) };
+        let color = ctx.theme.band(shown, &thresholds, &bands);
+        let mut segs: Vec<Segment> = lead(cfg, "window");
         let bw = cfg.size("bar_width");
         if bw > 0 {
             segs.extend(bar(
@@ -202,9 +205,7 @@ impl Module for LimitModule {
             && let Some(at) = w.resets_at
             && let Some(reset) = reset_text(ctx, cfg, at, self.0.wall_clock())
         {
-            let g = cfg.icon("reset");
-            let glyph_txt = if g.is_empty() { String::new() } else { format!("{g} ") };
-            segs.push(seg(cfg, format!(" {glyph_txt}{reset}"), "reset"));
+            segs.push(seg(cfg, format!(" {}{reset}", glyph_prefix(cfg, "reset")), "reset"));
         }
         Rendered::fresh(segs)
     }
@@ -289,10 +290,7 @@ impl Module for CostModule {
         }
         let Some(cost) = ctx.payload.cost.as_ref() else { return Rendered::empty() };
         let usd = cost.total_cost_usd.unwrap_or(0.0);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "cost", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "cost");
         segs.push(Segment::styled(
             dollars(usd, cfg.size("decimals")),
             Style::fg(cfg.color("amount")).bolded(),
@@ -313,6 +311,7 @@ mod tests {
 
     use crate::ansi::strip_ansi;
     use crate::render::{Clock, render_plain_at};
+    use crate::theme::Role;
 
     /// The three limit modules on one unframed line from the `spend-limit`
     /// fixture, at an instant and in a zone.
@@ -378,5 +377,42 @@ mod tests {
         assert_eq!(render(hidden, at, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112%");
         let fixed = "[modules.limit7d]\nreset = \"both\"\ndurations = \"fixed\"\n";
         assert!(render(fixed, at, TimeZone::UTC).contains("⏱ 3d04h (Tue 20:00)"));
+    }
+
+    /// SPEC § 3.3: `spend` prints a percentage that may pass 100, so its
+    /// band follows that number too. It used to be clamped to 100 before
+    /// the band was chosen, so a threshold above 100 could never be reached
+    /// and the fixture's 112 % was coloured as the middle band.
+    #[test]
+    fn the_spend_band_follows_the_unclamped_percentage() {
+        let band = |thresholds: &str| {
+            let text = format!(
+                "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"spend\"]\n[modules.spend]\nthresholds = {thresholds}\nband_colors = [\"ok\", \"warn\", \"hot\", \"danger\"]\n"
+            );
+            let path =
+                format!("{}/tests/fixtures/payloads/spend-limit.json", env!("CARGO_MANIFEST_DIR"));
+            let payload =
+                crate::payload::Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let row = crate::render::render_lines_at(&payload, &config, Some(80), &Clock::fixed());
+            let percent = row
+                .first()
+                .and_then(|l| l.iter().find(|s| s.text().ends_with('%')))
+                .cloned()
+                .unwrap_or_default();
+            assert_eq!(percent.text(), "112%");
+            let theme = config.theme;
+            [Role::Ok, Role::Warn, Role::Hot, Role::Danger]
+                .into_iter()
+                .position(|r| theme.role(r) == percent.style.fg)
+                .unwrap_or(usize::MAX)
+        };
+        // 112 % is past every threshold of the default set.
+        assert_eq!(band("[50, 75, 90]"), 3);
+        // With thresholds above 100 it lands where the printed number says.
+        assert_eq!(band("[50, 100, 150]"), 2);
+        assert_eq!(band("[50, 111, 150]"), 2);
+        assert_eq!(band("[50, 113, 150]"), 1);
     }
 }

@@ -11,6 +11,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Nothing here writes to the repository: the annotations are workflow
+# commands on stdout, not API calls. Least privilege, as release.yml and
+# claude-review.yml already declare.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1

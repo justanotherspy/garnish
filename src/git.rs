@@ -121,7 +121,7 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
     if dirs.uses_reftable() {
         return None;
     }
-    let text = std::fs::read_to_string(dirs.git_dir.join("HEAD")).ok()?;
+    let text = read_ref_file(&dirs.git_dir, "HEAD")?;
     let line = text.lines().next()?.trim();
     if let Some(r) = line.strip_prefix("ref:") {
         let r = r.trim();
@@ -133,6 +133,71 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
 /// Symbolic refs deeper than this are treated as broken (git's own limit).
 const SYMREF_MAX_DEPTH: usize = 5;
 
+/// Whether a ref name may be joined onto the git directory.
+///
+/// A ref is read by opening `<git dir>/<name>`, so a name holding `..` walks
+/// out of the repository: a `.git/HEAD` saying `ref: ../../../secret` made
+/// `branch` render the first seven characters of that file as the short SHA
+/// of a checkout the user never created (an unpacked archive, a shared
+/// directory). Every `ref:` hop goes through here, so a chain cannot smuggle
+/// one in either. This is git's own `check-ref-format` rule, narrowed to
+/// what the join needs: no empty, `.` or `..` component, and nothing
+/// absolute.
+///
+/// A name rule alone is not enough, because the same archive can carry
+/// symlinks: [`read_ref_file`] is the path rule that goes with it.
+fn joinable_ref(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('/')
+        && !name.contains('\\')
+        && name.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// Read a ref file, but only when it really is inside the git directory.
+///
+/// [`joinable_ref`] keeps `..` out of the *name*; this keeps the *file* in,
+/// which is the property actually wanted. A tar archive may carry symlinks,
+/// so `.git/HEAD` or `refs/heads/main` can be a link to any file on disk, and
+/// a link on an intermediate directory (`.git/refs/heads` → `/etc`) needs no
+/// suspicious name at all. Resolving both sides and comparing catches every
+/// shape of that. Git has not written a symbolic ref as a symlink since
+/// `core.prefersymlinkrefs` was deprecated, so nothing legitimate is refused.
+/// A ref file holds one short line, so anything near this is not one. The
+/// cap is also what keeps a hostile `.git/HEAD` from becoming a branch name
+/// the size of the file: `head` takes the whole first line, and every render
+/// that cuts it (`branch.max_length`) works over its clusters.
+const MAX_REF_BYTES: u64 = 64 * 1024;
+
+/// `packed-refs` is a real file in a real repository and a large one in a
+/// big repository, so its bound is generous where a ref's is tight.
+const MAX_PACKED_REFS_BYTES: u64 = 16 * 1024 * 1024;
+
+fn read_ref_file(base: &Path, name: &str) -> Option<String> {
+    String::from_utf8(read_ref_bytes(base, name, MAX_REF_BYTES)?).ok()
+}
+
+/// [`read_ref_file`] as bytes, with the size cap the caller needs.
+fn read_ref_bytes(base: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
+    read_under(&base.canonicalize().ok()?, name, max)
+}
+
+/// [`read_ref_bytes`] given an already-resolved directory.
+///
+/// `resolve_ref` reads up to five hops across two directories, so resolving
+/// the *base* inside the read would repeat the same `realpath` up to ten
+/// times on a warm tick, where the old code did none. It is resolved once
+/// per directory and only the target is resolved per read.
+fn read_under(root: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let path = root.join(name).canonicalize().ok()?;
+    if !path.starts_with(root) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(&path).ok()?.take(max).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 /// Resolve a full ref name (`refs/heads/main`) to a commit id.
 ///
 /// Loose refs are tried first, then `packed-refs`. `None` for reftable
@@ -143,11 +208,23 @@ pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
     if dirs.uses_reftable() {
         return None;
     }
+    // Resolved once for the whole walk, not once per hop per directory.
+    let roots: Vec<PathBuf> = [&dirs.git_dir, &dirs.common_dir]
+        .into_iter()
+        .filter_map(|d| d.canonicalize().ok())
+        .collect();
     let mut name = refname.to_owned();
     for _ in 0..SYMREF_MAX_DEPTH {
+        if !joinable_ref(&name) {
+            return None;
+        }
         let mut next: Option<String> = None;
-        for base in [&dirs.git_dir, &dirs.common_dir] {
-            let Ok(text) = std::fs::read_to_string(base.join(&name)) else { continue };
+        for base in &roots {
+            let Some(text) =
+                read_under(base, &name, MAX_REF_BYTES).and_then(|b| String::from_utf8(b).ok())
+            else {
+                continue;
+            };
             let line = text.lines().next().unwrap_or("").trim();
             if let Some(r) = line.strip_prefix("ref:") {
                 next = Some(r.trim().to_owned());
@@ -168,8 +245,12 @@ pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
 /// Look a ref up in `packed-refs`, stopping at the first match. The file is
 /// scanned as bytes so a multi-megabyte packed-refs costs one read plus a
 /// linear scan with no per-line allocation.
+///
+/// It goes through [`read_ref_bytes`] like every other ref read: it is the
+/// fallback whenever a loose ref is absent, so a symlinked `packed-refs`
+/// would be the same way out of the repository as a symlinked `HEAD`.
 fn packed_ref(dirs: &Dirs, refname: &str) -> Option<String> {
-    let packed = std::fs::read(dirs.common_dir.join("packed-refs")).ok()?;
+    let packed = read_ref_bytes(&dirs.common_dir, "packed-refs", MAX_PACKED_REFS_BYTES)?;
     let want = refname.as_bytes();
     packed
         .split(|b| *b == b'\n')
@@ -195,7 +276,9 @@ pub fn head_commit(dirs: &Dirs) -> Option<String> {
 /// `("origin", "refs/remotes/origin/main")`.
 #[must_use]
 pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
-    let text = std::fs::read_to_string(dirs.common_dir.join("config")).ok()?;
+    // Through the same contained, bounded reader as every ref: `config` sits
+    // under the git directory and is as symlinkable as `HEAD` is.
+    let text = read_ref_file(&dirs.common_dir, "config")?;
     let mut in_section = false;
     let mut remote: Option<String> = None;
     let mut merge: Option<String> = None;
@@ -238,12 +321,78 @@ pub fn fetch_age(dirs: &Dirs, now_epoch_secs: i64) -> Option<u64> {
     Some(now.saturating_sub(secs))
 }
 
+/// Config keys that make git run a command, cleared on every call.
+///
+/// The repository's `.git/config` is not the user's file in a checkout they
+/// did not create, and `core.fsmonitor` is a command `git status` starts on
+/// its own. The user typing `git status` there would run it too, so this is
+/// not a new trust boundary; what is new is that garnish runs git on a
+/// *timer*, without anyone asking. `-c` on the command line beats the file.
+///
+/// Clearing it costs nothing: the monitor is a speed hint for large working
+/// trees and git falls back to walking them, which is what the 2 s timeout
+/// is for. Keys that only a network transport reaches (`core.sshCommand`,
+/// `core.gitProxy`, an `ext::` URL) are not cleared, because each is a
+/// setting a user may legitimately want honoured and only an opted-in
+/// `fetch_interval` reaches them; PLAN's backlog carries that decision.
+const NO_COMMAND_HOOKS: [&str; 2] = ["-c", "core.fsmonitor="];
+
 /// Run `git` with arguments in `cwd`, killing it after `timeout`.
 ///
 /// # Errors
 /// Returns the stderr text (or a timeout message) on failure.
 pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
-    run_program(Path::new("git"), cwd, args, timeout)
+    let args: Vec<&str> = NO_COMMAND_HOOKS.into_iter().chain(args.iter().copied()).collect();
+    run_program_wanting(Path::new("git"), cwd, &args, timeout, Stdout::Read)
+}
+
+/// [`run_git`] for a command whose stdout the caller throws away.
+///
+/// Only the exit status matters, so a stdout read that has to be abandoned
+/// is not a failure: `fetch` runs `--quiet` and is precisely the call whose
+/// pipes an ssh `ControlPersist` master holds open, so treating that as an
+/// error recorded a fetch that worked as one that did not.
+///
+/// # Errors
+/// Returns the stderr text (or a timeout message) on failure.
+fn run_git_quiet(cwd: &Path, args: &[&str], timeout: Duration) -> Result<(), String> {
+    let args: Vec<&str> = NO_COMMAND_HOOKS.into_iter().chain(args.iter().copied()).collect();
+    run_program_wanting(Path::new("git"), cwd, &args, timeout, Stdout::Discard).map(|_| ())
+}
+
+/// Whether the caller reads what the child wrote to stdout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stdout {
+    /// The output is the answer, so failing to read it is a failure.
+    Read,
+    /// Only the exit status matters.
+    Discard,
+}
+
+/// How long the pipes are still read after the child has exited and the
+/// timeout is already spent. The child's own ends close with it, so this
+/// bounds one case only: a descendant still holding them (see [`drain`]).
+const DRAIN_FLOOR: Duration = Duration::from_millis(250);
+
+/// Read a pipe to the end on its own thread, delivering the bytes once.
+///
+/// A channel rather than a join handle, so the caller can put a deadline on
+/// the read. Joining has none: the write end stays open while *any*
+/// descendant holds it, not only the child — ssh's `ControlPersist` master
+/// outlives the `git fetch` that started it — and the worker would then sit
+/// in `read_to_end` for ever with its lock held, whatever timeout was asked
+/// for. A thread left behind does not hold the process up; it is dropped
+/// when the worker exits.
+fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(mut pipe) = pipe {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = pipe.read_to_end(&mut buf);
+            let _ = tx.send(buf);
+        });
+    }
+    rx
 }
 
 /// [`run_git`] with an explicit program (tests use a fake git).
@@ -256,7 +405,17 @@ pub fn run_program(
     args: &[&str],
     timeout: Duration,
 ) -> Result<String, String> {
-    use std::io::Read as _;
+    run_program_wanting(program, cwd, args, timeout, Stdout::Read)
+}
+
+/// [`run_program`], told whether the caller will read the output.
+fn run_program_wanting(
+    program: &Path,
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+    want: Stdout,
+) -> Result<String, String> {
     use std::process::{Command, Stdio};
     let mut child = Command::new(program)
         .args(args)
@@ -271,20 +430,8 @@ pub fn run_program(
         .map_err(|e| format!("git: {e}"))?;
     // Drain both pipes on their own threads: a child that writes more than
     // the pipe buffer (64 KiB) before exiting would otherwise block forever.
-    let stdout = child.stdout.take().map(|mut p| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = p.read_to_end(&mut buf);
-            buf
-        })
-    });
-    let stderr = child.stderr.take().map(|mut p| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = p.read_to_end(&mut buf);
-            buf
-        })
-    });
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
     let start = std::time::Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -302,8 +449,23 @@ pub fn run_program(
             Err(e) => return Err(e.to_string()),
         }
     };
-    let out = stdout.and_then(|t| t.join().ok()).unwrap_or_default();
-    let err = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
+    // What is left of the budget, never below a floor: the child has exited,
+    // so its pipes are normally closed already and both arrive at once.
+    let left = || timeout.saturating_sub(start.elapsed()).max(DRAIN_FLOOR);
+    // A read that gave up is an error, never an empty answer, for a caller
+    // that reads it: `is_dirty` takes "no output" for "clean", so `Ok("")`
+    // here would put a fabricated value in the cache for a whole TTL
+    // instead of a `✗`. For a caller that discards it, nothing was lost.
+    let out = match (stdout.recv_timeout(left()), want) {
+        (Ok(out), _) => out,
+        (Err(_), Stdout::Discard) => Vec::new(),
+        (Err(_), Stdout::Read) => {
+            return Err(format!("git {} wrote no output before the timeout", args.join(" ")));
+        }
+    };
+    // stderr only decorates a failure, so a lost one costs the message, not
+    // the answer.
+    let err = stderr.recv_timeout(left()).unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err).trim().to_owned();
     if status.success() {
         Ok(String::from_utf8_lossy(&out).into_owned())
@@ -356,10 +518,31 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
 /// `git fetch --quiet <remote>`, killed after `timeout` (a hung network
 /// fetch must not pin the worker and its lock).
 ///
+/// The remote is the one named in the repository's own `.git/config`, which
+/// is not the user's file in a checkout they did not create. Two things
+/// follow from that, and the first is not the whole of it:
+///
+/// - a name starting with `-` would be read by git as an option rather than
+///   a remote, and `--upload-pack=<cmd>` runs `<cmd>`, so the name is
+///   refused and passed after `--`;
+/// - the same file can set `remote.<name>.uploadpack`, which needs no
+///   suspicious name at all. `--upload-pack` on the command line beats it.
+///   Overriding it loses nothing but a per-remote server path, which is rare
+///   where a hostile checkout getting a command run is not.
+///
+/// `core.sshCommand`, `core.gitProxy` and an `ext::` URL remain: each is a
+/// setting a user may legitimately want honoured, and `fetch_interval`
+/// defaults to 0, so nothing reaches them until the user opts in. PLAN's
+/// backlog carries that decision.
+///
 /// # Errors
-/// Propagates git failures.
+/// Propagates git failures; refuses a remote that is not a plain name.
 pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> {
-    run_git(cwd, &["fetch", "--quiet", remote], timeout).map(|_| ())
+    if remote.is_empty() || remote.starts_with('-') {
+        return Err(format!("refusing to fetch from remote {remote:?}"));
+    }
+    let args = ["fetch", "--quiet", "--upload-pack", "git-upload-pack", "--", remote];
+    run_git_quiet(cwd, &args, timeout)
 }
 
 /// `git --version`, for `doctor` (killed after two seconds like every other
@@ -377,10 +560,16 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
     use std::process::Command;
 
+    /// `git` in a temp repository, cut off from the developer's own config:
+    /// this project mandates signed commits, so the machines that run this
+    /// suite are the machines with `commit.gpgsign = true`, and a commit
+    /// here cannot reach a pinentry.
     fn git(dir: &Path, args: &[&str]) {
         let st = Command::new("git")
             .args(args)
             .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .env("GIT_AUTHOR_NAME", "t")
             .env("GIT_AUTHOR_EMAIL", "t@t")
             .env("GIT_COMMITTER_NAME", "t")
@@ -515,6 +704,182 @@ mod tests {
             assert_eq!(head(&dirs), None, "reftable HEAD is a placeholder, never `.invalid`");
             assert_eq!(resolve_ref(&dirs, "refs/heads/main"), None);
         }
+    }
+
+    /// A ref name is joined onto the git directory, so it must never walk
+    /// out of it. A checkout the user did not create (an unpacked archive,
+    /// a shared directory) could put `ref: ../../../secret` in `.git/HEAD`
+    /// and see the first seven characters of that file rendered as the
+    /// branch's short SHA.
+    #[test]
+    fn a_ref_name_can_never_walk_out_of_the_git_directory() {
+        for bad in [
+            "refs/heads/../../../secret",
+            "refs/heads/..",
+            "../../secret",
+            "/etc/hostname",
+            "refs//heads/main",
+            "refs/heads/./main",
+            "",
+        ] {
+            assert!(!joinable_ref(bad), "{bad:?} must be refused");
+        }
+        for good in ["refs/heads/main", "refs/remotes/origin/feature/x", "HEAD", "refs/tags/v1"] {
+            assert!(joinable_ref(good), "{good:?} must be allowed");
+        }
+
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        let secret = work.join("secret.txt");
+        std::fs::write(&secret, "SECRETVALUE\n").unwrap();
+        // `.git/refs/heads/../../../secret.txt` is `<work>/secret.txt`.
+        std::fs::write(work.join(".git/HEAD"), "ref: ../../../secret.txt\n").unwrap();
+        assert_eq!(head(&dirs), Some(Head::Branch("../../../secret.txt".into())));
+        assert_eq!(head_commit(&dirs), None, "the file must not be read");
+        // Nor through a symbolic-ref hop.
+        std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/hop\n").unwrap();
+        std::fs::write(work.join(".git/refs/heads/hop"), "ref: ../../../secret.txt\n").unwrap();
+        assert_eq!(head_commit(&dirs), None, "the file must not be read through a hop");
+    }
+
+    /// The name rule is not the whole of it: the same archive that carries a
+    /// hostile `.git` can carry symlinks, and a link needs no suspicious
+    /// name. Three shapes, all of which read a file outside the git
+    /// directory through `read_to_string`, which follows links.
+    #[test]
+    fn a_symlinked_ref_can_never_read_a_file_outside_the_git_directory() {
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        let secret = work.join("secret.txt");
+        std::fs::write(&secret, "SECRETVALUE\n").unwrap();
+        let link = |from: &Path, to: &Path| {
+            let _ = std::fs::remove_file(from);
+            std::os::unix::fs::symlink(to, from).unwrap();
+        };
+
+        // 1. HEAD itself is a link.
+        link(&work.join(".git/HEAD"), &secret);
+        assert_eq!(head(&dirs), None, "a linked HEAD must not be read");
+
+        // 2. HEAD is honest and the ref it names is a link.
+        std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        link(&work.join(".git/refs/heads/main"), &secret);
+        assert_eq!(head_commit(&dirs), None, "a linked ref must not be read");
+
+        // 3. Nothing on the path is suspicious and a *directory* is the link.
+        std::fs::remove_file(work.join(".git/refs/heads/main")).unwrap();
+        std::fs::remove_dir_all(work.join(".git/refs/heads")).unwrap();
+        link(&work.join(".git/refs/heads"), &work);
+        assert_eq!(resolve_ref(&dirs, "refs/heads/secret.txt"), None, "through a linked dir");
+
+        // 4. `packed-refs` is the fallback whenever a loose ref is absent,
+        //    so a link there is the same door.
+        let (_d2, work2) = repo();
+        let dirs2 = discover(&work2).unwrap();
+        let sha = head_commit(&dirs2).unwrap();
+        git(&work2, &["pack-refs", "--all"]);
+        assert_eq!(resolve_ref(&dirs2, "refs/heads/main"), Some(sha), "packed refs still resolve");
+        let elsewhere = work2.join("packed-elsewhere");
+        std::fs::write(&elsewhere, "deadbeef refs/heads/main\n").unwrap();
+        link(&work2.join(".git/packed-refs"), &elsewhere);
+        assert_eq!(resolve_ref(&dirs2, "refs/heads/main"), None, "a linked packed-refs is refused");
+    }
+
+    /// A ref file is one short line, so a huge one is not a ref. The cap is
+    /// what stops a hostile `.git/HEAD` becoming a branch name the size of
+    /// the file, which every render that cuts it then walks cluster by
+    /// cluster on the tick path.
+    #[test]
+    fn a_ref_file_is_bounded_so_a_huge_head_cannot_become_a_branch_name() {
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        let huge = "a".repeat(usize::try_from(MAX_REF_BYTES).unwrap_or(0) * 2);
+        std::fs::write(work.join(".git/HEAD"), format!("ref: refs/heads/{huge}\n")).unwrap();
+        let name = match head(&dirs) {
+            Some(Head::Branch(n)) => n,
+            other => panic!("expected a branch, got {other:?}"),
+        };
+        assert!(
+            u64::try_from(name.len()).is_ok_and(|n| n <= MAX_REF_BYTES),
+            "the name is {} bytes, past the cap",
+            name.len()
+        );
+    }
+
+    /// The remote comes from the repository's own `.git/config`, so a name
+    /// git would read as an option (`--upload-pack=<cmd>` runs `<cmd>`) is
+    /// refused before the process starts.
+    #[test]
+    fn fetch_refuses_a_remote_that_git_would_read_as_an_option() {
+        let (_d, work) = repo();
+        for bad in ["--upload-pack=touch /tmp/pwned", "-o", ""] {
+            let err = fetch(&work, bad, Duration::from_secs(2)).unwrap_err();
+            assert!(err.starts_with("refusing to fetch"), "{bad:?}: {err}");
+        }
+        // A plain name still reaches git (there is no such remote here, so
+        // git itself reports it — the point is that it ran).
+        let err = fetch(&work, "nope", Duration::from_secs(5)).unwrap_err();
+        assert!(!err.starts_with("refusing to fetch"), "{err}");
+    }
+
+    /// The timeout bounds the whole call, not only the wait: a child that
+    /// exits while a grandchild keeps the pipes open used to leave the
+    /// worker in `read_to_end` for ever with its lock held.
+    ///
+    /// Giving up on the read is an *error*, never an empty answer, and both
+    /// halves need asserting: the first version of this test ran a fake git
+    /// that printed nothing and checked only `is_ok()` and the clock, so it
+    /// passed just as happily while `run_program` swallowed real output and
+    /// returned `Ok("")`, which `is_dirty` reads as a clean tree.
+    #[test]
+    fn a_grandchild_holding_the_pipes_cannot_outlast_the_timeout() {
+        let (tmp, work) = repo();
+        let write = |name: &str, body: &str| {
+            let p = tmp.path().join(name);
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        // The grandchild inherits the pipes and outlives the child, so the
+        // write end never closes and the read has to be abandoned.
+        let leaky = write("git-leaky", "#!/bin/sh\nsleep 30 &\nprintf 'M file\\n'\nexit 0\n");
+        let started = std::time::Instant::now();
+        let out = run_program(&leaky, &work, &["status"], Duration::from_millis(500));
+        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+        let err = out.expect_err("a drained-out read must not pass as an empty answer");
+        assert!(err.contains("wrote no output before the timeout"), "{err}");
+
+        // The same output without the grandchild arrives in full: the
+        // deadline is on the pipes, not on every call.
+        let clean = write("git-clean", "#!/bin/sh\nprintf 'M file\\n'\nexit 0\n");
+        let out = run_program(&clean, &work, &["status"], Duration::from_millis(500));
+        assert_eq!(out.as_deref(), Ok("M file\n"));
+
+        // A caller that discards stdout loses nothing when the read is
+        // abandoned, so the same grandchild must not turn a command that
+        // *worked* into a failure. `fetch` is that caller, runs `--quiet`,
+        // and is the very call an ssh `ControlPersist` master outlives.
+        let started = std::time::Instant::now();
+        let out = run_program_wanting(
+            &leaky,
+            &work,
+            &["fetch"],
+            Duration::from_millis(500),
+            Stdout::Discard,
+        );
+        assert_eq!(out.as_deref(), Ok(""), "a discarded read is not a failure");
+        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+        // It still fails when the command itself does, in git's own words
+        // (nothing holds the pipes here, so the stderr does arrive).
+        let bad = write("git-bad", "#!/bin/sh\necho boom >&2\nexit 1\n");
+        let out = run_program_wanting(
+            &bad,
+            &work,
+            &["fetch"],
+            Duration::from_millis(500),
+            Stdout::Discard,
+        );
+        assert_eq!(out.as_deref().map_err(String::as_str), Err("boom"));
     }
 
     #[test]

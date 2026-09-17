@@ -20,10 +20,20 @@ const fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_garnish")
 }
 
+/// `git` in a temp repository, cut off from the developer's own git config.
+///
+/// `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` point at `/dev/null` because this
+/// project mandates signed commits (CLAUDE.md § Session protocol), so the
+/// machines that run this suite are exactly the machines with
+/// `commit.gpgsign = true` — and a `git commit` here cannot reach a pinentry
+/// from a test process. `core.hooksPath` and `commit.template` would bite
+/// the same way.
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@t")
         .env("GIT_COMMITTER_NAME", "t")
@@ -75,12 +85,17 @@ fn push_from_a_second_clone(env: &Env, name: &str) -> PathBuf {
     other
 }
 
-fn sync_entry(env: &Env) -> String {
+fn sync_entry_path(env: &Env) -> PathBuf {
     std::fs::read_dir(env.cache.join("repos"))
         .unwrap()
         .flatten()
-        .find_map(|d| std::fs::read_to_string(d.path().join("sync.cache")).ok())
+        .map(|d| d.path().join("sync.cache"))
+        .find(|p| p.is_file())
         .expect("sync.cache written")
+}
+
+fn sync_entry(env: &Env) -> String {
+    std::fs::read_to_string(sync_entry_path(env)).expect("sync.cache readable")
 }
 
 fn payload(work: &Path) -> String {
@@ -90,12 +105,12 @@ fn payload(work: &Path) -> String {
     )
 }
 
-fn garnish(
-    env: &Env,
-    args: &[&str],
-    stdin: Option<&str>,
-    extra_env: &[(&str, &str)],
-) -> (String, String, bool) {
+/// The binary in the hermetic environment every test here needs (CLAUDE.md
+/// § Cache and worker invariants): its own cache root, a frozen clock, no
+/// spawning, no managed settings file, and a `HOME` that is not the
+/// developer's. The one builder, so a test that needs one thing different
+/// overrides only that (a hand-rolled `Command` used to drop three of these).
+fn cmd(env: &Env, args: &[&str]) -> Command {
     let mut cmd = Command::new(bin());
     cmd.args(args)
         .env("GARNISH_CACHE_DIR", &env.cache)
@@ -108,6 +123,16 @@ fn garnish(
         .env("GARNISH_MANAGED_SETTINGS", "")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    cmd
+}
+
+fn garnish(
+    env: &Env,
+    args: &[&str],
+    stdin: Option<&str>,
+    extra_env: &[(&str, &str)],
+) -> (String, String, bool) {
+    let mut cmd = cmd(env, args);
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
@@ -267,17 +292,47 @@ fn cache_live_lock_suppresses_spawn_and_dead_lock_is_reclaimed() {
         garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
     assert!(ok, "{err}");
     // Entries are past their TTL, but a live lock (this test's pid, stamped
-    // now) says a worker is already on it: the tick must not spawn.
-    let later = (NOW.parse::<u64>().unwrap() + 60).to_string();
-    let now_ms =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-    write_locks(&env, &format!("{} {now_ms}", std::process::id()));
+    // now) says a worker is already on it: the tick must not spawn. The
+    // stamp is in the tick's own frozen timeline — `GARNISH_NOW` moves
+    // `now_millis`, so a wall-clock stamp would read as a lock from the
+    // future, which is a clock that stepped backwards, not a live worker.
+    let later_secs = NOW.parse::<i64>().unwrap() + 60;
+    let later = later_secs.to_string();
+    write_locks(&env, &format!("{} {}", std::process::id(), later_secs * 1000));
     garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
     assert_eq!(spawns(&env).len(), 0, "{:?}", spawns(&env));
     // Locks stale by age are reclaimed: the tick spawns again.
     write_locks(&env, "4000000000 1");
     garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", later.as_str())]);
     assert_eq!(spawns(&env).len(), 2, "{:?}", spawns(&env));
+}
+
+/// A lock and an entry stamped in the future are a clock that stepped back
+/// (a resumed VM, NTP correcting a bad RTC), not a live worker and not a
+/// fresh value. Treating a negative age as "very recent" froze the module:
+/// every tick saw a live lock and a fresh entry, so nothing refreshed and
+/// no `⟳` ever appeared, until the wall clock caught up.
+#[test]
+fn cache_a_future_stamp_is_never_live_nor_fresh() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, err, ok) =
+        garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
+    assert!(ok, "{err}");
+    // An hour ahead of the tick's clock, in both the lock and the entries.
+    let ahead_secs = NOW.parse::<i64>().unwrap() + 3_600;
+    write_locks(&env, &format!("{} {}", std::process::id(), ahead_secs * 1000));
+    for d in std::fs::read_dir(env.cache.join("repos")).unwrap().flatten() {
+        for module in ["branch", "sync"] {
+            let path = d.path().join(format!("{module}.cache"));
+            let text = std::fs::read_to_string(&path).unwrap();
+            let rest = text.split_once('\n').map(|(_, r)| r.to_owned()).unwrap_or_default();
+            std::fs::write(&path, format!("v1 {} 5000 ok\n{rest}", ahead_secs * 1000)).unwrap();
+        }
+    }
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", NOW)]);
+    assert_eq!(spawns(&env).len(), 2, "a future lock must not suppress the refresh: {out}");
 }
 
 /// Overwrite every module lock in the repo cache with `text`.
@@ -297,17 +352,8 @@ fn spawn_thirty_two_concurrent_ticks_produce_one_worker_per_module() {
     let p = payload(&env.work);
     let children: Vec<_> = (0..32)
         .map(|_| {
-            let mut child = Command::new(bin())
-                .env("GARNISH_CACHE_DIR", &env.cache)
-                .env("GARNISH_NOW", NOW)
-                .env("GARNISH_NO_SPAWN", "1")
-                .env("GARNISH_CONFIG", env.work.join("garnish.toml"))
-                .env("COLUMNS", "120")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap();
+            let mut child =
+                cmd(&env, &[]).stdin(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
             child.stdin.take().unwrap().write_all(p.as_bytes()).unwrap();
             child
         })
@@ -343,11 +389,15 @@ fn worker_slow_git_never_blocks_a_tick_and_records_failure() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
 
-    // Ticks never touch git: fast even with a hanging git on PATH.
+    // Ticks never touch git: fast even with a hanging git on PATH. The
+    // bound is far above the 3 ms budget of SPEC § 8 on purpose — this
+    // proves the tick does not *wait* for the 30 s git, and a debug binary
+    // starting on a loaded shared runner is not a budget measurement
+    // (`bench/run.sh` is). A tighter bound flaked here.
     let started = Instant::now();
     let (out, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[("PATH", path.as_str())]);
     assert!(ok && out.contains("main"), "{out}");
-    assert!(started.elapsed() < Duration::from_secs(2), "tick took {:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_secs(10), "tick took {:?}", started.elapsed());
 
     // The worker gives up after its 2 s timeout and records an err entry…
     let w = env.work.to_str().unwrap().to_owned();
@@ -359,7 +409,8 @@ fn worker_slow_git_never_blocks_a_tick_and_records_failure() {
         &[("PATH", path.as_str())],
     );
     assert!(ok, "{err}");
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // Well under git's 30 s sleep: the worker's own 2 s timeout fired.
+    assert!(started.elapsed() < Duration::from_secs(20), "worker took {:?}", started.elapsed());
     let entry = std::fs::read_dir(env.cache.join("repos")).unwrap().flatten().find_map(|d| {
         let p = d.path().join("sync.cache");
         std::fs::read_to_string(p).ok()
@@ -446,6 +497,25 @@ fn worker_fetch_interval_fetches_once_per_interval() {
     let entry = sync_entry(&env);
     assert!(entry.contains(&format!("fetch_attempt={later}")), "{entry}");
     assert!(entry.contains("behind=2"), "{entry}");
+
+    // A stamp *ahead* of the clock is a clock that stepped backwards (a
+    // resumed VM, NTP correcting a bad RTC), not an attempt from the future.
+    // Its age is negative, so a plain `age >= interval` never came true and
+    // auto-fetch stayed frozen, silently, until the wall clock caught up.
+    // Here the entry is stamped an hour ahead and the next refresh must
+    // still fetch, which the third push proves.
+    push_from_a_second_clone(&env, "third");
+    let ahead_stamp = (wall + 4000).to_string();
+    let path = sync_entry_path(&env);
+    let poisoned = sync_entry(&env)
+        .replace(&format!("fetch_attempt={later}"), &format!("fetch_attempt={ahead_stamp}"));
+    assert!(poisoned.contains(&format!("fetch_attempt={ahead_stamp}")), "{poisoned}");
+    std::fs::write(&path, &poisoned).unwrap();
+    let (_, err, ok) = garnish(&env, refresh, None, &[("GARNISH_NOW", later.as_str())]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains(&format!("fetch_attempt={later}")), "the future stamp stays: {entry}");
+    assert!(entry.contains("behind=3"), "the fetch must not be frozen: {entry}");
 }
 
 /// The first executable `git` on `PATH`.
@@ -481,17 +551,10 @@ fn spawn_worker_outlives_the_ticks_process_group() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
 
-    let mut child = Command::new(bin())
-        .env("GARNISH_CACHE_DIR", &env.cache)
-        .env("GARNISH_NOW", NOW)
-        .env("GARNISH_CONFIG", env.work.join("garnish.toml"))
-        .env("COLUMNS", "120")
-        .env("NO_COLOR", "1")
+    let mut child = cmd(&env, &[])
         .env("PATH", &path)
         .env_remove("GARNISH_NO_SPAWN")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .process_group(0)
         .spawn()
         .unwrap();
@@ -646,4 +709,101 @@ fn worker_fetch_failure_keeps_counts_and_is_not_retried_within_the_interval() {
     );
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert!(out.contains("⇡1"), "{out}");
+}
+
+/// SPEC § 9: the repo modules against a real repository, at every preset and
+/// icon set.
+///
+/// Every pinned render in the suite runs with `Clock::fixed()`, whose
+/// `git: false` makes `Ctx::git_dirs()` `None`, and every payload fixture's
+/// `cwd` is a path that does not exist — so `sync` returned nothing and
+/// `branch` lost its sha and dirty halves in every golden and in the
+/// schema matrix. This is the one place they render with git on.
+///
+/// Serial (`worker_`): a shared cache root and a temp repository.
+#[test]
+fn worker_repo_modules_render_in_every_preset_and_icon_set() {
+    let env = setup();
+    let w = env.work.to_str().unwrap().to_owned();
+    // A *tracked* file, changed: `git status --untracked-files=no` ignores
+    // the `garnish.toml` each `config()` call drops in, so without this the
+    // tree is clean, `dirty=0` goes into the cache and the `full` preset's
+    // dirty badge never renders in the whole suite.
+    std::fs::write(env.work.join("a.txt"), "changed\n").unwrap();
+    let (_, err, ok) =
+        garnish(&env, &["refresh", "--all", "--session", "sess-worker", "--cwd", &w], None, &[]);
+    assert!(ok, "{err}");
+    let p = payload(&env.work);
+    for preset in ["minimal", "default", "full"] {
+        for icons in ["nerd", "unicode", "emoji", "ascii"] {
+            let label = format!("{preset}/{icons}");
+            config(
+                &env,
+                &format!(
+                    "icons = \"{icons}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"path\", \"branch\", \"sync\"]\n[modules.path]\npreset = \"{preset}\"\n[modules.branch]\npreset = \"{preset}\"\n[modules.sync]\npreset = \"{preset}\"\n"
+                ),
+            );
+            let (out, _, ok) = garnish(&env, &[], Some(&p), &[]);
+            assert!(ok, "{label}: {out}");
+            let row = out.lines().next().unwrap_or_default();
+            // The repo really is read: the branch, and the commit `setup`
+            // left unpushed as one ahead — with the set's own glyph, so a
+            // module that rendered nothing cannot satisfy this.
+            assert!(row.contains("main"), "{label}: no branch in {row:?}");
+            let set = garnish::icons::IconSet::parse(icons).unwrap();
+            let schema_glyph = |id: &str, key: &str| {
+                garnish::modules::entry(id).unwrap().schema.icon(key).unwrap().glyph.get(set)
+            };
+            let glyph = schema_glyph("sync", "ahead");
+            assert!(row.contains(&format!("{glyph}1")), "{label}: no {glyph:?}1 in {row:?}");
+            // The dirty marker is the one badge whose only render is here.
+            if preset == "full" {
+                let dirty = schema_glyph("branch", "dirty");
+                assert!(row.contains(dirty), "{label}: no dirty {dirty:?} in {row:?}");
+            }
+            assert!(
+                unicode_width::UnicodeWidthStr::width(row) <= 116,
+                "{label}: {row:?} is wider than the box"
+            );
+            if icons == "ascii" {
+                assert!(row.is_ascii(), "{label}: the ascii set emitted {row:?}");
+            }
+        }
+    }
+    // `branch.link` needs a branch: SPEC § 3.1 gives a detached HEAD no page,
+    // and the unit level cannot reach one (it has no repository on disk).
+    config(
+        &env,
+        "color = \"always\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nlink = true\n",
+    );
+    let repo = r#""repo":{"host":"github.com","owner":"o","name":"r"}"#;
+    let linked =
+        payload(&env.work).replace(r#""added_dirs":[]"#, &format!(r#""added_dirs":[],{repo}"#));
+    let no_color = [("NO_COLOR", "")];
+    let (out, _, ok) = garnish(&env, &[], Some(&linked), &no_color);
+    assert!(ok && out.contains("\x1b]8;;https://github.com/o/r/tree/main"), "{out:?}");
+    let head = env.work.join(".git").join("HEAD");
+    let sha = std::fs::read_to_string(env.work.join(".git/refs/heads/main")).unwrap();
+    std::fs::write(&head, &sha).unwrap();
+    let (out, _, ok) = garnish(&env, &[], Some(&linked), &no_color);
+    assert!(ok && !out.contains("\x1b]8;;"), "a detached HEAD has no page: {out:?}");
+    std::fs::write(&head, "ref: refs/heads/main\n").unwrap();
+
+    // `max_length` cuts the branch name with the icon set's own mark, which
+    // no other test reaches: the matrix never sets it (it is an integer, and
+    // only booleans and enums are swept) and every golden runs without git.
+    for (icons, mark) in [("unicode", "…"), ("ascii", "..")] {
+        config(
+            &env,
+            &format!(
+                "icons = \"{icons}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"branch\"]\n[modules.branch]\nshow_icon = false\nmax_length = 3\n"
+            ),
+        );
+        let (out, _, ok) = garnish(&env, &[], Some(&p), &[]);
+        let row = out.lines().next().unwrap_or_default().trim_end();
+        assert!(ok && row.ends_with(mark), "{icons}: {row:?} does not end in {mark:?}");
+        if icons == "ascii" {
+            assert!(row.is_ascii(), "the ascii set emitted {row:?}");
+        }
+    }
 }

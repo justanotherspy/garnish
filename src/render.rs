@@ -89,8 +89,7 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
         format!("{glyph} config: {origin}{message}{suffix}"),
         Style::fg(config.theme.role(Role::Warn)).dimmed(),
     )];
-    let ellipsis = if config.icons == IconSet::Ascii { ".." } else { "…" };
-    crate::ansi::truncate(&line, width, ellipsis)
+    crate::ansi::truncate(&line, width, config.icons.ellipsis())
 }
 
 /// The environment-dependent inputs of a render, so docs and tests can pin them.
@@ -120,6 +119,13 @@ pub struct Clock {
     /// run, `None` for a pinned one (and for tests that must not see the
     /// machine's).
     pub managed: Option<std::path::PathBuf>,
+    /// The cache root, or `None` to take it from the environment.
+    ///
+    /// The last thing a render read from the process environment on its own.
+    /// A caller that must not touch the machine's cache (`benches/tick.rs`,
+    /// which otherwise read and wrote the developer's real one and forked a
+    /// worker per miss) names its own here.
+    pub cache: Option<std::path::PathBuf>,
 }
 
 impl Clock {
@@ -136,6 +142,7 @@ impl Clock {
             animate: crate::time::animate_from_env(),
             settings: true,
             managed: crate::claude_settings::managed_settings_path(),
+            cache: None,
         }
     }
 
@@ -154,6 +161,7 @@ impl Clock {
             animate: false,
             settings: false,
             managed: None,
+            cache: None,
         }
     }
 
@@ -190,7 +198,8 @@ pub fn render_lines_at(
     clock: &Clock,
 ) -> Vec<Vec<Segment>> {
     let width = config.width(columns);
-    let cache = crate::cache::Cache::from_env();
+    let cache =
+        clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
     let mut ctx = Ctx {
         payload,
         theme: &config.theme,
@@ -217,13 +226,13 @@ pub fn render_lines_at(
         && config
             .animate
             .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
-    let stale = stale_glyphs(config.icons);
+    let stale = config.icons.stale_glyphs();
     let layout = Layout {
         chars: config.frame.chars.clone(),
         fill: config.frame.fill,
         width,
         truncate: config.truncate,
-        ellipsis: ellipsis_for(config.icons).into(),
+        ellipsis: config.icons.ellipsis().into(),
         // The effective animation switch is decided once, on `ctx`; with it
         // off there is no ticker and an over-wide line is cut (SPEC § 4.2).
         ticker: (config.overflow == config::Overflow::Ticker && ctx.animate).then(|| Ticker {
@@ -430,7 +439,7 @@ fn render_group(
             let view = cfg.animated(|n| ctx.frame(1.0, n));
             let rendered = entry.module.render(ctx, &view);
             let rendered = match (config.stale_style, &rendered.freshness) {
-                (StaleStyle::Hide, Freshness::Stale | Freshness::Failed(_)) => Rendered::empty(),
+                (StaleStyle::Hide, Freshness::Stale | Freshness::Failed) => Rendered::empty(),
                 (StaleStyle::Plain, _) => Rendered::fresh(rendered.segments),
                 _ => rendered,
             };
@@ -453,22 +462,6 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
         module
     } else {
         crate::ansi::truncate(&module, max, ellipsis)
-    }
-}
-
-/// The mark a cut ends in: `…`, or `..` where the icon set is ASCII only.
-/// One rule, so the schema matrix cannot drift from what a tick draws.
-const fn ellipsis_for(icons: IconSet) -> &'static str {
-    match icons {
-        IconSet::Ascii => "..",
-        IconSet::Nerd | IconSet::Unicode | IconSet::Emoji => "…",
-    }
-}
-
-const fn stale_glyphs(icons: IconSet) -> (&'static str, &'static str) {
-    match icons {
-        IconSet::Ascii => ("~", "x"),
-        IconSet::Nerd | IconSet::Unicode | IconSet::Emoji => ("⟳", "✗"),
     }
 }
 
@@ -1348,7 +1341,7 @@ mod tests {
             let shown = matrix_config(id, preset, icons, max, false, extra);
             let uncapped = matrix_config(id, preset, icons, 0, true, extra);
             // The ellipsis a cut ends in: `…`, or as much of `..` as fits.
-            let cut_mark: String = ellipsis_for(icons).chars().take(max.max(1)).collect();
+            let cut_mark: String = icons.ellipsis().chars().take(max.max(1)).collect();
             let clock = Clock::fixed();
             for (name, payload) in payloads {
                 let label = format!(

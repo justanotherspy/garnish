@@ -38,6 +38,28 @@ impl IconSet {
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|set| set.name() == s)
     }
+
+    /// The mark a cut ends in: `…`, or `..` where the set is ASCII only.
+    ///
+    /// One rule for every cut garnish makes — the line, a module's
+    /// `max_width`, a text box, a name's `max_length` — so an ASCII-only
+    /// status line never grows a non-ASCII glyph.
+    #[must_use]
+    pub const fn ellipsis(self) -> &'static str {
+        match self {
+            Self::Ascii => "..",
+            Self::Nerd | Self::Unicode | Self::Emoji => "…",
+        }
+    }
+
+    /// The glyphs an overdue and a failed value are marked with (SPEC § 3.6).
+    #[must_use]
+    pub const fn stale_glyphs(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Ascii => ("~", "x"),
+            Self::Nerd | Self::Unicode | Self::Emoji => ("⟳", "✗"),
+        }
+    }
 }
 
 /// One glyph with a value per icon set.
@@ -93,6 +115,23 @@ mod tests {
             assert_eq!(IconSet::parse(set.name()), Some(set));
         }
         assert_eq!(IconSet::parse("comic"), None);
+    }
+
+    /// Every cut and every stale mark stays inside the set it was asked for:
+    /// the ascii set is 7-bit, the others are not.
+    #[test]
+    fn ascii_set_marks_are_ascii_and_the_others_are_not() {
+        for set in IconSet::ALL {
+            let (overdue, failed) = set.stale_glyphs();
+            let marks = [set.ellipsis(), overdue, failed];
+            assert_eq!(
+                set == IconSet::Ascii,
+                marks.iter().all(|m| m.is_ascii()),
+                "{}: {marks:?}",
+                set.name()
+            );
+            assert!(marks.iter().all(|m| !m.is_empty()));
+        }
     }
 
     #[test]

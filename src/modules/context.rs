@@ -7,7 +7,7 @@ use crate::icons::glyph;
 use crate::num::percent_of;
 
 use super::util::{BAR_STYLES, bar, percent, rounded, tokens};
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
 /// percentage means.
@@ -85,10 +85,7 @@ impl Module for ContextModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let window = ctx.payload.context_window_size();
         let used = ctx.payload.context_window.as_ref().and_then(|c| c.used_percentage);
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "context", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "context");
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
         // SPEC § 3.2 `scale = "usable"`: 100 % is the compaction point, so
@@ -98,12 +95,12 @@ impl Module for ContextModule {
         //
         // The threshold is read from the settings chain, which a tick touches
         // only when something needs it (CLAUDE.md § Cache and worker
-        // invariants): with the marker off and the window scale, nothing
-        // does, so it is not read at all.
+        // invariants): with the marker, its percentage and the usable scale
+        // all off, nothing does, so it is not read at all.
         let usable_scale = cfg.str("scale") == "usable";
-        let threshold = (usable_scale || cfg.bool("compaction_marker"))
-            .then(|| threshold_percent(ctx, cfg, window))
-            .flatten();
+        let wants_threshold =
+            usable_scale || cfg.bool("compaction_marker") || cfg.bool("show_compaction_percent");
+        let threshold = wants_threshold.then(|| threshold_percent(ctx, cfg, window)).flatten();
         let usable =
             usable_scale.then_some(threshold).flatten().filter(|t| *t >= MIN_USABLE_PERCENT);
         let pct = used
@@ -131,8 +128,12 @@ impl Module for ContextModule {
             let sp = if segs.is_empty() { "" } else { " " };
             segs.push(Segment::styled(format!("{sp}{text}"), Style::fg(fill_color).bolded()));
         }
+        // The label follows the threshold, not the marker: the two are
+        // separate switches, and only the `usable` scale hides both (the
+        // percentage would read a constant 100 %).
         if cfg.bool("show_compaction_percent")
-            && let Some(m) = marker
+            && usable.is_none()
+            && let Some(m) = threshold
         {
             segs.push(seg(cfg, format!(" {}{}", cfg.icon("compact"), percent(m)), "marker"));
         }
@@ -140,11 +141,11 @@ impl Module for ContextModule {
             segs.push(seg(cfg, format!(" {}", tokens(window)), "window"));
         }
         if cfg.bool("exceeds_200k") && ctx.payload.exceeds_200k_tokens == Some(true) {
-            segs.push(seg(cfg, format!(" {}", cfg.icon("exceeds")), "exceeds"));
+            segs.extend(badge(cfg, "exceeds", "exceeds"));
         }
         let warn_at = cfg.float("warn_at");
-        if warn_at > 0.0 && pct.is_some_and(|p| p >= warn_at) && !cfg.icon("warn").is_empty() {
-            segs.push(seg(cfg, format!(" {}", cfg.icon("warn")), "warn"));
+        if warn_at > 0.0 && pct.is_some_and(|p| p >= warn_at) {
+            segs.extend(badge(cfg, "warn", "warn"));
         }
         Rendered::fresh(segs)
     }
@@ -316,5 +317,27 @@ mod tests {
         let warn = "scale = \"usable\"\nwarn_at = 90\n";
         assert_eq!(render(89.0, warn, env.clone()), "⊞ █████████░ 90% ⚠");
         assert_eq!(render(88.0, warn, env), "⊞ ████████▉░ 89%");
+    }
+
+    /// SPEC § 3.2: `compaction_marker` draws the marker and
+    /// `show_compaction_percent` prints the label; they are separate
+    /// switches, so the label works with the marker off (it used to be
+    /// gated on the marker and produce nothing). Only `usable` hides both,
+    /// where the label would read a constant 100 %.
+    #[test]
+    fn the_compaction_label_and_the_marker_are_separate_switches() {
+        let env = crate::claude_settings::Env::default();
+        let label = "show_compaction_percent = true\n";
+        assert_eq!(render(50.0, label, env.clone()), "⊞ █████░░░░▏ 50% ⤓99%");
+        assert_eq!(
+            render(50.0, &format!("{label}compaction_marker = false\n"), env.clone()),
+            "⊞ █████░░░░░ 50% ⤓99%"
+        );
+        assert_eq!(render(50.0, "compaction_marker = false\n", env.clone()), "⊞ █████░░░░░ 50%");
+        // `usable` hides both; compaction disabled leaves nothing to print.
+        assert_eq!(render(50.0, &format!("{label}scale = \"usable\"\n"), env), "⊞ █████░░░░░ 51%");
+        let disabled =
+            crate::claude_settings::Env { disable: Some("1".into()), ..Default::default() };
+        assert_eq!(render(50.0, label, disabled), "⊞ █████░░░░░ 50%");
     }
 }

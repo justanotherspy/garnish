@@ -9,7 +9,7 @@ use crate::icons::glyph;
 use crate::num::percent_of;
 
 use super::util::{percent, tokens};
-use super::{Ctx, Module, Rendered, icon, seg};
+use super::{Ctx, Module, Rendered, badge, glyph_prefix, lead, seg};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -52,10 +52,7 @@ impl Module for SessionModule {
             return Rendered::empty();
         };
         let elapsed = ms / 1000;
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "session", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "session");
         segs.push(seg(cfg, ctx.duration(cfg, elapsed), "value"));
         if cfg.bool("show_start")
             && let Ok(started) = ctx
@@ -108,10 +105,7 @@ impl Module for ApiModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let Some(cost) = ctx.payload.cost.as_ref() else { return Rendered::empty() };
         let Some(api_ms) = cost.total_api_duration_ms else { return Rendered::empty() };
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "api", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "api");
         segs.push(seg(cfg, ctx.duration(cfg, api_ms / 1000), "value"));
         if cfg.bool("show_share")
             && let Some(total) = cost.total_duration_ms.filter(|t| *t > 0)
@@ -185,10 +179,7 @@ impl Module for CacheModule {
     }
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
-        let mut segs: Vec<Segment> = Vec::new();
-        if cfg.bool("show_icon") {
-            segs.extend(icon(cfg, "cache", "icon"));
-        }
+        let mut segs: Vec<Segment> = lead(cfg, "cache");
         let pc = ctx.payload.prompt_cache.as_ref();
         let ratio = pc.and_then(|p| p.hit_ratio).or_else(|| {
             let u = ctx.payload.context_window.as_ref()?.current_usage.as_ref()?;
@@ -211,11 +202,11 @@ impl Module for CacheModule {
             let cd = pc.expires_at.and_then(|t| ctx.countdown(cfg, t));
             match (warm, cd) {
                 (true, Some(cd)) => {
-                    segs.push(seg(cfg, format!(" {} {cd}", cfg.icon("warm")), "warm"));
+                    segs.push(seg(cfg, format!(" {}{cd}", glyph_prefix(cfg, "warm")), "warm"));
                 }
-                (true, None) => segs.push(seg(cfg, format!(" {}", cfg.icon("warm")), "warm")),
+                (true, None) => segs.extend(badge(cfg, "warm", "warm")),
                 (false, _) if pc.caching_observed == Some(true) => {
-                    segs.push(seg(cfg, format!(" {}", cfg.icon("cold")), "cold"));
+                    segs.extend(badge(cfg, "cold", "cold"));
                 }
                 _ => {}
             }
@@ -298,7 +289,13 @@ impl Module for ClockModule {
                     segs.push(seg(cfg, format!("{f} "), "spinner"));
                 }
             } else {
-                segs.push(seg(cfg, format!("{} ", cfg.icon("spinner")), "spinner"));
+                // `glyph_prefix` is the whole of it: an animated spinner
+                // blanked to `["", ""]` must leave no cell either, which
+                // the static branch above has always got right.
+                let frame = glyph_prefix(cfg, "spinner");
+                if !frame.is_empty() {
+                    segs.push(seg(cfg, frame, "spinner"));
+                }
             }
         }
         let fmt = match (cfg.str("format") == "12h", cfg.bool("seconds")) {

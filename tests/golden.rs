@@ -102,4 +102,22 @@ fn golden_renders_match() {
         })
         .collect();
     assert!(failures.is_empty(), "{} golden mismatches:\n{}", failures.len(), failures.join("\n"));
+
+    // A golden whose fixture was deleted or renamed would keep passing for
+    // ever, and `UPDATE_GOLDEN=1` never removes one (the config suite has
+    // the same guard). Sixteen files per fixture, so one rename leaves
+    // sixteen behind.
+    let expected: std::collections::BTreeSet<String> = combos
+        .iter()
+        .map(|(f, preset, icons)| {
+            format!("{}--{preset}--{icons}.txt", f.file_stem().unwrap().to_str().unwrap())
+        })
+        .collect();
+    let orphans: Vec<String> = std::fs::read_dir(&golden_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.starts_with("config--") && !expected.contains(n))
+        .collect();
+    assert!(orphans.is_empty(), "goldens without a fixture (delete them): {orphans:?}");
 }

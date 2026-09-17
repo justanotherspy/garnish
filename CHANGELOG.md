@@ -5,6 +5,70 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Audit through Phase 20** — the code read against its documents
+
+Fixed, each with a test:
+
+- A checkout you did not create (an unpacked archive, a shared directory)
+  could make garnish read files outside it or run commands. A `.git/HEAD`
+  naming a ref outside the repository (`ref: ../../../x`), or a symlinked
+  `HEAD`, ref or `refs/heads` directory, made `branch` show the first
+  seven characters of any file as its short SHA: every ref file garnish
+  opens (`HEAD`, a loose ref, `packed-refs`, `config`) must now resolve to
+  a path inside the git directory, and is read with a size cap. And
+  `.git/config` could
+  run a command three ways: a remote name starting with `-` (git reads it
+  as an option), `core.fsmonitor` (`git status` runs it) and
+  `remote.<name>.uploadpack` (a fetch runs it). The name is refused and
+  the other two are overridden on every call.
+- A module whose last background refresh *failed* lost its `✗` mark when
+  it had no value of its own, so `sync` with a broken git looked like an
+  empty row instead of a failure. A `git status` whose output could not be read
+  before the timeout also reported a *clean* tree rather than a failure,
+  so the dirty marker went missing with nothing to show why.
+- `pr` underlined its number whenever `link = true`, even when the payload
+  carried no URL to link to, so it looked clickable and was not.
+- `sync` printed `refs/heads/main` as the upstream of a branch tracking a
+  local branch, where every other case reads `origin/main`.
+- `spend` coloured its percentage from a value clamped to 100 while
+  printing the real one, so a threshold above 100 could never be reached.
+- `context.show_compaction_percent` printed nothing unless
+  `compaction_marker` was also on, which nothing documented.
+- `branch.max_length` and `session_name.max_length` cut with `…` even
+  under `icons = "ascii"`, and could split a flag or an accented letter in
+  half.
+- A bar glyph (`fill` or `empty`) that was not exactly one cell was
+  silently replaced while `config check` said `ok`; it is reported now,
+  like `frame.fill_char`, and the same goes for an animated one
+  (`fill_frames`). `marker` is exempt when it is blank, which is how the
+  marker is turned off. `[frame] separator_frames = []` keeps meaning "no
+  animation" and is still accepted.
+- Blanking a trailing glyph (`icons.dirty = ""`) left a stray space that
+  widened the module and shifted any aligned column beside it. The
+  `cache` countdown left two.
+- `GARNISH_CONFIG=` (empty) put `⚠ config: cannot read` on every tick, and
+  `XDG_CONFIG_HOME=` made the config lookup relative to the current
+  directory, so a checkout holding `garnish/garnish.toml` became your
+  config. An empty path variable means unset everywhere now.
+- Under `color = "256"` every theme was shifted: the 6×6×6 cube's levels
+  are `0, 95, 135, 175, 215, 255`, not evenly spaced, so a channel could
+  be moved by up to 69 and could land 95 away from the nearest level.
+- A clipped text box of wide glyphs (CJK, emoji) could come out narrower
+  than its `width`, shifting an aligned column.
+- A background worker could hang for ever holding its module's lock when
+  something outlived `git fetch` (ssh's persistent connection does), and a
+  clock that stepped backwards froze a module's value, and its automatic
+  fetch, until the wall clock caught up.
+- An error in an inline `line = [...]` array named the wrong line number.
+- `GARNISH_DEBUG` now writes a line per tick, as the reference has always
+  said; it only ever logged a failed worker start.
+
+Also: the generated reference gained `GARNISH_DEBUG`, `DISABLE_COMPACT`
+and `GARNISH_MANAGED_SETTINGS` rows and the real range for the three
+`*_step` keys (`0.001`–`1000`, documented as "> 0"); `garnish doctor`
+builds its environment list from the same constants the code reads, so a
+hook cannot go missing from a bug report.
+
 **Per-module presentation** (PLAN Phase 20)
 
 - `max_width` on any built-in module cuts the whole module (label, prefix

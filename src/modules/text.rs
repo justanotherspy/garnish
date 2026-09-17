@@ -11,7 +11,6 @@ use std::sync::LazyLock;
 use crate::ansi::{Segment, display_width, scroll, truncate};
 use crate::config::schema::{ColorSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::config::{MAX_CELLS, MAX_TEXT_CHARS};
-use crate::icons::IconSet;
 
 use super::{Ctx, Rendered, seg};
 
@@ -32,7 +31,7 @@ fn schema() -> ModuleSchema {
     ModuleSchema {
         id: "text",
         summary: "Static text in a box of fixed width; define any number as `[modules.text.<name>]`.",
-        doc: "A fixed string in a box, placed on a line as `text.<name>`. `width = 0` makes the box as wide as the text; otherwise the box is `width` cells with `pad` blank cells on each side, `justify` places shorter text in it, and `overflow` decides what happens to longer text: `clip` cuts it with an ellipsis, `scroll` slides a window over it and restarts after the end has passed, `scroll-wrap` is a ticker that flows continuously with `gap` between the end and the start. Scrolling is a pure function of the clock (`floor(now × step) mod period`), so nothing is stored between ticks and `GARNISH_ANIMATE=0` freezes it. The text is plain: escape sequences and control characters are stripped. Text modules have no `preset` and no `refresh`.",
+        doc: "A fixed string in a box, placed on a line as `text.<name>`. `width = 0` makes the box as wide as the text; otherwise the box is `width` cells with `pad` blank cells on each side, `justify` places shorter text in it, and `overflow` decides what happens to longer text: `clip` cuts it with an ellipsis, `scroll` slides a window over it and restarts after the end has passed, `scroll-wrap` is a ticker that flows continuously with `gap` between the end and the start. Scrolling is a pure function of the clock (`floor(now × step) mod period`), so nothing is stored between ticks and `GARNISH_ANIMATE=0` freezes it. The text is plain: escape sequences and control characters are stripped. With an empty `text` the module has nothing to show, so `hide_when_empty` (on by default) hides it rather than drawing a dim `–`. Text modules have no `preset` and no `refresh`, and `width` sizes the box where other modules take `max_width`.",
         sources: &["the config file"],
         refresh: 0,
         opts: vec![
@@ -72,7 +71,7 @@ fn schema() -> ModuleSchema {
             OptSpec::new(
                 "step",
                 Kind::Float,
-                "Cells scrolled per tick (> 0; 0.5 = every second tick).",
+                "Cells scrolled per tick (0.001–1000; 0.5 = every second tick).",
                 Value::Float(1.0),
             ),
             OptSpec::new(
@@ -138,8 +137,17 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let step = cfg.float("step");
         match cfg.str("overflow") {
             "clip" => {
-                let ellipsis = if ctx.icons == IconSet::Ascii { ".." } else { "…" };
-                truncate(&styled, box_w, ellipsis)
+                let mut cut = truncate(&styled, box_w, ctx.icons.ellipsis());
+                // A cut can land short of the box: the next cluster may be
+                // two cells wide with one cell left, so `truncate` stops
+                // early. `scroll` always fills its window, and a text
+                // module is a fixed-width slot next to aligned columns, so
+                // the shortfall is padded rather than left to shift them.
+                let short = box_w.saturating_sub(crate::ansi::segments_width(&cut));
+                if short > 0 {
+                    cut.push(Segment::plain(" ".repeat(short)));
+                }
+                cut
             }
             "scroll-wrap" => {
                 let gap = cfg.str("gap");
@@ -149,8 +157,10 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
             _ => scroll(&styled, box_w, ctx.frame(step, text_w), "", false),
         }
     };
-    // `url` (SPEC § 3.7) links the box, padding cells excluded; the config
-    // already checked it against the painter's rule, which applies again.
+    // `url` (SPEC § 3.7) links the whole box and nothing outside it: the
+    // `justify` fill, a scrolled window's cells and the clip shortfall are
+    // all inside, only the `pad` cells added below are not. The config
+    // already checked the URL against the painter's rule, which applies again.
     let url = cfg.str("url");
     let body: Vec<Segment> =
         if url.is_empty() { body } else { body.into_iter().map(|s| s.with_link(url)).collect() };
@@ -203,9 +213,136 @@ mod tests {
         let clipped = module("text = \"clip me\"\nwidth = 4\noverflow = \"clip\"\n");
         assert_eq!(crate::ansi::Painter::PLAIN.paint(&clipped), "cli…");
         assert!(linked(&clipped), "{clipped:?}");
+        // A cut that lands short (the next cluster is two cells wide with one
+        // cell left) is padded to the box, and that cell is inside the box
+        // like the `justify` fill, so it carries the link too.
+        let short = module("text = \"日本語\"\nwidth = 4\noverflow = \"clip\"\n");
+        assert_eq!(crate::ansi::Painter::PLAIN.paint(&short), "日… ");
+        assert_eq!(crate::ansi::segments_width(&short), 4);
+        assert!(linked(&short), "{short:?}");
         let centred = module("text = \"hi\"\nwidth = 6\njustify = \"center\"\n");
         assert_eq!(crate::ansi::Painter::PLAIN.paint(&centred), "  hi  ");
         assert!(linked(&centred), "{centred:?}");
         assert!(centred.len() >= 3, "fill, text, fill: {centred:?}");
+    }
+
+    /// SPEC § 9: the `text.<name>` family is the one module set outside the
+    /// schema matrix, its content being wholly user-supplied, so `text`,
+    /// `width`, `justify`, `overflow` and `url` are swept here instead, over
+    /// text a user could really paste. `pad` is pinned at 1 (it is what
+    /// makes the link boundary visible) and `step` and `gap` stay at their
+    /// defaults, so the two scrolling modes are sampled at one clock phase.
+    ///
+    /// The invariants are the matrix's, and each is asserted: the box is
+    /// exactly the width it was asked for, no escape or control byte reaches
+    /// a row, every cluster on the row is one of the input's (so none was
+    /// split), a `url` the painter accepts is on the row and one it refuses
+    /// does not parse at all.
+    #[test]
+    fn every_text_option_holds_the_shared_invariants() {
+        use crate::icons::IconSet;
+        let payload = crate::payload::Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let hostile = [
+            ("plain", "hello"),
+            ("escape", "a\u{1b}[31mred\u{1b}[0m"),
+            ("control", "a\u{7}b\u{0}c"),
+            ("bidi", "a\u{202e}gnp.txt"),
+            ("wide", "日本語テキスト"),
+            ("flag", "🇺🇸🇫🇷ab"),
+            ("combining", "e\u{301}e\u{301}e\u{301}"),
+            ("newline", "one\ntwo"),
+        ];
+        // Format characters too, not only controls: the `bidi` fixture is
+        // there for U+202E, which is `Cf` and passes `is_control`, so a
+        // predicate of controls alone let the one row that exists to catch a
+        // reversed name assert nothing but its width.
+        let is_escape = |c: char| c.is_control() || crate::ansi::is_format_char(c);
+        // A URL the painter would refuse never reaches a row because the
+        // *config* refuses it first, which is the stronger rule and is
+        // asserted once here rather than swept.
+        let (_, errs) = crate::config::parse(
+            "[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = \"x\"\nurl = \"git@github.com:o/r.git\"\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(
+            errs.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            vec!["modules.text.a.url"],
+            "a URL the painter refuses must not parse"
+        );
+
+        // `url` varies with the text rather than adding a fifth loop: with a
+        // single value the link assertion below was vacuous, because nothing
+        // in the sweep set `url` and `seg.link` was `None` in all 1152 cases.
+        let urls = ["", "https://x.example/a"];
+        for (i, (name, text)) in hostile.into_iter().enumerate() {
+            let url = urls.get(i % urls.len()).copied().unwrap_or_default();
+            let linkable = !url.is_empty();
+            for icons in IconSet::ALL {
+                for overflow in ["clip", "scroll", "scroll-wrap"] {
+                    for justify in ["left", "center", "right"] {
+                        for width in [0_usize, 1, 4, 9] {
+                            let cfg = format!(
+                                "icons = \"{}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = {}\nurl = {}\nwidth = {width}\npad = 1\noverflow = \"{overflow}\"\njustify = \"{justify}\"\n",
+                                icons.name(),
+                                crate::config::schema::toml_string(text),
+                                crate::config::schema::toml_string(url),
+                            );
+                            let (config, errs) =
+                                crate::config::parse(&cfg, &crate::modules::SCHEMAS);
+                            assert!(errs.is_empty(), "{name}: {errs:?}");
+                            let mut clock = Clock::fixed();
+                            clock.animate = true;
+                            let label =
+                                format!("{name}/{}/{overflow}/{justify}/{width}", icons.name());
+                            let row = render_lines_at(&payload, &config, Some(80), &clock)
+                                .into_iter()
+                                .next()
+                                .unwrap_or_default();
+                            for seg in &row {
+                                assert!(
+                                    !seg.text().chars().any(is_escape),
+                                    "{label}: {:?}",
+                                    seg.text()
+                                );
+                                assert!(
+                                    seg.link.as_deref().is_none_or(crate::ansi::safe_link),
+                                    "{label}: {:?}",
+                                    seg.link
+                                );
+                            }
+                            // A URL the painter refuses never reaches a row;
+                            // one it accepts always does, so neither half of
+                            // the rule can pass by nothing happening.
+                            let linked = row.iter().any(|s| s.link.as_deref() == Some(url));
+                            assert_eq!(linked, linkable, "{label}: url {url:?}");
+                            // No cluster is ever split: every cluster on the
+                            // row is one of the input's, a pad space, or the
+                            // set's own cut mark. A half-emoji would be
+                            // neither, and so would a lone combining mark.
+                            // Against the *reduced* text: the config strips
+                            // escapes and control bytes on the way in, so the
+                            // raw literal is not what the module rendered.
+                            let source = crate::ansi::clusters(&crate::ansi::plain_text(text));
+                            let mark: Vec<String> =
+                                crate::ansi::clusters(icons.ellipsis()).into_iter().collect();
+                            for seg in &row {
+                                for c in crate::ansi::clusters(seg.text()) {
+                                    assert!(
+                                        c == " " || source.contains(&c) || mark.contains(&c),
+                                        "{label}: {c:?} is not a cluster of the input"
+                                    );
+                                }
+                            }
+                            // `width = 0` sizes the box to the text; any
+                            // other width is exactly that, plus the pads.
+                            let cells = crate::ansi::segments_width(&row);
+                            if width > 0 {
+                                assert_eq!(cells, width + 2, "{label}: {cells} cells");
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

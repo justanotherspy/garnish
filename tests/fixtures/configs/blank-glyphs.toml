@@ -1,0 +1,52 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# An empty glyph means "do not draw it", and must leave no cell behind
+# (SPEC § 4.1). Four trailing badges and two interpolated glyphs used to
+# emit a lone space instead, which is a segment like any other: the module
+# kept a cell and `align = true` shifted the whole column. The helpers have
+# unit tests; this is the render, so that reverting a call site to its own
+# `format!(" {}", cfg.icon(…))` fails here rather than passing.
+#
+# `align = true` is the point: with it on, one stray cell moves every
+# module to its right, so the golden pins the whole row and not just the
+# module that lost its glyph.
+
+align = true
+
+[[line]]
+modules = ["model", "context"]
+right = ["clock"]
+
+[[line]]
+modules = ["cache", "worktree"]
+
+[modules.model]
+preset = "full"
+[modules.model.icons]
+fast = ""
+thinking = ""
+
+[modules.context]
+preset = "full"
+[modules.context.icons]
+warn = ""
+exceeds = ""
+marker = ""
+
+[modules.cache]
+preset = "full"
+[modules.cache.icons]
+warm = ""
+cold = ""
+
+[modules.worktree]
+preset = "full"
+[modules.worktree.icons]
+arrow = ""
+
+[modules.clock]
+preset = "full"
+[modules.clock.icons]
+spinner = ""

@@ -118,7 +118,12 @@ pub enum Command {
         #[arg(long)]
         cwd: PathBuf,
         /// The caller already holds the module lock; release it when done.
-        #[arg(long)]
+        ///
+        /// Only ever passed with `--module`, by the tick that took that one
+        /// lock ([`crate::spawn::Job::args`]). With `--all` it would adopt a
+        /// lock per module — inventing one where there was none and taking
+        /// over one a live worker still holds — so the two are exclusive.
+        #[arg(long, conflicts_with = "all")]
         lock_held: bool,
     },
     /// Remove cache directories of sessions idle for more than a day.
@@ -269,6 +274,7 @@ fn run_command() -> Result<()> {
             let mut stdout = std::io::stdout().lock();
             let _ = stdout.write_all(out.as_bytes());
             let _ = stdout.flush();
+            tick_note(&input, req.columns, &out);
             Ok(())
         }
         Command::Preview { path, args } => preview(&path, config_path, &args),
@@ -436,15 +442,7 @@ fn install(
     let existing = inst::read_existing(&plan.settings).map_err(|e| eyre!(e))?;
     let merged = match inst::merge(existing.as_deref().unwrap_or(""), &plan) {
         Ok(merged) => merged,
-        Err(problem) => {
-            // A settings file that does not parse is never rewritten (SPEC
-            // § 5): the file and the problem on one line, exit 1, no report.
-            eprintln!(
-                "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-                plan.settings.display()
-            );
-            return Err(Quiet.into());
-        }
+        Err(problem) => return Err(refuse_unparsable(&plan.settings, &problem)),
     };
     if dry_run {
         writeln!(stdout, "would write {}:", plan.settings.display())?;
@@ -523,10 +521,19 @@ fn install_default_config(
 fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
     explicit
         .map(Path::to_path_buf)
-        .or_else(|| {
-            std::env::var_os(config::CONFIG_ENV).filter(|v| !v.is_empty()).map(PathBuf::from)
-        })
+        .or_else(|| config::env_path(config::CONFIG_ENV))
         .or_else(config::default_path)
+}
+
+/// The one-line refusal for a file that does not parse (SPEC § 5: a file
+/// garnish cannot read is never rewritten). The path and the problem on one
+/// line, exit 1, no report.
+fn refuse_unparsable(path: &Path, problem: &str) -> color_eyre::Report {
+    eprintln!(
+        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+        path.display()
+    );
+    Quiet.into()
 }
 
 /// The one-line refusal for a writing command run without `HOME`.
@@ -535,10 +542,34 @@ fn no_home(flag: &str, what: &str) -> color_eyre::Report {
     Quiet.into()
 }
 
-/// `COLUMNS`, then `GARNISH_COLUMNS`.
+/// The per-tick diagnostic line of SPEC § 5, written only with
+/// `GARNISH_DEBUG` set: what the tick was given and what it produced, which
+/// is what a report of "the status line looks wrong" needs and a screenshot
+/// does not carry. Costs one environment read when the hook is off.
+fn tick_note(input: &str, columns: Option<usize>, out: &str) {
+    if !crate::debug::enabled() {
+        return;
+    }
+    let widest = out
+        .lines()
+        .map(|line| crate::ansi::display_width(&crate::ansi::strip_ansi(line)))
+        .max()
+        .unwrap_or(0);
+    crate::debug::log(&format!(
+        "tick stdin={}B columns={} rows={} widest={widest}",
+        input.len(),
+        columns.map_or_else(|| "unset".to_owned(), |c| c.to_string()),
+        out.lines().count(),
+    ));
+}
+
+/// Environment variable naming the width when `COLUMNS` is absent.
+pub const COLUMNS_ENV: &str = "GARNISH_COLUMNS";
+
+/// `COLUMNS`, then [`COLUMNS_ENV`].
 #[must_use]
 pub fn env_columns() -> Option<usize> {
-    ["COLUMNS", "GARNISH_COLUMNS"].iter().find_map(|k| std::env::var(k).ok()?.trim().parse().ok())
+    ["COLUMNS", COLUMNS_ENV].iter().find_map(|k| std::env::var(k).ok()?.trim().parse().ok())
 }
 
 fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result<()> {
@@ -661,11 +692,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
                 let current = std::fs::read_to_string(&target)
                     .with_context(|| format!("reading {}", target.display()))?;
                 if let Some(problem) = config::syntax_error(&current) {
-                    eprintln!(
-                        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-                        target.display()
-                    );
-                    return Err(Quiet.into());
+                    return Err(refuse_unparsable(&target, &problem));
                 }
             }
             let backup =

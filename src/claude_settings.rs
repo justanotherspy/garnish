@@ -241,13 +241,6 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
     }
 }
 
-/// Extract the keys garnish reads from one settings JSON text; a text that
-/// does not parse sets none of them.
-#[must_use]
-pub fn from_settings_json(text: &str) -> FileKeys {
-    parse_settings_json(text).unwrap_or_default()
-}
-
 /// What one file of the settings chain holds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileState {
@@ -270,13 +263,22 @@ pub fn read_file(path: &Path) -> FileState {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileState::Absent,
         Err(e) => return FileState::Unreadable(e.to_string()),
     };
-    let mut text = String::new();
-    // One byte past the cap tells an over-long file from one exactly at it.
-    match file.take(MAX_SETTINGS_BYTES.saturating_add(1)).read_to_string(&mut text) {
-        Ok(n) if u64::try_from(n).is_ok_and(|n| n > MAX_SETTINGS_BYTES) => {
-            FileState::Invalid(format!("longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"))
-        }
-        Ok(_) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
+    // Bytes first, then UTF-8: reading straight into a `String` validates
+    // the *truncated* stream, so a file over the cap whose cut lands inside
+    // a multi-byte character failed as "unreadable: stream did not contain
+    // valid UTF-8" and sent the reader looking for corruption that was not
+    // there. One byte past the cap tells an over-long file from one at it.
+    let mut bytes = Vec::new();
+    if let Err(e) = file.take(MAX_SETTINGS_BYTES.saturating_add(1)).read_to_end(&mut bytes) {
+        return FileState::Unreadable(e.to_string());
+    }
+    if u64::try_from(bytes.len()).is_ok_and(|n| n > MAX_SETTINGS_BYTES) {
+        return FileState::Invalid(format!(
+            "longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"
+        ));
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
         Err(e) => FileState::Unreadable(e.to_string()),
     }
 }
@@ -330,6 +332,12 @@ pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
 mod tests {
     use super::*;
 
+    /// The keys of a settings text, with an unparsable one contributing
+    /// none — the shape `read_file` gives the chain.
+    fn keys_of(text: &str) -> FileKeys {
+        parse_settings_json(text).unwrap_or_default()
+    }
+
     #[test]
     fn threshold_math_matches_claude_code() {
         let ac = AutoCompact { enabled: true, window: None, pct_override: None };
@@ -349,15 +357,15 @@ mod tests {
 
     #[test]
     fn settings_json_extraction() {
-        let keys = from_settings_json(r#"{"autoCompactWindow": 500000}"#);
+        let keys = keys_of(r#"{"autoCompactWindow": 500000}"#);
         assert_eq!(keys, FileKeys { auto_compact_window: Some(500_000), ..Default::default() });
-        let keys = from_settings_json(r#"{"autoCompactEnabled": false}"#);
+        let keys = keys_of(r#"{"autoCompactEnabled": false}"#);
         assert_eq!(keys, FileKeys { auto_compact_enabled: Some(false), ..Default::default() });
-        let keys = from_settings_json(r#"{"prefersReducedMotion": true, "theme": "dark"}"#);
+        let keys = keys_of(r#"{"prefersReducedMotion": true, "theme": "dark"}"#);
         assert_eq!(keys, FileKeys { reduced_motion: Some(true), ..Default::default() });
-        assert_eq!(from_settings_json(r#"{"prefersReducedMotion": "yes"}"#), FileKeys::default());
-        assert_eq!(from_settings_json("nope"), FileKeys::default());
-        assert_eq!(from_settings_json("[1]"), FileKeys::default());
+        assert_eq!(keys_of(r#"{"prefersReducedMotion": "yes"}"#), FileKeys::default());
+        assert_eq!(keys_of("nope"), FileKeys::default());
+        assert_eq!(keys_of("[1]"), FileKeys::default());
         // The doctor's keys, a BOM tolerated as `install` tolerates it, and
         // the two ways a file fails, named.
         let keys = parse_settings_json(
@@ -369,15 +377,15 @@ mod tests {
         assert_eq!(keys.hide_vim_mode, Some(true));
         assert_eq!(keys.disable_all_hooks, Some(false));
         assert_eq!(keys.tui, Some(Tui::Fullscreen));
-        assert_eq!(from_settings_json(r#"{"tui": "default"}"#).tui, Some(Tui::Default));
+        assert_eq!(keys_of(r#"{"tui": "default"}"#).tui, Some(Tui::Default));
         // Anything but the two names is kept as written, a non-string too,
         // so `doctor` can say what Claude Code does with it.
         for other in [r#""FULLSCREEN""#, r#"" fullscreen""#, r#""""#, "1", "null", "[1]"] {
             let value: serde_json::Value = serde_json::from_str(other).unwrap();
-            let keys = from_settings_json(&format!(r#"{{"tui": {other}}}"#));
+            let keys = keys_of(&format!(r#"{{"tui": {other}}}"#));
             assert_eq!(keys.tui, Some(Tui::Other(value)), "{other}");
         }
-        assert_eq!(from_settings_json("{}").tui, None);
+        assert_eq!(keys_of("{}").tui, None);
         assert!(parse_settings_json("{ broken").unwrap_err().starts_with("not valid JSON: "));
         assert_eq!(parse_settings_json("[1]").unwrap_err(), "not a JSON object");
         // An empty file is what a fresh `touch` leaves and what `install`
@@ -411,6 +419,13 @@ mod tests {
         assert!(
             matches!(read_file(&at_cap), FileState::Keys(ref k) if k.reduced_motion == Some(true))
         );
+        // Over the cap and non-ASCII: the cut lands inside a multi-byte
+        // character, which used to fail UTF-8 validation first and tell the
+        // user their file was "unreadable" rather than too long.
+        let wide = dir.path().join("wide.json");
+        let fill = "é".repeat(usize::try_from(MAX_SETTINGS_BYTES).unwrap());
+        std::fs::write(&wide, format!("{{\"note\": \"{fill}\"}}")).unwrap();
+        assert!(matches!(read_file(&wide), FileState::Invalid(ref e) if e.contains("longer")));
         assert_eq!(read_keys(&[huge, at_cap, dir.path().join("none.json")]).len(), 1);
         let chain = settings_chain(
             Some(Path::new("/m/managed.json")),

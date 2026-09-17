@@ -111,11 +111,24 @@ impl Color {
     }
 }
 
+/// The six channel values of the 256-colour palette's 6×6×6 cube.
+///
+/// xterm spaces them unevenly — `0` then `55 + 40 i` — so dividing the range
+/// into six equal parts picks the wrong level for most of 96..130 and
+/// 176..214. Every built-in palette is written in `#rrggbb`, so under
+/// `color = "256"` that error moved whole themes: `#6c7086` (muted) came out
+/// as `rgb(135,135,175)`, a light blue-grey, instead of `rgb(95,95,135)`.
+const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+
 /// Approximate an RGB color with the 6×6×6 cube of the 256-color palette.
 fn rgb_to_256(r: u8, g: u8, b: u8) -> u8 {
     let q = |c: u8| -> u8 {
-        // 0..=255 → 0..=5
-        u8::try_from((u16::from(c).saturating_mul(5).saturating_add(127)) / 255).unwrap_or(5)
+        let nearest = CUBE_LEVELS
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, level)| u16::from(c).abs_diff(u16::from(**level)))
+            .map_or(0, |(i, _)| i);
+        u8::try_from(nearest).unwrap_or(5)
     };
     16_u8
         .saturating_add(q(r).saturating_mul(36))
@@ -371,7 +384,11 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
         out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
     }
     if ell_width > 0 && max_width >= ell_width {
-        let style = out.last().map_or(Style::PLAIN, |s| s.style);
+        // The style of whatever survived the cut, or of the text that would
+        // have been there: with a budget narrower than the first cluster
+        // nothing survives, and an unstyled `…` would make a module flip to
+        // the terminal default at exactly its narrowest setting.
+        let style = out.last().or_else(|| segments.first()).map_or(Style::PLAIN, |s| s.style);
         out.push(Segment::styled(ellipsis, style));
     }
     out
@@ -586,7 +603,7 @@ fn clean(s: String) -> String {
 /// Unicode `Cf` characters that change layout or reading order without
 /// occupying a cell: zero-width space/non-joiner, the bidi marks and
 /// embeddings/isolates, word joiner and friends, the byte order mark.
-const fn is_format_char(c: char) -> bool {
+pub(crate) const fn is_format_char(c: char) -> bool {
     matches!(
         c,
         '\u{200b}' | '\u{200c}' | '\u{200e}' | '\u{200f}' | '\u{061c}' | '\u{180e}' | '\u{feff}'
@@ -892,6 +909,14 @@ mod tests {
         assert_eq!(fit("..", 1), ".");
         assert_eq!(fit("🌿x", 1), "");
         assert_eq!(fit("🌿x", 2), "🌿");
+        // A cut that keeps nothing still paints the mark in the module's
+        // colour: `max_width = 2` on a two-cell icon used to leave an
+        // unstyled `…` where `max_width = 3` was coloured.
+        let styled = [Segment::styled("🌿 ", Style::fg(Color::Ansi(2))), Segment::plain("main")];
+        let cut = truncate(&styled, 2, "…");
+        assert_eq!(Painter::PLAIN.paint(&cut), "…");
+        assert_eq!(cut.last().map(|s| s.style.fg), Some(Color::Ansi(2)));
+        assert_eq!(truncate(&styled, 3, "…").last().map(|s| s.style.fg), Some(Color::Ansi(2)));
     }
 
     #[test]
@@ -899,5 +924,41 @@ mod tests {
         assert_eq!(rgb_to_256(0, 0, 0), 16);
         assert_eq!(rgb_to_256(255, 255, 255), 231);
         assert_eq!(rgb_to_256(255, 0, 0), 196);
+        // Every level maps to itself, and the midpoints go to the nearer
+        // one: the corners alone pass under an even split of the range,
+        // which is what used to move `color = "256"` themes off their
+        // palette (`#6c7086` → 103, a light blue-grey, instead of 60).
+        for (i, level) in CUBE_LEVELS.into_iter().enumerate() {
+            let index = u8::try_from(16 + i * 36 + i * 6 + i).unwrap();
+            assert_eq!(rgb_to_256(level, level, level), index, "level {level}");
+        }
+        // The `garnish` palette's muted and frame roles, which an even
+        // split sent to 103 and 102 (both `rgb(135,135,…)`).
+        assert_eq!(rgb_to_256(0x6c, 0x70, 0x86), 60);
+        assert_eq!(rgb_to_256(0x58, 0x5b, 0x70), 59);
+        // 115 is the midpoint of 95 and 135; 116 rounds up.
+        assert_eq!(rgb_to_256(115, 0, 0), 16 + 36);
+        assert_eq!(rgb_to_256(116, 0, 0), 16 + 2 * 36);
+    }
+
+    /// Every byte lands on its nearest cube level, so no channel is ever
+    /// moved further than half the gap it sits in: 48 across the wide
+    /// 0..95 step, 20 across the even 40-wide ones. The old even split of
+    /// the range was off by up to 47 even inside a 40-wide step (128 went
+    /// to 175) and by 69 across the wide first one (26 went to 95, where
+    /// 0 is nearest, a gap of 95 between the two answers).
+    #[test]
+    fn rgb_cube_is_the_nearest_level_for_every_byte() {
+        for c in 0..=u8::MAX {
+            let index = usize::from(rgb_to_256(c, 0, 0).saturating_sub(16)) / 36;
+            let level = CUBE_LEVELS.get(index).copied().unwrap_or(0);
+            let best = CUBE_LEVELS
+                .into_iter()
+                .min_by_key(|l| u16::from(c).abs_diff(u16::from(*l)))
+                .unwrap_or(0);
+            assert_eq!(level, best, "{c}");
+            let error = u16::from(c).abs_diff(u16::from(level));
+            assert!(error <= if c < 95 { 48 } else { 20 }, "{c} → {level}");
+        }
     }
 }

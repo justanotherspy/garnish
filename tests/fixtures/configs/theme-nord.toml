@@ -1,0 +1,26 @@
+# fixture: subscription-full
+# columns: 60
+# now: 1738425600
+# icons: unicode
+# color: always
+# A non-default palette with colour on (SPEC § 9). `colour-on.toml` pins the
+# painter's escape sequences for the `garnish` theme; every other golden
+# renders plain, so the five other palettes reached no render at all. This
+# one carries a band-coloured bar and a warn glyph, so a palette whose
+# entries were reordered would move a colour here.
+
+theme = "nord"
+
+[frame]
+style = "none"
+
+[[line]]
+modules = ["context", "limit5h"]
+right   = ["clock"]
+
+[modules.context]
+width = 12
+warn_at = 40
+
+[modules.limit5h]
+bar_width = 6

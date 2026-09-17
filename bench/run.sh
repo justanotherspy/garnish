@@ -28,13 +28,17 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 origin="$work/origin.git"
+# Cut off from the developer's git config: this project mandates signed
+# commits, and the commit below cannot reach a pinentry from a script.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME=b GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=b GIT_COMMITTER_EMAIL=b@b
 git init -q --bare -b main "$origin"
 git init -q -b main "$repo"
 (
   cd "$repo"
   git remote add origin "$origin"
   for i in $(seq 1 50); do echo "$i" > "f$i.txt"; done
-  git add . && git -c user.name=b -c user.email=b@b commit -qm init
+  git add . && git commit -qm init
   git push -q -u origin main
   echo change > f1.txt
 )
