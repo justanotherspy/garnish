@@ -221,6 +221,11 @@ impl Layout<'_> {
     /// Lay every row out, returning the terminal lines of each configured
     /// row in order. A box around a run of rows puts its top line on the
     /// first row of the run and its bottom line on the last.
+    ///
+    /// A column's stack holds rows, so the type is recursive, but the
+    /// nesting is two deep at most: an inner row takes no `col` key and the
+    /// config rejects one (`row[0].col[0].row[0].col` is an unknown key), so
+    /// nothing here walks deeper than `row → col → row → col`.
     #[must_use]
     pub fn lines(&self, rows: &[Row<'_>]) -> Vec<Vec<Line>> {
         let blocks = blocks(rows);
@@ -259,7 +264,15 @@ impl Layout<'_> {
                     .map(|(at, row)| {
                         let height = self.row_height(row);
                         let fill = if self.fill { Fill::Rule } else { Fill::Packed };
-                        let inner = self.inner_width(row, *index, framed);
+                        // A tall row's lines take different caps (`first`
+                        // then `middle`), and a `custom` frame's need not
+                        // be the same width: the columns share the room the
+                        // *widest* pair leaves, so no line overflows and the
+                        // others fill the difference with rule cells.
+                        let inner = (0..height)
+                            .map(|i| self.inner_width(row, index.saturating_add(i), framed))
+                            .min()
+                            .unwrap_or_else(|| self.inner_width(row, *index, framed));
                         let lines = self
                             .row_body(row, inner, height, fill, Fit::default())
                             .into_iter()
@@ -1975,6 +1988,48 @@ mod tests {
         let joined = runs.concat();
         let want: String = "abc".chars().cycle().take(joined.chars().count()).collect();
         assert_eq!(joined, want, "the runs of {:?}", Painter::PLAIN.paint(&line.segments()));
+    }
+
+    /// SPEC § 4.3: a tall row's lines take different caps (`first` then
+    /// `middle`, then `last`), and a `custom` frame's need not be the same
+    /// width. The row is laid out to the room the *widest* pair leaves;
+    /// laying it out to the first line's, as it once was, left the taller
+    /// caps hanging past the box and the row's own recut ate them into `…`.
+    #[test]
+    fn a_tall_row_under_uneven_custom_caps_fits_every_line() {
+        for width in [24_usize, 40, 80] {
+            let mut f = Fixture::new(FrameStyle::Custom, true, width);
+            f.chars = FrameChars {
+                first: "<".to_owned(),
+                middle: "<<<".to_owned(),
+                last: "<<<<<".to_owned(),
+                single: "<".to_owned(),
+                right_first: ">".to_owned(),
+                right_middle: ">>>".to_owned(),
+                right_last: ">>>>>".to_owned(),
+                right_single: ">".to_owned(),
+                ..FrameChars::for_style(FrameStyle::Rounded)
+            };
+            let l = f.layout();
+            let stack = Col {
+                width: Width::Fr(1),
+                justify: Justify::Left,
+                valign: VAlign::Top,
+                boxed: None,
+                content: Content::Stack(vec![
+                    row(vec![col(Width::Fr(1), "one")], 1),
+                    row(vec![col(Width::Fr(1), "two")], 1),
+                    row(vec![col(Width::Fr(1), "three")], 1),
+                ]),
+            };
+            let rows = vec![Row { cols: vec![stack], ..row(Vec::new(), 1) }];
+            let ends = [("<", ">"), ("<<<", ">>>"), ("<<<<<", ">>>>>")];
+            for (line, (prefix, cap)) in l.lines(&rows).into_iter().flatten().zip(ends) {
+                let text = Painter::PLAIN.paint(&line.segments());
+                assert_eq!(line.width(), width, "{text:?}");
+                assert!(text.starts_with(prefix) && text.ends_with(cap), "{text:?}");
+            }
+        }
     }
 
     /// SPEC § 4.3: a box under a frame that has no shape (`none`,

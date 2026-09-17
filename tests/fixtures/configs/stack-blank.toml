@@ -20,3 +20,16 @@ modules = []
 blank = true
 [[row.col.row]]
 modules = ["clock"]
+
+# `blank` on the outer row of a multi-line row keeps every one of its lines,
+# the padding lines a short column contributes included (SPEC § 4.3).
+[[row]]
+blank = true
+[[row.col]]
+[[row.col.row]]
+modules = []
+[[row.col.row]]
+modules = []
+
+[[row]]
+modules = ["session"]
