@@ -13,7 +13,7 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | [`labels-and-placeholders`](#labels-and-placeholders) | labels, brackets, dim – for absent modules, UTC clock with date | 170 | nerd-font |
 | [`minimal-clean`](#minimal-clean) | one unframed line: path, context, limit, clock | 80 | nerd-font |
 | [`motd-ticker`](#motd-ticker) | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
-| [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed lines, a separator per line | 130 | nerd-font |
+| [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed rows, a separator per row | 130 | nerd-font |
 | [`session-detail`](#session-detail) | session, api, cache and cost detail, plain stale style, 1 s git refresh | 130 | nerd-font |
 | [`single-line-full`](#single-line-full) | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
 | [`tall-eight-lines`](#tall-eight-lines) | one module per row, eight rows, square frame | 100 | nerd-font |
@@ -54,11 +54,11 @@ style            = "rounded"
 fill_pattern     = "·  "
 separator_frames = [" │ ", " ┃ ", " ╎ "]
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
@@ -97,11 +97,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "context"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["limit5h", "limit7d", "spend", "cost"]
 right   = ["lines"]
 
@@ -195,11 +195,11 @@ warn   = "yellow"         # named colour for the middle band / behind counts
 [frame]
 style = "heavy"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d", "cache"]
 
@@ -250,11 +250,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["session", "cache"]
 
@@ -346,11 +346,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "vim"]
 right   = ["session", "api"]
 
@@ -450,11 +450,11 @@ theme  = "garnish"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["text.motd", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
@@ -470,7 +470,7 @@ color    = "accent2"
 
 ## `packed-heavy`
 
-custom heavy frame, left-packed lines, a separator per line
+custom heavy frame, left-packed rows, a separator per row
 
 At 130 columns, needs nerd-font:
 
@@ -484,7 +484,7 @@ At 130 columns, needs nerd-font:
 
 ```toml
 # name: packed-heavy
-# summary: custom heavy frame, left-packed lines, a separator per line
+# summary: custom heavy frame, left-packed rows, a separator per row
 # columns: 130
 # needs: nerd-font
 
@@ -510,16 +510,16 @@ right_single = ""
 pad          = " "
 separator    = " ⋮ "        # default separator for lines that do not set one
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync"]
 right   = ["session_name", "clock"]
 separator = "  "          # this line: two spaces, no bar
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["lines"]
 separator = " • "
@@ -558,11 +558,11 @@ stale_after = 1           # style stale after one missed TTL (default 5)
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["cost", "lines"]
 
@@ -633,7 +633,7 @@ overflow  = "ticker"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr", "model", "effort", "context", "style", "limit5h", "limit7d", "spend", "cost", "session", "api", "cache"]
 right   = ["session_name", "agent", "vim", "lines", "clock"]
 ```
@@ -674,24 +674,24 @@ truncate = true
 [frame]
 style = "square"
 
-[[line]]
+[[row]]
 modules = ["path"]
 right   = ["clock"]
-[[line]]
+[[row]]
 modules = ["branch"]
-[[line]]
+[[row]]
 modules = ["sync"]
-[[line]]
+[[row]]
 modules = ["pr"]
 right   = ["session_name"]
-[[line]]
+[[row]]
 modules = ["model"]
-[[line]]
+[[row]]
 modules = ["context"]
 right   = ["limit5h"]
-[[line]]
+[[row]]
 modules = ["session"]
-[[line]]
+[[row]]
 modules = ["cache"]
 right   = ["lines"]
 ```
@@ -728,15 +728,15 @@ durations = "fixed"
 [frame]
 style = "double"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["lines", "clock"]
 
@@ -777,11 +777,11 @@ durations = "fixed"
 style = "powerline"
 pad   = " "               # powerline ships with no space between the caps and the text
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "context", "limit5h"]
 right   = ["session", "cost"]
 

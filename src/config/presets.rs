@@ -1,6 +1,6 @@
-//! Top-level presets: which lines exist and which module preset they imply.
+//! Top-level presets: which rows exist and which module preset they imply.
 
-use super::LineCfg;
+use super::RowCfg;
 use super::schema::Preset;
 
 /// Top-level presets.
@@ -55,10 +55,10 @@ impl TopPreset {
         !matches!(self, Self::Minimal)
     }
 
-    /// The lines this preset defines.
+    /// The rows this preset defines.
     #[must_use]
-    pub fn lines(self) -> Vec<LineCfg> {
-        let line = |left: &[&str], right: &[&str]| LineCfg {
+    pub fn rows(self) -> Vec<RowCfg> {
+        let row = |left: &[&str], right: &[&str]| RowCfg {
             left: left.iter().map(|s| (*s).to_owned()).collect(),
             right: right.iter().map(|s| (*s).to_owned()).collect(),
             separator: None,
@@ -67,17 +67,17 @@ impl TopPreset {
         };
         match self {
             Self::Default | Self::Full => vec![
-                line(&["path", "branch", "sync", "worktree", "pr"], &["session_name", "agent"]),
-                line(&["model", "effort", "context", "style"], &["vim"]),
-                line(&["limit5h", "limit7d", "spend", "cost"], &["lines"]),
-                line(&["session", "api", "cache"], &["clock"]),
+                row(&["path", "branch", "sync", "worktree", "pr"], &["session_name", "agent"]),
+                row(&["model", "effort", "context", "style"], &["vim"]),
+                row(&["limit5h", "limit7d", "spend", "cost"], &["lines"]),
+                row(&["session", "api", "cache"], &["clock"]),
             ],
             Self::Minimal => {
-                vec![line(&["path", "branch", "context", "limit5h", "cost"], &["clock"])]
+                vec![row(&["path", "branch", "context", "limit5h", "cost"], &["clock"])]
             }
             Self::Compact => vec![
-                line(&["path", "branch", "sync", "pr"], &["clock"]),
-                line(&["model", "effort", "context", "limit5h", "cost"], &["cache"]),
+                row(&["path", "branch", "sync", "pr"], &["clock"]),
+                row(&["model", "effort", "context", "limit5h", "cost"], &["cache"]),
             ],
         }
     }

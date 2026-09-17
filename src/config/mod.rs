@@ -45,17 +45,18 @@ impl std::fmt::Display for ConfigError {
     }
 }
 
-/// One `[[line]]`.
+/// One `[[row]]`: the addressable unit of the config, one or more terminal
+/// lines tall (SPEC § 4.3). `[[line]]` is its permanent alias.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LineCfg {
+pub struct RowCfg {
     /// Left-aligned module ids.
     pub left: Vec<String>,
     /// Right-aligned module ids.
     pub right: Vec<String>,
-    /// Separator override for this line.
+    /// Separator override for this row.
     pub separator: Option<String>,
     /// Configured with `modules = []` and no `right`: an intentional blank
-    /// row that `hide_empty_lines` never drops (SPEC § 4.1).
+    /// row that `hide_empty_rows` never drops (SPEC § 4.1).
     pub spacer: bool,
     /// `blank = true` on a spacer: when the row would be whitespace only
     /// (no visible frame) it carries one invisible cell so Claude Code keeps
@@ -290,8 +291,8 @@ pub struct Config {
     pub align: bool,
     /// Which side of a padded right-group module the text sits on.
     pub right_justify: RightJustify,
-    /// Drop a line whose modules all rendered nothing (spacers are kept).
-    pub hide_empty_lines: bool,
+    /// Drop a row whose modules all rendered nothing (spacers are kept).
+    pub hide_empty_rows: bool,
     /// Truncate or scroll a left group wider than its budget.
     pub overflow: Overflow,
     /// Cells the ticker advances per tick (`> 0`; 0.5 = every second tick).
@@ -308,8 +309,8 @@ pub struct Config {
     pub durations: DurationStyle,
     /// Frame.
     pub frame: FrameCfg,
-    /// Lines.
-    pub lines: Vec<LineCfg>,
+    /// Rows, in order (SPEC § 4.3).
+    pub rows: Vec<RowCfg>,
     /// Resolved module configs, keyed by id, for every registered module.
     pub modules: BTreeMap<&'static str, ModuleCfg>,
     /// The user-defined text modules (`[modules.text.<name>]`), keyed by name
@@ -361,7 +362,7 @@ struct RawConfig {
     padding: Option<u16>,
     align: Option<bool>,
     right_justify: Option<RightJustify>,
-    hide_empty_lines: Option<bool>,
+    hide_empty_rows: Option<bool>,
     overflow: Option<Overflow>,
     ticker_step: Option<f64>,
     ticker_gap: Option<String>,
@@ -369,11 +370,16 @@ struct RawConfig {
     durations: Option<DurationStyle>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
-    line: Vec<RawLine>,
+    /// The rows as written, under whichever of the two array names the file
+    /// used ([`RawConfig::rows_key`]).
+    row: Vec<RawRow>,
+    /// The file wrote the rows as `[[line]]`: every error under a row points
+    /// at the name the user typed.
+    rows_alias: bool,
     modules: BTreeMap<String, toml::Table>,
 }
 
-const TOP_KEYS: [&str; 20] = [
+const TOP_KEYS: [&str; 22] = [
     "preset",
     "icons",
     "theme",
@@ -384,6 +390,7 @@ const TOP_KEYS: [&str; 20] = [
     "padding",
     "align",
     "right_justify",
+    "hide_empty_rows",
     "hide_empty_lines",
     "overflow",
     "ticker_step",
@@ -392,6 +399,7 @@ const TOP_KEYS: [&str; 20] = [
     "durations",
     "colors",
     "frame",
+    "row",
     "line",
     "modules",
 ];
@@ -405,12 +413,21 @@ const OVERFLOWS: &str = "truncate, ticker";
 pub const DEFAULT_TICKER_GAP: &str = "   ";
 
 impl RawConfig {
+    /// The array name the file used, so an error points at what was typed.
+    const fn rows_key(&self) -> &'static str {
+        if self.rows_alias { "line" } else { "row" }
+    }
+
     // The table is taken by value so every field moves into place: cloning
     // each value cost a fifth of the parse on the full annotated file.
     fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
         let mut raw = Self::default();
         let presets = TopPreset::ALL.iter().map(|p| p.name()).collect::<Vec<_>>().join(", ");
         let icon_sets = IconSet::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
+        // The two array names are reconciled after the loop: TOML gives no
+        // order between two arrays of tables, so a file carries one or the
+        // other (SPEC § 4.3).
+        let (mut rows, mut alias): (Option<Vec<RawRow>>, Option<Vec<RawRow>>) = (None, None);
         for (key, value) in table {
             match key.as_str() {
                 "preset" => raw.preset = enum_field(&key, value, &presets, errors),
@@ -425,7 +442,14 @@ impl RawConfig {
                 "right_justify" => {
                     raw.right_justify = enum_field(&key, value, RIGHT_JUSTIFIES, errors);
                 }
-                "hide_empty_lines" => raw.hide_empty_lines = field(&key, value, errors),
+                // `hide_empty_lines` is the permanent alias of
+                // `hide_empty_rows` (SPEC § 4.3); the new name wins when a
+                // file carries both.
+                "hide_empty_rows" => raw.hide_empty_rows = field(&key, value, errors),
+                "hide_empty_lines" => {
+                    let alias = field(&key, value, errors);
+                    raw.hide_empty_rows = raw.hide_empty_rows.or(alias);
+                }
                 "overflow" => raw.overflow = enum_field(&key, value, OVERFLOWS, errors),
                 "ticker_step" => raw.ticker_step = field(&key, value, errors),
                 "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
@@ -439,27 +463,9 @@ impl RawConfig {
                     toml::Value::Table(t) => raw.frame = Some(RawFrame::from_table(t, errors)),
                     _ => errors.push(problem("frame", "expected a [frame] table")),
                 },
-                "line" => match value {
-                    toml::Value::Array(items) => {
-                        for (i, item) in items.into_iter().enumerate() {
-                            let path = format!("line[{i}]");
-                            // A non-table keeps its place as a `bad_list`
-                            // placeholder, so every later line keeps the
-                            // index it has in the file: dropping it would
-                            // renumber the survivors and send the user to a
-                            // `line[n]` that is not theirs. The flag stops
-                            // it reading as a spacer, and it renders nothing.
-                            let line = if let toml::Value::Table(t) = item {
-                                RawLine::from_table(&path, t, errors)
-                            } else {
-                                errors.push(problem(&path, "expected a [[line]] table"));
-                                RawLine { bad_list: true, ..RawLine::default() }
-                            };
-                            raw.line.push(line);
-                        }
-                    }
-                    _ => errors.push(problem("line", "expected [[line]] tables")),
-                },
+                // `[[row]]` and its permanent alias `[[line]]` (SPEC § 4.3).
+                "row" => rows = Some(row_array("row", value, errors)),
+                "line" => alias = Some(row_array("line", value, errors)),
                 "modules" => match value {
                     toml::Value::Table(t) => {
                         for (id, module) in t {
@@ -482,8 +488,50 @@ impl RawConfig {
                 )),
             }
         }
+        match (rows, alias) {
+            (Some(rows), None) => raw.row = rows,
+            (None, Some(alias)) => {
+                raw.row = alias;
+                raw.rows_alias = true;
+            }
+            (Some(rows), Some(_)) => {
+                errors.push(problem(
+                    "line",
+                    "a file uses either [[row]] or its alias [[line]], not both; \
+                     the [[line]] entries are ignored",
+                ));
+                raw.row = rows;
+            }
+            (None, None) => {}
+        }
         raw
     }
+}
+
+/// One `[[row]]` (or `[[line]]`) array, item by item.
+///
+/// A non-table keeps its place as a `bad_list` placeholder, so every later
+/// row keeps the index it has in the file: dropping it would renumber the
+/// survivors and send the user to a `row[n]` that is not theirs. The flag
+/// stops it reading as a spacer, and it renders nothing.
+fn row_array(name: &str, value: toml::Value, errors: &mut Vec<ConfigError>) -> Vec<RawRow> {
+    let toml::Value::Array(items) = value else {
+        errors.push(problem(name, &format!("expected [[{name}]] tables")));
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let path = format!("{name}[{i}]");
+            if let toml::Value::Table(t) = item {
+                RawRow::from_table(&path, t, errors)
+            } else {
+                errors.push(problem(&path, &format!("expected a [[{name}]] table")));
+                RawRow { bad_list: true, ..RawRow::default() }
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Default)]
@@ -577,7 +625,7 @@ impl RawFrame {
 }
 
 #[derive(Debug, Default)]
-struct RawLine {
+struct RawRow {
     modules: Vec<String>,
     right: Vec<String>,
     separator: Option<String>,
@@ -587,9 +635,11 @@ struct RawLine {
     blank: bool,
 }
 
-impl RawLine {
+const ROW_KEYS: &str = "modules, right, separator, blank";
+
+impl RawRow {
     fn from_table(path: &str, table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
-        let mut line = Self::default();
+        let mut row = Self::default();
         for (key, value) in table {
             let path = format!("{path}.{key}");
             match key.as_str() {
@@ -598,25 +648,25 @@ impl RawLine {
                     // the empty result is a reported mistake, not a spacer.
                     let given = value.as_array().map_or(usize::MAX, Vec::len);
                     let ids = id_list(&path, value, errors);
-                    line.bad_list |= ids.len() != given;
+                    row.bad_list |= ids.len() != given;
                     if key == "modules" {
-                        line.modules = ids;
+                        row.modules = ids;
                     } else {
-                        line.right = ids;
+                        row.right = ids;
                     }
                 }
                 "separator" => {
-                    line.separator =
+                    row.separator =
                         field::<String>(&path, value, errors).map(|s| crate::ansi::plain_text(&s));
                 }
-                "blank" => line.blank = field::<bool>(&path, value, errors).unwrap_or(false),
-                _ => errors.push(problem(
-                    &path,
-                    "unknown key; expected one of modules, right, separator, blank",
-                )),
+                "blank" => row.blank = field::<bool>(&path, value, errors).unwrap_or(false),
+                _ => {
+                    let message = format!("unknown key; expected one of {ROW_KEYS}");
+                    errors.push(problem(&path, &message));
+                }
             }
         }
-        line
+        row
     }
 }
 
@@ -815,10 +865,11 @@ pub fn parse_with(
         }
     };
     if overlay.preset.is_some() {
-        // The preset's lines replace the file's, so their problems are moot.
+        // The preset's rows replace the file's, so their problems are moot.
+        let key = format!("{}[", raw.rows_key());
         raw.preset = overlay.preset;
-        raw.line.clear();
-        errors.retain(|e| !e.path.starts_with("line["));
+        raw.row.clear();
+        errors.retain(|e| !e.path.starts_with(&key));
     }
     raw.icons = overlay.icons.or(raw.icons);
     raw.theme = overlay.theme.clone().or(raw.theme);
@@ -867,18 +918,18 @@ impl Config {
             .max(MIN_WIDTH)
     }
 
-    /// Separator for a line.
+    /// Separator for a row.
     #[must_use]
-    pub fn separator<'a>(&'a self, line: &'a LineCfg) -> &'a str {
-        line.separator.as_deref().unwrap_or(&self.frame.chars.separator)
+    pub fn separator<'a>(&'a self, row: &'a RowCfg) -> &'a str {
+        row.separator.as_deref().unwrap_or(&self.frame.chars.separator)
     }
 
-    /// Separator for a line at animation frame `frame`: the line's own
+    /// Separator for a row at animation frame `frame`: the row's own
     /// override wins, then `separator_frames[frame]`, then the static
     /// separator (SPEC § 4.2).
     #[must_use]
-    pub fn separator_at<'a>(&'a self, line: &'a LineCfg, frame: usize) -> &'a str {
-        line.separator
+    pub fn separator_at<'a>(&'a self, row: &'a RowCfg, frame: usize) -> &'a str {
+        row.separator
             .as_deref()
             .or_else(|| self.frame.separator_frames.get(frame).map(String::as_str))
             .unwrap_or(&self.frame.chars.separator)
@@ -914,23 +965,24 @@ fn resolve_colors(
     overrides
 }
 
-/// The `[[line]]` tables as configured (SPEC § 4.1): which are spacers, and
-/// which spacers opted in to `blank`.
-fn resolve_lines(raw: &[RawLine], errors: &mut Vec<ConfigError>) -> Vec<LineCfg> {
+/// The `[[row]]` tables as configured (SPEC § 4.1, § 4.3): which are spacers,
+/// and which spacers opted in to `blank`. `key` is the array name the file
+/// used, so an error points at what was typed.
+fn resolve_rows(key: &str, raw: &[RawRow], errors: &mut Vec<ConfigError>) -> Vec<RowCfg> {
     raw.iter()
         .enumerate()
         .map(|(i, l)| {
-            // Only a line written empty is a spacer; a mistyped `modules` is
-            // an error and an empty row, which `hide_empty_lines` then drops
+            // Only a row written empty is a spacer; a mistyped `modules` is
+            // an error and an empty row, which `hide_empty_rows` then drops
             // like any other.
             let spacer = l.modules.is_empty() && l.right.is_empty() && !l.bad_list;
             if l.blank && !spacer {
                 errors.push(problem(
-                    &format!("line[{i}].blank"),
+                    &format!("{key}[{i}].blank"),
                     "only a spacer (modules = [] with no right) can be marked blank",
                 ));
             }
-            LineCfg {
+            RowCfg {
                 left: l.modules.clone(),
                 right: l.right.clone(),
                 separator: l.separator.clone(),
@@ -963,8 +1015,11 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let theme = Theme::from_palette(pal, &overrides);
 
     let frame = resolve_frame(raw.frame.as_ref(), preset, errors);
-    let mut lines: Vec<LineCfg> =
-        if raw.line.is_empty() { preset.lines() } else { resolve_lines(&raw.line, errors) };
+    let mut rows: Vec<RowCfg> = if raw.row.is_empty() {
+        preset.rows()
+    } else {
+        resolve_rows(raw.rows_key(), &raw.row, errors)
+    };
     let mut modules: BTreeMap<&'static str, ModuleCfg> = BTreeMap::new();
     for schema in schemas {
         let base = format!("modules.{}", schema.id);
@@ -987,9 +1042,9 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             });
         }
     }
-    // Preset lines are valid by construction; only explicit lines need checking.
-    if !raw.line.is_empty() {
-        check_line_ids(&mut lines, schemas, &texts, errors);
+    // Preset rows are valid by construction; only explicit rows need checking.
+    if !raw.row.is_empty() {
+        check_row_ids(raw.rows_key(), &mut rows, schemas, &texts, errors);
     }
 
     let stale_after = resolve_stale_after(raw.stale_after, errors);
@@ -1006,7 +1061,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
         padding: usize::from(raw.padding.unwrap_or(0)),
         align: raw.align.unwrap_or(false),
         right_justify: raw.right_justify.unwrap_or_default(),
-        hide_empty_lines: raw.hide_empty_lines.unwrap_or(true),
+        hide_empty_rows: raw.hide_empty_rows.unwrap_or(true),
         overflow: raw.overflow.unwrap_or_default(),
         ticker_step: resolve_step("ticker_step", raw.ticker_step, errors),
         // Plain text only: an escape sequence in the gap would be cut by the
@@ -1031,26 +1086,27 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             _ => DurationStyle::Compact,
         }),
         frame,
-        lines,
+        rows,
         modules,
         texts,
     }
 }
 
-/// Every id on a `[[line]]` is a registered module or a defined `text.<name>`;
+/// Every id on a `[[row]]` is a registered module or a defined `text.<name>`;
 /// an unknown one is reported and removed, so the resolved config (and
 /// `config show`) carries only ids that render.
-fn check_line_ids(
-    lines: &mut [LineCfg],
+fn check_row_ids(
+    key: &str,
+    rows: &mut [RowCfg],
     schemas: &[ModuleSchema],
     texts: &BTreeMap<String, ModuleCfg>,
     errors: &mut Vec<ConfigError>,
 ) {
-    for (i, line) in lines.iter_mut().enumerate() {
-        for (field, ids) in [("modules", &mut line.left), ("right", &mut line.right)] {
+    for (i, row) in rows.iter_mut().enumerate() {
+        for (field, ids) in [("modules", &mut row.left), ("right", &mut row.right)] {
             let mut j = 0_usize;
             ids.retain(|id| {
-                let path = format!("line[{i}].{field}[{j}]");
+                let path = format!("{key}[{i}].{field}[{j}]");
                 j = j.saturating_add(1);
                 let (known, message) = id.strip_prefix(crate::modules::text::PREFIX).map_or_else(
                     || {
@@ -1617,7 +1673,7 @@ mod tests {
         let (c, errs) = parse("", &schemas());
         assert_eq!(errs, Vec::new());
         assert_eq!(c.preset, TopPreset::Default);
-        assert_eq!(c.lines.len(), 4);
+        assert_eq!(c.rows.len(), 4);
         assert_eq!(c.frame.style, FrameStyle::Rounded);
         assert!(c.frame.fill);
         assert_eq!(c.modules.get("path").map(|m| m.int("depth")), Some(2));
@@ -1660,14 +1716,14 @@ mod tests {
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert!(errs[0].message.ends_with("expected one of end, start"), "{}", errs[0].message);
         assert_eq!(c.right_justify, RightJustify::End);
-        assert!(c.hide_empty_lines, "empty lines are hidden by default");
+        assert!(c.hide_empty_rows, "empty rows are hidden by default");
         let (c, errs) = parse(
-            "hide_empty_lines = false\n[[line]]\nmodules = []\n[[line]]\nright = [\"clock\"]\n[[line]]\nmodules = [\"path\"]\n",
+            "hide_empty_rows = false\n[[row]]\nmodules = []\n[[row]]\nright = [\"clock\"]\n[[row]]\nmodules = [\"path\"]\n",
             &schemas,
         );
         assert_eq!(errs, Vec::new());
-        assert!(!c.hide_empty_lines);
-        let spacers: Vec<bool> = c.lines.iter().map(|l| l.spacer).collect();
+        assert!(!c.hide_empty_rows);
+        let spacers: Vec<bool> = c.rows.iter().map(|l| l.spacer).collect();
         // A mistyped list is an error and an empty row, never a spacer
         // (whole-stack review: it rendered as a permanent blank rule).
         let (bad, errs) = parse(
@@ -1675,16 +1731,16 @@ mod tests {
             &schemas,
         );
         assert_eq!(errs.len(), 3, "{errs:?}");
-        assert_eq!(errs[0].path, "line[0].modules");
-        assert!(!bad.lines[0].spacer && bad.lines[0].left.is_empty());
-        assert!(bad.lines[1].spacer, "a [[line]] with no keys is a spacer");
-        assert!(!bad.lines[2].spacer, "a list of non-ids is a mistake, not a spacer");
+        assert_eq!(errs[0].path, "line[0].modules", "the error names the array the file used");
+        assert!(!bad.rows[0].spacer && bad.rows[0].left.is_empty());
+        assert!(bad.rows[1].spacer, "a [[line]] with no keys is a spacer");
+        assert!(!bad.rows[2].spacer, "a list of non-ids is a mistake, not a spacer");
         assert_eq!(
             spacers,
             vec![true, false, false],
             "only `modules = []` with no `right` is a spacer"
         );
-        assert!(Config::defaults(&schemas).lines.iter().all(|l| !l.spacer && !l.blank));
+        assert!(Config::defaults(&schemas).rows.iter().all(|l| !l.spacer && !l.blank));
         // `blank = true` is an opt-in for spacers only (SPEC § 4.1): on a
         // line with modules it is reported and ignored; a wrong type too.
         let (c, errs) = parse(
@@ -1695,9 +1751,48 @@ mod tests {
         let misuse = errs.iter().find(|e| e.path == "line[1].blank").expect("misuse reported");
         assert!(misuse.message.contains("only a spacer"), "{}", misuse.message);
         assert!(errs.iter().any(|e| e.path == "line[2].blank"), "wrong type reported: {errs:?}");
-        let blanks: Vec<bool> = c.lines.iter().map(|l| l.blank).collect();
+        let blanks: Vec<bool> = c.rows.iter().map(|l| l.blank).collect();
         assert_eq!(blanks, vec![true, false, false, false]);
-        assert!(c.lines.iter().all(|l| l.blank || l.spacer || !l.left.is_empty()));
+        assert!(c.rows.iter().all(|l| l.blank || l.spacer || !l.left.is_empty()));
+    }
+
+    /// `[[line]]` and `hide_empty_lines` are permanent aliases (SPEC § 4.3):
+    /// every config written before rows existed must resolve to exactly the
+    /// same thing, and a file that carries both array names is reported
+    /// rather than silently ordered.
+    #[test]
+    fn the_line_aliases_resolve_to_the_same_config_and_both_arrays_are_reported() {
+        let schemas = schemas();
+        let body = |key: &str, hide: &str| {
+            format!(
+                "{hide} = false\n[[{key}]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \" | \"\n[[{key}]]\nmodules = []\nblank = true\n"
+            )
+        };
+        let (rows, row_errs) = parse(&body("row", "hide_empty_rows"), &schemas);
+        let (lines, line_errs) = parse(&body("line", "hide_empty_lines"), &schemas);
+        assert_eq!(row_errs, Vec::new());
+        assert_eq!(line_errs, Vec::new());
+        assert_eq!(rows.rows, lines.rows, "the alias resolves to the same rows");
+        assert!(!rows.hide_empty_rows && !lines.hide_empty_rows);
+
+        // Two arrays of tables have no order between them, so a file uses one
+        // name: the alias is dropped and said so, never interleaved.
+        let (both, errs) =
+            parse("[[row]]\nmodules = [\"path\"]\n[[line]]\nmodules = [\"clock\"]\n", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "line");
+        assert!(errs[0].message.contains("not both"), "{}", errs[0].message);
+        assert_eq!(both.rows.len(), 1);
+        assert_eq!(both.rows[0].left, ["path"], "the [[row]] entries win");
+
+        // The new name wins whichever order the file writes the two switches
+        // in, and an error under a row points at the array the file used.
+        let (c, errs) = parse("hide_empty_lines = true\nhide_empty_rows = false\n", &schemas);
+        assert_eq!(errs, Vec::new());
+        assert!(!c.hide_empty_rows);
+        let (_, errs) = parse("[[row]]\nmodules = [\"nope\"]\n", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "row[0].modules[0]");
     }
 
     #[test]
@@ -1752,8 +1847,8 @@ format = "12h"
         assert_eq!(c.frame.style, FrameStyle::Double);
         assert!(!c.frame.fill);
         assert_eq!(c.frame.chars.separator, " | ");
-        assert_eq!(c.lines.len(), 1);
-        assert_eq!(c.separator(&c.lines[0]), "  ");
+        assert_eq!(c.rows.len(), 1);
+        assert_eq!(c.separator(&c.rows[0]), "  ");
         let path = c.modules.get("path").unwrap();
         assert_eq!(path.preset, Preset::Full);
         assert_eq!(path.int("depth"), 3);
@@ -1855,15 +1950,15 @@ x = 1
         // The valid keys are in effect…
         assert_eq!(c.frame.style, FrameStyle::Heavy);
         assert_eq!(c.frame.chars.separator, " ┃ ");
-        assert_eq!(c.lines.len(), 1);
-        assert_eq!(c.lines[0].left, vec!["path"], "the unknown id is reported and removed");
+        assert_eq!(c.rows.len(), 1);
+        assert_eq!(c.rows[0].left, vec!["path"], "the unknown id is reported and removed");
         assert_eq!(c.modules.get("clock").map(|m| m.str("format")), Some("24h"));
         // …and each bad one fell back to its own default.
         let defaults = Config::defaults(&schemas());
         assert_eq!(c.theme, defaults.theme, "unknown theme and bad colour → default palette");
         assert_eq!(c.durations, DurationStyle::Compact);
         assert_eq!(c.padding, 0);
-        assert_eq!(c.lines[0].right, Vec::<String>::new(), "bad right list → no right group");
+        assert_eq!(c.rows[0].right, Vec::<String>::new(), "bad right list → no right group");
         assert_eq!(c.modules.get("path").map(|m| m.int("depth")), Some(2));
         let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &schemas());
         assert!(errs.is_empty(), "payload-only modules may run every tick: {errs:?}");
@@ -1879,7 +1974,7 @@ x = 1
         let (c, errs) = parse("[[line]]\nmodules = [\"clock\", 3]\nright = \"x\"\n", &schemas());
         let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, vec!["line[0].modules[1]", "line[0].right"]);
-        assert_eq!(c.lines[0].left, vec!["clock"], "the good item stays");
+        assert_eq!(c.rows[0].left, vec!["clock"], "the good item stays");
         for (text, path) in [
             ("line = \"x\"", "line"),
             ("modules = 1", "modules"),
@@ -1891,7 +1986,7 @@ x = 1
             let (c, errs) = parse(text, &schemas());
             assert_eq!(errs.len(), 1, "{text}: {errs:?}");
             assert_eq!(errs[0].path, path, "{text}");
-            assert_eq!(c.lines.len(), 4, "{text}: the default lines stand in");
+            assert_eq!(c.rows.len(), 4, "{text}: the default lines stand in");
         }
         // An inline `line = [...]`, which nothing else in the suite used.
         // A non-table item keeps its place as a placeholder rather than being
@@ -1903,9 +1998,9 @@ x = 1
         // The placeholder holds the index and nothing else, so the default
         // `hide_empty_lines` drops it at render and the row it stands for
         // does not become a blank line.
-        assert_eq!(c.lines.len(), 2);
-        assert!(c.lines[0].left.is_empty() && c.lines[0].right.is_empty() && !c.lines[0].spacer);
-        assert_eq!(c.lines[1].left, vec!["clock"], "the good item stays");
+        assert_eq!(c.rows.len(), 2);
+        assert!(c.rows[0].left.is_empty() && c.rows[0].right.is_empty() && !c.rows[0].spacer);
+        assert_eq!(c.rows[1].left, vec!["clock"], "the good item stays");
     }
 
     #[test]
@@ -1992,7 +2087,7 @@ x = 1
         assert!((motd.float("step") - 1.0).abs() < f64::EPSILON, "bad step → default");
         assert_eq!(motd.str("justify"), "left", "bad justify → default");
         assert_eq!(motd.refresh, 0);
-        assert_eq!(c.lines[0].left, Vec::<String>::new(), "the unknown id is removed");
+        assert_eq!(c.rows[0].left, Vec::<String>::new(), "the unknown id is removed");
 
         // An explicit colors.text wins over the shorthand; text and gap are plain.
         let text = "[modules.text.x]\ntext = \"\\u001b[31mred\\u001b[0m\\tnote\"\ngap = \" \\u001b[5m·\\u001b[0m \"\ncolor = \"muted\"\n[modules.text.x.colors]\ntext = \"red\"\n";
@@ -2058,9 +2153,9 @@ x = 1
         assert!((c.frame.fill_step - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.frame.fill_direction, FillDirection::Left);
         assert_eq!(c.frame.separator_frames, vec![" │ ", " ┃ ", " ╎ "]);
-        assert_eq!(c.separator_at(&c.lines[0], 1), " ┃ ");
-        assert_eq!(c.separator_at(&c.lines[0], 7), " │ ", "out of range → static");
-        let line = LineCfg { separator: Some("--".into()), ..c.lines[0].clone() };
+        assert_eq!(c.separator_at(&c.rows[0], 1), " ┃ ");
+        assert_eq!(c.separator_at(&c.rows[0], 7), " │ ", "out of range → static");
+        let line = RowCfg { separator: Some("--".into()), ..c.rows[0].clone() };
         assert_eq!(c.separator_at(&line, 1), "--", "a per-line separator wins");
         // A two-cell glyph in the pattern, frames of unequal width, a bad
         // direction and a zero step: each reported under its path, each
@@ -2208,7 +2303,7 @@ x = 1
         let overlay = Overlay { preset: Some(TopPreset::Minimal), ..Default::default() };
         let (c, errs) = parse_with("[[line]]\nmodules = [3]\n", &schemas(), &overlay);
         assert_eq!(errs, Vec::new(), "the overlay replaces the lines, so their problems are moot");
-        assert_eq!(c.lines.len(), 1);
+        assert_eq!(c.rows.len(), 1);
     }
 
     #[test]
@@ -2230,7 +2325,7 @@ x = 1
         assert_eq!(c.frame.chars.pad, " ");
         assert_eq!(c.frame.chars.separator, " | ");
         assert_eq!(c.frame.chars.right_last, ">");
-        assert_eq!(c.lines[0].separator.as_deref(), Some("+"), "a DCS loses its payload too");
+        assert_eq!(c.rows[0].separator.as_deref(), Some("+"), "a DCS loses its payload too");
         let model = c.modules.get("model").unwrap();
         assert_eq!(model.label, "M");
         assert_eq!(model.prefix, "(");
@@ -2549,8 +2644,8 @@ x = 1
         let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, ["theme", "line[0].modules[0]", "line[0].modules[2]"], "{errs:?}");
         assert_eq!(c.theme_name, "garnish", "the palette in effect, not the typo");
-        assert_eq!(c.lines[0].left, ["clock"]);
-        assert_eq!(c.lines[0].right, ["path"]);
+        assert_eq!(c.rows[0].left, ["clock"]);
+        assert_eq!(c.rows[0].right, ["path"]);
         let shown = crate::docs::config_toml(&c, false);
         let (again, errs) = parse(&shown, &crate::modules::SCHEMAS);
         assert_eq!(errs, Vec::new(), "{shown}");
@@ -2591,7 +2686,7 @@ x = 1
         let (c, _) = parse("preset = \"minimal\"", &schemas());
         assert_eq!(c.frame.style, FrameStyle::None);
         assert!(c.frame.fill);
-        assert_eq!(c.lines.len(), 1);
+        assert_eq!(c.rows.len(), 1);
         // A fill glyph that is not one cell is reported (SPEC § 5) and the
         // style's own glyph stays, instead of a silent blank rule.
         let (wide, errs) = parse("[frame]\nfill_char = \"ab\"", &schemas());
@@ -2605,7 +2700,7 @@ x = 1
         assert_eq!(esc.frame.chars.fill, "-", "the escape is stripped before the width check");
         assert_eq!(errs, Vec::new());
         let (c, _) = parse("preset = \"compact\"", &schemas());
-        assert_eq!(c.lines.len(), 2);
+        assert_eq!(c.rows.len(), 2);
         assert_eq!(c.modules.get("path").unwrap().preset, Preset::Default);
         let (c, _) = parse("preset = \"full\"", &schemas());
         assert_eq!(c.modules.get("path").unwrap().preset, Preset::Full);

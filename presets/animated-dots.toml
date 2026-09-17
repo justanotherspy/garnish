@@ -18,11 +18,11 @@ style            = "rounded"
 fill_pattern     = "·  "
 separator_frames = [" │ ", " ┃ ", " ╎ "]
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 

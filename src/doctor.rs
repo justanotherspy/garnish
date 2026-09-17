@@ -272,7 +272,7 @@ fn placed(config: &Config, id: &str) -> bool {
         || config.modules.get(id).is_some_and(|m| m.enabled),
         |name| config.texts.get(name).is_some_and(|m| m.enabled),
     );
-    enabled && config.lines.iter().any(|l| l.left.iter().chain(&l.right).any(|m| m == id))
+    enabled && config.rows.iter().any(|l| l.left.iter().chain(&l.right).any(|m| m == id))
 }
 
 /// Whether the config shows something that changes every second, which is
@@ -345,12 +345,12 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
     let c = &loaded.config;
     let _ = writeln!(
         o,
-        "preset={} icons={} theme={} frame={} lines={}",
+        "preset={} icons={} theme={} frame={} rows={}",
         c.preset.name(),
         c.icons.name(),
         c.theme_name,
         c.frame.style.name(),
-        c.lines.len()
+        c.rows.len()
     );
     let _ = writeln!(o);
 }

@@ -103,17 +103,17 @@ falls back to the defaults wholesale, with the line of the syntax error;
 such a file is never overwritten either (`config init --force` refuses it
 and keeps a backup of any file it does replace).
 
-## 5. Compose your own lines
+## 5. Compose your own rows
 
-Every module is independent, so lines are just lists of module ids. `modules`
+Every module is independent, so rows are just lists of module ids. `modules`
 are left-aligned, `right` are right-aligned, and the frame rule fills the gap.
 
 ```toml
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d", "cost"]
 ```
@@ -132,7 +132,7 @@ sequences are stripped) in a box of fixed width, so it doubles as a
 fixed-width slot next to aligned columns. Longer text scrolls or is cut:
 
 ```toml
-[[line]]
+[[row]]
 modules = ["path", "text.motd"]
 right   = ["text.tag", "clock"]
 
@@ -162,16 +162,16 @@ countdown. Each module page under [modules/](modules/) lists its keys.
 
 Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is
-open, `vim` only with vim mode on. A line whose modules all have nothing to
-show is dropped too (outside a repository, a line of `branch sync pr` would
-otherwise be an empty framed row); set `hide_empty_lines = false` to keep
+open, `vim` only with vim mode on. A row whose modules all have nothing to
+show is dropped too (outside a repository, a row of `branch sync pr` would
+otherwise be an empty framed row); set `hide_empty_rows = false` to keep
 such rows, or write `modules = []` for a spacer row that always stays.
 Claude Code drops whitespace-only rows from the script's output, so with
 `style = "none"` and colour off (`color = "never"`, `NO_COLOR`) a spacer
-shows in `preview` only; add `blank = true` to that line to keep it on
+shows in `preview` only; add `blank = true` to that row to keep it on
 screen whatever the colour setting (the row then carries one invisible
 cell).
-With `stale_style = "hide"`, a line made only of cached modules can vanish
+With `stale_style = "hide"`, a row made only of cached modules can vanish
 while its values are overdue; `hide_when_empty = false` on one of them pins
 the row.
 
@@ -283,7 +283,7 @@ so the two stay in step; an explicit `animate` wins over the setting, and
 
 ## 8. Under the hood
 
-stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[line]]` renders
+stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[row]]` renders
 its modules → frame joins left/right groups and fills to the width of Claude
 Code's box (`$COLUMNS − 4 − padding`, § 7) → stdout.
 Cached modules read one small file each; when it is past its TTL the tick

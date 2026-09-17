@@ -15,11 +15,11 @@ theme  = "garnish"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["text.motd", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 

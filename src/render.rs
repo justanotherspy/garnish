@@ -247,7 +247,7 @@ pub fn render_lines_at(
     // Every line renders before any is composed: aligned columns need the
     // widths of all lines.
     let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
-        .lines
+        .rows
         .iter()
         .map(|line| {
             (
@@ -283,17 +283,17 @@ pub fn render_lines_at(
             }
         }
     }
-    // A line whose modules all rendered nothing is dropped unless it is an
-    // intentional spacer or `hide_empty_lines = false`; the caps follow the
+    // A row whose modules all rendered nothing is dropped unless it is an
+    // intentional spacer or `hide_empty_rows = false`; the caps follow the
     // survivors (SPEC § 4.1).
     let kept: Vec<_> = config
-        .lines
+        .rows
         .iter()
         .zip(lefts.iter().zip(rights.iter()))
         .map(|(line, (left, right))| (line, left, right))
         .filter(|(line, left, right)| {
             let empty = left.is_empty() && right.is_empty();
-            let hidden = config.hide_empty_lines && !line.spacer && empty;
+            let hidden = config.hide_empty_rows && !line.spacer && empty;
             !hidden
         })
         .collect();
@@ -606,7 +606,7 @@ mod tests {
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
         let out = render_loaded(&payload, &loaded, Some(160), false, false);
         let plain = render_plain(&payload, &loaded, Some(160));
-        assert_eq!(plain.lines().count(), loaded.config.lines.len(), "{plain}");
+        assert_eq!(plain.lines().count(), loaded.config.rows.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
         assert!(plain.contains("projects/demo") && plain.contains("agent"), "{plain}");
         // The only escapes are the painter's own SGR: no OSC 8 for a bad

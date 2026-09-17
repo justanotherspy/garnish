@@ -44,7 +44,7 @@ free-text "describe what you want" at any point and map it onto the keys.
 | A window's reset as time left, or the clock time it resets at? | `reset = "countdown" \| "absolute" \| "both"` on `limit5h`, `limit7d`, `spend` | `countdown` |
 
 If a gallery preset matches the answers (`garnish presets`), start from it;
-otherwise start from a built-in preset and add `[[line]]` blocks.
+otherwise start from a built-in preset and add `[[row]]` blocks.
 
 ## 3. Draft, preview, validate, then write
 

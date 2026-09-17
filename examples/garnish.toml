@@ -21,8 +21,8 @@ padding = 0
 align = false
 # Where a padded right-group module's text sits: end (hugs the cap) | start (follows the separator)
 right_justify = "end"
-# Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).
-hide_empty_lines = true
+# Drop a row whose modules all rendered nothing (a `modules = []` spacer is kept).
+hide_empty_rows = true
 # A left group wider than its budget: truncate (cut with …) | ticker (scroll it)
 overflow = "truncate"
 # Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start
@@ -66,17 +66,17 @@ fill_direction = "right"
 separator_frames = []
 separator_step = 1
 
-# Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.
-[[line]]
+# Rows: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right = ["session_name", "agent"]
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "style"]
 right = ["vim"]
-[[line]]
+[[row]]
 modules = ["limit5h", "limit7d", "spend", "cost"]
 right = ["lines"]
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right = ["clock"]
 

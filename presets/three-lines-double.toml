@@ -13,15 +13,15 @@ durations = "fixed"
 [frame]
 style = "double"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["lines", "clock"]
 
