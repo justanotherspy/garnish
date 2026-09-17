@@ -134,5 +134,40 @@ fn tick_in_process(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, parse_payload, resolve_config, render_modules, tick_in_process);
+/// The layout shapes of SPEC § 4.3 against the same warm tick: columns are
+/// arithmetic over the segments the modules already rendered, so the cost of
+/// a shape is the cost of the cells it draws, not of anything new being read.
+fn tick_in_process_layout(c: &mut Criterion) {
+    let (payload, _seeded) = repo_payload_and_cache();
+    let clock = Clock { git: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
+    let cases = [
+        (
+            "columns",
+            "[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n[[row.col]]\nmodules = [\"limit5h\"]\n[[row.col]]\nmodules = [\"session\"]\n[[row.col]]\nmodules = [\"clock\"]\n",
+        ),
+        (
+            "boxes",
+            "[box.repo]\ntitle = \"Repository\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"branch\"]\nright = [\"clock\"]\n[[row]]\nbox = \"repo\"\nmodules = [\"model\", \"context\"]\n[[row]]\nbox = true\nmodules = [\"limit5h\", \"cost\"]\n",
+        ),
+        (
+            "dashboard",
+            "[frame]\nstyle = \"none\"\n[box.repo]\nstyle = \"double\"\ntitle = \"Repository\"\n[[row]]\ngap = 2\n[[row.col]]\nbox = \"repo\"\n[[row.col.row]]\nmodules = [\"path\", \"branch\"]\n[[row.col.row]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\njustify = \"center\"\n[[row.col.row]]\nmodules = [\"clock\"]\n[[row.col]]\njustify = \"center\"\n[[row.col.row]]\nbox = true\nmodules = [\"context\"]\n[[row.col.row]]\nbox = true\nmodules = [\"limit5h\"]\n[[row.col.row]]\nbox = true\nmodules = [\"cost\"]\n",
+        ),
+    ];
+    for (name, text) in cases {
+        let (cfg, _) = config::parse(text, &SCHEMAS);
+        c.bench_function(&format!("tick_in_process_{name}"), |b| {
+            b.iter(|| render_lines_at(black_box(&payload), &cfg, Some(120), &clock));
+        });
+    }
+}
+
+criterion_group!(
+    benches,
+    parse_payload,
+    resolve_config,
+    render_modules,
+    tick_in_process,
+    tick_in_process_layout
+);
 criterion_main!(benches);

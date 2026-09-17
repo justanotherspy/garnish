@@ -66,6 +66,14 @@ impl Line {
         self.pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect()
     }
 
+    /// [`Self::segments`] for a caller that owns the line: the tick paints
+    /// each line once and drops it, and copying every segment to do that was
+    /// a measurable part of the render.
+    #[must_use]
+    pub fn into_segments(self) -> Vec<Segment> {
+        self.pieces.into_iter().flat_map(|p| p.segs).collect()
+    }
+
     /// The line's width in cells.
     #[must_use]
     pub fn width(&self) -> usize {
@@ -131,11 +139,14 @@ pub struct Col<'a> {
 #[derive(Debug, Clone)]
 pub enum Content<'a> {
     /// `modules` and `right`, one entry per module that rendered something.
+    ///
+    /// Borrowed from the render, which holds them for the whole tick: the
+    /// layout only measures and copies what it draws.
     Groups {
         /// The left-anchored modules.
-        left: Vec<Vec<Segment>>,
+        left: &'a [Vec<Segment>],
         /// The right-anchored modules.
-        right: Vec<Vec<Segment>>,
+        right: &'a [Vec<Segment>],
     },
     /// `[[row.col.row]]`: the column is a stack of rows.
     Stack(Vec<Row<'a>>),
@@ -571,7 +582,7 @@ impl Layout<'_> {
         match &col.content {
             Content::Groups { left, right } => {
                 let sep = display_width(row.separator);
-                let join = |g: &Vec<Vec<Segment>>| {
+                let join = |g: &[Vec<Segment>]| {
                     let text: usize = g.iter().map(|m| segments_width(m)).sum();
                     text.saturating_add(sep.saturating_mul(g.len().saturating_sub(1)))
                 };
@@ -731,11 +742,15 @@ impl Layout<'_> {
     /// Cut or scroll a group that does not fit its budget (SPEC § 4.1): the
     /// window advances with the tick's clock, so a cancelled tick loses
     /// nothing; with animations off there is no ticker and the group is cut.
+    ///
+    /// A group that fits is handed back untouched: measuring it costs a sum,
+    /// and the copy is made only when something is actually cut.
     fn fit_group(&self, pieces: Vec<Piece>, budget: usize) -> Vec<Piece> {
-        let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
-        if !self.truncate || segments_width(&segs) <= budget {
+        let width: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
+        if !self.truncate || width <= budget {
             return pieces;
         }
+        let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
         let segs = self.ticker.as_ref().map_or_else(
             || truncate(&segs, budget, self.ellipsis),
             |ticker| {
@@ -1368,13 +1383,14 @@ mod tests {
             let groups = |segs: &[Segment]| {
                 if segs.is_empty() { Vec::new() } else { vec![segs.to_vec()] }
             };
+            let (left, right) = (groups(left), groups(right));
             let row = Row {
                 cols: vec![Col {
                     width: Width::Fr(1),
                     justify: Justify::Left,
                     valign: VAlign::Top,
                     boxed: None,
-                    content: Content::Groups { left: groups(left), right: groups(right) },
+                    content: Content::Groups { left: &left, right: &right },
                 }],
                 gap: 1,
                 separator,
@@ -1540,16 +1556,22 @@ mod tests {
     }
 
     /// A column of `modules` alone, for the layout tests below.
+    ///
+    /// The layout borrows the rendered groups from the render, which holds
+    /// them for the whole tick; a test has no such owner, so the one module
+    /// is leaked. It is a handful of segments per test.
     fn col(width: Width, text: &str) -> Col<'static> {
+        let left: &'static [Vec<Segment>] = if text.is_empty() {
+            &[]
+        } else {
+            Box::leak(Box::new(vec![vec![Segment::plain(text)]]))
+        };
         Col {
             width,
             justify: Justify::Left,
             valign: VAlign::Top,
             boxed: None,
-            content: Content::Groups {
-                left: if text.is_empty() { Vec::new() } else { vec![vec![Segment::plain(text)]] },
-                right: Vec::new(),
-            },
+            content: Content::Groups { left, right: &[] },
         }
     }
 

@@ -198,9 +198,9 @@ pub fn render_lines_at(
     clock: &Clock,
 ) -> Vec<Vec<Segment>> {
     render_rows_at(payload, config, columns, clock)
-        .iter()
+        .into_iter()
         .flatten()
-        .map(crate::layout::Line::segments)
+        .map(crate::layout::Line::into_segments)
         .collect()
 }
 
@@ -337,7 +337,7 @@ impl<'a> ColRender<'a> {
 
     fn to_layout(&'a self) -> crate::layout::Col<'a> {
         let content = if self.rows.is_empty() {
-            crate::layout::Content::Groups { left: self.left.clone(), right: self.right.clone() }
+            crate::layout::Content::Groups { left: &self.left, right: &self.right }
         } else {
             crate::layout::Content::Stack(self.rows.iter().map(RowRender::to_layout).collect())
         };
