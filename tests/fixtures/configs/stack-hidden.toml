@@ -1,0 +1,29 @@
+# fixture: subscription-full
+# columns: 64
+# now: 1738425600
+# icons: unicode
+# `cost` renders nothing on a subscription payload and `vim` nothing with vim
+# mode off (SPEC § 3), so `hide_empty_rows` drops the inner row of only those
+# and empties the second column. The column keeps its share and renders empty
+# lines, so its sibling does not move (SPEC § 4.3), and the bare row of the
+# same two modules goes altogether.
+
+[[row]]
+gap = 2
+[[row.col]]
+[[row.col.row]]
+modules = ["model", "effort"]
+[[row.col.row]]
+modules = ["cost", "vim"]
+[[row.col.row]]
+modules = ["clock"]
+[[row.col]]
+[[row.col.row]]
+modules = ["cost"]
+
+[[row]]
+modules = ["cost", "vim"]
+
+[[row]]
+modules = ["session"]
+right   = ["api"]

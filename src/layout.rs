@@ -543,15 +543,24 @@ impl Layout<'_> {
         // Left to right, gap then column: a column whose gap plus one cell
         // does not fit renders nothing, and so does everything to its right.
         let mut left = width;
+        let mut dropped = 0_usize;
         for (j, take) in desired.iter_mut().enumerate() {
             let cost = if j > 0 { row.gap } else { 0 };
             if left < cost.saturating_add(1) {
                 *take = 0;
+                dropped = dropped.saturating_add(1);
                 continue;
             }
             left = left.saturating_sub(cost);
             *take = (*take).min(left);
             left = left.saturating_sub(*take);
+        }
+        // A dropped column is invisible on screen, so the one place it can
+        // be explained is the debug log (SPEC § 4.3).
+        if dropped > 0 {
+            crate::debug::log(&format!(
+                "layout: {dropped} of {n} columns dropped, {width} cells is too narrow for them"
+            ));
         }
         desired
     }

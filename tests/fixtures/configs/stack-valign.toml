@@ -1,0 +1,25 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# A three-row stack beside three one-line columns, each placed by its own
+# `valign` (SPEC § 4.3): top, centre and bottom of the row's three lines.
+
+[[row]]
+gap = 2
+[[row.col]]
+[[row.col.row]]
+modules = ["model"]
+[[row.col.row]]
+modules = ["effort"]
+[[row.col.row]]
+modules = ["context"]
+[[row.col]]
+valign = "top"
+modules = ["session"]
+[[row.col]]
+valign = "center"
+modules = ["api"]
+[[row.col]]
+valign = "bottom"
+modules = ["clock"]

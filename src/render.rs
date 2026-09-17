@@ -336,7 +336,11 @@ impl<'a> ColRender<'a> {
     }
 
     fn to_layout(&'a self) -> crate::layout::Col<'a> {
-        let content = if self.rows.is_empty() {
+        // A stack stays a stack once `hide_empty_rows` has emptied it, so
+        // its share renders as the empty lines of a stack (spaces) rather
+        // than as an empty flex column (a rule): the two look different, and
+        // the column's neighbours have not changed (SPEC § 4.3).
+        let content = if self.cfg.rows.is_empty() {
             crate::layout::Content::Groups { left: &self.left, right: &self.right }
         } else {
             crate::layout::Content::Stack(self.rows.iter().map(RowRender::to_layout).collect())

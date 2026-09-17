@@ -1,0 +1,22 @@
+# fixture: subscription-full
+# columns: 70
+# now: 1738425600,1738425603
+# icons: unicode
+# Each column scrolls in its own window (SPEC § 4.3): the wide first column
+# is a ticker, while the fixed-width clock beside it holds still. Two instants
+# apart show the window advancing one cell per tick without moving anything
+# else on the row.
+overflow = "ticker"
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "model", "effort", "context", "limit5h", "session"]
+[[row.col]]
+width = 12
+justify = "right"
+modules = ["clock"]
+
+[[row]]
+modules = ["api"]
+right   = ["cache"]
