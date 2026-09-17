@@ -178,10 +178,6 @@ Open items only; closed ones are in the work log.
 - [ ] First release through the pipeline (`v0.3.0`): needs the `release` environment (required reviewer Daniel) on the repo and the merged `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first release" note from the tap's README, and the "from the first tagged release" qualifier from README § Install and guide § 1
 - [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's fullscreen and classic renderers (`/tui`) to confirm the § 2.1 arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt; the classic frame scrolling), then drop "read, not watched" from SPEC § 2.1 and `CLAUDE.md`
 - [ ] Whether `preview <dir>`'s heading should honour `--color never` (SPEC § 7 does not say; the test compares the plain heading)
-- [ ] One pull request against `main` carrying both fixes the review workflow needs. It has to go in alone and first: the action refuses to run at all on a branch whose copy of the workflow differs from `main`'s (CLAUDE.md § Claude review).
-  1. `ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head` on the checkout step. Three of the four triggers are comment events, whose `GITHUB_REF` is the default branch, so a review asked for with `@claude` reads `main`'s tree while reasoning about the pull request's diff.
-  2. Stop the review delegating. On PR #66 it spent 44 of its 50 turns and $2.43 and posted **nothing**: no inline comments, no summary, its own checklist left four of six dimensions at "delegated, running". The run reports `"subtype": "success"` with `permission_denials_count: 4`, and the `--allowedTools` list has no `Task`, so the four delegations were the four denials. One line in the prompt ("Review the diff yourself; do not delegate to subagents") is the cheap fix and keeps the turn budget predictable. Adding `Task` to the allowlist instead would let it fan out, but a subagent's turns come out of the same 50, so the cap would want raising with it
-
 - [ ] How far to go in refusing a hostile `.git/config`. The audit's review found that refusing a `-` remote closed one door and left others: the same file sets `core.fsmonitor` (a command `git status` runs) and `remote.<name>.uploadpack` (a command a fetch runs), and both are now overridden on the command line, which costs nothing real. Three remain, and each is a setting a user may genuinely want honoured in their own repositories: `core.sshCommand`, `core.gitProxy`, and an `ext::` remote URL. All three need `fetch_interval > 0`, which is opt-in and defaults to 0, so nothing reaches them by default. The options are to clear them too (safe against an unpacked archive, breaks a custom ssh command or proxy), to refuse to fetch at all when the repository is not owned by the user (git's own `safe.directory` answer), or to leave them and say so in the `fetch_interval` docs
 
 **Parked designs** (decided, not to be reopened without a reason)
@@ -618,3 +614,16 @@ was built, what the reviews found and what was decided, not how.
   `CLAUDE.md` tripwire that covered one of the four edits it claimed. The
   tripwire now writes every common option into a config and requires it
   back out, which fails if any of the four is missed. 194 → 227 tests.
+
+- **2026-09-17 (the review workflow itself)** — PR #66 merged, and the two
+  things that stopped its own Claude review working went in after it, alone,
+  because the action refuses to run on a branch whose copy of the workflow
+  differs from `main`'s. Asked for the label, the review fanned out to four
+  subagents, had all four refused (`Task` was not in the allowlist), and
+  finished reporting success after 44 of its 50 turns and $2.43 having
+  posted nothing at all. Daniel chose to allow the fanout rather than forbid
+  it, so `Task` is allowed and the cap is 100, since a subagent spends from
+  the same budget; the prompt now tells the review to use one subagent per
+  dimension on a large diff and never to end without its summary. The
+  checkout also names the pull request's head, which it had to stop doing
+  when the fix was pulled out of #66 to let that branch be reviewed at all.
