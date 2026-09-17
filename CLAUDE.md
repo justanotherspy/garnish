@@ -437,10 +437,11 @@ chosen crate.
 
 ## Architecture in one breath
 
-stdin JSON → `Payload` → `Config` (TOML + presets) → for each `[[line]]`, each
-module id renders `Vec<Segment>` from the payload or from its cache file → the
-frame joins left/right groups and fills to `$COLUMNS − 4 − padding` (the
-width of Claude Code's box, `Config::width`) → stdout. A cached
+stdin JSON → `Payload` → `Config` (TOML + presets) → for each `[[row]]`, each
+module id renders `Vec<Segment>` from the payload or from its cache file →
+`layout` puts the row's columns on terminal lines and fills to
+`$COLUMNS − 4 − padding` (the width of Claude Code's box, `Config::width`)
+→ stdout. A cached
 module past its TTL spawns a detached `garnish refresh` worker (own process
 group, lock file) and keeps showing the last value; only once it is
 `stale_after` TTLs overdue does it render dimmed with `⟳`. **No child process
@@ -479,6 +480,22 @@ on a warm tick.** See `SPEC.md` for the contract and `docs/` for user docs.
   and fails on one that no schema defined in that file declares, so a typo
   in a key cannot render silently as an empty icon. A new helper that
   takes a key by name has to be added to that scan's pattern list.
+- **`frame.rs` owns the characters, `layout.rs` owns where they go.** A
+  row is columns (SPEC § 4.3), so there is one composer for every shape:
+  `Layout::lines` → blocks (a box's run of rows, or one row) → `row_body`
+  (share the width, compose each column, join with gaps) → `wrap_frame` or
+  the box's edges. A plain row is one `1fr` column and goes through the
+  same path, which is why the whole golden suite is the regression test for
+  a change in there: if a layout change is meant to be invisible, *every*
+  golden must come out byte-identical, and if it is not, exactly the
+  goldens of the shape it touches must change. Adding a layout key means:
+  `RowCfg`/`ColCfg` → `resolve_row`/`resolve_col` (with its TOML path) →
+  `docs::write_rows` → `layout` → a config-golden fixture → `make docs`.
+  Two things the layout must never do, because both showed up as bugs: drop
+  a piece because its text is empty (a one-cell text module is pad and a
+  link, and the link is the point), and copy the rendered groups (it
+  borrows them from the render, which holds them for the tick; the copies
+  cost a fifth of the in-process tick).
 - **A module never spells a shared rule itself.** The leading glyph is
   `modules::lead`, a trailing one `modules::badge`, a glyph built into a
   longer string `modules::glyph_prefix`, a name cut `util::cut_name`, the
