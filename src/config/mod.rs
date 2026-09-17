@@ -1657,27 +1657,53 @@ fn check_box_ref(
 /// back after another box, or after a bare row, is reported and the second
 /// run unboxed, since two boxes cannot share a name.
 fn check_box_runs(key: &str, rows: &mut [RowCfg], errors: &mut Vec<ConfigError>) {
-    let named = |row: &RowCfg| row.boxed.as_ref().and_then(BoxRef::name).map(str::to_owned);
-    let mut seen: Vec<String> = Vec::new();
+    check_box_run(key, rows, &mut Vec::new(), errors);
+}
+
+/// One list of rows. A stack is a run of its own, so a name inside one is
+/// never adjacent to a name outside it, but `seen` spans the whole tree: a
+/// box is one run in the config, not one run per list.
+fn check_box_run(
+    key: &str,
+    rows: &mut [RowCfg],
+    seen: &mut Vec<String>,
+    errors: &mut Vec<ConfigError>,
+) {
+    let name_of = |boxed: Option<&BoxRef>| boxed.and_then(BoxRef::name).map(str::to_owned);
+    let reused = |name: &str, what: &str| {
+        format!(
+            "box {name:?} is already drawn around earlier rows; \
+             a box is one run of adjacent rows, so this {what} is not boxed"
+        )
+    };
     let mut previous: Option<String> = None;
     for (i, row) in rows.iter_mut().enumerate() {
-        if let Some(name) = named(row)
+        let path = format!("{key}[{i}]");
+        if let Some(name) = name_of(row.boxed.as_ref())
             && previous.as_ref() != Some(&name)
         {
             if seen.contains(&name) {
-                errors.push(problem(
-                    &format!("{key}[{i}].box"),
-                    &format!(
-                        "box {name:?} is already drawn around earlier rows; \
-                         a box is one run of adjacent rows, so this row is not boxed"
-                    ),
-                ));
+                errors.push(problem(&format!("{path}.box"), &reused(&name, "row")));
                 row.boxed = None;
             } else {
                 seen.push(name);
             }
         }
-        previous = named(row);
+        previous = name_of(row.boxed.as_ref());
+        for (j, col) in row.cols.iter_mut().enumerate() {
+            let path = format!("{path}.col[{j}]");
+            if let Some(name) = name_of(col.boxed.as_ref()) {
+                if seen.contains(&name) {
+                    errors.push(problem(&format!("{path}.box"), &reused(&name, "column")));
+                    col.boxed = None;
+                } else {
+                    seen.push(name);
+                }
+            }
+            if !col.rows.is_empty() {
+                check_box_run(&format!("{path}.row"), &mut col.rows, seen, errors);
+            }
+        }
     }
 }
 
@@ -2815,6 +2841,60 @@ mod tests {
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].path, "box.a.style");
         assert_eq!(c.boxes["a"].style, Some(FrameStyle::Rounded));
+    }
+
+    /// SPEC § 4.3: a box is one run of adjacent rows, wherever those rows
+    /// are. A run inside a stack is a run like any other, and a name that
+    /// comes back anywhere else in the tree is reported and left unboxed.
+    #[test]
+    fn a_box_is_one_run_of_adjacent_rows_anywhere_in_the_tree() {
+        let schemas = schemas();
+        let inner = |body: &str| format!("[box.a]\ntitle = \"A\"\n[[row]]\n[[row.col]]\n{body}");
+        let stacked = |boxed: &str, module: &str| {
+            format!("[[row.col.row]]\n{boxed}modules = [\"{module}\"]\n")
+        };
+
+        // Two adjacent inner rows naming the same box are one run.
+        let body =
+            format!("{}{}", stacked("box = \"a\"\n", "path"), stacked("box = \"a\"\n", "clock"));
+        let (c, errs) = parse(&inner(&body), &schemas);
+        assert_eq!(errs, Vec::new());
+        let rows = &c.rows[0].cols[0].rows;
+        assert!(rows.iter().all(|r| r.boxed.is_some()), "both rows keep the box");
+
+        // A bare row between them makes the second a new run of a name
+        // already drawn, which is reported and unboxed.
+        let body = format!(
+            "{}{}{}",
+            stacked("box = \"a\"\n", "path"),
+            stacked("", "path"),
+            stacked("box = \"a\"\n", "clock")
+        );
+        let (c, errs) = parse(&inner(&body), &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "row[0].col[0].row[2].box");
+        let rows = &c.rows[0].cols[0].rows;
+        assert!(rows[0].boxed.is_some() && rows[2].boxed.is_none());
+
+        // The run spans the whole tree: a name drawn at the top level and
+        // again inside a stack is two boxes with one name.
+        let text = format!(
+            "[box.a]\ntitle = \"A\"\n[[row]]\nbox = \"a\"\nmodules = [\"path\"]\n[[row]]\n[[row.col]]\n{}",
+            stacked("box = \"a\"\n", "clock")
+        );
+        let (c, errs) = parse(&text, &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "row[1].col[0].row[0].box");
+        assert!(c.rows[0].boxed.is_some(), "the first run keeps it");
+        assert!(c.rows[1].cols[0].rows[0].boxed.is_none());
+
+        // A column's own box takes the name too, so a row cannot take it back.
+        let text = "[box.a]\ntitle = \"A\"\n[[row]]\n[[row.col]]\nbox = \"a\"\n\
+                    [[row.col.row]]\nmodules = [\"path\"]\n[[row]]\nbox = \"a\"\nmodules = [\"clock\"]\n";
+        let (c, errs) = parse(text, &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "row[1].box");
+        assert!(c.rows[0].cols[0].boxed.is_some() && c.rows[1].boxed.is_none());
     }
 
     /// `[[line]]` and `hide_empty_lines` are permanent aliases (SPEC § 4.3):

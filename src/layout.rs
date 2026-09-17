@@ -398,18 +398,21 @@ impl Layout<'_> {
     fn col_height(&self, col: &Col<'_>) -> usize {
         let content = match &col.content {
             Content::Groups { .. } => 1,
-            Content::Stack(rows) => rows.iter().map(|r| self.boxed_height(r)).sum::<usize>().max(1),
+            Content::Stack(rows) => {
+                blocks(rows).iter().map(|b| self.block_height(b)).sum::<usize>().max(1)
+            }
         };
         // A boxed column is its content plus the two edge lines, so a boxed
         // one-line column is a three-line box.
         if col.boxed.is_some() { content.saturating_add(2) } else { content }
     }
 
-    /// An inner row's height, its own box included. A top-level row's box is
-    /// drawn by its block, which adds the two lines there instead.
-    fn boxed_height(&self, row: &Row<'_>) -> usize {
-        let height = self.row_height(row);
-        if row.boxed.is_some() { height.saturating_add(2) } else { height }
+    /// One block of a stack: its rows, plus the two edge lines when they are
+    /// inside a box. A top-level row's box is drawn by `boxed_block`, which
+    /// adds the two lines there instead.
+    fn block_height(&self, block: &Block<'_, '_>) -> usize {
+        let rows: usize = block.rows.iter().map(|(_, r)| self.row_height(r)).sum();
+        if block.boxed.is_some() { rows.saturating_add(2) } else { rows }
     }
 
     /// The pad inside a box: the frame's, or one cell when the frame has
@@ -691,9 +694,10 @@ impl Layout<'_> {
                 let group = Group { left, right, justify: col.justify, separator: row.separator };
                 vec![self.compose_group(&group, width, fill, fit)]
             }
-            Content::Stack(rows) => {
-                rows.iter().flat_map(|inner| self.stack_row(inner, width, fill, fit)).collect()
-            }
+            Content::Stack(rows) => blocks(rows)
+                .iter()
+                .flat_map(|block| self.stack_block(block, width, fill, fit))
+                .collect(),
         };
         // A padding line is the column's cells as spaces, whatever the fill
         // mode: they place the columns to its right, and a packed row drops
@@ -715,39 +719,57 @@ impl Layout<'_> {
         out
     }
 
-    /// One row of a stack: its own box around it when it has one, else its
-    /// line with its title set into it.
-    fn stack_row(&self, inner: &Row<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Vec<Draft>> {
-        let height = self.row_height(inner);
-        let Some(boxed) = inner.boxed else {
-            let mut lines = self.row_body(inner, width, height, fill, fit);
-            // An inner row's title goes into its own first line.
-            if let (Some(title), Some(first)) = (inner.title, lines.first_mut()) {
-                self.place_title(first, title, fill);
-            }
-            // A blank inner row carries the cell that keeps its line on
-            // screen (SPEC § 4.1): the outer row cannot add it for one of
-            // its columns.
-            if inner.blank {
-                for line in &mut lines {
-                    mark_blank(line);
-                }
-            }
-            return lines;
+    /// One block of a stack: the rows of one box drawn inside it, or a bare
+    /// row's own line. Adjacent inner rows naming the same box are one box
+    /// here exactly as they are at the top level (SPEC § 4.3).
+    fn stack_block(
+        &self,
+        block: &Block<'_, '_>,
+        width: usize,
+        fill: Fill,
+        fit: Fit,
+    ) -> Vec<Vec<Draft>> {
+        let Some(boxed) = block.boxed else {
+            return block
+                .rows
+                .iter()
+                .flat_map(|(_, inner)| self.stack_row(inner, width, fill, fit))
+                .collect();
         };
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
         let Some((interior, pad)) = self.box_interior(&chars, width) else {
-            return (0..height.saturating_add(2))
+            return (0..self.block_height(block))
                 .map(|_| vec![Draft::Space(width, Elem::Pad)])
                 .collect();
         };
-        let body = self.row_body(inner, interior, height, Fill::from_box(&cfg), fit);
-        // `box = true` on a row is the one way to title a one-row box.
-        let title = cfg.title.as_ref().or(inner.title);
+        // `box = true` on a row is the one way to title a one-row box, so a
+        // block's first row stands in when the box has no title of its own.
+        let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
         let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
-        lines.extend(body.into_iter().map(|d| self.side_drafts(d, &chars, &cfg, pad)));
+        for (_, inner) in &block.rows {
+            let body =
+                self.row_body(inner, interior, self.row_height(inner), Fill::from_box(&cfg), fit);
+            lines.extend(body.into_iter().map(|d| self.side_drafts(d, &chars, &cfg, pad)));
+        }
         lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
+        lines
+    }
+
+    /// One bare row of a stack: its line with its title set into it.
+    fn stack_row(&self, inner: &Row<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Vec<Draft>> {
+        let mut lines = self.row_body(inner, width, self.row_height(inner), fill, fit);
+        // An inner row's title goes into its own first line.
+        if let (Some(title), Some(first)) = (inner.title, lines.first_mut()) {
+            self.place_title(first, title, fill);
+        }
+        // A blank inner row carries the cell that keeps its line on screen
+        // (SPEC § 4.1): the outer row cannot add it for one of its columns.
+        if inner.blank {
+            for line in &mut lines {
+                mark_blank(line);
+            }
+        }
         lines
     }
 }
