@@ -1811,6 +1811,44 @@ mod tests {
         }
     }
 
+    /// A boxed column's edges land on the column's own cells. The line's
+    /// width alone cannot see this: a box drawn one cell too narrow is
+    /// absorbed by the row's fill and the line is still exactly the box
+    /// width, so the placement map is what pins the interior.
+    #[test]
+    fn a_boxed_columns_edges_land_on_the_columns_own_cells() {
+        for width in [40_usize, 60, 101] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let boxed = |text| Col { boxed: Some(&BoxRef::Anon), ..col(Width::Fr(1), text) };
+            let r = row(vec![boxed("one"), boxed("two")], 2);
+            let inner = l.inner_width(&r, 0, l.row_height(&r));
+            let lines: Vec<Line> =
+                l.lines(std::slice::from_ref(&r)).into_iter().flatten().collect();
+            let edges = |line: &Line| -> Vec<Range<usize>> {
+                line.spans()
+                    .into_iter()
+                    .filter(|(elem, _)| *elem == Elem::BoxEdge)
+                    .map(|(_, range)| range)
+                    .collect()
+            };
+            let show = |line: &Line| Painter::PLAIN.paint(&line.segments());
+            let top = lines.first().map(edges).unwrap_or_default();
+            let text = lines.iter().map(show).collect::<Vec<_>>().join("\n");
+            assert_eq!(top.len(), 4, "two corners per box:\n{text}");
+            // The sides of the interior lines stand in the corners' cells: a
+            // box whose interior is one cell short still has its corners in
+            // the right place, and the row's fill hides the difference.
+            for line in &lines {
+                assert_eq!(edges(line), top, "the edges move:\n{text}");
+            }
+            let (first, second) = (top[1].end - top[0].start, top[3].end - top[2].start);
+            assert_eq!(top[2].start - top[1].end, 2, "the row's gap:\n{text}");
+            assert!(first.abs_diff(second) <= 1, "{first} and {second}:\n{text}");
+            assert_eq!(first + 2 + second, inner, "the boxes fill the row:\n{text}");
+        }
+    }
+
     /// SPEC § 4.3: `truncate = false` lets the last column's content run
     /// past the box; every other column is still cut to its share, or it
     /// would spill into its neighbour and move the whole row.
