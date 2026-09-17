@@ -249,12 +249,7 @@ pub fn render_lines_at(
     let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
         .rows
         .iter()
-        .map(|line| {
-            (
-                render_group(&ctx, config, &line.left, stale, &layout.ellipsis),
-                render_group(&ctx, config, &line.right, stale, &layout.ellipsis),
-            )
-        })
+        .map(|row| render_row_groups(&ctx, config, row, stale, &layout.ellipsis))
         .unzip();
     if config.align {
         if config.frame.fill {
@@ -410,6 +405,27 @@ fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool, pad_left: b
             }
         }
     }
+}
+
+/// The two groups of one row.
+///
+/// Until the column layout lands, a row renders as its columns' groups in
+/// order, which is exactly the one-column form every config has today.
+type Groups = (Vec<Vec<Segment>>, Vec<Vec<Segment>>);
+fn render_row_groups(
+    ctx: &Ctx<'_>,
+    config: &Config,
+    row: &config::RowCfg,
+    stale: (&str, &str),
+    ellipsis: &str,
+) -> Groups {
+    let ids = |pick: fn(&config::ColCfg) -> &Vec<String>| {
+        row.cols.iter().flat_map(pick).cloned().collect::<Vec<_>>()
+    };
+    (
+        render_group(ctx, config, &ids(|c| &c.left), stale, ellipsis),
+        render_group(ctx, config, &ids(|c| &c.right), stale, ellipsis),
+    )
 }
 
 /// Every module of a group rendered and decorated, each cut to its

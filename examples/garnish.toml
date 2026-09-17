@@ -67,6 +67,12 @@ separator_frames = []
 separator_step = 1
 
 # Rows: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.
+# A row can hold columns side by side instead; see docs/config.md § [[row.col]]:
+# [[row]]
+# gap = 2
+# [[row.col]]
+# width = "1fr"        # "<n>fr" | "auto" | a cell count
+# modules = ["path", "branch"]
 [[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right = ["session_name", "agent"]
@@ -79,6 +85,14 @@ right = ["lines"]
 [[row]]
 modules = ["session", "api", "cache"]
 right = ["clock"]
+
+# A box frames a run of adjacent rows, or a whole column:
+# [box.repo]
+# title = "Repository"
+# title_justify = "left"  # left | center | right
+# style = "double"        # inherits [frame] style when absent
+# fill = false            # draw the rule inside the box too
+# color = "accent"        # role or literal; frame colour when absent
 
 # path — Working directory, based on the repository root.
 [modules.path]

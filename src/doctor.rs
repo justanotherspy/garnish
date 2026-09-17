@@ -272,7 +272,7 @@ fn placed(config: &Config, id: &str) -> bool {
         || config.modules.get(id).is_some_and(|m| m.enabled),
         |name| config.texts.get(name).is_some_and(|m| m.enabled),
     );
-    enabled && config.rows.iter().any(|l| l.left.iter().chain(&l.right).any(|m| m == id))
+    enabled && config.rows.iter().any(|r| r.ids().any(|m| m == id))
 }
 
 /// Whether the config shows something that changes every second, which is

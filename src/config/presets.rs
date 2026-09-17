@@ -58,12 +58,11 @@ impl TopPreset {
     /// The rows this preset defines.
     #[must_use]
     pub fn rows(self) -> Vec<RowCfg> {
-        let row = |left: &[&str], right: &[&str]| RowCfg {
-            left: left.iter().map(|s| (*s).to_owned()).collect(),
-            right: right.iter().map(|s| (*s).to_owned()).collect(),
-            separator: None,
-            spacer: false,
-            blank: false,
+        let row = |left: &[&str], right: &[&str]| {
+            RowCfg::plain(
+                left.iter().map(|s| (*s).to_owned()).collect(),
+                right.iter().map(|s| (*s).to_owned()).collect(),
+            )
         };
         match self {
             Self::Default | Self::Full => vec![

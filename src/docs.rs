@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::config::schema::{
     COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Preset, Value, toml_string,
 };
-use crate::config::{self, Config, Overlay};
+use crate::config::{self, ColCfg, Config, Overlay};
 use crate::frame::FrameStyle;
 use crate::icons::IconSet;
 use crate::modules::SCHEMAS;
@@ -227,30 +227,150 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
     let _ = writeln!(out);
 }
 
-/// `[[row]]` per configured row.
+/// `[[row]]` per configured row, with `[[row.col]]` and `[[row.col.row]]`
+/// only where the config has them (SPEC § 4.3), so a plain row round-trips
+/// as the plain form it was written in.
 fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
     comment(
         out,
         annotated,
         "Rows: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.",
     );
-    for line in &cfg.rows {
+    comment(
+        out,
+        annotated,
+        "A row can hold columns side by side instead; see docs/config.md § [[row.col]]:",
+    );
+    comment(out, annotated, "[[row]]");
+    comment(out, annotated, "gap = 2");
+    comment(out, annotated, "[[row.col]]");
+    comment(out, annotated, "width = \"1fr\"        # \"<n>fr\" | \"auto\" | a cell count");
+    comment(out, annotated, "modules = [\"path\", \"branch\"]");
+    for row in &cfg.rows {
         // A row left with no ids by a reported mistake renders as an empty
         // row that `hide_empty_rows` drops; written back as `modules = []`
         // it would become a spacer that is always drawn, so it is left out.
-        if line.left.is_empty() && line.right.is_empty() && !line.spacer {
+        if row.cols.iter().all(ColCfg::is_empty) && !row.spacer {
             continue;
         }
         let _ = writeln!(out, "[[row]]");
-        let _ = writeln!(out, "modules = {}", toml_list(&line.left));
-        if !line.right.is_empty() {
-            let _ = writeln!(out, "right = {}", toml_list(&line.right));
+        if row.explicit_cols && row.gap != config::DEFAULT_GAP {
+            let _ = writeln!(out, "gap = {}", row.gap);
         }
-        if let Some(sep) = &line.separator {
+        if let Some(sep) = &row.separator {
             let _ = writeln!(out, "separator = {}", toml_string(sep));
         }
-        if line.blank {
+        write_title(out, row.title.as_ref());
+        write_box_ref(out, row.boxed.as_ref());
+        if row.blank {
             let _ = writeln!(out, "blank = true");
+        }
+        match row.single().filter(|_| !row.explicit_cols) {
+            // The plain form: one column, written as the row's own groups.
+            Some(col) => write_groups(out, col),
+            _ => {
+                for col in &row.cols {
+                    let _ = writeln!(out, "[[row.col]]");
+                    if col.width != config::Width::default() {
+                        let _ = writeln!(out, "width = {}", col.width.to_toml());
+                    }
+                    if col.justify_set {
+                        let _ = writeln!(out, "justify = {}", toml_string(col.justify.name()));
+                    }
+                    if col.valign != config::VAlign::default() {
+                        let _ = writeln!(out, "valign = {}", toml_string(col.valign.name()));
+                    }
+                    write_box_ref(out, col.boxed.as_ref());
+                    if col.rows.is_empty() {
+                        write_groups(out, col);
+                    }
+                    for inner in &col.rows {
+                        let _ = writeln!(out, "[[row.col.row]]");
+                        if let Some(sep) = &inner.separator {
+                            let _ = writeln!(out, "separator = {}", toml_string(sep));
+                        }
+                        write_title(out, inner.title.as_ref());
+                        write_box_ref(out, inner.boxed.as_ref());
+                        if inner.blank {
+                            let _ = writeln!(out, "blank = true");
+                        }
+                        if let Some(col) = inner.single() {
+                            write_groups(out, col);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = writeln!(out);
+    write_boxes(out, cfg, annotated);
+}
+
+/// The `modules` / `right` pair of one column.
+fn write_groups(out: &mut String, col: &ColCfg) {
+    let _ = writeln!(out, "modules = {}", toml_list(&col.left));
+    if !col.right.is_empty() {
+        let _ = writeln!(out, "right = {}", toml_list(&col.right));
+    }
+}
+
+/// The four `title*` keys of a row or a box, each only when it is set.
+fn write_title(out: &mut String, title: Option<&config::TitleCfg>) {
+    let Some(title) = title else { return };
+    let _ = writeln!(out, "title = {}", toml_string(&title.text));
+    if title.justify != config::Justify::default() {
+        let _ = writeln!(out, "title_justify = {}", toml_string(title.justify.name()));
+    }
+    if title.pad != config::DEFAULT_TITLE_PAD {
+        let _ = writeln!(out, "title_pad = {}", title.pad);
+    }
+    if let Some(color) = title.color {
+        let _ = writeln!(out, "title_color = {}", toml_string(&color.to_spec()));
+    }
+}
+
+/// `box = "<name>"` or `box = true`.
+fn write_box_ref(out: &mut String, boxed: Option<&config::BoxRef>) {
+    match boxed {
+        Some(config::BoxRef::Named(name)) => {
+            let _ = writeln!(out, "box = {}", toml_string(name));
+        }
+        Some(config::BoxRef::Anon) => {
+            let _ = writeln!(out, "box = true");
+        }
+        None => {}
+    }
+}
+
+/// The `[box.<name>]` tables (SPEC § 4.3), or, in an annotated file without
+/// any, one commented example so boxes are discoverable from `config init`.
+fn write_boxes(out: &mut String, cfg: &Config, annotated: bool) {
+    if cfg.boxes.is_empty() {
+        if annotated {
+            let _ = writeln!(out, "# A box frames a run of adjacent rows, or a whole column:");
+            let _ = writeln!(out, "# [box.repo]");
+            let _ = writeln!(out, "# title = \"Repository\"");
+            let _ = writeln!(out, "# title_justify = \"left\"  # left | center | right");
+            let _ =
+                writeln!(out, "# style = \"double\"        # inherits [frame] style when absent");
+            let _ = writeln!(out, "# fill = false            # draw the rule inside the box too");
+            let _ = writeln!(
+                out,
+                "# color = \"accent\"        # role or literal; frame colour when absent"
+            );
+            let _ = writeln!(out);
+        }
+        return;
+    }
+    for (name, b) in &cfg.boxes {
+        let _ = writeln!(out, "[box.{name}]");
+        write_title(out, b.title.as_ref());
+        if let Some(style) = b.style {
+            let _ = writeln!(out, "style = {}", toml_string(style.name()));
+        }
+        let _ = writeln!(out, "fill = {}", b.fill);
+        if let Some(color) = b.color {
+            let _ = writeln!(out, "color = {}", toml_string(&color.to_spec()));
         }
     }
     let _ = writeln!(out);
@@ -867,13 +987,15 @@ fn presets_section(o: &mut String) {
         let lines: Vec<String> = preset
             .rows()
             .iter()
-            .map(|l| {
-                let right = if l.right.is_empty() {
+            .map(|r| {
+                // Preset rows are the plain one-column form.
+                let col = r.single().cloned().unwrap_or_default();
+                let right = if col.right.is_empty() {
                     String::new()
                 } else {
-                    format!(" ⟶ {}", l.right.join(" "))
+                    format!(" ⟶ {}", col.right.join(" "))
                 };
-                format!("`{}`{}", l.left.join(" "), right)
+                format!("`{}`{}", col.left.join(" "), right)
             })
             .collect();
         let _ = writeln!(
