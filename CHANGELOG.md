@@ -5,6 +5,33 @@ file's section for it. `PLAN.md` holds the session-by-session detail.
 
 ## Unreleased
 
+**Layout: rows, columns, stacks, titles and boxes**
+
+A config is a list of **rows**, and a row is now the addressable unit
+rather than one terminal line: it can be several lines tall. `[[row]]` is
+the name, and `[[line]]` and `hide_empty_lines` stay accepted for ever, so
+every config already on disk keeps working and renders byte for byte as it
+did. A file uses one array name or the other; carrying both is reported.
+
+New, all optional:
+
+- **Columns.** `[[row.col]]` puts columns side by side, sharing the row's
+  width by `width = "<n>fr" | "auto" | <cells>` with `gap` cells between
+  them. `justify` places a column's modules and defaults to its position,
+  so three bare columns read left / centre / right. Content is cut to its
+  own column and never spills into a neighbour.
+- **Stacks.** `[[row.col.row]]` makes a column a stack of rows; the row is
+  as tall as its tallest column and `valign` places a shorter one.
+- **Titles.** `title` with `title_justify`, `title_pad` and `title_color`
+  sets plain text into a row's rule; a row with only a title is a titled
+  spacer.
+- **Boxes.** `[box.<name>]` frames a run of adjacent rows, or a whole
+  column, with its own corners and sides in place of the frame's caps;
+  `box = true` boxes a single row. A box takes its style from `[frame]`
+  unless it names one, and its interior is clean unless `fill = true`.
+- Four gallery presets to copy from: `grid-three`, `grid-six`,
+  `boxed-panels` and `dashboard-panels`.
+
 **Audit through Phase 20** — the code read against its documents
 
 Fixed, each with a test:

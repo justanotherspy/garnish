@@ -57,7 +57,7 @@ style = "rounded"
 fill = true
 # Default separator between modules on a line (style-dependent when unset).
 # separator = " │ "
-# For style = "custom": first middle last single fill_char right_first right_middle right_last right_single pad
+# For style = "custom": first middle last single fill_char right_first right_middle right_last right_single pad, and the box glyphs top_left top_right bottom_left bottom_right side
 # Animation (see docs/config.md): a one-cell-glyph pattern travelling along the rule,
 # and separator frames cycled one per tick (all the same width). Empty = static.
 fill_pattern = ""

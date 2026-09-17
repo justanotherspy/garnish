@@ -820,9 +820,14 @@ struct RawFrame {
     fill_direction: Option<FillDirection>,
     separator_frames: Option<Vec<String>>,
     separator_step: Option<f64>,
+    top_left: Option<String>,
+    top_right: Option<String>,
+    bottom_left: Option<String>,
+    bottom_right: Option<String>,
+    side: Option<String>,
 }
 
-const FRAME_KEYS: [&str; 18] = [
+const FRAME_KEYS: [&str; 23] = [
     "style",
     "fill",
     "first",
@@ -841,6 +846,11 @@ const FRAME_KEYS: [&str; 18] = [
     "fill_direction",
     "separator_frames",
     "separator_step",
+    "top_left",
+    "top_right",
+    "bottom_left",
+    "bottom_right",
+    "side",
 ];
 const FILL_DIRECTIONS: &str = "left, right";
 
@@ -863,6 +873,11 @@ impl RawFrame {
                 "pad" => Some(&mut f.pad),
                 "separator" => Some(&mut f.separator),
                 "fill_pattern" => Some(&mut f.fill_pattern),
+                "top_left" => Some(&mut f.top_left),
+                "top_right" => Some(&mut f.top_right),
+                "bottom_left" => Some(&mut f.bottom_left),
+                "bottom_right" => Some(&mut f.bottom_right),
+                "side" => Some(&mut f.side),
                 _ => None,
             };
             if let Some(slot) = text_slot {
@@ -2086,6 +2101,25 @@ fn resolve_frame(
         set(&mut chars.right_single, &f.right_single);
         set(&mut chars.pad, &f.pad);
         set(&mut chars.separator, &f.separator);
+        // The five box glyphs (SPEC § 4.3) are drawn one per cell at the
+        // ends of a box's lines, so each is one cell or the style's own
+        // glyph stays.
+        for (key, given, dst) in [
+            ("top_left", &f.top_left, &mut chars.top_left),
+            ("top_right", &f.top_right, &mut chars.top_right),
+            ("bottom_left", &f.bottom_left, &mut chars.bottom_left),
+            ("bottom_right", &f.bottom_right, &mut chars.bottom_right),
+            ("side", &f.side, &mut chars.side),
+        ] {
+            match given {
+                Some(c) if crate::ansi::display_width(c) == 1 => dst.clone_from(c),
+                Some(_) => {
+                    let path = format!("frame.{key}");
+                    errors.push(problem(&path, "must be exactly one cell wide"));
+                }
+                None => {}
+            }
+        }
     }
     // Filling is on for every style: with `none` the rule is spaces, which is
     // what right-aligns the `right` group on an unframed line.
@@ -3128,6 +3162,41 @@ x = 1
             assert_eq!(errs[0].path, path, "{bad}");
             assert!(c.modules.get("path").unwrap().icon_frames("folder").is_empty(), "{bad}");
         }
+    }
+
+    /// A `custom` frame carries the five box glyphs too (SPEC § 4.3), each
+    /// one cell like the caps, and a built-in style brings its own.
+    #[test]
+    fn a_custom_frame_takes_the_five_box_glyphs() {
+        let schemas = schemas();
+        let keys = ["top_left", "top_right", "bottom_left", "bottom_right", "side"];
+        let mut body = String::new();
+        for key in keys {
+            body.push_str(key);
+            body.push_str(" = \"+\"\n");
+        }
+        let (c, errs) = parse(&format!("[frame]\nstyle = \"custom\"\n{body}"), &schemas);
+        assert_eq!(errs, Vec::new());
+        let ch = &c.frame.chars;
+        assert_eq!(
+            [&ch.top_left, &ch.top_right, &ch.bottom_left, &ch.bottom_right, &ch.side],
+            [&"+".to_owned(); 5]
+        );
+        // A glyph wider than one cell would push every box line out of line.
+        for key in keys {
+            let (c, errs) =
+                parse(&format!("[frame]\nstyle = \"custom\"\n{key} = \"ab\"\n"), &schemas);
+            assert_eq!(errs.len(), 1, "{key}: {errs:?}");
+            assert_eq!(errs[0].path, format!("frame.{key}"));
+            assert!(errs[0].message.contains("one cell"), "{}", errs[0].message);
+            assert!(c.frame.chars.side.is_empty(), "{key}: the style's own glyph stays");
+        }
+        // The built-in shapes come with their own; `none` has none, which is
+        // what makes its box invisible.
+        let (c, _) = parse("[frame]\nstyle = \"double\"\n", &schemas);
+        assert_eq!(c.frame.chars.side, "║");
+        let (c, _) = parse("[frame]\nstyle = \"none\"\n", &schemas);
+        assert_eq!(c.frame.chars.side, "", "an invisible box has no side glyph");
     }
 
     #[test]

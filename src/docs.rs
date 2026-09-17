@@ -202,11 +202,25 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
         ] {
             let _ = writeln!(out, "{key} = {}", toml_string(value));
         }
+        // The box glyphs (SPEC § 4.3) only exist for a style with a box
+        // shape; an empty one is `none`'s invisible box, and writing it
+        // back would make `config show` disagree with itself.
+        for (key, value) in [
+            ("top_left", &ch.top_left),
+            ("top_right", &ch.top_right),
+            ("bottom_left", &ch.bottom_left),
+            ("bottom_right", &ch.bottom_right),
+            ("side", &ch.side),
+        ] {
+            if !value.is_empty() {
+                let _ = writeln!(out, "{key} = {}", toml_string(value));
+            }
+        }
     } else {
         comment(
             out,
             annotated,
-            "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad",
+            "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad, and the box glyphs top_left top_right bottom_left bottom_right side",
         );
     }
     comment(
