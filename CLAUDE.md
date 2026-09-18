@@ -259,6 +259,22 @@ the cap above, and a prompt rule never to end without the summary), but
 the tell is worth keeping: a green check says only that the job ran, so
 read the tracking comment's checkboxes to know whether a review happened.
 
+**It happened a second time, and the prompt rule did not save it.** PR #69
+(run 35340645084) ended the same way — `"subtype": "success"`, no summary,
+no inline comments, three of six boxes still "subagent running" — after 76
+seconds, 11 of 100 turns and $0.89, with `permission_denials_count: 12`.
+`Task` was allowed this time, so the fan-out started; what the subagents
+lacked was anywhere to run. They inherit this allowlist, and it held no
+`Bash` beyond `gh pr diff|view|comment` and the action's own git-write
+entries, so twelve calls were refused and the parent gave up. Read-only
+`Bash` (`git diff|log|show`, `rg`, `wc`, `head`, `tail`, `ls`, `find`) is
+allowed now, and the prompt names the surface and forbids retrying a
+refusal, because an allowlist only says no — it never says why. **The
+diagnosis lives in the job log, not the check**: `permission_denials_count`
+and `num_turns` are in the `"type": "result"` JSON the action prints, and
+the count is all it records, so which calls were refused has to be
+inferred from the allowlist.
+
 **A pull request that edits this file cannot be reviewed by it.** The action
 exchanges its OIDC token only when the workflow file is byte-identical to the
 copy on the default branch, and refuses with `Workflow validation failed`
