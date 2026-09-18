@@ -129,7 +129,16 @@ goal without a documented reason.
   or updates it, plus `cargo-nextest`; `make setup ARGS=--bench` adds
   `hyperfine` and `jq`; `--all` adds `watchexec`. If a fresh nightly breaks
   the build or nursery lints, pin `channel = "nightly-YYYY-MM-DD"` to the
-  last good date and note it in `PLAN.md`; unpin later. When `make setup`
+  last good date and note it in `PLAN.md`; unpin later, or just fix it when
+  the lint is mechanical and small.
+  **CI installs a fresh nightly, and a session's is whatever its container
+  was built with** — four days behind, on 2026-09-18, which made `make
+  check` pass on code CI rejected and turned a two-line clippy fix into a
+  three-round guessing game off the CI log. When a check is red on a lint
+  and the tree is green here, `rustup update nightly` *first*, then
+  reproduce: one `cargo clippy --all-targets` then finds every site at
+  once, including the ones in `#[cfg(test)]` that only the lib-test target
+  compiles and that a grep for a single-line form will miss. When `make setup`
   stops with a PATH note, rustup's `cargo`/`rustc` proxies are not on the
   shell's PATH (a package-manager rustup keeps them in its own bin
   directory; Homebrew's is keg-only): fix PATH on the host, never in the
@@ -249,6 +258,22 @@ fan out with `Task`, which was not then in the allowlist, and
 the cap above, and a prompt rule never to end without the summary), but
 the tell is worth keeping: a green check says only that the job ran, so
 read the tracking comment's checkboxes to know whether a review happened.
+
+**It happened a second time, and the prompt rule did not save it.** PR #69
+(run 35340645084) ended the same way — `"subtype": "success"`, no summary,
+no inline comments, three of six boxes still "subagent running" — after 76
+seconds, 11 of 100 turns and $0.89, with `permission_denials_count: 12`.
+`Task` was allowed this time, so the fan-out started; what the subagents
+lacked was anywhere to run. They inherit this allowlist, and it held no
+`Bash` beyond `gh pr diff|view|comment` and the action's own git-write
+entries, so twelve calls were refused and the parent gave up. Read-only
+`Bash` (`git diff|log|show`, `rg`, `wc`, `head`, `tail`, `ls`, `find`) is
+allowed now, and the prompt names the surface and forbids retrying a
+refusal, because an allowlist only says no — it never says why. **The
+diagnosis lives in the job log, not the check**: `permission_denials_count`
+and `num_turns` are in the `"type": "result"` JSON the action prints, and
+the count is all it records, so which calls were refused has to be
+inferred from the allowlist.
 
 **A pull request that edits this file cannot be reviewed by it.** The action
 exchanges its OIDC token only when the workflow file is byte-identical to the
