@@ -634,7 +634,14 @@ was built, what the reviews found and what was decided, not how.
   off it. Fixed rather than pinned (§ Toolchain offers both): two mechanical
   lines that clippy itself wrote, against a pin that would need lifting
   again. The tell that it is a roll and not a branch's own fault is that the
-  failing lines are byte-identical on `main` — and that a session on the
-  previous nightly cannot reproduce it at all, so the fix is verified by the
-  new form passing `make check` and by CI going green, never by watching the
-  old error disappear locally.
+  failing lines are byte-identical on `main`.
+
+  The session cost more than the fix did, because it was diagnosed from CI
+  one error at a time: a container's toolchain is whatever the image was
+  built with (here 09-13, four days behind CI), so `make check` came back
+  green on code CI rejected, and a grep for the single-line form missed a
+  third site inside `#[cfg(test)]` in `src/layout.rs` that only the lib-test
+  target compiles. `rustup update nightly` first, then reproduce: the whole
+  thing is one `cargo clippy` once the toolchains match. `clippy.toml`
+  relaxes unwrap and indexing in tests, not `map_unwrap_or`, so a test is
+  just as red as `src/`.
