@@ -159,8 +159,7 @@ fn config(env: &Env, text: &str) {
 
 fn spawns(env: &Env) -> Vec<String> {
     std::fs::read_to_string(env.cache.join("spawns.log"))
-        .map(|s| s.lines().map(str::to_owned).collect())
-        .unwrap_or_default()
+        .map_or_default(|s| s.lines().map(str::to_owned).collect())
 }
 
 fn repo_cache_files(env: &Env) -> Vec<String> {
@@ -327,7 +326,7 @@ fn cache_a_future_stamp_is_never_live_nor_fresh() {
         for module in ["branch", "sync"] {
             let path = d.path().join(format!("{module}.cache"));
             let text = std::fs::read_to_string(&path).unwrap();
-            let rest = text.split_once('\n').map(|(_, r)| r.to_owned()).unwrap_or_default();
+            let rest = text.split_once('\n').map_or_default(|(_, r)| r.to_owned());
             std::fs::write(&path, format!("v1 {} 5000 ok\n{rest}", ahead_secs * 1000)).unwrap();
         }
     }
