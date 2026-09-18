@@ -627,3 +627,21 @@ was built, what the reviews found and what was decided, not how.
   dimension on a large diff and never to end without its summary. The
   checkout also names the pull request's head, which it had to stop doing
   when the fix was pulled out of #66 to let that branch be reviewed at all.
+- **2026-09-18 (a nightly roll turned every branch red)** — clippy's
+  `map_unwrap_or` widened to catch `map(_).unwrap_or_default()`, and with
+  `-D warnings` that is an error: two of them in `tests/worker.rs`, one on a
+  `Result` and one on an `Option`, on `main` and therefore on every branch
+  off it. Fixed rather than pinned (§ Toolchain offers both): two mechanical
+  lines that clippy itself wrote, against a pin that would need lifting
+  again. The tell that it is a roll and not a branch's own fault is that the
+  failing lines are byte-identical on `main`.
+
+  The session cost more than the fix did, because it was diagnosed from CI
+  one error at a time: a container's toolchain is whatever the image was
+  built with (here 09-13, four days behind CI), so `make check` came back
+  green on code CI rejected, and a grep for the single-line form missed a
+  third site inside `#[cfg(test)]` in `src/layout.rs` that only the lib-test
+  target compiles. `rustup update nightly` first, then reproduce: the whole
+  thing is one `cargo clippy` once the toolchains match. `clippy.toml`
+  relaxes unwrap and indexing in tests, not `map_unwrap_or`, so a test is
+  just as red as `src/`.

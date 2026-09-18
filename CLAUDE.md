@@ -129,7 +129,16 @@ goal without a documented reason.
   or updates it, plus `cargo-nextest`; `make setup ARGS=--bench` adds
   `hyperfine` and `jq`; `--all` adds `watchexec`. If a fresh nightly breaks
   the build or nursery lints, pin `channel = "nightly-YYYY-MM-DD"` to the
-  last good date and note it in `PLAN.md`; unpin later. When `make setup`
+  last good date and note it in `PLAN.md`; unpin later, or just fix it when
+  the lint is mechanical and small.
+  **CI installs a fresh nightly, and a session's is whatever its container
+  was built with** — four days behind, on 2026-09-18, which made `make
+  check` pass on code CI rejected and turned a two-line clippy fix into a
+  three-round guessing game off the CI log. When a check is red on a lint
+  and the tree is green here, `rustup update nightly` *first*, then
+  reproduce: one `cargo clippy --all-targets` then finds every site at
+  once, including the ones in `#[cfg(test)]` that only the lib-test target
+  compiles and that a grep for a single-line form will miss. When `make setup`
   stops with a PATH note, rustup's `cargo`/`rustc` proxies are not on the
   shell's PATH (a package-manager rustup keeps them in its own bin
   directory; Homebrew's is keg-only): fix PATH on the host, never in the
