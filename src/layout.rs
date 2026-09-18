@@ -1833,7 +1833,7 @@ mod tests {
                     .collect()
             };
             let show = |line: &Line| Painter::PLAIN.paint(&line.segments());
-            let top = lines.first().map(edges).unwrap_or_default();
+            let top = lines.first().map_or_default(edges);
             let text = lines.iter().map(show).collect::<Vec<_>>().join("\n");
             assert_eq!(top.len(), 4, "two corners per box:\n{text}");
             // The sides of the interior lines stand in the corners' cells: a
