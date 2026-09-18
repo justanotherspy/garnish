@@ -627,3 +627,14 @@ was built, what the reviews found and what was decided, not how.
   dimension on a large diff and never to end without its summary. The
   checkout also names the pull request's head, which it had to stop doing
   when the fix was pulled out of #66 to let that branch be reviewed at all.
+- **2026-09-18 (a nightly roll turned every branch red)** — clippy's
+  `map_unwrap_or` widened to catch `map(_).unwrap_or_default()`, and with
+  `-D warnings` that is an error: two of them in `tests/worker.rs`, one on a
+  `Result` and one on an `Option`, on `main` and therefore on every branch
+  off it. Fixed rather than pinned (§ Toolchain offers both): two mechanical
+  lines that clippy itself wrote, against a pin that would need lifting
+  again. The tell that it is a roll and not a branch's own fault is that the
+  failing lines are byte-identical on `main` — and that a session on the
+  previous nightly cannot reproduce it at all, so the fix is verified by the
+  new form passing `make check` and by CI going green, never by watching the
+  old error disappear locally.
