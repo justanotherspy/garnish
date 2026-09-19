@@ -1,7 +1,9 @@
 //! `limit5h`, `limit7d`, `spend`, `cost`: subscription rate limits and API spend.
 
 use crate::ansi::{Segment, Style};
-use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+};
 use crate::icons::{Glyph, glyph};
 use crate::payload::RateWindow;
 use crate::time::WallClock;
@@ -100,6 +102,7 @@ impl Module for LimitModule {
         };
         ModuleSchema {
             id: self.id(),
+            measure: Some(MeasureKind::Percent),
             summary,
             doc,
             sources,
@@ -207,7 +210,7 @@ impl Module for LimitModule {
         {
             segs.push(seg(cfg, format!(" {}{reset}", glyph_prefix(cfg, "reset")), "reset"));
         }
-        Rendered::fresh(segs)
+        Rendered::fresh(segs).measured(super::Measure::Percent(shown))
     }
 }
 
@@ -232,6 +235,7 @@ impl Module for CostModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "cost",
+            measure: Some(MeasureKind::Amount),
             summary: "Estimated session cost in USD.",
             doc: "Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (those report `rate_limits`), so one usage line serves both auth modes; set `only_without_rate_limits = false` to always show it.",
             sources: &[
@@ -301,7 +305,7 @@ impl Module for CostModule {
             segs.push(seg(cfg, format!(" {}{added}", cfg.icon("added")), "added"));
             segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
         }
-        Rendered::fresh(segs)
+        Rendered::fresh(segs).measured(super::Measure::Amount(usd))
     }
 }
 

@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use crate::ansi::{Segment, Style};
 use crate::cache::Scope;
-use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+};
 use crate::git::{self, Head};
 use crate::icons::glyph;
 
@@ -129,6 +131,7 @@ impl Module for PathModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "path",
+            measure: None,
             summary: "Working directory, based on the repository root.",
             doc: "The base directory is the git top level when inside a repository, otherwise `workspace.project_dir`. When the current directory is deeper than the base, the extra path is shown dimmed. The `full` preset shows the whole tilde-collapsed path and the number of `/add-dir` directories.",
             sources: &[
@@ -228,6 +231,7 @@ impl Module for WorktreeModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "worktree",
+            measure: None,
             summary: "Git worktree name.",
             doc: "Shown when the current directory is inside a linked git worktree (`workspace.git_worktree`) or the session entered a Claude Code worktree (`worktree.name`). The `full` preset adds the original branch.",
             sources: &[
@@ -298,6 +302,7 @@ impl Module for PrModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "pr",
+            measure: None,
             summary: "Open pull/merge request with review state, linked.",
             doc: "The open PR (or GitLab MR) Claude Code found for the current branch, as a clickable OSC 8 link with a glyph for the review state: approved, pending, changes requested, or draft. Hidden when there is none. No network calls: the harness supplies the data.",
             sources: &["pr.number", "pr.url", "pr.review_state", "pr.kind"],
@@ -416,6 +421,7 @@ impl Module for BranchModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "branch",
+            measure: None,
             summary: "Checked-out branch (or detached HEAD).",
             doc: "The current branch read from the repository without spawning git; a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).",
             sources: &["worktree.branch", ".git/HEAD", "git status (worker)"],
@@ -523,7 +529,7 @@ impl Module for BranchModule {
                 freshness = fresh;
             }
         }
-        Rendered { segments: segs, freshness }
+        Rendered { segments: segs, freshness, measure: None }
     }
 
     fn scope(&self, session: &str, cwd: &Path) -> Scope {
@@ -552,6 +558,7 @@ impl Module for SyncModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "sync",
+            measure: Some(MeasureKind::Count),
             summary: "Commits ahead/behind the upstream branch.",
             doc: "Ahead/behind counts against `@{upstream}` using the remote-tracking refs already on disk (no network). The `full` preset names the upstream and hints how long ago the last fetch happened; `fetch_interval` opts into a background `git fetch`.",
             sources: &["git rev-list --left-right --count (worker)", ".git/FETCH_HEAD age"],
@@ -637,6 +644,7 @@ impl Module for SyncModule {
         if let Some((ahead, behind)) = counts {
             segs.extend(count_segments(cfg, ctx.theme, ahead, behind, cfg.bool("show_zero")));
         }
+        let measure = counts.map(|(a, b)| super::Measure::Count(a.saturating_add(b)));
         if cfg.bool("show_upstream") {
             let sp = if segs.is_empty() { "" } else { " " };
             segs.push(seg(cfg, format!("{sp}{}", upstream_label(&tracking)), "upstream"));
@@ -650,7 +658,7 @@ impl Module for SyncModule {
             segs.push(seg(cfg, hint, "stale"));
         }
         let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
-        Rendered { segments: segs, freshness }
+        Rendered { segments: segs, freshness, measure }
     }
 
     fn scope(&self, session: &str, cwd: &Path) -> Scope {

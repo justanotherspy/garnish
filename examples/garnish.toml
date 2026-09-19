@@ -100,6 +100,8 @@ right = ["clock"]
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -142,6 +144,8 @@ added = "muted"
 enabled = true
 # preset = "default"
 refresh = 5
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -186,6 +190,8 @@ dirty = "warn"
 enabled = true
 # preset = "default"
 refresh = 5
+# hide (list of empty | zero) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -234,6 +240,8 @@ stale = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -268,6 +276,8 @@ original = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -320,6 +330,8 @@ draft = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -364,6 +376,8 @@ thinking = "accent2"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -400,6 +414,8 @@ word = "text"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | below:N | above:N) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -474,6 +490,8 @@ warn = "danger"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -504,6 +522,8 @@ name = "text"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | below:N | above:N) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -554,6 +574,8 @@ empty = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | below:N | above:N) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -604,6 +626,8 @@ empty = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | below:N | above:N) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -654,6 +678,8 @@ empty = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | zero) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -696,6 +722,8 @@ removed = "danger"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -730,6 +758,8 @@ start = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | below:N | above:N) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -764,6 +794,8 @@ share = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | below:N | above:N) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -814,6 +846,8 @@ detail = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -854,6 +888,8 @@ date = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -888,6 +924,8 @@ id = "muted"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -922,6 +960,8 @@ visual = "warn"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.
@@ -956,6 +996,8 @@ thinking = "accent2"
 enabled = true
 # preset = "default"
 refresh = 0
+# hide (list of empty | zero) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
 # label (string ≤ 4096 chars) — Dim text before the value.
 label = ""
 # prefix (string ≤ 4096 chars) — Text before the module.

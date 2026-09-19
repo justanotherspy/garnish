@@ -2,7 +2,9 @@
 
 use crate::ansi::{Segment, Style};
 use crate::claude_settings::{self, DEFAULT_COMPACT_BUFFER};
-use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+};
 use crate::icons::glyph;
 use crate::num::percent_of;
 
@@ -25,6 +27,7 @@ impl Module for ContextModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "context",
+            measure: Some(MeasureKind::Percent),
             summary: "Context window usage bar with color bands and the auto-compaction marker.",
             doc: "A smooth bar spanning the full context window (`context_window.context_window_size`, 1M when absent). The filled part takes the color of the current band; a marker shows where Claude Code will auto-compact (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` minus the summary buffer). No token counter: the bar and the percentage are the story.",
             sources: &[
@@ -147,7 +150,7 @@ impl Module for ContextModule {
         if warn_at > 0.0 && pct.is_some_and(|p| p >= warn_at) {
             segs.extend(badge(cfg, "warn", "warn"));
         }
-        Rendered::fresh(segs)
+        Rendered::fresh(segs).measured(pct.map(|p| super::Measure::Percent(rounded(p))))
     }
 }
 

@@ -824,6 +824,26 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
             ),
         );
     }
+    // The states come from the schema's measure (SPEC § 3), as the parser's
+    // check and the reference row do.
+    let states = schema.hide_states().join(", ");
+    fields.push(
+        Field::new(
+            "hide",
+            &format!(
+                "States that hide the module, comma-separated: {states}. `empty` is what hide_when_empty hides; the two combine."
+            ),
+            SlotKind::StrList,
+            slot("hide"),
+        )
+        .valued(
+            draft,
+            cfg.and_then(|c| c.common("hide"))
+                .map(to_toml)
+                .or_else(|| Some(Value::Array(Vec::new()))),
+            "[]",
+        ),
+    );
     for opt in COMMON_OPTS.iter().filter(|o| text.is_none() || o.key != "max_width") {
         let value = cfg.and_then(|c| c.common(opt.key)).map(to_toml);
         let kind = SlotKind::of(opt.kind, opt.max);
@@ -1379,7 +1399,14 @@ mod tests {
             for color in &schema.colors {
                 assert!(keys.contains(&format!("colors.{}", color.key).as_str()), "{}", schema.id);
             }
-            assert!(keys.contains(&"preset") && keys.contains(&"max_width"));
+            assert!(
+                keys.contains(&"preset") && keys.contains(&"max_width") && keys.contains(&"hide")
+            );
+            let hide = form.fields.iter().find(|f| f.key == "hide").unwrap();
+            assert_eq!(hide.kind, SlotKind::StrList);
+            for state in schema.hide_states() {
+                assert!(hide.doc.contains(state), "{}: {}", schema.id, hide.doc);
+            }
         }
         let (text, _) =
             built("[modules.text.motd]\ntext = \"hi\"\n", &FormKind::Module("text.motd".into()));
@@ -1387,6 +1414,7 @@ mod tests {
         assert!(
             keys.contains(&"text")
                 && keys.contains(&"width")
+                && keys.contains(&"hide")
                 && !keys.contains(&"max_width")
                 && !keys.contains(&"preset")
         );

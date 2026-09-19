@@ -2,8 +2,9 @@ p┌ [modules.path] ────────────────────
 ▶│  enabled         true                        (true)                        │
  │  preset          default                     (default)                     │
 r│  refresh         0                           (0)                           │
+r│  hide            []                          ([])                          │
 r│  label                                       ("")                          │
-r│  prefix                                      ("")                          │
+ │  prefix                                      ("")                          │
  │  suffix                                      ("")                          │
  │  hide_when_empty true                        (true)                        │
  │  max_width       0                           (0)                           │
@@ -16,7 +17,6 @@ r│  prefix                                      ("")                          
  │  icons.added     +                           (+)                           │
  │  colors.icon     #7dd3a0                     (accent)                      │
  │  colors.base     #cdd6f4                     (text)                        │
- │  colors.subpath  #6c7086                     (muted)                       │
  │Render this module at all.                                                  │
  │                                                                            │
  │                                                                            │

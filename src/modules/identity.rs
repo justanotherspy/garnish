@@ -1,7 +1,9 @@
 //! `session_name`, `vim`, `agent`, `lines`: who and what this session is.
 
 use crate::ansi::{Segment, Style};
-use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+};
 use crate::icons::glyph;
 
 use super::util::cut_name;
@@ -14,6 +16,7 @@ impl Module for SessionNameModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "session_name",
+            measure: None,
             summary: "Session name.",
             doc: "The name set with `--name` or `/rename`, or the AI-generated title. Hidden when the session only has its default name. The `full` preset appends the short session id.",
             sources: &["session_name", "session_id"],
@@ -72,6 +75,7 @@ impl Module for VimModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "vim",
+            measure: None,
             summary: "Vim mode badge.",
             doc: "`vim.mode` when vim mode is enabled (`NORMAL`, `INSERT`, `VISUAL`, `VISUAL LINE`). Set `hideVimModeIndicator = true` in the `statusLine` settings so the mode is not shown twice.",
             sources: &["vim.mode"],
@@ -131,6 +135,7 @@ impl Module for AgentModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "agent",
+            measure: None,
             summary: "Agent name.",
             doc: "`agent.name` when Claude Code runs with `--agent` or agent settings. Hidden otherwise. The `full` preset adds a glyph when extended thinking is enabled.",
             sources: &["agent.name", "thinking.enabled"],
@@ -190,6 +195,7 @@ impl Module for LinesModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "lines",
+            measure: Some(MeasureKind::Count),
             summary: "Lines added and removed this session.",
             doc: "`cost.total_lines_added` and `cost.total_lines_removed`. The `full` preset adds the net delta.",
             sources: &["cost.total_lines_added", "cost.total_lines_removed"],
@@ -243,6 +249,6 @@ impl Module for LinesModule {
             let sign = if net >= 0 { "+" } else { "" };
             segs.push(seg(cfg, format!(" ({sign}{net})"), "net"));
         }
-        Rendered::fresh(segs)
+        Rendered::fresh(segs).measured(super::Measure::Count(added.saturating_add(removed)))
     }
 }

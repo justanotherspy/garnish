@@ -1,0 +1,43 @@
+# fixture: api-key
+# columns: 100
+# icons: unicode
+# `hide = [...]` (SPEC § 3): a module leaves its row in the states it names,
+# and a hidden module is one that rendered nothing, never a `–`. `cost` and
+# `lines` name `zero` and stay (the fixture has a cost and changed lines);
+# `context` names `above:40` and goes at 42 %; `api` names `below:20` and goes
+# at a 12 % share of the session, a number it is not even printing; `cache`
+# names `above:95` and stays at 91 %. On the second row `sync` has no
+# repository: `hide_when_empty = false` alone would print its `–`, but
+# `hide = ["empty"]` joins the flag and hides it, while `worktree` with the
+# flag alone keeps its placeholder and `pr`, present, shows.
+
+[[line]]
+modules = ["cost", "lines", "context", "api", "cache"]
+right   = ["clock"]
+
+[[line]]
+modules = ["sync", "worktree", "pr"]
+right   = ["session_name"]
+
+[modules.cost]
+hide = ["zero"]
+
+[modules.lines]
+hide_zero = false
+hide = ["zero"]
+
+[modules.context]
+hide = ["above:40"]
+
+[modules.api]
+hide = ["below:20"]
+
+[modules.cache]
+hide = ["above:95"]
+
+[modules.sync]
+hide_when_empty = false
+hide = ["empty"]
+
+[modules.worktree]
+hide_when_empty = false

@@ -17,7 +17,8 @@ pub mod schema;
 
 use presets::TopPreset;
 use schema::{
-    COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value, common_keys,
+    COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
+    common_keys,
 };
 
 /// Environment variable naming the config file.
@@ -2270,6 +2271,12 @@ fn parse_overrides(
                 Some(n) => ov.refresh = Some(n),
                 None => err(key, "expected a non-negative integer (seconds)".into()),
             },
+            // Checked against the schema's measure (SPEC § 3), as `refresh`
+            // is against `schema.refresh`, so hand-parsed like it.
+            "hide" => match hide_rules(schema, value) {
+                Ok(rules) => ov.hide = Some(rules),
+                Err(msg) => err(key, msg),
+            },
             "icons" => match value.as_table() {
                 Some(t) => parse_icons(schema, t, &mut ov, &mut err),
                 None => err(key, "expected a table of icon overrides".into()),
@@ -2312,6 +2319,26 @@ fn set_common(ov: &mut Overrides, key: &str, value: Value) -> bool {
         _ => return false,
     }
     true
+}
+
+/// A module's `hide` list (SPEC § 3): every entry a state the schema's
+/// measure allows, or the reason the key is refused whole (the per-key
+/// fallback of § 5: the default, no hiding, stands in for the list).
+fn hide_rules(schema: &ModuleSchema, value: &toml::Value) -> Result<Vec<HideRule>, String> {
+    let accepts = || format!("this module accepts {}", schema.hide_states().join(", "));
+    let items = value.as_array().ok_or_else(|| "expected a list of strings".to_owned())?;
+    items
+        .iter()
+        .map(|item| {
+            let text = item.as_str().ok_or_else(|| "expected a list of strings".to_owned())?;
+            let rule = HideRule::parse(text).map_err(|e| format!("{e}; {}", accepts()))?;
+            if rule.applies_to(schema.measure) {
+                Ok(rule)
+            } else {
+                Err(format!("{text:?} does not apply here; {}", accepts()))
+            }
+        })
+        .collect()
 }
 
 /// The size limit a module option must respect, from its schema
@@ -2533,6 +2560,7 @@ mod tests {
         vec![
             ModuleSchema {
                 id: "path",
+                measure: None,
                 summary: "",
                 doc: "",
                 sources: &[],
@@ -2543,6 +2571,7 @@ mod tests {
             },
             ModuleSchema {
                 id: "clock",
+                measure: None,
                 summary: "",
                 doc: "",
                 sources: &[],
@@ -3700,6 +3729,83 @@ x = 1
                 opt.key
             );
         }
+    }
+
+    /// SPEC § 3 `hide`: every state is checked against the schema's measure,
+    /// a bad list is refused whole (the default stands in), the list and
+    /// `hide_when_empty` are a union, and `config show` writes it back.
+    #[test]
+    fn hide_lists_follow_the_schemas_measure() {
+        let (c, errs) = parse(
+            "[modules.cost]\nhide = [\"zero\", \"empty\"]\n[modules.context]\nhide = [\"below:10\", \"above:90.5\"]\n[modules.text.note]\ntext = \"x\"\nhide = [\"empty\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new());
+        let cost = c.modules.get("cost").unwrap();
+        assert_eq!(cost.hide, vec![HideRule::Zero, HideRule::Empty]);
+        assert_eq!(
+            c.modules.get("context").unwrap().hide,
+            vec![HideRule::Below(10.0), HideRule::Above(90.5)]
+        );
+        assert_eq!(c.texts.get("note").unwrap().hide, vec![HideRule::Empty]);
+        assert!(cost.hides_empty());
+        // The union: `empty` in the list hides an empty render whatever
+        // `hide_when_empty` says, and the flag alone still works.
+        let (c, errs) = parse(
+            "[modules.pr]\nhide_when_empty = false\nhide = [\"empty\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new());
+        assert!(c.modules.get("pr").unwrap().hides_empty());
+        let (c, _) = parse("[modules.pr]\nhide_when_empty = false\n", &crate::modules::SCHEMAS);
+        assert!(!c.modules.get("pr").unwrap().hides_empty());
+        // Refused lists, each naming what the module accepts; the default stands.
+        let refused = [
+            (
+                "[modules.context]\nhide = [\"zero\"]\n",
+                "modules.context",
+                "empty, below:N, above:N",
+            ),
+            ("[modules.cost]\nhide = [\"below:5\"]\n", "modules.cost", "accepts empty, zero"),
+            ("[modules.model]\nhide = [\"zero\"]\n", "modules.model", "accepts empty"),
+            (
+                "[modules.text.a]\ntext = \"x\"\nhide = [\"zero\"]\n",
+                "modules.text.a",
+                "accepts empty",
+            ),
+            (
+                "[modules.cost]\nhide = [\"empty\", \"nope\"]\n",
+                "modules.cost",
+                "unknown hide state",
+            ),
+            ("[modules.context]\nhide = [\"below:2000\"]\n", "modules.context", "0 to 1000"),
+            ("[modules.context]\nhide = [\"below:x\"]\n", "modules.context", "needs a number"),
+            ("[modules.cost]\nhide = \"zero\"\n", "modules.cost", "expected a list"),
+            ("[modules.cost]\nhide = [1]\n", "modules.cost", "expected a list"),
+        ];
+        for (text, base, message) in refused {
+            let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+            assert_eq!(errs.len(), 1, "{text}: {errs:?}");
+            assert_eq!(errs[0].path, format!("{base}.hide"), "{text}");
+            assert!(errs[0].message.contains(message), "{text}: {}", errs[0].message);
+            let id = base.trim_start_matches("modules.");
+            let hide =
+                c.modules.get(id).map(|m| m.hide.clone()).or_else(|| {
+                    c.texts.get(id.trim_start_matches("text.")).map(|m| m.hide.clone())
+                });
+            assert_eq!(hide, Some(Vec::new()), "{text}");
+        }
+        // `config show` writes the list, and it parses back to the same rules.
+        let (c, _) = parse("[modules.context]\nhide = [\"below:10\"]\n", &crate::modules::SCHEMAS);
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(shown.contains("hide = [\"below:10\"]"), "{shown}");
+        let (again, errs) = parse(&shown, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(again.modules.get("context").unwrap().hide, vec![HideRule::Below(10.0)]);
+        // Every module table round-trips (`show` pins `animate`, so the whole
+        // config is compared in the shorthand test, not here).
+        assert_eq!(again.modules, c.modules);
+        assert_eq!(again.texts, c.texts);
     }
 
     /// SPEC § 4.1: a bar glyph is repeated cell by cell, so an override

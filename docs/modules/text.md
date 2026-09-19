@@ -41,6 +41,7 @@ ship it befo  a rathe…       v0.2
 | key | type | default | description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Render this module. |
+| `hide` | list of `empty` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | Text after the module. |

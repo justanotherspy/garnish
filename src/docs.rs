@@ -417,6 +417,7 @@ fn write_texts(out: &mut String, cfg: &Config, annotated: bool) {
         }
         let _ = writeln!(out, "[modules.text.{name}]");
         let _ = writeln!(out, "enabled = {}", m.enabled);
+        write_hide(out, m, schema, annotated);
         write_common(out, m, annotated, text_common_opts());
         for opt in &schema.opts {
             if annotated {
@@ -463,6 +464,20 @@ fn write_common(out: &mut String, m: &ModuleCfg, annotated: bool, opts: &[OptSpe
     }
 }
 
+/// The `hide` line of a module table (SPEC § 3), with the states the
+/// module takes in the annotated form.
+fn write_hide(out: &mut String, m: &ModuleCfg, schema: &ModuleSchema, annotated: bool) {
+    if annotated {
+        let _ = writeln!(
+            out,
+            "# hide (list of {}) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine",
+            schema.hide_states().join(" | ")
+        );
+    }
+    let value = m.common("hide").unwrap_or_else(|| Value::StrList(Vec::new()));
+    let _ = writeln!(out, "hide = {}", value.to_toml());
+}
+
 fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
     for schema in SCHEMAS.iter() {
         let Some(m) = cfg.modules.get(schema.id) else { continue };
@@ -482,6 +497,7 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
             let _ = writeln!(out, "preset = {}", toml_string(m.preset.name()));
         }
         let _ = writeln!(out, "refresh = {}", m.refresh);
+        write_hide(out, m, schema, annotated);
         write_common(out, m, annotated, &COMMON_OPTS);
         for opt in &schema.opts {
             if annotated {
@@ -684,6 +700,7 @@ pub fn text_page() -> String {
     let _ = writeln!(o, "## Options\n\n`[modules.text.<name>]`\n");
     let _ = writeln!(o, "| key | type | default | description |\n|---|---|---|---|");
     let _ = writeln!(o, "| `enabled` | bool | `true` | Render this module. |");
+    let _ = writeln!(o, "| `hide` | list of `empty` | `[]` | {} |", hide_doc(schema));
     for opt in text_common_opts() {
         let _ = writeln!(
             o,
@@ -746,6 +763,12 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
         o,
         "| `refresh` | integer | `{r}` | `{r}` | `{r}` | Seconds between background refreshes; 0 = every tick. |",
         r = schema.refresh
+    );
+    let _ = writeln!(
+        o,
+        "| `hide` | list of {} | `[]` | `[]` | `[]` | {} |",
+        schema.hide_states().iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", "),
+        hide_doc(schema)
     );
     for opt in &COMMON_OPTS {
         let value = opt.default.to_toml();
@@ -823,6 +846,26 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
     }
 }
 
+/// The `hide` row's description: the states in the module's own terms
+/// (SPEC § 3), from the measure its schema declares.
+fn hide_doc(schema: &ModuleSchema) -> String {
+    use crate::config::schema::MeasureKind;
+    let measure = match (schema.measure, schema.id) {
+        (Some(MeasureKind::Count), _) => "; `zero` when the count is zero",
+        (Some(MeasureKind::Amount), _) => "; `zero` when the amount is zero",
+        (Some(MeasureKind::Percent), "api") => {
+            "; `below:N` and `above:N` compare its share of the session, shown or not"
+        }
+        (Some(MeasureKind::Percent), _) => {
+            "; `below:N` and `above:N` compare the percentage the row prints"
+        }
+        (None, _) => "",
+    };
+    format!(
+        "States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine{measure}."
+    )
+}
+
 /// Nerd Font glyphs as `U+XXXX` so the page is readable without the font.
 fn code_points(s: &str) -> String {
     if s.chars().any(|c| matches!(u32::from(c), 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFD)) {
@@ -883,7 +926,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing or were hidden by `hide_when_empty` or a `hide` list (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
         steps = crate::config::STEP_BOUNDS
     );
     let _ = writeln!(
@@ -1087,7 +1130,7 @@ fn presets_section(o: &mut String) {
 
     let _ = writeln!(
         o,
-        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
+        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
     );
 }
 

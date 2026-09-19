@@ -30,6 +30,7 @@ pub static SCHEMA: LazyLock<ModuleSchema> = LazyLock::new(schema);
 fn schema() -> ModuleSchema {
     ModuleSchema {
         id: "text",
+        measure: None,
         summary: "Static text in a box of fixed width; define any number as `[modules.text.<name>]`.",
         doc: "A fixed string in a box, placed on a line as `text.<name>`. `width = 0` makes the box as wide as the text; otherwise the box is `width` cells with `pad` blank cells on each side, `justify` places shorter text in it, and `overflow` decides what happens to longer text: `clip` cuts it with an ellipsis, `scroll` slides a window over it and restarts after the end has passed, `scroll-wrap` is a ticker that flows continuously with `gap` between the end and the start. Scrolling is a pure function of the clock (`floor(now × step) mod period`), so nothing is stored between ticks and `GARNISH_ANIMATE=0` freezes it. The text is plain: escape sequences and control characters are stripped. With an empty `text` the module has nothing to show, so `hide_when_empty` (on by default) hides it rather than drawing a dim `–`. Text modules have no `preset` and no `refresh`, and `width` sizes the box where other modules take `max_width`.",
         sources: &["the config file"],

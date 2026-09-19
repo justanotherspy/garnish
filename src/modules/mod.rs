@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::ansi::{Segment, Style};
 use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
-use crate::config::schema::{Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
 use crate::payload::Payload;
 use crate::theme::Theme;
@@ -53,26 +53,53 @@ pub enum Freshness {
     Failed,
 }
 
+/// The number a module's output measures this tick (SPEC § 3).
+///
+/// Attached to the [`Rendered`] so the render loop can apply the module's
+/// `hide` list without the module spelling the rule: a count, an amount,
+/// or the percentage the row prints (rounded as printed, so `below:50`
+/// reads the same number the eye does).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Measure {
+    /// A count (lines changed, commits ahead and behind).
+    Count(u64),
+    /// An amount of money in dollars.
+    Amount(f64),
+    /// The percentage the row prints.
+    Percent(f64),
+}
+
 /// A module's output for one tick.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Rendered {
     /// Segments, in order. Empty means "nothing to show".
     pub segments: Vec<Segment>,
     /// Data freshness.
     pub freshness: Freshness,
+    /// What the output measures, for the `hide` list; `None` when the
+    /// module has no count, amount or percentage this tick.
+    pub measure: Option<Measure>,
 }
 
 impl Rendered {
     /// Nothing to show.
     #[must_use]
     pub const fn empty() -> Self {
-        Self { segments: Vec::new(), freshness: Freshness::Fresh }
+        Self { segments: Vec::new(), freshness: Freshness::Fresh, measure: None }
     }
 
     /// Fresh segments.
     #[must_use]
     pub const fn fresh(segments: Vec<Segment>) -> Self {
-        Self { segments, freshness: Freshness::Fresh }
+        Self { segments, freshness: Freshness::Fresh, measure: None }
+    }
+
+    /// The output with its measure attached (SPEC § 3), the one call a
+    /// module makes so its `hide` list can be applied by the render loop.
+    #[must_use]
+    pub fn measured(mut self, measure: impl Into<Option<Measure>>) -> Self {
+        self.measure = measure.into();
+        self
     }
 
     /// True when there is nothing to show.
@@ -80,6 +107,24 @@ impl Rendered {
     pub fn is_empty(&self) -> bool {
         self.segments.iter().all(|s| s.text().is_empty())
     }
+}
+
+/// Whether a module's `hide` list takes its output off the row this tick
+/// (SPEC § 3).
+///
+/// `zero` matches a count of none or an amount under a cent (what prints
+/// as `$0.00`), `below:N` and `above:N` match the percentage the row
+/// prints. `empty` is [`decorate`]'s business, through
+/// [`ModuleCfg::hides_empty`], since it is about having nothing to print.
+#[must_use]
+pub fn hidden_by(rendered: &Rendered, rules: &[HideRule]) -> bool {
+    rules.iter().any(|rule| match (rule, rendered.measure) {
+        (HideRule::Zero, Some(Measure::Count(n))) => n == 0,
+        (HideRule::Zero, Some(Measure::Amount(a))) => a.abs() < 0.005,
+        (HideRule::Below(n), Some(Measure::Percent(p))) => p < *n,
+        (HideRule::Above(n), Some(Measure::Percent(p))) => p > *n,
+        _ => false,
+    })
 }
 
 /// Everything a module may look at while rendering.
@@ -454,7 +499,7 @@ pub fn decorate(
     // row. An *overdue* one still hides, because its last value really was
     // nothing (an in-sync `sync` renders no segments), and showing `– ⟳` for
     // it would flicker a row in every idle pause.
-    if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hide_when_empty {
+    if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hides_empty() {
         return Vec::new();
     }
     // The wrapping is the same for every state; only the middle differs.
@@ -552,13 +597,16 @@ mod tests {
         assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
         let text =
             |r: Rendered| crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, marks));
-        let empty = |f: Freshness| Rendered { segments: Vec::new(), freshness: f };
+        let empty = |f: Freshness| Rendered { segments: Vec::new(), freshness: f, measure: None };
         assert_eq!(text(Rendered::empty()), "", "a fresh empty module is hidden");
         assert_eq!(text(empty(Freshness::Stale)), "", "so is an overdue one with no value");
         assert_eq!(text(empty(Freshness::Failed)), "– ✗", "a broken one is never silent");
         // A module that did render keeps its value, dimmed, with the mark.
-        let value =
-            || Rendered { segments: vec![Segment::plain("⇡2")], freshness: Freshness::Stale };
+        let value = || Rendered {
+            segments: vec![Segment::plain("⇡2")],
+            freshness: Freshness::Stale,
+            measure: None,
+        };
         assert_eq!(text(value()), "⇡2 ⟳");
         assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
     }
@@ -736,6 +784,32 @@ mod tests {
         // A count well under what the sources hold today (≈ 200) means a
         // reader pattern went stale, not that the modules read less.
         assert!(seen > 180, "the scan found only {seen} reads; are the patterns stale?");
+    }
+
+    /// SPEC § 3: the `hide` list reads the measure a module attached; a
+    /// module without one is never hidden by `zero`, `below` or `above`,
+    /// and a count is never read as a percentage or the other way round.
+    #[test]
+    fn hide_rules_read_the_measure() {
+        use crate::config::schema::HideRule::{Above, Below, Empty, Zero};
+        let with = |m: Option<Measure>| Rendered::fresh(vec![Segment::plain("x")]).measured(m);
+        assert!(hidden_by(&with(Some(Measure::Count(0))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Count(1))), &[Zero]));
+        assert!(hidden_by(&with(Some(Measure::Amount(0.004))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Amount(0.005))), &[Zero]));
+        assert!(hidden_by(&with(Some(Measure::Percent(9.0))), &[Below(10.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(10.0))), &[Below(10.0)]));
+        assert!(hidden_by(&with(Some(Measure::Percent(91.0))), &[Above(90.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(90.0))), &[Above(90.0)]));
+        assert!(hidden_by(&with(Some(Measure::Percent(50.0))), &[Below(10.0), Above(40.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(50.0))), &[Empty]));
+        assert!(!hidden_by(&with(None), &[Zero, Below(100.0), Above(0.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Count(0))), &[Below(100.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(0.0))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Count(0))), &[]));
+        // `measured` takes the measure or an option of one.
+        assert_eq!(Rendered::empty().measured(Measure::Count(2)).measure, Some(Measure::Count(2)));
+        assert_eq!(Rendered::empty().measured(None).measure, None);
     }
 
     #[test]

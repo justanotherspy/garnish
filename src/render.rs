@@ -623,9 +623,14 @@ fn render_group(
             let rendered = entry.module.render(ctx, &view);
             let rendered = match (config.stale_style, &rendered.freshness) {
                 (StaleStyle::Hide, Freshness::Stale | Freshness::Failed) => Rendered::empty(),
-                (StaleStyle::Plain, _) => Rendered::fresh(rendered.segments),
+                (StaleStyle::Plain, _) => Rendered { freshness: Freshness::Fresh, ..rendered },
                 _ => rendered,
             };
+            // The `hide` list (SPEC § 3) reads the measure the module
+            // attached; a hidden module rendered nothing, never a `–`.
+            if modules::hidden_by(&rendered, &cfg.hide) {
+                return None;
+            }
             let module = decorate(rendered, cfg, &config.theme, stale);
             Some((id.clone(), cap_width(module, cfg.max_width, ellipsis)))
         })
