@@ -700,3 +700,20 @@ was built, what the reviews found and what was decided, not how.
   stopping while subagents were still running is how every one of the five
   ended. The script also reports `$(…)`, backticks and redirects now, since
   those hide inside a command that looks single.
+
+  The sixth run (35458733807) is the one that separated the two problems.
+  Handing the review its diff worked: it read the diffstat from the file,
+  reviewed `src/layout.rs` and the `frame.rs`/`render.rs` integration, and
+  the denials fell from twelve to **three** — two `ls`, one `wc`, all of
+  them incidental compound lines. And it still posted nothing, stopping at
+  47 turns of its 100 and $2.77 with a subagent mid-flight. So the tool
+  surface was never the whole story; the parent abandoning its delegates
+  is a separate failure, and it is six for six. Three prompt rules had
+  been written against exactly that (never end without the summary, never
+  end with a subagent unfinished, prefer to review it yourself) and all
+  three were ignored. **An instruction the model does not follow is not a
+  control**, so `Task` came out of the allowlist: no delegate, nothing to
+  abandon, and the diff is already on disk. Same move as the diff file,
+  one level up. If a run without subagents still posts nothing, the thing
+  to question is whether this review is worth its cost, not which rule to
+  write next.
