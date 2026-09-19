@@ -149,7 +149,10 @@ shapes="$(
     | map(select(.tool_name == "Bash") | (.tool_input.command // ""))
     | map(
         gsub("\\s+"; " ")
-        | [ splits("\\|\\||&&|[|;&]") ]
+        # `&&`, `||`, `|` and `;` only. A bare `&` is not an operator worth
+        # splitting on: it is far more often the tail of a `2>&1`, which cut
+        # `ls … 2>&1 | head` into a phantom verb named `1` (run 35458733807).
+        | [ splits("\\|\\||&&|[|;]") ]
         | map(ltrimstr(" ") | split(" ") | .[0] // "")
         | map(select(. != ""))
         | join(" → ")
