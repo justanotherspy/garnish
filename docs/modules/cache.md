@@ -56,6 +56,8 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 | `warm` | `U+F06D` | `✦` | `🔥` | `warm` | Warm glyph. |
 | `cold` | `U+F2DC` | `✧` | `🧊` | `cold` | Cold glyph. |
 
+Also try (`cache`: `U+F0A0` `U+F187` `⛁` `⛃`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

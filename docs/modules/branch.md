@@ -55,6 +55,8 @@ The current branch read from the repository without spawning git; a detached HEA
 | `detached` | `U+F0C1` | `➦` | `📌` | `@` | Detached HEAD icon. |
 | `dirty` | `U+F111` | `✱` | `✨` | `*` | Dirty marker. |
 
+Also try (`branch`: `U+F126` `U+F418` `U+E702` `⎇` `⌥` `⑂`; `dirty`: `✱` `*` `+` `~`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

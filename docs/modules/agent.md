@@ -51,6 +51,8 @@ Agent name.
 | `agent` | `U+F21B` | `✪` | `👤` | `agent:` | Agent icon. |
 | `thinking` | `U+F0EB` | `⋯` | `💭` | `~` | Thinking glyph. |
 
+Also try (`agent`: `U+F007` `U+F17B` `U+F477` `⚙`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

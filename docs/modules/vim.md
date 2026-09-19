@@ -50,6 +50,8 @@ Vim mode badge.
 |---|---|---|---|---|---|
 | `vim` | `U+E62B` | `` | `` | `` | Vim icon. |
 
+Also try (`vim`: `U+E7C5` `U+F120` `V`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

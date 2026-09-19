@@ -54,6 +54,8 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 |---|---|---|---|---|---|
 | `spinner` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛` | `|/-\` | Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width. |
 
+Also try (`spinner`: `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` `|/-\` `▁▃▅▇█▇▅▃` `⣾⣽⣻⢿⡿⣟⣯⣷` `⠁⠂⠄⡀⢀⠠⠐⠈`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

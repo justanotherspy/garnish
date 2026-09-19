@@ -54,6 +54,8 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 | `fast` | `U+F0E7` | `⚡` | `⚡` | `!` | Fast mode. |
 | `thinking` | `U+F0EB` | `⋯` | `💭` | `~` | Extended thinking. |
 
+Also try (`model`: `U+F0D0` `U+F135` `U+F477` `❖` `✦` `✧`; `fast`: `⚡` `↯` `*`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

@@ -51,6 +51,8 @@ Wall-clock time since the session started (`cost.total_duration_ms`; resets on `
 |---|---|---|---|---|---|
 | `session` | `U+F017` | `⏱` | `⌚` | `t:` | Session icon. |
 
+Also try (`session`: `U+F252` `U+F1DA` `⏱` `⌛`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

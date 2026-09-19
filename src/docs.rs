@@ -788,6 +788,23 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
                 icon.doc
             );
         }
+        // The alternatives the `setup` glyph picker offers (SPEC § 14), so
+        // a hand-written override can start from the same list.
+        let also: Vec<String> = schema
+            .icons
+            .iter()
+            .filter_map(|icon| {
+                let alternatives = crate::icons::suggestions(schema.id, icon.key);
+                (!alternatives.is_empty()).then(|| {
+                    let glyphs: Vec<String> =
+                        alternatives.iter().map(|g| format!("`{}`", code_points(g))).collect();
+                    format!("`{}`: {}", icon.key, glyphs.join(" "))
+                })
+            })
+            .collect();
+        if !also.is_empty() {
+            let _ = writeln!(o, "\nAlso try ({}).", also.join("; "));
+        }
         let _ = writeln!(
             o,
             "\nAny icon key also accepts `<key>_frames = [\"…\", \"…\"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).\n"

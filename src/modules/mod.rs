@@ -834,6 +834,9 @@ mod tests {
             for icon in &schema.icons {
                 for glyph in crate::icons::suggestions(schema.id, icon.key) {
                     seen = seen.saturating_add(1);
+                    // `all` is true of an empty string, and an empty
+                    // suggestion once shipped that way.
+                    assert!(!glyph.is_empty(), "{}.{}: an empty suggestion", schema.id, icon.key);
                     if private_use(glyph) {
                         continue;
                     }

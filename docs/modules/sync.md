@@ -57,6 +57,8 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 | `stale` | `U+F017` | `↻` | `⌛` | `?` | Stale-fetch glyph. |
 | `no_upstream` | `U+F127` | `⊘` | `🚫` | `-` | No-upstream glyph. |
 
+Also try (`ahead`: `⇡` `⇈` `^`; `behind`: `⇣` `⇊` `v`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 
