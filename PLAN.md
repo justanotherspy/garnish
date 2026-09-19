@@ -684,3 +684,19 @@ was built, what the reviews found and what was decided, not how.
   script additionally prints each denied command's verbs, since a line
   refused for its shape — `git diff | less` dies on `less` — is invisible
   when the denials are grouped by verb.
+
+  That verb printing paid off on the next run (35453133607), and corrected
+  the guess inside the fix it had just shipped: five denials, all
+  `git diff`, and the shape line read `git → wc`. **A compound command is
+  refused even when every part of it is allowed** — `Bash(git:*)` and
+  `Bash(wc:*)` were both on the list. So no allowlist can buy the review a
+  pipeline, and widening one further was never going to work. The review's
+  whole job is to read a diff, and five runs had now died obtaining or
+  slicing one through `Bash`, so the diff is collected for it: a step
+  before the review writes `$RUNNER_TEMP/pr.diff` and `pr.diffstat` in
+  plain job shell, with no permission system in front of it, and the prompt
+  sends `Read` and `Grep` there. Neither can be refused. The fan-out went
+  from encouraged to discouraged in the same pass, because the parent
+  stopping while subagents were still running is how every one of the five
+  ended. The script also reports `$(…)`, backticks and redirects now, since
+  those hide inside a command that looks single.
