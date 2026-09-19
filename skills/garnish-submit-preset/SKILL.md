@@ -65,8 +65,8 @@ request for a real-terminal screenshot (attached after creation; it becomes
 `presets/screenshots/<name>.png`).
 
 The issue is public. Replace the home directory in any path with `~`,
-print the **whole body**, and ask (AskUserQuestion when available): "post
-this to justanotherspy/garnish as a public issue?". Only a yes runs:
+print the **whole body**, and ask (AskUserQuestion when available):
+"post this to justanotherspy/garnish as a public issue?". Only a yes runs:
 
 ```sh
 gh issue create --repo justanotherspy/garnish --title "$TITLE" --body-file "$BODY" --label preset

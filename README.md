@@ -62,11 +62,12 @@ columns (this block is the one that may scroll on a narrow screen):
 ╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ✦ 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
-Beyond the four built-ins, the [presets gallery](docs/presets.md) has complete
-configs (aligned columns, Dracula in 256 colours, a scrolling ticker, animated
-dots, …) rendered at their own widths; `garnish presets` lists them and
-`garnish config init --preset <name>` writes one. A real-terminal capture may
-accompany a preset as `presets/screenshots/<name>.png`.
+Beyond the four built-ins, the [presets gallery](docs/presets.md) has 28
+complete configs (titled sections, boxed panels, a sidebar, a grid, links,
+a compaction-aware bar, narrow and ASCII-only terminals, tickers and
+animation, …) rendered at their own widths; `garnish setup` previews each
+at yours, `garnish presets` lists them and `garnish config init --preset
+<name>` writes one.
 
 A config written by `garnish config init` (or `garnish install`) spells out
 every `[[row]]` and the `[frame]`; those explicit blocks win over the
@@ -105,23 +106,31 @@ git clone https://github.com/justanotherspy/garnish.git && cd garnish
 make install            # cargo install --path . --locked  →  ~/.cargo/bin/garnish
 ```
 
-Then hook it into Claude Code:
+Then set it up:
 
 ```sh
-garnish install         # writes statusLine into ~/.claude/settings.json (backup kept)
-garnish config init     # writes ~/.config/garnish/garnish.toml with the defaults
+garnish setup           # pick a preset or build a layout, previewed live, then hook it into Claude Code
 ```
 
-`garnish install` merges a `statusLine` block into your settings file and
-keeps a backup next to it; add `--dry-run` to see the change first and
-`--absolute` if `~/.cargo/bin` is not on the PATH Claude Code sees. The
-equivalent by hand:
+`setup` is a full-screen picker and builder: every preset rendered at
+your terminal's real width, rows, columns, titles and boxes from single
+keys, an editor for every option, a preview you can click, and an install
+step that merges the `statusLine` block into `~/.claude/settings.json`
+with a backup kept. Run it again any time to edit the config in place.
+
+Without the screen, `garnish setup --preset compact --install` writes a
+preset and hooks it up, and `garnish install` alone does the settings
+(`--dry-run` shows the change; `--absolute` if `~/.cargo/bin` is not on the
+PATH Claude Code sees). The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }
 ```
 
 ## Compose your line
+
+`garnish setup` edits everything below in place with a live preview; this
+is what it writes.
 
 ```toml
 preset = "default"          # default | minimal | full | compact
@@ -211,10 +220,11 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
 Three Claude Code skills ship with garnish under `skills/` and are written to
 `~/.claude/skills/` by `garnish install` (or `garnish skills install`):
 
-- **garnish-statusline** builds or reworks a config interactively (terminal,
-  font, width, what matters, colours, frame, alignment), previews a draft
-  with `garnish preview`, validates it with `config check` and writes it
-  once you approve.
+- **garnish-statusline** offers `garnish setup` first, or builds the
+  config from a conversation (terminal, font, width, what matters, rows or
+  panels, colours, frame, motion, links), previews a draft with `garnish
+  preview`, validates it with `config check` and writes it once you
+  approve.
 - **garnish-feedback** files an issue on this repository with `gh`, carrying
   the environment, `config show`, `doctor` (glyph grid included) and the
   rendered line, and asks for a screenshot.

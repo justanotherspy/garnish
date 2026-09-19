@@ -1,193 +1,140 @@
 # Changelog
 
 User-visible changes per release. The tag message for a release is this
-file's section for it. `PLAN.md` holds the session-by-session detail.
+file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 ## Unreleased
 
-**Layout: rows, columns, stacks, titles and boxes**
+**`garnish setup`** (PLAN Phase 22)
 
-A config is a list of **rows**, and a row is now the addressable unit
-rather than one terminal line: it can be several lines tall. `[[row]]` is
-the name, and `[[line]]` and `hide_empty_lines` stay accepted for ever, so
-every config already on disk keeps working and renders byte for byte as it
-did. A file uses one array name or the other; carrying both is reported.
+- A full-screen setup in the terminal. The **preset picker** shows the
+  four built-ins and the gallery, each rendered live at your terminal's
+  real width, and warns when the terminal is narrower than the preset
+  wants or shorter than Claude Code's fullscreen renderer allows; `Enter`
+  writes it and offers the install step when Claude Code has no
+  `statusLine` yet. The **builder** edits the config file in place: rows,
+  columns, stacks, titles and boxes from single keys, a module picker with
+  fuzzy and initialism search (`sn` finds `session_name`), an editor for
+  every module and top-level key generated from the same schema the
+  reference is, glyph and colour pickers with suggestions, and a preview
+  you can click to select and edit a module. `s` saves only the keys you
+  set, in the file's own order, keeping the previous file as a backup; a
+  file that does not parse is never overwritten, and a file changed on
+  disk since it was read asks before it is replaced.
+- `garnish setup --preset <name> [--install]` writes a preset without
+  opening the screen. A bare `garnish` typed at a terminal prints a
+  pointer at `setup` instead of waiting for JSON (`garnish render` always
+  reads stdin).
+- Each module page lists alternative glyphs under *also try*: the same
+  list the glyph picker offers.
 
-New, all optional:
+**Layout: rows, columns, stacks, titles and boxes** (Phase 21)
 
-- **Columns.** `[[row.col]]` puts columns side by side, sharing the row's
-  width by `width = "<n>fr" | "auto" | <cells>` with `gap` cells between
-  them. `justify` places a column's modules and defaults to its position,
-  so three bare columns read left / centre / right. Content is cut to its
-  own column and never spills into a neighbour.
-- **Stacks.** `[[row.col.row]]` makes a column a stack of rows; the row is
-  as tall as its tallest column and `valign` places a shorter one.
-- **Titles.** `title` with `title_justify`, `title_pad` and `title_color`
-  sets plain text into a row's rule; a row with only a title is a titled
-  spacer.
-- **Boxes.** `[box.<name>]` frames a run of adjacent rows, or a whole
-  column, with its own corners and sides in place of the frame's caps;
-  `box = true` boxes a single row. A box takes its style from `[frame]`
-  unless it names one, and its interior is clean unless `fill = true`.
-  Adjacent rows of a stack join a box by name as top-level rows do, and a
-  name that comes back anywhere else in the file is reported, since a box
-  is one run of adjacent rows.
-- Four gallery presets to copy from: `grid-three`, `grid-six`,
-  `boxed-panels` and `dashboard-panels`.
+- A config is a list of **rows** and a row can be several lines tall.
+  `[[row]]` is the name; `[[line]]` and `hide_empty_lines` stay accepted
+  for ever, so every config on disk renders byte for byte as before.
+- **Columns**: `[[row.col]]` puts columns side by side, sharing the width
+  by `width = "<n>fr" | "auto" | <cells>` with `gap` between them;
+  `justify` defaults to the column's position, so three bare columns read
+  left / centre / right. Content is cut to its own column and never spills.
+- **Stacks**: `[[row.col.row]]` makes a column a stack of rows; `valign`
+  places a shorter one.
+- **Titles**: `title`, `title_justify`, `title_pad`, `title_color` set
+  text into a row's rule; a row with only a title is a titled spacer.
+- **Boxes**: `[box.<name>]` frames a run of adjacent rows, or a whole
+  column, with its own corners and sides; `box = true` boxes one row. A
+  box takes its style from `[frame]` unless it names one.
 
-**Audit through Phase 20** — the code read against its documents
+**Per-module presentation** (Phase 20)
 
-Fixed, each with a test:
+- `max_width` on any module cuts the whole module to that many cells with
+  `…` before the columns are aligned, so one long value cannot push the
+  rest of the row off. The common keys (`label`, `prefix`, `suffix`,
+  `hide_when_empty`, `max_width`) are on every module page with their caps.
+- `path.style = "fish"` abbreviates every directory but the last
+  (`~/p/garnish`). `branch.link = true` links the name to the branch on
+  the forge; a text module's `url` links its box.
+- `context.scale = "usable"` measures the bar against the auto-compaction
+  threshold, so 100 % is where compaction runs.
+- `reset = "absolute" | "both"` on `limit5h`, `limit7d` and `spend` prints
+  when a window resets (`⏱14:30`, `⏱Tue 14:30`, `⏱Mar 1`), alone or after
+  the countdown.
 
-- A checkout you did not create (an unpacked archive, a shared directory)
-  could make garnish read files outside it or run commands. A `.git/HEAD`
-  naming a ref outside the repository (`ref: ../../../x`), or a symlinked
-  `HEAD`, ref or `refs/heads` directory, made `branch` show the first
-  seven characters of any file as its short SHA: every ref file garnish
-  opens (`HEAD`, a loose ref, `packed-refs`, `config`) must now resolve to
-  a path inside the git directory, and is read with a size cap. And
-  `.git/config` could
-  run a command three ways: a remote name starting with `-` (git reads it
-  as an option), `core.fsmonitor` (`git status` runs it) and
-  `remote.<name>.uploadpack` (a fetch runs it). The name is refused and
-  the other two are overridden on every call.
-- A module whose last background refresh *failed* lost its `✗` mark when
-  it had no value of its own, so `sync` with a broken git looked like an
-  empty row instead of a failure. A `git status` whose output could not be read
-  before the timeout also reported a *clean* tree rather than a failure,
-  so the dirty marker went missing with nothing to show why.
-- `pr` underlined its number whenever `link = true`, even when the payload
-  carried no URL to link to, so it looked clickable and was not.
-- `sync` printed `refs/heads/main` as the upstream of a branch tracking a
-  local branch, where every other case reads `origin/main`.
-- `spend` coloured its percentage from a value clamped to 100 while
-  printing the real one, so a threshold above 100 could never be reached.
-- `context.show_compaction_percent` printed nothing unless
-  `compaction_marker` was also on, which nothing documented.
-- `branch.max_length` and `session_name.max_length` cut with `…` even
-  under `icons = "ascii"`, and could split a flag or an accented letter in
-  half.
-- A bar glyph (`fill` or `empty`) that was not exactly one cell was
-  silently replaced while `config check` said `ok`; it is reported now,
-  like `frame.fill_char`, and the same goes for an animated one
-  (`fill_frames`). `marker` is exempt when it is blank, which is how the
-  marker is turned off. `[frame] separator_frames = []` keeps meaning "no
-  animation" and is still accepted.
-- Blanking a trailing glyph (`icons.dirty = ""`) left a stray space that
-  widened the module and shifted any aligned column beside it. The
-  `cache` countdown left two.
-- `GARNISH_CONFIG=` (empty) put `⚠ config: cannot read` on every tick, and
-  `XDG_CONFIG_HOME=` made the config lookup relative to the current
-  directory, so a checkout holding `garnish/garnish.toml` became your
-  config. An empty path variable means unset everywhere now.
-- Under `color = "256"` every theme was shifted: the 6×6×6 cube's levels
-  are `0, 95, 135, 175, 215, 255`, not evenly spaced, so a channel could
-  be moved by up to 69 and could land 95 away from the nearest level.
-- A clipped text box of wide glyphs (CJK, emoji) could come out narrower
-  than its `width`, shifting an aligned column.
-- A background worker could hang for ever holding its module's lock when
-  something outlived `git fetch` (ssh's persistent connection does), and a
-  clock that stepped backwards froze a module's value, and its automatic
-  fetch, until the wall clock caught up.
-- An error in an inline `line = [...]` array named the wrong line number.
-- `GARNISH_DEBUG` now writes a line per tick, as the reference has always
-  said; it only ever logged a failed worker start.
+**Harness fidelity** (Phase 19)
 
-Also: the generated reference gained `GARNISH_DEBUG`, `DISABLE_COMPACT`
-and `GARNISH_MANAGED_SETTINGS` rows and the real range for the three
-`*_step` keys (`0.001`–`1000`, documented as "> 0"); `garnish doctor`
-builds its environment list from the same constants the code reads, so a
-hook cannot go missing from a bug report.
-
-**Per-module presentation** (PLAN Phase 20)
-
-- `max_width` on any built-in module cuts the whole module (label, prefix
-  and suffix included) to that many cells with `…`, before the columns
-  are aligned and before the line is cut, so one long branch name or
-  session title cannot push the rest of the line off. The common keys
-  (`label`, `prefix`, `suffix`, `hide_when_empty`, `max_width`) are now
-  listed on every module page and in `config init`'s file with their
-  caps; a text module is told to use `width` instead.
-- `path.style = "fish"` abbreviates every directory but the last to its
-  first character, the way the fish shell prompts (`~/p/garnish`).
-- `branch.link = true` links the name to the branch on the forge, built
-  from the repository identity in Claude Code's payload (GitLab gets its
-  `/-/tree/` form; nothing without a repository or on a detached HEAD),
-  and a text module's `url` wraps its box in a link. `config check`
-  rejects a URL the painter would not emit instead of letting the link
-  vanish on screen.
-- `context.scale = "usable"` measures the bar and the percentage against
-  the auto-compaction threshold, so 100 % is the point compaction runs
-  and the marker is implied; it falls back to the window scale when
-  compaction is off or the threshold is under a tenth of the window.
-- `reset = "absolute" | "both"` on `limit5h`, `limit7d` and `spend`
-  prints when a window resets, alone or in parentheses after the
-  countdown, in the form that identifies the instant at the distance that
-  window sits: the time for the five-hour window (`⏱14:30`), the weekday
-  and time for the seven-day one (`⏱Tue 14:30`), the date for the spend
-  window, which is weeks out (`⏱Mar 1`).
-
-**Harness fidelity** (PLAN Phase 19)
-
-- `animate` left unset now follows Claude Code's *Reduce motion* setting
-  (`prefersReducedMotion`, read from the same settings files as the
-  autocompact keys); an explicit `animate` wins over it and
-  `GARNISH_ANIMATE=0` over both. `config init` writes the key as a comment
-  and `config show` prints the value in effect.
+- `animate` left unset follows Claude Code's *Reduce motion* setting; an
+  explicit value wins, `GARNISH_ANIMATE=0` over both.
 - `garnish install` and `config init --force` never rewrite a
-  `settings.json` or `garnish.toml` that does not parse: one line names the
-  file and the problem and nothing is written. `config init --force` keeps
-  a backup of the file it replaces, as `install` does. Every rewrite goes
-  through a symlink even before its target exists (a dotfiles link made
-  ahead of the file stays a link), the new file is born with the old one's
-  permissions, and no temp file survives a failure.
-- Claude Code's settings files are read at most 1 MiB deep and an empty
-  file counts as `{}` everywhere (`doctor` no longer calls it invalid).
+  `settings.json` or `garnish.toml` that does not parse, keep a backup of
+  what they replace, write through symlinks and keep permissions.
 - `garnish doctor` lists Claude Code's settings files for the current
-  directory (managed, local, project, user) and whether each parses, then
-  the keys that change what the line can show, resolved as Claude Code
-  resolves them: it suggests `refreshInterval = 1` when the config shows a
-  clock, a timer or a running animation and `hideVimModeIndicator = true`
-  when the `vim` module is on, says when a `refreshInterval` below 1 is
-  being ignored by Claude Code, and says when `disableAllHooks` or
-  `prefersReducedMotion` is in effect. A `statusLine.command` from any of
-  those files is shown as plain text, and the project's files relative to
-  the project directory, so the report stays safe to paste into an issue.
-- Verified against Claude Code 2.1.270 (and 2.1.261): every status line
-  row is drawn dim by Claude Code and nothing the command prints can undo
-  it, so the planned per-row reset was dropped. `garnish preview` now
-  draws its rows faint the same way, so a theme is judged at the
-  intensity the screen will give it (`--color never` stays plain; the
-  status line itself is unchanged). The 13 000-token autocompact buffer
-  is unchanged.
-- `GARNISH_MANAGED_SETTINGS` names the managed settings file garnish reads
-  first in Claude Code's chain, or, empty, says there is none; `doctor`
-  lists it with the other hooks. The test suite sets it, so a managed
-  file on the machine running `cargo test` no longer changes a golden.
-- `garnish doctor` prints Claude Code's `tui` setting and what it means
-  for the line, naming a value Claude Code drops or rejects the file for,
-  and the guide's troubleshooting says how many rows fit: the fullscreen
-  renderer gives the prompt box and the status line together at most half
-  the terminal and cuts a taller status line from the bottom, the classic
-  renderer cuts nothing and scrolls. garnish itself caps nothing (read
-  from the 2.1.270 binary).
+  directory and the keys that change what the line can show
+  (`statusLine`, `refreshInterval`, `hideVimModeIndicator`,
+  `disableAllHooks`, `prefersReducedMotion`, `tui`), resolved as Claude
+  Code resolves them, and suggests `refreshInterval = 1` or
+  `hideVimModeIndicator = true` when the config calls for them.
+- `garnish preview` draws its rows faint, as Claude Code draws every
+  status line row (verified in 2.1.270: nothing a command prints can undo
+  it), so a theme is judged at the intensity the screen gives it.
+- The guide says how many rows fit: Claude Code's fullscreen renderer
+  gives the prompt box and the status line together at most half the
+  terminal and cuts a taller status line from the bottom; the classic
+  renderer scrolls instead.
+- `GARNISH_MANAGED_SETTINGS` names the managed settings file, or, empty,
+  says there is none.
 
-**Fixes**
+**Gallery and skills**
 
+- 28 presets, nine of them new: `titled-sections`, `links-and-shortcuts`,
+  `compaction-watch`, `sidebar-panels`, `narrow-unicode`, `ascii-only`,
+  `slow-motion`, `ticker-two-step` and `still-life` show titles, links,
+  the compaction scale, cell and share widths, a boxed column, narrow and
+  ASCII-only terminals, half-speed animation, a two-cell ticker and
+  animation off. `docs/presets.md` renders every one at its width.
+- The `garnish-statusline` skill offers `garnish setup` first and keeps
+  the conversational path; all three skills are shorter.
+
+**Fixes** (the audit through Phase 20; each with a test)
+
+- A checkout you did not create could make garnish read files outside it
+  or run commands: a `.git/HEAD` naming a ref outside the repository, a
+  symlinked `HEAD`, ref or `refs/heads`, and three ways `.git/config` could
+  run a command (a remote named `-…`, `core.fsmonitor`,
+  `remote.<name>.uploadpack`). Every ref read now stays inside the git
+  directory with a size cap, and the two settings are overridden on every
+  call.
+- A module whose last refresh failed lost its `✗` mark when it had no
+  value of its own; a `git status` whose output could not be read reported
+  a clean tree.
+- `pr` underlined its number without a URL to link to; `sync` printed
+  `refs/heads/main` for a local upstream; `spend` coloured its percentage
+  from a value clamped to 100; `context.show_compaction_percent` needed
+  the marker on; `branch.max_length` and `session_name.max_length` cut
+  with `…` under `icons = "ascii"` and could split a flag or an accented
+  letter.
+- A bar glyph that was not one cell was silently replaced while
+  `config check` said `ok`; it is reported now. Blanking a trailing glyph
+  left a stray space.
+- `GARNISH_CONFIG=` and `XDG_CONFIG_HOME=` (empty) misbehaved; an empty
+  path variable means unset everywhere now.
+- Under `color = "256"` every theme was shifted: the cube's levels are
+  `0, 95, 135, 175, 215, 255`, not evenly spaced.
+- A background worker could hang for ever holding its lock when something
+  outlived `git fetch` (ssh's persistent connection does); a clock that
+  stepped backwards froze a module's value and its automatic fetch.
 - `cost.decimals` is capped at 8: the money formatter allocated one byte
-  per decimal place, so a huge value could exhaust memory on every tick.
-- The size caps (`width`, `pad`, `bar_width` ≤ 1024 cells; `text`, `gap`
-  ≤ 4096 characters; `decimals` ≤ 8) are part of each module's schema and
-  the generated reference shows them in the type column.
-- `docs/README.md` no longer says the whole `docs/` directory is generated:
-  `docs/guide.md` is hand-written.
+  per decimal place. The size caps are part of each module's schema and
+  the reference shows them.
+- `GARNISH_DEBUG` writes a line per tick, as documented; the environment
+  reference gained `GARNISH_DEBUG`, `DISABLE_COMPACT` and
+  `GARNISH_MANAGED_SETTINGS`; `doctor` builds its environment list from
+  the constants the code reads.
 
 **Install**
 
 - Prebuilt binaries for Linux and macOS (x86_64 and aarch64) on every
   release, and a Homebrew cask: `brew install --cask justanotherspy/tap/garnish`.
-  The release workflow publishes the cask to the tap only after a manual
-  approval (CLAUDE.md § Release process).
+  The cask is published to the tap only after a manual approval.
 
 ## 0.2.0 — 2026-09-06 (PLAN Phases 12–18)
 

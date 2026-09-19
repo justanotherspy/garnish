@@ -48,8 +48,8 @@ Labels: `feedback`, plus `alignment` for widths, glyphs or the right edge.
 The issue is public. Replace the home directory in every path with `~`
 (`doctor` already does; `config show` prints no path), keep only the
 `GARNISH_*` lines of the doctor's environment section, print the **whole
-body**, and ask (AskUserQuestion when available): "post this to
-justanotherspy/garnish as a public issue?". Only a yes runs:
+body**, and ask (AskUserQuestion when available):
+"post this to justanotherspy/garnish as a public issue?". Only a yes runs:
 
 ```sh
 gh issue create --repo justanotherspy/garnish --title "$TITLE" --body-file "$BODY" \
