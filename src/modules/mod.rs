@@ -111,7 +111,8 @@ pub enum Freshness {
 pub enum Measure {
     /// A count (lines changed, commits ahead and behind).
     Count(u64),
-    /// An amount of money in dollars.
+    /// An amount of money in dollars, rounded as the row prints it
+    /// ([`Ctx::dollars_shown`]), so `zero` is what reads as zero.
     Amount(f64),
     /// The percentage the row prints.
     Percent(f64),
@@ -160,15 +161,17 @@ impl Rendered {
 /// Whether a module's `hide` list takes its output off the row this tick
 /// (SPEC § 3).
 ///
-/// `zero` matches a count of none or an amount under a cent (what prints
-/// as `$0.00`), `below:N` and `above:N` match the percentage the row
-/// prints. `empty` is [`decorate`]'s business, through
+/// `zero` matches a count of none or an amount that prints as zero (the
+/// amount arrives rounded as printed: `$0.00` under two decimals, `$0`
+/// under `cost = "whole"`), `below:N` and `above:N` match the percentage
+/// the row prints. `empty` is [`decorate`]'s business, through
 /// [`ModuleCfg::hides_empty`], since it is about having nothing to print.
 #[must_use]
 pub fn hidden_by(rendered: &Rendered, rules: &[HideRule]) -> bool {
     rules.iter().any(|rule| match (rule, rendered.measure) {
         (HideRule::Zero, Some(Measure::Count(n))) => n == 0,
-        (HideRule::Zero, Some(Measure::Amount(a))) => a.abs() < 0.005,
+        // Rounded as printed, so zero is exact and nothing prints below it.
+        (HideRule::Zero, Some(Measure::Amount(a))) => a <= 0.0,
         (HideRule::Below(n), Some(Measure::Percent(p))) => p < *n,
         (HideRule::Above(n), Some(Measure::Percent(p))) => p > *n,
         _ => false,
@@ -277,6 +280,21 @@ impl Ctx<'_> {
         self.percent_style(cfg).format(p, false)
     }
 
+    /// The number [`Ctx::percent`] prints, as a number: what a band
+    /// threshold and a `below:N` / `above:N` rule compare, so they agree
+    /// with the printed value at the boundaries whatever the style (SPEC
+    /// § 3, § 4).
+    #[must_use]
+    pub fn percent_shown(&self, cfg: &ModuleCfg, p: f64) -> f64 {
+        self.percent_style(cfg).shown(p, true)
+    }
+
+    /// [`Ctx::percent_shown`] for a number that may pass 100 (`spend`).
+    #[must_use]
+    pub fn percent_shown_unclamped(&self, cfg: &ModuleCfg, p: f64) -> f64 {
+        self.percent_style(cfg).shown(p, false)
+    }
+
     fn percent_style(&self, cfg: &ModuleCfg) -> PercentStyle {
         PercentStyle::parse(cfg.str("percent")).unwrap_or(self.format.percent)
     }
@@ -285,7 +303,18 @@ impl Ctx<'_> {
     /// `inherit`, then `[format] cost`; `decimals` is read by `precise`.
     #[must_use]
     pub fn dollars(&self, cfg: &ModuleCfg, usd: f64, decimals: usize) -> String {
-        CostStyle::parse(cfg.str("cost")).unwrap_or(self.format.cost).format(usd, decimals)
+        self.cost_style(cfg).format(usd, decimals)
+    }
+
+    /// The amount [`Ctx::dollars`] prints, as a number: what `zero` in a
+    /// `hide` list reads (SPEC § 3).
+    #[must_use]
+    pub fn dollars_shown(&self, cfg: &ModuleCfg, usd: f64, decimals: usize) -> f64 {
+        self.cost_style(cfg).shown(usd, decimals)
+    }
+
+    fn cost_style(&self, cfg: &ModuleCfg) -> CostStyle {
+        CostStyle::parse(cfg.str("cost")).unwrap_or(self.format.cost)
     }
 
     /// Countdown from this tick's clock to an epoch-seconds instant in the
@@ -941,8 +970,9 @@ mod tests {
         let with = |m: Option<Measure>| Rendered::fresh(vec![Segment::plain("x")]).measured(m);
         assert!(hidden_by(&with(Some(Measure::Count(0))), &[Zero]));
         assert!(!hidden_by(&with(Some(Measure::Count(1))), &[Zero]));
-        assert!(hidden_by(&with(Some(Measure::Amount(0.004))), &[Zero]));
-        assert!(!hidden_by(&with(Some(Measure::Amount(0.005))), &[Zero]));
+        assert!(hidden_by(&with(Some(Measure::Amount(0.0))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Amount(0.01))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Amount(0.004))), &[Zero]), "rounded as printed");
         assert!(hidden_by(&with(Some(Measure::Percent(9.0))), &[Below(10.0)]));
         assert!(!hidden_by(&with(Some(Measure::Percent(10.0))), &[Below(10.0)]));
         assert!(hidden_by(&with(Some(Measure::Percent(91.0))), &[Above(90.0)]));

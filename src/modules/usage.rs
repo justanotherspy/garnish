@@ -9,7 +9,7 @@ use crate::num::{clamp_percent, round_to_u64, u64_to_f64};
 use crate::payload::RateWindow;
 use crate::time::WallClock;
 
-use super::util::{BAR_STYLES, bar, rounded, rounded_unclamped};
+use super::util::{BAR_STYLES, bar};
 use super::{Ctx, Module, Rendered, detail, glyph_prefix, lead, seg};
 
 /// Which rate-limit window a limit module shows.
@@ -247,7 +247,11 @@ impl Module for LimitModule {
         // The band follows the number the row prints, which for `spend` may
         // pass 100 (SPEC § 3.3). Clamping it there capped the band at the
         // one holding 100, so a threshold above 100 could never be reached.
-        let shown = if self.0 == Window::Spend { rounded_unclamped(used) } else { rounded(used) };
+        let shown = if self.0 == Window::Spend {
+            ctx.percent_shown_unclamped(cfg, used)
+        } else {
+            ctx.percent_shown(cfg, used)
+        };
         // SPEC § 3.3: the pace is computed once, only when a switch wants it,
         // and only for a window whose length is known.
         let wants_pace = cfg.bool("pace")
@@ -255,12 +259,16 @@ impl Module for LimitModule {
             || cfg.bool("eta")
             || cfg.bool("elapsed_marker")
             || cfg.str("reset") == "elapsed";
+        // A window whose reset has passed has no pace: the payload keeps the
+        // old `resets_at` until the next response, and against it every
+        // switch would read the usage as 100 % elapsed (SPEC § 3.3).
+        let now = ctx.now.as_second();
         let pace = self
             .0
             .length_secs()
             .filter(|_| wants_pace)
-            .zip(w.resets_at)
-            .map(|(length, at)| pace(used, at, ctx.now.as_second(), length));
+            .zip(w.resets_at.filter(|at| *at > now))
+            .map(|(length, at)| pace(used, at, now, length));
         let color = match pace.and_then(|p| pace_band(shown, p.ratio)) {
             Some(band) if cfg.bool("pace_colors") => cfg.color(band.color_key()),
             _ => ctx.theme.band(shown, &thresholds, &bands),
@@ -517,9 +525,10 @@ impl Module for CostModule {
         }
         let Some(cost) = ctx.payload.cost.as_ref() else { return Rendered::empty() };
         let usd = cost.total_cost_usd.unwrap_or(0.0);
+        let decimals = cfg.size("decimals");
         let mut segs: Vec<Segment> = lead(cfg, "cost");
         segs.push(Segment::styled(
-            ctx.dollars(cfg, usd, cfg.size("decimals")),
+            ctx.dollars(cfg, usd, decimals),
             Style::fg(cfg.color("amount")).bolded(),
         ));
         if cfg.bool("show_lines") {
@@ -528,7 +537,9 @@ impl Module for CostModule {
             segs.push(seg(cfg, format!(" {}{added}", cfg.icon("added")), "added"));
             segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
         }
-        Rendered::fresh(segs).measured(super::Measure::Amount(usd))
+        // The amount as printed, so `zero` is what reads as zero (SPEC § 3).
+        let shown = ctx.dollars_shown(cfg, usd, decimals);
+        Rendered::fresh(segs).measured(super::Measure::Amount(shown))
     }
 }
 
@@ -666,6 +677,17 @@ mod tests {
         );
         let past = 1_738_699_201;
         assert_eq!(render(elapsed, past, TimeZone::UTC), "⏳ 24%  ≣ 41%  $ 112% ⏱ 24d3h");
+        // Every switch dies with the countdown: the payload keeps the old
+        // `resets_at` until the next response, and against it the usage
+        // would read as 100 % elapsed (`⇣77%`, the marker in the last cell).
+        let bars = "[modules.limit5h]\nbar_width = 8\n[modules.limit7d]\nbar_width = 8\n";
+        let every = "[modules.limit5h]\nbar_width = 8\npace = true\neta = true\nelapsed_marker = true\nreset = \"elapsed\"\n[modules.limit7d]\nbar_width = 8\npace = true\neta = true\nelapsed_marker = true\nreset = \"elapsed\"\n";
+        assert_eq!(
+            render(every, past, TimeZone::UTC),
+            "⏳ █▉░░░░░░ 24%  ≣ ███▎░░░░ 41%  $ 112% ⏱ 24d3h"
+        );
+        assert_eq!(render(every, past, TimeZone::UTC), render(bars, past, TimeZone::UTC));
+        assert_ne!(render(every, at, TimeZone::UTC), render(bars, at, TimeZone::UTC));
         // The precise style reaches the delta; a zero delta prints bare.
         let precise = "[format]\npercent = \"precise\"\n[modules.limit5h]\npace = true\n[modules.limit7d]\npace = true\n";
         assert!(render(precise, at, TimeZone::UTC).contains("23.5% ⇣31.9%"));
@@ -714,6 +736,76 @@ mod tests {
         let (fg, theme) =
             percent_color("pace = true\n[modules.limit5h.colors]\npace_nominal = \"accent\"\n", at);
         assert_eq!(fg, theme.role(Role::Band1));
+        // Past the reset there is no pace, so the thresholds band stands.
+        let (fg, theme) = percent_color(nominal, 1_738_699_201);
+        assert_eq!(fg, theme.role(Role::Band1));
+    }
+
+    /// SPEC § 3, § 4: a band threshold and a `below:N` / `above:N` rule
+    /// compare the number the row prints, whichever `percent` style: the
+    /// fixture's 23.5 % is 24 under `whole` and 23.5 under `precise`. The
+    /// bands and the measure used to take the whole-number rounding under
+    /// either style, so `thresholds = [23.7]` coloured a row printing
+    /// `23.5%` as over the threshold and `below:23.6` left it in place.
+    #[test]
+    fn bands_and_hide_rules_compare_the_printed_number() {
+        let at = 1_738_425_600;
+        let below = "[modules.limit5h]\nhide = [\"below:23.6\"]\n";
+        assert!(render(below, at, TimeZone::UTC).starts_with("⏳ 24%"), "24 is not below 23.6");
+        let precise = format!("[format]\npercent = \"precise\"\n{below}");
+        assert!(render(&precise, at, TimeZone::UTC).starts_with("≣ 41.2%"), "23.5 is below 23.6");
+        let band_of = |top: &str| {
+            let text = format!(
+                "{top}[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"limit5h\"]\n[modules.limit5h]\nthresholds = [23.7, 75, 90]\n"
+            );
+            let path =
+                format!("{}/tests/fixtures/payloads/spend-limit.json", env!("CARGO_MANIFEST_DIR"));
+            let payload =
+                crate::payload::Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = Clock { now: jiff::Timestamp::from_second(at).unwrap(), ..Clock::fixed() };
+            let row = crate::render::render_lines_at(&payload, &config, Some(80), &clock);
+            let fg = row
+                .first()
+                .and_then(|l| l.iter().find(|s| s.text().ends_with('%')))
+                .map(|s| s.style.fg)
+                .unwrap();
+            (fg, config.theme)
+        };
+        let (fg, theme) = band_of("");
+        assert_eq!(fg, theme.role(Role::Band2), "24 is over 23.7");
+        let (fg, theme) = band_of("[format]\npercent = \"precise\"\n");
+        assert_eq!(fg, theme.role(Role::Band1), "23.5 is under 23.7");
+    }
+
+    /// SPEC § 3 `zero` on `cost` reads the amount as the row prints it:
+    /// `$0.00` under two decimals is zero, `$0.004` under three is not,
+    /// and `$0` under `cost = "whole"` is zero whatever the cents.
+    #[test]
+    fn cost_zero_follows_the_printed_amount() {
+        let row = |usd: &str, extra: &str| {
+            let payload = crate::payload::Payload::parse(&format!(
+                "{{\"session_id\": \"s\", \"cost\": {{\"total_cost_usd\": {usd}}}}}"
+            ))
+            .unwrap();
+            let text = format!(
+                "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"cost\"]\n[modules.cost]\n{extra}"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+                .trim_end()
+                .to_owned()
+        };
+        let zero = "hide = [\"zero\"]\n";
+        assert_eq!(row("0.004", zero), "", "$0.00 is zero");
+        assert!(row("0.004", &format!("{zero}decimals = 3\n")).ends_with("$0.004"), "not zero");
+        assert!(row("0.006", zero).ends_with("$0.01"));
+        assert_eq!(row("0.4", &format!("{zero}cost = \"whole\"\n")), "", "$0 is zero");
+        assert!(row("0.6", &format!("{zero}cost = \"whole\"\n")).ends_with("$1"));
+        assert_eq!(row("-0.0", zero), "", "a negative zero is zero");
+        assert!(row("-0.0", "").ends_with("$0.00"), "and prints no sign");
     }
 
     /// SPEC § 3.3: `spend` prints a percentage that may pass 100, so its

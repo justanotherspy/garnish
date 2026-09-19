@@ -6,8 +6,8 @@
 # number: `tokens = "precise"` writes 128,400 where `compact` writes 128k,
 # `percent = "precise"` keeps one decimal, `cost = "whole"` rounds to
 # dollars, and `parens = "dim"` mutes the parenthesised details (the api
-# share, the net lines, the cache writes) so the values in front of them
-# stand out. A module can pin its own style with `tokens`, `percent` or
+# share, the net lines, a `both` reset's time) so the values in front of
+# them stand out. A module can pin its own style with `tokens`, `percent` or
 # `cost` under `[modules.<id>]`; here the context module keeps compact
 # tokens for its window tag.
 

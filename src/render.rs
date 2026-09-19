@@ -26,6 +26,11 @@ pub struct Request<'a> {
     /// Draw every row faint, as Claude Code draws the status line on screen
     /// (`preview`, SPEC § 2.1); the tick leaves that to the harness.
     pub dim: bool,
+    /// Whether a cached module may look its entry up and spawn a worker:
+    /// the tick does, `preview` never (SPEC § 14: a preview is not a
+    /// tick, so it neither reads the cache nor forks; a cached module
+    /// shows its not-yet-refreshed state).
+    pub workers: bool,
 }
 
 /// Render a full tick. Never fails and never prints nothing.
@@ -35,11 +40,11 @@ pub fn render(req: &Request<'_>) -> String {
         return "⚠ garnish: bad payload\n".to_owned();
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
-    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim)
+    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, req.workers)
 }
 
 /// Render with an already loaded config (used by tests, previews and
-/// benches). `dim` is [`Request::dim`].
+/// benches). `dim` is [`Request::dim`] and `workers` [`Request::workers`].
 #[must_use]
 pub fn render_loaded(
     payload: &Payload,
@@ -47,11 +52,13 @@ pub fn render_loaded(
     columns: Option<usize>,
     no_color: bool,
     dim: bool,
+    workers: bool,
 ) -> String {
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
     let painter = Painter { mode, links: mode != ColorMode::Never, dim };
-    let mut lines = render_lines(payload, config, columns);
+    let clock = Clock { workers, ..Clock::from_env() };
+    let mut lines = render_lines_at(payload, config, columns, &clock);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
     }
@@ -679,7 +686,7 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
 /// Plain-text render (no escapes), for tests and docs.
 #[must_use]
 pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
-    strip_ansi(&render_loaded(payload, loaded, columns, true, false))
+    strip_ansi(&render_loaded(payload, loaded, columns, true, false, true))
 }
 
 /// Plain-text render of the configured lines with a pinned clock (docs).
@@ -815,7 +822,7 @@ mod tests {
         assert!(!json.contains('\x1b'), "escaped on the wire");
         let payload = Payload::parse(&json).unwrap();
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
-        let out = render_loaded(&payload, &loaded, Some(160), false, false);
+        let out = render_loaded(&payload, &loaded, Some(160), false, false, true);
         let plain = render_plain(&payload, &loaded, Some(160));
         assert_eq!(plain.lines().count(), loaded.config.rows.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");

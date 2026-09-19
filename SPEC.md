@@ -271,8 +271,11 @@ states in which the module leaves its row, each named by the schema:
 or an amount that is zero: `cost` at `$0.00`, `lines` at `+0 −0`, `sync`
 at `⇡0 ⇣0`), and `below:N` / `above:N` for a module whose value is a
 percentage (`context`, `limit5h`, `limit7d`, `spend`, `cache`'s hit
-ratio, `api`'s share of the session), compared with the rounded number
-the row prints. Which states a module accepts follows from the *measure*
+ratio, `api`'s share of the session, whether or not `show_share` prints
+it), compared with the number the row prints, rounded as its `percent`
+style rounds it (§ 4); `zero` reads an amount the same way, as printed,
+so `$0.00` under two decimals and `$0` under `cost = "whole"` are zero
+and `$0.004` under three decimals is not. Which states a module accepts follows from the *measure*
 its schema declares (a count, an amount, a percentage, or none): every
 module takes `empty`, a text module (§ 3.7) nothing else, and `config
 check` names the accepted states when it refuses one. The list and
@@ -452,7 +455,7 @@ clamped to the window, from the payload's `resets_at` alone.
   `danger`); below 20 % used the ratio is noise and the thresholds bands
   stand, above 80 % used the band is critical whatever the ratio.
 - `eta = true` prints, after the pace, the time until the window reaches
-  100 % at the current rate (`⇥1h37m`: `icons.eta`, `colors.eta`, in the
+  100 % at the current rate (`⇥ 1h37m`: `icons.eta`, `colors.eta`, in the
   module's `durations` style): `elapsed × (100 − used) ÷ used`, and only
   when that lands before the reset; a window that resets first shows
   nothing, since nothing runs out.
@@ -577,7 +580,7 @@ document decides the count for these four alone).
 
 | id | shows | minimal | default | full | refresh |
 |---|---|---|---|---|---|
-| `version` | the payload's `version` | `v2.1.270` | dim `v2.1.270` | icon + dim `v2.1.270` | 0 |
+| `version` | the payload's `version` | dim `v2.1.270` | dim `v2.1.270` | icon + dim `v2.1.270` | 0 |
 | `sandbox` | `sandbox.enabled` in the settings chain | glyph | glyph | glyph + `sandbox` | 0 (the § 2.3 chain, read at most once per tick) |
 | `voice` | `voice.enabled` in the settings chain | glyph | glyph | glyph + `voice` | 0 (the same read) |
 | `account` | `oauthAccount.emailAddress` from `~/.claude.json` | the part before `@` | icon + the email | icon + the email | 600 (a worker; the tick reads its cache entry) |
@@ -733,7 +736,8 @@ one style per kind of number, each with today's rendering as its
 default. `tokens`: `compact` (`12k`, `128k`, `1.0M`), `precise`
 (`128,400`, thousands separated), `whole` (`128400`). `percent`: `whole`
 (`42%`) or `precise` (`42.3%`, one decimal). `cost`: `precise` (`$1.23`,
-`cost.decimals` places, `$1.2k` from a thousand up) or `whole` (`$1`). A
+`cost.decimals` places) or `whole` (`$1`), either printing `$1.2k` from a
+thousand up. A
 module that prints a kind carries the same-named option with `inherit`
 as its default (`context` and `cache` print tokens; the limits,
 `context`, `cache` and `api` print percentages; `cost` prints money), so
@@ -1408,7 +1412,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
-| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain) |
+| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain); a preview is not a tick, so it never reads the cache or spawns a worker (§ 14) |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
 | `garnish presets` | list the gallery presets (§ 12): name, summary, declared width, requirement |
@@ -1808,10 +1812,12 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   cells by every table, no East Asian Ambiguous character, no variation
   selector), and the generated module pages list them under the icons
   table as *also try*.
-- **Preview.** Rendered in-process through `render_lines_at`, exactly as
-  `garnish preview` renders a fixture: the same clock (live, so animations
-  move; `GARNISH_ANIMATE=0` freezes them as everywhere), no git discovery,
-  no cache, no settings. `f` cycles every bundled fixture
+- **Preview.** Rendered in-process through `render_lines_at` with a live
+  clock (animations move; `GARNISH_ANIMATE=0` freezes them as everywhere)
+  that, like `garnish preview`, never reads the cache or spawns a worker
+  (a preview is not a tick: a cached module shows its not-yet-refreshed
+  state) and, unlike it, does no git discovery and reads no settings,
+  since the bundled fixtures name no real directory. `f` cycles every bundled fixture
   (`fixtures::FIXTURES`: subscription, API key, before the first
   response, no git, the PR states, 1M at 96 % and the rest of
   `tests/fixtures/payloads/`) so the person sees what an absent field does

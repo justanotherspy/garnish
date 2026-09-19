@@ -10,7 +10,6 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::rounded;
 use super::{Ctx, Module, Rendered, badge, detail, glyph_prefix, lead, seg};
 
 /// `session`: wall-clock session duration.
@@ -121,7 +120,8 @@ impl Module for ApiModule {
         {
             segs.extend(detail(ctx, cfg, "", &ctx.percent(cfg, share), "share"));
         }
-        Rendered::fresh(segs).measured(share.map(|s| super::Measure::Percent(rounded(s))))
+        Rendered::fresh(segs)
+            .measured(share.map(|s| super::Measure::Percent(ctx.percent_shown(cfg, s))))
     }
 }
 
@@ -203,7 +203,7 @@ impl Module for CacheModule {
         });
         let text = ratio.map_or_else(|| "–".to_owned(), |r| ctx.percent(cfg, r * 100.0));
         segs.push(Segment::styled(text, Style::fg(cfg.color("percent")).bolded()));
-        let measure = ratio.map(|r| super::Measure::Percent(rounded(r * 100.0)));
+        let measure = ratio.map(|r| super::Measure::Percent(ctx.percent_shown(cfg, r * 100.0)));
         let Some(pc) = pc else { return Rendered::fresh(segs).measured(measure) };
         if cfg.bool("show_ttl")
             && let Some(ttl) = pc.ttl.as_deref()

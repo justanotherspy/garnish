@@ -116,17 +116,37 @@ impl PercentStyle {
         [Self::Whole, Self::Precise].into_iter().find(|s| s.name() == name)
     }
 
-    /// A percentage in this style; `clamp` holds it to `0..=100`, and off
-    /// it may pass 100 (`spend`), never falling below 0.
+    /// The number this style prints for `p`, as a number: what a band
+    /// threshold and a `below:N` / `above:N` rule compare, so they agree
+    /// with the printed value at the boundaries whatever the style (SPEC
+    /// § 3, § 4). `clamp` holds it to `0..=100`; off, it may pass 100
+    /// (`spend`). NaN and anything at or below zero are 0 (a negative
+    /// zero would print its sign).
+    #[must_use]
+    pub fn shown(self, p: f64, clamp: bool) -> f64 {
+        let p = if p.is_nan() || p <= 0.0 {
+            0.0
+        } else if clamp {
+            p.min(100.0)
+        } else {
+            p
+        };
+        match self {
+            Self::Whole => crate::num::u64_to_f64(crate::num::round_to_u64(p)),
+            // Rounded here rather than by the formatter, so the compared
+            // number and the printed text are one rounding: the formatter
+            // rounds a tie to even, `round` away from zero (12.25 → 12.3).
+            Self::Precise => (p * 10.0).round() / 10.0,
+        }
+    }
+
+    /// A percentage in this style: [`PercentStyle::shown`], printed.
     #[must_use]
     pub fn format(self, p: f64, clamp: bool) -> String {
-        match (self, clamp) {
-            (Self::Whole, true) => util::percent(p),
-            (Self::Whole, false) => util::percent_unclamped(p),
-            (Self::Precise, true) => format!("{:.1}%", crate::num::clamp_percent(p)),
-            (Self::Precise, false) => {
-                format!("{:.1}%", if p.is_nan() || p < 0.0 { 0.0 } else { p })
-            }
+        let shown = self.shown(p, clamp);
+        match self {
+            Self::Whole => format!("{}%", crate::num::round_to_u64(shown)),
+            Self::Precise => format!("{shown:.1}%"),
         }
     }
 }
@@ -150,15 +170,32 @@ impl CostStyle {
         [Self::Precise, Self::Whole].into_iter().find(|s| s.name() == name)
     }
 
-    /// An amount in this style; `decimals` is `cost.decimals`, which only
-    /// `precise` reads. A thousand and up is `$1.2k` in both.
+    /// The amount this style prints for `usd`, as a number: what `zero` in
+    /// a `hide` list reads (SPEC § 3), rounded to the places printed
+    /// (`decimals` under `precise`, none under `whole`). NaN and anything
+    /// at or below zero are 0 (a negative zero would print its sign).
+    #[must_use]
+    pub fn shown(self, usd: f64, decimals: usize) -> f64 {
+        if usd.is_nan() || usd <= 0.0 {
+            return 0.0;
+        }
+        let places = match self {
+            Self::Precise => decimals.min(crate::config::MAX_DECIMALS),
+            Self::Whole => 0,
+        };
+        let scale = 10_f64.powi(i32::try_from(places).unwrap_or(i32::MAX));
+        (usd * scale).round() / scale
+    }
+
+    /// An amount in this style: [`CostStyle::shown`], printed. `decimals`
+    /// is `cost.decimals`, which only `precise` reads; a thousand and up
+    /// (after rounding) is `$1.2k` in both.
     #[must_use]
     pub fn format(self, usd: f64, decimals: usize) -> String {
+        let shown = self.shown(usd, decimals);
         match self {
-            Self::Precise => util::dollars(usd, decimals),
-            Self::Whole if usd.is_nan() || usd < 0.0 => "$0".to_owned(),
-            Self::Whole if usd >= 1000.0 => util::dollars(usd, 0),
-            Self::Whole => format!("${usd:.0}"),
+            Self::Precise => util::dollars(shown, decimals),
+            Self::Whole => util::dollars(shown, 0),
         }
     }
 }
@@ -243,5 +280,34 @@ mod tests {
         assert_eq!(CostStyle::parse(""), None);
         assert_eq!(ParensStyle::Dim.name(), "dim");
         assert!(TokenStyle::CHOICES.contains("precise") && ParensStyle::CHOICES.contains("dim"));
+    }
+
+    /// SPEC § 3, § 4: what a band or a `hide` rule compares is the number
+    /// printed, rounded as the style rounds it; a tie rounds the same way
+    /// in both, a negative zero prints no sign, and the thousand mark
+    /// follows the rounded amount.
+    #[test]
+    fn shown_is_the_printed_number() {
+        assert_eq!(PercentStyle::Whole.shown(23.5, true), 24.0);
+        assert_eq!(PercentStyle::Precise.shown(23.5, true), 23.5);
+        assert_eq!(PercentStyle::Precise.shown(23.46, true), 23.5);
+        assert_eq!(PercentStyle::Precise.shown(12.25, true), 12.3);
+        assert_eq!(PercentStyle::Precise.format(12.25, true), "12.3%");
+        assert_eq!(PercentStyle::Precise.shown(140.0, true), 100.0);
+        assert_eq!(PercentStyle::Precise.shown(140.04, false), 140.0);
+        assert_eq!(PercentStyle::Whole.shown(f64::NAN, false), 0.0);
+        assert_eq!(PercentStyle::Precise.format(-0.0, true), "0.0%");
+        assert_eq!(PercentStyle::Precise.format(-3.0, false), "0.0%");
+        assert_eq!(PercentStyle::Whole.format(-0.0, true), "0%");
+        assert_eq!(CostStyle::Precise.shown(0.004, 2), 0.0);
+        assert_eq!(CostStyle::Precise.shown(0.004, 3), 0.004);
+        assert_eq!(CostStyle::Precise.shown(0.006, 2), 0.01);
+        assert_eq!(CostStyle::Whole.shown(0.4, 2), 0.0);
+        assert_eq!(CostStyle::Whole.shown(0.6, 2), 1.0);
+        assert_eq!(CostStyle::Whole.format(-0.0, 2), "$0");
+        assert_eq!(CostStyle::Precise.format(-0.0, 2), "$0.00");
+        assert_eq!(CostStyle::Whole.format(999.5, 2), "$1.0k");
+        assert_eq!(CostStyle::Precise.format(999.999, 2), "$1.0k");
+        assert_eq!(CostStyle::Precise.format(999.994, 2), "$999.99");
     }
 }

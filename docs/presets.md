@@ -1189,8 +1189,8 @@ At 120 columns:
 # number: `tokens = "precise"` writes 128,400 where `compact` writes 128k,
 # `percent = "precise"` keeps one decimal, `cost = "whole"` rounds to
 # dollars, and `parens = "dim"` mutes the parenthesised details (the api
-# share, the net lines, the cache writes) so the values in front of them
-# stand out. A module can pin its own style with `tokens`, `percent` or
+# share, the net lines, a `both` reset's time) so the values in front of
+# them stand out. A module can pin its own style with `tokens`, `percent` or
 # `cost` under `[modules.<id>]`; here the context module keeps compact
 # tokens for its window tag.
 
@@ -1376,7 +1376,7 @@ At 130 columns, needs nerd-font:
 
 ```text
 ╭─  ~/projects/garnish ─────────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00 ─╮
-╰─  1h12m since 14:48 │  8m20s (12%) │  91% 1h  47m00s 2 misses 352kw ──────────────────  $1.234 +156 −23 │  +156 −23 ─╯
+╰─  1h12m since 14:48 │  8m20s (12%) │  91% 1h  47m00s 2 misses 352kw ──────────────────  $1.235 +156 −23 │  +156 −23 ─╯
 ```
 
 <details><summary><code>presets/session-detail.toml</code></summary>

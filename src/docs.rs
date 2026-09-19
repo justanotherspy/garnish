@@ -917,7 +917,9 @@ fn hide_doc(schema: &ModuleSchema) -> String {
     use crate::config::schema::MeasureKind;
     let measure = match (schema.measure, schema.id) {
         (Some(MeasureKind::Count), _) => "; `zero` when the count is zero",
-        (Some(MeasureKind::Amount), _) => "; `zero` when the amount is zero",
+        (Some(MeasureKind::Amount), _) => {
+            "; `zero` when the amount prints as zero (`$0.00`, or `$0` under `cost = \"whole\"`)"
+        }
         (Some(MeasureKind::Percent), "api") => {
             "; `below:N` and `above:N` compare its share of the session, shown or not"
         }

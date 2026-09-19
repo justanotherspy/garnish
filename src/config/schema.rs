@@ -291,6 +291,7 @@ impl HideRule {
     /// # Errors
     /// With the reason when the text names no state.
     pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
         match text {
             "empty" => return Ok(Self::Empty),
             "zero" => return Ok(Self::Zero),
@@ -862,6 +863,7 @@ mod tests {
     #[test]
     fn hide_rules_parse_print_and_apply_by_measure() {
         assert_eq!(HideRule::parse("empty"), Ok(HideRule::Empty));
+        assert_eq!(HideRule::parse(" empty "), Ok(HideRule::Empty), "a state is trimmed");
         assert_eq!(HideRule::parse("zero"), Ok(HideRule::Zero));
         assert_eq!(HideRule::parse("below:10"), Ok(HideRule::Below(10.0)));
         assert_eq!(HideRule::parse("above:12.5"), Ok(HideRule::Above(12.5)));

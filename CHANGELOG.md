@@ -15,7 +15,7 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   the same-named option on each module that prints that kind, and
   `parens = "dim"` draws every parenthesised detail in the muted role.
 - `limit5h` and `limit7d` gain `pace` (`⇡14%` ahead of the window, `⇣32%`
-  behind), `pace_colors`, `eta` (`⇥1h37m` until the window is spent, only
+  behind), `pace_colors`, `eta` (`⇥ 1h37m` until the window is spent, only
   when that comes before the reset), `reset = "elapsed"` (`⏱2h46m/5h`)
   and `elapsed_marker` on the mini bar.
 - `[frame] separator_color = "inherit"` paints each separator in the
@@ -109,7 +109,7 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 **Gallery and skills**
 
-- 28 presets, nine of them new: `titled-sections`, `links-and-shortcuts`,
+- Nine more presets (32 in all with the four above): `titled-sections`, `links-and-shortcuts`,
   `compaction-watch`, `sidebar-panels`, `narrow-unicode`, `ascii-only`,
   `slow-motion`, `ticker-two-step` and `still-life` show titles, links,
   the compaction scale, cell and share widths, a boxed column, narrow and

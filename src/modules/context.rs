@@ -8,7 +8,7 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{BAR_STYLES, bar, rounded};
+use super::util::{BAR_STYLES, bar};
 use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
@@ -109,7 +109,8 @@ impl Module for ContextModule {
         let pct = used
             .map(crate::num::clamp_percent)
             .map(|u| usable.map_or(u, |scale| crate::num::clamp_percent(u * 100.0 / scale)));
-        let fill_color = ctx.theme.band(rounded(pct.unwrap_or(0.0)), &thresholds, &bands);
+        let fill_color =
+            ctx.theme.band(ctx.percent_shown(cfg, pct.unwrap_or(0.0)), &thresholds, &bands);
 
         let marker =
             if usable.is_some() || !cfg.bool("compaction_marker") { None } else { threshold };
@@ -154,7 +155,8 @@ impl Module for ContextModule {
         if warn_at > 0.0 && pct.is_some_and(|p| p >= warn_at) {
             segs.extend(badge(cfg, "warn", "warn"));
         }
-        Rendered::fresh(segs).measured(pct.map(|p| super::Measure::Percent(rounded(p))))
+        Rendered::fresh(segs)
+            .measured(pct.map(|p| super::Measure::Percent(ctx.percent_shown(cfg, p))))
     }
 }
 

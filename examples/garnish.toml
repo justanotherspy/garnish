@@ -1235,7 +1235,7 @@ suffix = ""
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
-# show_icon (bool) — Show the icon. [minimal=true default=true full=true]
+# show_icon (bool) — Show the icon. [minimal=false default=true full=true]
 # show_icon = true
 # style (`email` | `user`) — `email` shows the whole address; `user` the part before `@`. [minimal="user" default="email" full="email"]
 # style = "email"

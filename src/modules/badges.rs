@@ -146,7 +146,8 @@ impl Module for AccountModule {
             sources: &["~/.claude.json oauthAccount.emailAddress (worker)"],
             refresh: 600,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true)),
+                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
+                    .minimal(Value::Bool(false)),
                 OptSpec::new(
                     "style",
                     Kind::Enum(ACCOUNT_STYLES),
@@ -177,8 +178,10 @@ impl Module for AccountModule {
         let Some(email) = entry.get("email").filter(|e| !e.is_empty()) else {
             return Rendered { segments: Vec::new(), freshness, measure: None };
         };
+        // `user`: the part before `@`, unless there is none (`@host`), when
+        // the whole address stays rather than an icon with nothing after it.
         let shown = if cfg.str("style") == "user" {
-            email.split_once('@').map_or(email, |(user, _)| user)
+            email.split_once('@').map(|(user, _)| user).filter(|u| !u.is_empty()).unwrap_or(email)
         } else {
             email
         };
@@ -204,9 +207,9 @@ impl Module for AccountModule {
 pub fn read_account(path: &Path) -> Result<BTreeMap<String, String>, String> {
     use std::io::Read as _;
     let shown = path.display();
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+    let file = match claude_settings::open_regular(path) {
+        Ok(Some(file)) => file,
+        Ok(None) => return Ok(BTreeMap::new()),
         Err(e) => return Err(format!("{shown}: {e}")),
     };
     // Bytes first, one past the cap, as `claude_settings::read_file` reads
@@ -318,6 +321,17 @@ mod tests {
         assert!(email("[1]").is_err_and(|e| e.contains("not a JSON object")));
         assert!(email("").is_err_and(|e| e.contains("not valid JSON")));
         assert!(read_account(dir.path()).is_err(), "a directory cannot be read");
+        // A FIFO in place of the file: `open` would wait for a writer for
+        // ever and the worker with it, its lock live all the while. The
+        // read is refused without opening, so the answer comes at once.
+        if let Some(fifo) = crate::claude_settings::tests::fifo(&dir.path().join("fifo.json")) {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(read_account(&fifo));
+            });
+            let answer = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("blocked");
+            assert!(answer.as_ref().is_err_and(|e| e.contains("not a regular file")), "{answer:?}");
+        }
         // The cap: one byte over is a failure, at the cap the file is read.
         let body = r#"{"oauthAccount": {"emailAddress": "dev@example.com"}, "pad": ""#;
         let tail = "\"}";
@@ -354,10 +368,17 @@ mod tests {
         // render here misses and nothing is spawned.
         let mut values = BTreeMap::new();
         values.insert("email".to_owned(), "dev@example.com".to_owned());
-        cache.write(&scope, "account", &Entry::ok(600_000, values)).unwrap();
+        cache.write(&scope, "account", &Entry::ok(600_000, values.clone())).unwrap();
         assert_eq!(at(""), "@ dev@example.com");
         assert_eq!(at("style = \"user\"\n"), "@ dev");
-        assert_eq!(at("preset = \"minimal\"\nshow_icon = false\n"), "dev");
+        // An address with nothing before the `@` keeps the whole address
+        // under `user`: an icon followed by nothing would be a lone glyph.
+        let mut odd = BTreeMap::new();
+        odd.insert("email".to_owned(), "@example.com".to_owned());
+        cache.write(&scope, "account", &Entry::ok(600_000, odd)).unwrap();
+        assert_eq!(at("style = \"user\"\n"), "@ @example.com");
+        cache.write(&scope, "account", &Entry::ok(600_000, values.clone())).unwrap();
+        assert_eq!(at("preset = \"minimal\"\n"), "dev", "minimal: the user part, no icon");
         cache.write(&scope, "account", &Entry::ok(600_000, BTreeMap::new())).unwrap();
         assert_eq!(at(""), "", "an entry without the line: no account");
         assert_eq!(at("hide_when_empty = false\n"), "–");

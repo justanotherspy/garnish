@@ -90,6 +90,12 @@ Open items only; closed ones are in `WORKLOG.md`.
 
 **When asked** (small; none blocks anything)
 
+- [ ] `garnish preview` discovers git and reads the settings chain as the
+  tick does; only the cache and the workers are off (SPEC § 14, Phase 23's
+  review). The setup pane skips git and settings too, since the bundled
+  fixtures name no real directory; whether the CLI preview should is
+  Daniel's call (a captured payload from a real repository would then
+  lose its repo group)
 - [ ] The Claude settings chain (SPEC § 2.3) ignores `CLAUDE_CONFIG_DIR`,
   which moves the user file; only the `account` worker honours it for
   `.claude.json` (SPEC § 3.8). Honouring it in the chain means one more

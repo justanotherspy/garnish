@@ -295,13 +295,36 @@ pub enum FileState {
     Keys(FileKeys),
 }
 
+/// Open a file garnish reads on a timer, refusing anything that is not a
+/// regular file.
+///
+/// `open` on a FIFO waits for a writer for ever, and a repository nobody
+/// here built can put one at `.claude/settings.json` (CLAUDE.md, "The
+/// repository is not the user's file"). `Ok(None)` when there is nothing
+/// at `path`; a symlink is followed.
+///
+/// # Errors
+/// The metadata or open error, or one saying the path is not a regular
+/// file.
+pub fn open_regular(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+    let meta = match std::fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !meta.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file"));
+    }
+    std::fs::File::open(path).map(Some)
+}
+
 /// Read one settings file of the chain, at most [`MAX_SETTINGS_BYTES`] of it.
 #[must_use]
 pub fn read_file(path: &Path) -> FileState {
     use std::io::Read as _;
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileState::Absent,
+    let file = match open_regular(path) {
+        Ok(Some(file)) => file,
+        Ok(None) => return FileState::Absent,
         Err(e) => return FileState::Unreadable(e.to_string()),
     };
     // Bytes first, then UTF-8: reading straight into a `String` validates
@@ -377,13 +400,21 @@ pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The keys of a settings text, with an unparsable one contributing
     /// none — the shape `read_file` gives the chain.
     fn keys_of(text: &str) -> FileKeys {
         parse_settings_json(text).unwrap_or_default()
+    }
+
+    /// A FIFO at `path`, through the `mkfifo` binary (there is no
+    /// dependency for it): `None` where the binary is missing, so the
+    /// test that wants one skips rather than fails.
+    pub fn fifo(path: &Path) -> Option<PathBuf> {
+        let made = std::process::Command::new("mkfifo").arg(path).status().ok()?.success();
+        made.then(|| path.to_path_buf())
     }
 
     #[test]
@@ -459,6 +490,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_file(&dir.path().join("none.json")), FileState::Absent);
         assert!(matches!(read_file(dir.path()), FileState::Unreadable(_)));
+        // A FIFO where a settings file should be (a cloned repository can
+        // carry one): refused without opening, since `open` would wait for
+        // a writer for ever, on the tick.
+        if let Some(fifo) = fifo(&dir.path().join("fifo.json")) {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(read_file(&fifo));
+            });
+            let state = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("blocked");
+            assert!(
+                matches!(state, FileState::Unreadable(ref e) if e.contains("not a regular file")),
+                "{state:?}"
+            );
+        }
         std::fs::write(dir.path().join("bad.json"), "{").unwrap();
         assert!(matches!(read_file(&dir.path().join("bad.json")), FileState::Invalid(_)));
         std::fs::write(dir.path().join("ok.json"), "{}").unwrap();
