@@ -65,6 +65,28 @@ summary="$(attempts '[.[] | select(.type == "assistant") | .message.content[]?
   | select(.type == "tool_use") | select(.name == "Bash")
   | select((.input.command // "") | startswith("gh pr comment"))]')"
 
+# The third posting route, and the one the review actually uses: under
+# `track_progress` the summary is written *into* the tracking comment with
+# `update_claude_comment`, not posted beside it. Counting only `gh pr comment`
+# marked the first review that ever worked as a failure (run 35459324425: 35
+# turns, no denials, a full review posted, and this script said "0 inline, 0
+# top-level"). Every checklist tick is the same call, so the count means
+# nothing; what separates a summary from a progress update is that a summary
+# has no unchecked box left in it. Serialise the whole input, so this does not
+# depend on which field the body arrives in.
+tracked="$(
+  jq -r '
+    [ .[]
+      | select(.type == "assistant") | .message.content[]?
+      | select(.type == "tool_use")
+      | select(.name == "mcp__github_comment__update_claude_comment")
+      | (.input | tostring)
+    ]
+    | last // ""
+    | if . == "" or test("- \\[ \\]") then 0 else 1 end
+  ' "$file"
+)"
+
 echo "### Claude review: tool use"
 echo
 echo "| | |"
@@ -73,7 +95,7 @@ echo "| result | \`$subtype\` (is_error: \`$is_error\`) |"
 echo "| turns | $turns |"
 echo "| cost | \$$cost |"
 echo "| denied calls | $denials |"
-echo "| summary comments posted | $inline inline, $summary top-level |"
+echo "| summary posted | $inline inline, $summary top-level, $tracked in the tracking comment |"
 echo
 
 # Red on either of the two ways a review wastes its whole budget, because the
@@ -81,7 +103,7 @@ echo
 # whenever Claude returned a result, however little it did with it.
 fail=0
 
-if [ "$summary" = "0" ]; then
+if [ "$summary" = "0" ] && [ "$tracked" = "0" ]; then
   echo "> **The review posted no summary.** Whatever else it found is lost:"
   echo "> the checkout and the transcript go away with the runner."
   echo
