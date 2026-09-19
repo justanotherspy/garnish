@@ -1,0 +1,43 @@
+# fixture: subscription-full
+# columns: 120
+# now: 1738425600
+# icons: unicode
+# The SPEC § 4.3 sample: one row, three columns — a full-height double box
+# over a stack, a bare centred column, and a column of three boxes. The frame
+# has no box shape, so an unstyled box is drawn rounded.
+durations = "fixed"
+
+[frame]
+style = "none"
+
+[box.repo]
+style = "double"
+title = "Repository"
+
+[[row]]
+gap = 2
+
+[[row.col]]
+box = "repo"
+[[row.col.row]]
+modules = ["model", "effort"]
+[[row.col.row]]
+modules = ["session", "api"]
+
+[[row.col]]
+justify = "center"
+valign = "center"
+[[row.col.row]]
+modules = ["clock"]
+
+[[row.col]]
+justify = "center"
+[[row.col.row]]
+box = true
+modules = ["context"]
+[[row.col.row]]
+box = true
+modules = ["limit5h"]
+[[row.col.row]]
+box = true
+modules = ["cache"]

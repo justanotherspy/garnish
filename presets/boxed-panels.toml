@@ -1,0 +1,50 @@
+# name: boxed-panels
+# summary: two titled boxes, one around the repo rows and one around usage
+# columns: 120
+# needs: nerd-font
+
+# Adjacent rows naming the same box form one box (SPEC § 4.3), drawn with its
+# own corners and sides in place of the frame's caps. `fill` is off inside a
+# box, so the interior is clean; the row outside them keeps the frame.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[box.repo]
+title = "Repository"
+style = "double"
+
+[box.usage]
+title = "Usage"
+title_justify = "center"
+
+[[row]]
+box = "repo"
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+box = "repo"
+modules = ["worktree", "model", "effort"]
+
+[[row]]
+box = "usage"
+modules = ["context", "limit5h", "limit7d"]
+
+[[row]]
+box = "usage"
+modules = ["spend", "cost"]
+right   = ["lines"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["clock"]
+
+[modules.context]
+width = 20

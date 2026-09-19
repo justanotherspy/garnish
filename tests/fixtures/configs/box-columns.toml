@@ -1,0 +1,34 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# Columns inside a box: the row is laid out to the width between the box's
+# sides, and its empty cells are the box's spaces rather than the frame's
+# rule, because `fill` is off inside a box (SPEC § 4.3). The second box asks
+# for the rule back.
+
+[box.panel]
+title = "Panel"
+
+[box.ruled]
+title = "Ruled"
+fill = true
+
+[[row]]
+box = "panel"
+gap = 2
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+[[row.col]]
+modules = ["clock"]
+
+[[row]]
+box = "ruled"
+gap = 2
+[[row.col]]
+modules = ["limit5h"]
+[[row.col]]
+modules = ["session"]
+right   = ["api"]

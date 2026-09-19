@@ -1,0 +1,27 @@
+# fixture: subscription-full
+# columns: 90
+# now: 1738425600
+# icons: unicode
+# `fill = false` with columns (SPEC § 4.3): a column still owns its share of
+# the width, but its empty cells are spaces rather than rule, so `justify` is
+# all that places the group inside it. The second row packs a left and a
+# right group into one column, as a plain packed line always has.
+
+[frame]
+fill = false
+
+[[row]]
+gap = 2
+[[row.col]]
+justify = "left"
+modules = ["model"]
+[[row.col]]
+justify = "center"
+modules = ["context"]
+[[row.col]]
+justify = "right"
+modules = ["clock"]
+
+[[row]]
+modules = ["session"]
+right   = ["api"]

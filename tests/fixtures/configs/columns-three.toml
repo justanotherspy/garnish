@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 120
+# now: 1738425600
+# icons: unicode
+# Three columns of equal share, reading left / centre / right without saying
+# so: `justify` follows the column's position (SPEC § 4.3). The second row is
+# a plain one, so the two shapes sit under the same frame.
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+[[row.col]]
+modules = ["session", "api"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["clock"]

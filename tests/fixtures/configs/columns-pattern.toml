@@ -1,0 +1,23 @@
+# fixture: subscription-full
+# columns: 90
+# now: 1738425600, 1738425601
+# icons: unicode
+# A line's rule cells are numbered together, gaps between columns included,
+# so the dots travel across a column boundary instead of restarting in each
+# column (SPEC § 4.3). Two instants show the whole line shift as one.
+
+[frame]
+fill_pattern = "·  "
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["context"]
+[[row.col]]
+modules = ["clock"]
+
+[[row]]
+modules = ["session"]
+right   = ["api"]

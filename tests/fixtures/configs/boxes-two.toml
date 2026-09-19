@@ -1,0 +1,30 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# A named box around two adjacent rows, a `box = true` row boxed alone with
+# its own title against the right corner, and a bare row keeping the frame's
+# caps (SPEC § 4.3). The box inherits the frame's style unless it names one.
+
+[box.repo]
+title = "Repository"
+style = "double"
+
+[[row]]
+box = "repo"
+modules = ["model", "context"]
+right   = ["clock"]
+
+[[row]]
+box = "repo"
+modules = ["session", "api"]
+
+[[row]]
+box           = true
+title         = "Usage"
+title_justify = "right"
+modules       = ["limit5h", "limit7d"]
+
+[[row]]
+modules = ["cache"]
+right   = ["lines"]

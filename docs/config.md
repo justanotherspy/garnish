@@ -8,7 +8,7 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 
 | key | values | default | meaning |
 |---|---|---|---|
-| `preset` | `default` \| `minimal` \| `full` \| `compact` | `default` | Which lines exist and which module preset they imply, when `[[line]]` is absent. |
+| `preset` | `default` \| `minimal` \| `full` \| `compact` | `default` | Which rows exist and which module preset they imply, when `[[row]]` is absent. |
 | `icons` | `nerd` \| `unicode` \| `emoji` \| `ascii` | `nerd` | Glyph set. `nerd` needs a Nerd Font. |
 | `theme` | `garnish` \| `catppuccin-mocha` \| `nord` \| `dracula` \| `tokyonight` \| `mono` | `garnish` | Color palette (see below). |
 | `color` | `auto` \| `always` \| `never` \| `256` \| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set. |
@@ -18,7 +18,7 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 | `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |
 | `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |
 | `right_justify` | `end` \| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |
-| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = "hide"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |
+| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = "hide"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |
 | `overflow` | `truncate` \| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |
 | `ticker_step` | number | `1` | Cells the ticker advances per tick (0.001–1000; `0.5` = every second tick). |
 | `ticker_gap` | string | `"   "` | Text between the end of a scrolled group and its wrapped-around start. |
@@ -136,19 +136,103 @@ With `align = true` every module column is padded to the widest module in it, so
 ╰─ ⏱ 1h12m        │ ⇄ 8m20s │ ⛁ 91% 1h ✦ 47m00s ───────────────────────────╯
 ```
 
-## `[[line]]`
+## `[[row]]`
 
-Each entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = "none"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output when colour is off (`color = "never"`, `NO_COLOR`; with colour on the rule's colour codes keep the row; `preview --color never` shows what the screen drops). `blank = true` on the spacer keeps it on screen either way by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and a font with the clock spinner's braille should draw empty). It is off by default, so the harness's own rule stands unless you opt in; on a line with modules it is reported.
+Each entry is one row of the status line. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that row. Any module id may appear on any row, in any order; a module that has nothing to show is skipped, and a row whose modules all have nothing to show is dropped (`hide_empty_rows`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = "none"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output when colour is off (`color = "never"`, `NO_COLOR`; with colour on the rule's colour codes keep the row; `preview --color never` shows what the screen drops). `blank = true` on the spacer keeps it on screen either way by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and a font with the clock spinner's braille should draw empty). It is off by default, so the harness's own rule stands unless you opt in; on a row with modules it is reported.
+
+`[[line]]` is the permanent alias of `[[row]]`: every config written before rows existed keeps working, and `config check` says nothing about it. A file uses one name or the other — carrying both arrays is reported and the `[[line]]` entries ignored, because TOML gives no order between two arrays of tables.
 
 ```toml
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["clock"]
 separator = "  "
 
-[[line]]
+[[row]]
 modules = []          # a spacer
 blank = true          # keep it on screen even without a frame
+```
+
+## `[[row.col]]`
+
+A row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:
+
+| value | meaning |
+|---|---|
+| `"<n>fr"` | a share of the width left over once the others are placed (`"1fr"` by default, so three bare columns are thirds and six are sixths) |
+| `"auto"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = "fixed"`, a module with `max_width`), not for branch names |
+| an integer | that many cells |
+
+`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` (`left` \| `center` \| `right`) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = "ticker"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.
+
+```toml
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "branch"]
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+```
+
+```text
+── ❒ ~/projects/garnish ───────────────────────── ❖ Opus │ ⚙ ▁▃▅▇█ ─────────────────── ⊞ ████████▍░░░░░░░░░░▏ 42% ──
+```
+
+A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` (`top` \| `center` \| `bottom`) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.
+
+## Titles
+
+`title` is plain text set into a row's rule in the frame colour, with `title_pad` spaces on each side (1 by default) and `title_color` for another role or literal. `title_justify` puts it right after the left cap, centred in the widest empty gap of the line, or right before the right cap. A title wider than its space is cut with `…` and never widens the line, and a row with only a title is a titled spacer that is always kept.
+
+```toml
+[[row]]
+title = "Session"
+modules = []
+
+[[row]]
+title = "Usage"
+title_justify = "right"
+modules = ["limit5h", "limit7d"]
+```
+
+```text
+╭─ Session ────────────────────────────────────────────────────────────────╮
+╰─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d4h ────────────────────────────────── Usage ─╯
+```
+
+## `[box.<name>]`
+
+A box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = "<name>"` form one box, inside a stack as at the top level; `box = "<name>"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest. A box is one run of adjacent rows in the whole file, so a name that comes back anywhere after it is reported and that run left unboxed.
+
+| key | default | meaning |
+|---|---|---|
+| `title` `title_justify` `title_pad` `title_color` | none | the title set into the box's top rule, as for a row |
+| `style` | the `[frame]` style | `none` \| `rounded` \| `square` \| `double` \| `heavy` \| `custom`; when the frame's style has no box shape (`none`, `powerline`) an unstyled box is `rounded`, and a box that asks for `none` itself is invisible |
+| `fill` | `false` | draw the rule between a row's groups inside the box; off by default, because a clean interior is what a box is for |
+| `color` | the frame colour | role or literal for the box's glyphs |
+
+```toml
+[box.repo]
+title = "Repository"
+style = "double"
+
+[[row]]
+box = "repo"
+modules = ["path", "model"]
+right   = ["clock"]
+
+[[row]]
+box = "repo"
+modules = ["context"]
+```
+
+```text
+╔═ Repository ═════════════════════════════════════════╗
+║ ❒ ~/projects/garnish │ ❖ Opus             ⠋ 16:00:00 ║
+║ ⊞ ████████▍░░░░░░░░░░▏ 42%                           ║
+╚══════════════════════════════════════════════════════╝
 ```
 
 ## Top-level presets

@@ -1,0 +1,38 @@
+# fixture: subscription-full
+# columns: 110
+# now: 1738425600
+# icons: unicode
+# Adjacent rows naming the same box form one box wherever they are, inside a
+# stack as at the top level (SPEC § 4.3): the first column is a two-row box
+# with a bare row under it, the second is three `box = true` rows, which are
+# three boxes because `true` never joins.
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[box.repo]
+title = "Repository"
+style = "double"
+
+[[row]]
+gap = 2
+[[row.col]]
+[[row.col.row]]
+box     = "repo"
+modules = ["model", "effort"]
+[[row.col.row]]
+box     = "repo"
+modules = ["session", "api"]
+[[row.col.row]]
+modules = ["clock"]
+[[row.col]]
+[[row.col.row]]
+box     = true
+modules = ["context"]
+[[row.col.row]]
+box     = true
+modules = ["limit5h"]
+[[row.col.row]]
+box     = true
+modules = ["cache"]

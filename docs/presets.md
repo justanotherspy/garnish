@@ -6,14 +6,18 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 |---|---|---|---|
 | [`animated-dots`](#animated-dots) | dots travelling along the rule, a pulsing separator and a cycling model icon | 100 | nerd-font |
 | [`bars-and-limits`](#bars-and-limits) | 40-cell line-style context bar with window tag, mini bars on the limits | 130 | nerd-font |
+| [`boxed-panels`](#boxed-panels) | two titled boxes, one around the repo rows and one around usage | 120 | nerd-font |
 | [`compact-aligned`](#compact-aligned) | two rounded lines with stacked bars, Catppuccin Mocha | 110 | nerd-font |
+| [`dashboard-panels`](#dashboard-panels) | a full-height repo box, a centred column, and three stacked panels | 150 | nerd-font |
 | [`dracula-256`](#dracula-256) | Dracula with role and per-module colour overrides in 256-colour mode | 130 | nerd-font |
 | [`emoji-overrides`](#emoji-overrides) | emoji icons with per-module glyph overrides and name limits | 130 | emoji |
 | [`full-aligned`](#full-aligned) | every module at full verbosity, columns aligned, fixed timers | 130 | nerd-font |
+| [`grid-six`](#grid-six) | six equal columns, one module each, over a full-width flex row | 170 | nerd-font |
+| [`grid-three`](#grid-three) | three columns side by side — repo, model, usage — reading left, centre, right | 140 | nerd-font |
 | [`labels-and-placeholders`](#labels-and-placeholders) | labels, brackets, dim – for absent modules, UTC clock with date | 170 | nerd-font |
 | [`minimal-clean`](#minimal-clean) | one unframed line: path, context, limit, clock | 80 | nerd-font |
 | [`motd-ticker`](#motd-ticker) | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
-| [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed lines, a separator per line | 130 | nerd-font |
+| [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed rows, a separator per row | 130 | nerd-font |
 | [`session-detail`](#session-detail) | session, api, cache and cost detail, plain stale style, 1 s git refresh | 130 | nerd-font |
 | [`single-line-full`](#single-line-full) | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
 | [`tall-eight-lines`](#tall-eight-lines) | one module per row, eight rows, square frame | 100 | nerd-font |
@@ -54,11 +58,11 @@ style            = "rounded"
 fill_pattern     = "·  "
 separator_frames = [" │ ", " ┃ ", " ╎ "]
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
@@ -97,11 +101,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "context"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["limit5h", "limit7d", "spend", "cost"]
 right   = ["lines"]
 
@@ -131,6 +135,81 @@ hide_zero = false
 
 </details>
 
+## `boxed-panels`
+
+two titled boxes, one around the repo rows and one around usage
+
+At 120 columns, needs nerd-font:
+
+```text
+╔═ Repository ═════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║  ~/projects/garnish │  #42                                                                       garnish-dev ║
+║  Opus │  ▁▃▅▇█                                                                                                 ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+╭───────────────────────────────────────────────────── Usage ──────────────────────────────────────────────────────╮
+│  ████████▍░░░░░░░░░░▏ 42% │  24%  2h13m │  41%  3d04h                                                       │
+│                                                                                                        +156 −23 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+──  1h12m │  8m20s │  91% 1h  47m00s ───────────────────────────────────────────────────────────── ⠋ 16:00:00 ──
+```
+
+<details><summary><code>presets/boxed-panels.toml</code></summary>
+
+```toml
+# name: boxed-panels
+# summary: two titled boxes, one around the repo rows and one around usage
+# columns: 120
+# needs: nerd-font
+
+# Adjacent rows naming the same box form one box (SPEC § 4.3), drawn with its
+# own corners and sides in place of the frame's caps. `fill` is off inside a
+# box, so the interior is clean; the row outside them keeps the frame.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[box.repo]
+title = "Repository"
+style = "double"
+
+[box.usage]
+title = "Usage"
+title_justify = "center"
+
+[[row]]
+box = "repo"
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+box = "repo"
+modules = ["worktree", "model", "effort"]
+
+[[row]]
+box = "usage"
+modules = ["context", "limit5h", "limit7d"]
+
+[[row]]
+box = "usage"
+modules = ["spend", "cost"]
+right   = ["lines"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["clock"]
+
+[modules.context]
+width = 20
+```
+
+</details>
+
 ## `compact-aligned`
 
 two rounded lines with stacked bars, Catppuccin Mocha
@@ -156,6 +235,85 @@ theme  = "catppuccin-mocha"
 color  = "auto"
 align  = true
 durations = "fixed"
+```
+
+</details>
+
+## `dashboard-panels`
+
+a full-height repo box, a centred column, and three stacked panels
+
+At 150 columns, needs nerd-font:
+
+```text
+╔═ Repository ═════════════════════════════════════════════════╗                   ╭─────────────────────────────────────────────────────────────╮
+║  ~/projects/garnish                                         ║                   │                  ████████▍░░░░░░░░░░▏ 42%                  │
+║  #42                                                       ║                   ╰─────────────────────────────────────────────────────────────╯
+║                                                              ║                   ╭─────────────────────────────────────────────────────────────╮
+║                                                              ║   Opus   ▁▃▅▇█  │                         24%  2h13m                        │
+║                                                              ║                   ╰─────────────────────────────────────────────────────────────╯
+║                                                              ║                   ╭─────────────────────────────────────────────────────────────╮
+║                                                              ║                   │                         ⠋ 16:00:00                          │
+╚══════════════════════════════════════════════════════════════╝                   ╰─────────────────────────────────────────────────────────────╯
+```
+
+<details><summary><code>presets/dashboard-panels.toml</code></summary>
+
+```toml
+# name: dashboard-panels
+# summary: a full-height repo box, a centred column, and three stacked panels
+# columns: 150
+# needs: nerd-font
+
+# The SPEC § 4.3 dashboard: one row, three columns. The first is a box the
+# row's full height over a stack of two rows, the second a bare centred
+# column, the third a stack of three boxes. The frame has no box shape, so an
+# unstyled box is drawn rounded.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "none"
+
+[box.repo]
+title = "Repository"
+style = "double"
+
+[[row]]
+gap = 2
+
+[[row.col]]
+box = "repo"
+[[row.col.row]]
+modules = ["path", "branch"]
+[[row.col.row]]
+modules = ["sync", "pr"]
+
+[[row.col]]
+width = "auto"
+justify = "center"
+valign = "center"
+[[row.col.row]]
+modules = ["model", "effort"]
+
+[[row.col]]
+justify = "center"
+[[row.col.row]]
+box = true
+modules = ["context"]
+[[row.col.row]]
+box = true
+modules = ["limit5h"]
+[[row.col.row]]
+box = true
+modules = ["cost", "clock"]
+
+[modules.context]
+width = 20
 ```
 
 </details>
@@ -195,11 +353,11 @@ warn   = "yellow"         # named colour for the middle band / behind counts
 [frame]
 style = "heavy"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d", "cache"]
 
@@ -250,11 +408,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["session", "cache"]
 
@@ -317,6 +475,118 @@ durations = "fixed"       # 9m00s / 1h05m instead of 9m / 1h5m, so timers keep t
 
 </details>
 
+## `grid-six`
+
+six equal columns, one module each, over a full-width flex row
+
+At 170 columns, needs nerd-font:
+
+```text
+╭─  ~/projects/garnish ──────────────────────────────────────────  Opus ──────────────  ████▏░░░░▏ 42% ──────────  24%  2h13m ───────────────────── ⠋ 16:00:00 ─╮
+╰─  1h12m │  8m20s │  91% 1h  47m00s ───────────────────────────────────────────────────────────────────────────────────────────────────────────────  +156 −23 ─╯
+```
+
+<details><summary><code>presets/grid-six.toml</code></summary>
+
+```toml
+# name: grid-six
+# summary: six equal columns, one module each, over a full-width flex row
+# columns: 170
+# needs: nerd-font
+
+# Six `1fr` columns share the width equally (the leftover cells go one each to
+# the first of them, so the shares differ by at most one), and each holds a
+# single module. `durations = "fixed"` keeps the timers from changing width as
+# they tick, which is what keeps a grid from shuffling.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+[[row.col]]
+modules = ["path"]
+[[row.col]]
+modules = ["branch"]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["context"]
+[[row.col]]
+modules = ["limit5h"]
+[[row.col]]
+modules = ["clock"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["lines"]
+
+[modules.path]
+max_width = 20
+
+[modules.context]
+width = 10
+```
+
+</details>
+
+## `grid-three`
+
+three columns side by side — repo, model, usage — reading left, centre, right
+
+At 140 columns, needs nerd-font:
+
+```text
+╭─  ~/projects/garnish ───────────────────────────────────  Opus │  ▁▃▅▇█ ─────────────────────────────  ████████▍░░░░░░░░░░▏ 42% ─╮
+╰─  24%  2h13m │  41%  3d04h ───────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╯
+```
+
+<details><summary><code>presets/grid-three.toml</code></summary>
+
+```toml
+# name: grid-three
+# summary: three columns side by side — repo, model, usage — reading left, centre, right
+# columns: 140
+# needs: nerd-font
+
+# A row is columns side by side (SPEC § 4.3). With no `justify` anywhere, the
+# first column reads left, the last right and the middle one centre, so the
+# three groups sit where you would put them by hand. The second row is the
+# plain form, which is one column filling the width.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "branch", "sync"]
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+
+[[row]]
+modules = ["limit5h", "limit7d", "cost"]
+right   = ["clock"]
+
+[modules.context]
+width = 20
+```
+
+</details>
+
 ## `labels-and-placeholders`
 
 labels, brackets, dim – for absent modules, UTC clock with date
@@ -346,11 +616,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "vim"]
 right   = ["session", "api"]
 
@@ -450,11 +720,11 @@ theme  = "garnish"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["text.motd", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
@@ -470,7 +740,7 @@ color    = "accent2"
 
 ## `packed-heavy`
 
-custom heavy frame, left-packed lines, a separator per line
+custom heavy frame, left-packed rows, a separator per row
 
 At 130 columns, needs nerd-font:
 
@@ -484,7 +754,7 @@ At 130 columns, needs nerd-font:
 
 ```toml
 # name: packed-heavy
-# summary: custom heavy frame, left-packed lines, a separator per line
+# summary: custom heavy frame, left-packed rows, a separator per row
 # columns: 130
 # needs: nerd-font
 
@@ -510,16 +780,16 @@ right_single = ""
 pad          = " "
 separator    = " ⋮ "        # default separator for lines that do not set one
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync"]
 right   = ["session_name", "clock"]
 separator = "  "          # this line: two spaces, no bar
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["lines"]
 separator = " • "
@@ -558,11 +828,11 @@ stale_after = 1           # style stale after one missed TTL (default 5)
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["cost", "lines"]
 
@@ -633,7 +903,7 @@ overflow  = "ticker"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr", "model", "effort", "context", "style", "limit5h", "limit7d", "spend", "cost", "session", "api", "cache"]
 right   = ["session_name", "agent", "vim", "lines", "clock"]
 ```
@@ -674,24 +944,24 @@ truncate = true
 [frame]
 style = "square"
 
-[[line]]
+[[row]]
 modules = ["path"]
 right   = ["clock"]
-[[line]]
+[[row]]
 modules = ["branch"]
-[[line]]
+[[row]]
 modules = ["sync"]
-[[line]]
+[[row]]
 modules = ["pr"]
 right   = ["session_name"]
-[[line]]
+[[row]]
 modules = ["model"]
-[[line]]
+[[row]]
 modules = ["context"]
 right   = ["limit5h"]
-[[line]]
+[[row]]
 modules = ["session"]
-[[line]]
+[[row]]
 modules = ["cache"]
 right   = ["lines"]
 ```
@@ -728,15 +998,15 @@ durations = "fixed"
 [frame]
 style = "double"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["lines", "clock"]
 
@@ -777,11 +1047,11 @@ durations = "fixed"
 style = "powerline"
 pad   = " "               # powerline ships with no space between the caps and the text
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "context", "limit5h"]
 right   = ["session", "cost"]
 

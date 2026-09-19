@@ -15,11 +15,11 @@ stale_after = 1           # style stale after one missed TTL (default 5)
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["cost", "lines"]
 

@@ -69,9 +69,9 @@ dots, …) rendered at their own widths; `garnish presets` lists them and
 accompany a preset as `presets/screenshots/<name>.png`.
 
 A config written by `garnish config init` (or `garnish install`) spells out
-every `[[line]]` and the `[frame]`; those explicit blocks win over the
+every `[[row]]` and the `[frame]`; those explicit blocks win over the
 preset, so changing `preset` in such a file only changes what each module
-shows, not the lines. To switch presets outright, delete the `[[line]]` and
+shows, not the rows. To switch presets outright, delete the `[[row]]` and
 `[frame]` blocks (or start from a file that holds only `preset`, `icons` and
 `theme`). Each preset's module list is in
 [docs/config.md](docs/config.md#top-level-presets).
@@ -131,11 +131,11 @@ theme  = "catppuccin-mocha" # garnish | catppuccin-mocha | nord | dracula | toky
 [frame]
 style = "rounded"           # none | rounded | square | double | heavy | powerline | custom
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "cost"]
 
@@ -147,23 +147,43 @@ width  = 30
 Every module has `minimal` / `default` / `full` presets plus its own icons,
 colors and refresh interval, and the common `label`, `prefix`, `suffix`,
 `hide_when_empty` and `max_width` keys (`max_width` cuts a module to that
-many cells with `…`, so one long value cannot push the rest of the line
-off). Put any module on any line, left or right.
+many cells with `…`, so one long value cannot push the rest of the row
+off). Put any module on any row, left or right.
 
 A few top-level keys keep a multi-line layout tidy: `align = true` pads every
 module column to the widest module in it, so the `│` separators stack
 vertically instead of drifting with each line's content (`right_justify =
 "start"` keeps a padded right-side module next to its separator instead of
 the cap); `durations = "fixed"` prints timers as `9m00s` / `1h05m` instead of
-`9m` / `1h5m`, so they keep their width as they tick; and `hide_empty_lines`
-(on by default) drops a line whose modules all have nothing to show, while
-`modules = []` makes a spacer row that always stays.
+`9m` / `1h5m`, so they keep their width as they tick; and `hide_empty_rows`
+(on by default) drops a row whose modules all have nothing to show, while
+`modules = []` makes a spacer row that always stays. (`[[line]]` and
+`hide_empty_lines` are permanent aliases of `[[row]]` and `hide_empty_rows`,
+so a config written before rows existed keeps working.)
 
 ```text
 ╭─ ❖ Opus         │ ⊞ ████████▍░░░░░░░░░░▏ 42% ─────────────── ⠋ 16:00:00 ─╮
 ├─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d04h ──────────────────────────── Δ +156 −23 ─┤
 ╰─ ⏱ 1h12m        │ ⇄ 8m20s │ ⛁ 91% 1h ✦ 47m00s ───────────────────────────╯
 ```
+
+A row can also be **columns side by side**, and a column can hold a stack of
+rows of its own. `width` is `"1fr"` (a share of what is left), `"auto"` (the
+column's content) or a number of cells; `justify` places a column's modules
+and follows the column's position when you leave it out, so three bare
+columns read left / centre / right. `title` sets text into a row's rule, and
+`[box.<name>]` frames a run of rows — or a whole column — with its own
+corners and sides:
+
+```text
+╔═ Repository ═════════════════════════════════════════╗
+║ ❒ ~/projects/garnish │ ❖ Opus             ⠋ 16:00:00 ║
+║ ⊞ ████████▍░░░░░░░░░░▏ 42%                           ║
+╚══════════════════════════════════════════════════════╝
+```
+
+The `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` presets
+are working examples; [docs/config.md](docs/config.md#row-col) has the keys.
 
 | group | modules |
 |---|---|

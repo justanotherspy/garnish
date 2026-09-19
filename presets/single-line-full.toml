@@ -20,6 +20,6 @@ overflow  = "ticker"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr", "model", "effort", "context", "style", "limit5h", "limit7d", "spend", "cost", "session", "api", "cache"]
 right   = ["session_name", "agent", "vim", "lines", "clock"]

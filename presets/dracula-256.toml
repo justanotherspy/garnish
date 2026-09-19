@@ -19,11 +19,11 @@ warn   = "yellow"         # named colour for the middle band / behind counts
 [frame]
 style = "heavy"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d", "cache"]
 

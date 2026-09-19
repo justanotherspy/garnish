@@ -1,0 +1,54 @@
+# fixture: subscription-full
+# columns: 120
+# now: 1738425600
+# icons: unicode
+# durations = "fixed" keeps the timers from changing width as they tick, which
+# is what an `auto` column is for: it is re-measured every tick and moves its
+# neighbours with it (SPEC § 4.3).
+durations = "fixed"
+
+# `auto` (its content), a cell count, and `2fr` sharing what is left.
+[[row]]
+gap = 2
+[[row.col]]
+width = "auto"
+modules = ["model"]
+[[row.col]]
+width = 24
+justify = "center"
+modules = ["limit5h"]
+[[row.col]]
+width = "2fr"
+modules = ["session", "api"]
+right   = ["clock"]
+
+# No `fr` column at all: the columns take exactly what they asked for and the
+# free width is a rule after the last of them, which is why that column still
+# keeps a pad on its right.
+[[row]]
+gap = 2
+[[row.col]]
+width = "auto"
+modules = ["session"]
+[[row.col]]
+width = 20
+modules = ["api"]
+[[row.col]]
+width = "auto"
+justify = "right"
+modules = ["clock"]
+
+# Six equal columns: the shares differ by at most one cell and add up.
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["effort"]
+[[row.col]]
+modules = ["context"]
+[[row.col]]
+modules = ["limit5h"]
+[[row.col]]
+modules = ["session"]
+[[row.col]]
+modules = ["clock"]

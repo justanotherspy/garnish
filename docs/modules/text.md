@@ -9,7 +9,7 @@ A fixed string in a box, placed on a line as `text.<name>`. `width = 0` makes th
 ## Example
 
 ```toml
-[[line]]
+[[row]]
 modules = ["text.motd", "text.clip", "text.tag"]
 [modules.text.motd]
 text = "ship it before lunch, then write the docs"

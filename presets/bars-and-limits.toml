@@ -13,11 +13,11 @@ durations = "fixed"
 [frame]
 style = "rounded"
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "context"]
 right   = ["clock"]
 
-[[line]]
+[[row]]
 modules = ["limit5h", "limit7d", "spend", "cost"]
 right   = ["lines"]
 

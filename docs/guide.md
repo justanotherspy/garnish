@@ -103,17 +103,17 @@ falls back to the defaults wholesale, with the line of the syntax error;
 such a file is never overwritten either (`config init --force` refuses it
 and keeps a backup of any file it does replace).
 
-## 5. Compose your own lines
+## 5. Compose your own rows
 
-Every module is independent, so lines are just lists of module ids. `modules`
+Every module is independent, so rows are just lists of module ids. `modules`
 are left-aligned, `right` are right-aligned, and the frame rule fills the gap.
 
 ```toml
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d", "cost"]
 ```
@@ -132,7 +132,7 @@ sequences are stripped) in a box of fixed width, so it doubles as a
 fixed-width slot next to aligned columns. Longer text scrolls or is cut:
 
 ```toml
-[[line]]
+[[row]]
 modules = ["path", "text.motd"]
 right   = ["text.tag", "clock"]
 
@@ -162,16 +162,16 @@ countdown. Each module page under [modules/](modules/) lists its keys.
 
 Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is
-open, `vim` only with vim mode on. A line whose modules all have nothing to
-show is dropped too (outside a repository, a line of `branch sync pr` would
-otherwise be an empty framed row); set `hide_empty_lines = false` to keep
+open, `vim` only with vim mode on. A row whose modules all have nothing to
+show is dropped too (outside a repository, a row of `branch sync pr` would
+otherwise be an empty framed row); set `hide_empty_rows = false` to keep
 such rows, or write `modules = []` for a spacer row that always stays.
 Claude Code drops whitespace-only rows from the script's output, so with
 `style = "none"` and colour off (`color = "never"`, `NO_COLOR`) a spacer
-shows in `preview` only; add `blank = true` to that line to keep it on
+shows in `preview` only; add `blank = true` to that row to keep it on
 screen whatever the colour setting (the row then carries one invisible
 cell).
-With `stale_style = "hide"`, a line made only of cached modules can vanish
+With `stale_style = "hide"`, a row made only of cached modules can vanish
 while its values are overdue; `hide_when_empty = false` on one of them pins
 the row.
 
@@ -187,6 +187,55 @@ to put modules of similar width in the same column, or to move the odd
 module to a line of its own. On the right side the pad goes before the text
 by default so it hugs the cap; `right_justify = "start"` puts it after, so
 the text stays next to the separator.
+
+### Columns, titles and boxes
+
+A row is the addressable unit of the config and can be more than one
+terminal line tall. Everything above is the base case: a row with `modules`
+and `right` is one column filling the width. Add `[[row.col]]` tables and
+the row becomes columns side by side, sharing the width by `width` —
+`"1fr"` (a share of what is left), `"auto"` (the column's own content) or a
+number of cells — with `gap` empty cells between them:
+
+```toml
+[[row]]
+gap = 2
+[[row.col]]
+modules = ["path", "branch"]
+[[row.col]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["context"]
+```
+
+`justify` says where a column's modules sit when it has no `right` group,
+and its default follows the column's position, so those three read left,
+centre and right without being told. A column can hold a stack of rows of
+its own (`[[row.col.row]]`) instead of modules; the row is then as tall as
+its tallest column, and `valign` places a shorter one.
+
+`title` sets plain text into a row's rule (`title_justify` left, centred or
+right; a row with only a title is a titled spacer). `[box.<name>]` frames a
+run of adjacent rows, or a whole column, with its own corners and sides in
+place of the frame's caps — two extra lines, so a box is at least three
+tall, and `box = true` boxes one row on its own. Rows join by name inside
+a stack as they do at the top level, and a box is one run of adjacent rows
+in the whole file: a name that comes back anywhere after it is reported.
+
+```toml
+[box.repo]
+title = "Repository"
+style = "double"      # inherits [frame] style when absent
+
+[[row]]
+box = "repo"
+modules = ["path", "model"]
+right   = ["clock"]
+```
+
+The keys are in [config.md § `[[row.col]]`](config.md#row-col) and
+§ `[box.<name>]`; `grid-three`, `grid-six`, `boxed-panels` and
+`dashboard-panels` in the gallery are working examples to copy from.
 
 ## 6. Presets, icons, colors
 
@@ -283,7 +332,7 @@ so the two stay in step; an explicit `animate` wins over the setting, and
 
 ## 8. Under the hood
 
-stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[line]]` renders
+stdin JSON → `Payload` → `Config` (TOML + presets) → each `[[row]]` renders
 its modules → frame joins left/right groups and fills to the width of Claude
 Code's box (`$COLUMNS − 4 − padding`, § 7) → stdout.
 Cached modules read one small file each; when it is past its TTL the tick

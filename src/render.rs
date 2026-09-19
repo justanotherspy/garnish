@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width, strip_ansi};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
-use crate::frame::{Layout, Ticker, compose_line, join_modules};
+use crate::frame::Ticker;
 use crate::icons::IconSet;
 use crate::modules::{self, Ctx, Freshness, Rendered, SCHEMAS, decorate};
 use crate::payload::Payload;
@@ -197,6 +197,25 @@ pub fn render_lines_at(
     columns: Option<usize>,
     clock: &Clock,
 ) -> Vec<Vec<Segment>> {
+    render_rows_at(payload, config, columns, clock)
+        .into_iter()
+        .flatten()
+        .map(crate::layout::Line::into_segments)
+        .collect()
+}
+
+/// Every configured row rendered to its terminal lines (SPEC § 4.3).
+///
+/// One entry per `[[row]]`, in order: a row is one line today and several
+/// once it carries a stack or a box, and each line carries what its pieces
+/// are, which is what `setup`'s placement map reads (SPEC § 14).
+#[must_use]
+pub fn render_rows_at(
+    payload: &Payload,
+    config: &Config,
+    columns: Option<usize>,
+    clock: &Clock,
+) -> Vec<Vec<crate::layout::Line>> {
     let width = config.width(columns);
     let cache =
         clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
@@ -227,12 +246,15 @@ pub fn render_lines_at(
             .animate
             .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
     let stale = config.icons.stale_glyphs();
-    let layout = Layout {
-        chars: config.frame.chars.clone(),
+    let ellipsis: String = config.icons.ellipsis().into();
+    let layout = crate::layout::Layout {
+        chars: &config.frame.chars,
+        style: config.frame.style,
+        theme: &config.theme,
         fill: config.frame.fill,
         width,
         truncate: config.truncate,
-        ellipsis: config.icons.ellipsis().into(),
+        ellipsis: &ellipsis,
         // The effective animation switch is decided once, on `ctx`; with it
         // off there is no ticker and an over-wide line is cut (SPEC § 4.2).
         ticker: (config.overflow == config::Overflow::Ticker && ctx.animate).then(|| Ticker {
@@ -241,73 +263,210 @@ pub fn render_lines_at(
             now: clock.now,
         }),
         rule: rule_pattern(config, &ctx),
+        boxes: &config.boxes,
     };
-    let separator_frame =
-        ctx.frame(config.frame.separator_step, config.frame.separator_frames.len());
-    // Every line renders before any is composed: aligned columns need the
-    // widths of all lines.
-    let (mut lefts, mut rights): (Vec<_>, Vec<_>) = config
-        .lines
+    let frame = ctx.frame(config.frame.separator_step, config.frame.separator_frames.len());
+    // Every module renders before anything is laid out: aligned columns and
+    // `auto` widths need the widths of every row.
+    let mut tree: Vec<RowRender<'_>> = config
+        .rows
         .iter()
-        .map(|line| {
-            (
-                render_group(&ctx, config, &line.left, stale, &layout.ellipsis),
-                render_group(&ctx, config, &line.right, stale, &layout.ellipsis),
-            )
+        .map(|row| {
+            let sep = config.separator_at(row, frame);
+            render_row(&ctx, config, row, sep, stale, &ellipsis)
         })
-        .unzip();
+        .collect();
     if config.align {
-        if config.frame.fill {
-            align_columns(&mut lefts, false, false);
-            let pad_left = config.right_justify == config::RightJustify::End;
-            align_columns(&mut rights, true, pad_left);
+        align_tree(&mut tree, config);
+    }
+    // A row whose modules all rendered nothing is dropped unless it is an
+    // intentional spacer or `hide_empty_rows = false`; an inner row goes the
+    // same way, and its stack shortens (SPEC § 4.1, § 4.3).
+    if config.hide_empty_rows {
+        for row in &mut tree {
+            for col in &mut row.cols {
+                col.rows.retain(|inner| inner.cfg.spacer || !inner.is_empty());
+            }
+        }
+        tree.retain(|row| row.cfg.spacer || !row.is_empty());
+    }
+    let rows: Vec<crate::layout::Row<'_>> = tree.iter().map(RowRender::to_layout).collect();
+    layout.lines(&rows)
+}
+
+/// One configured row with every module of it rendered, before any width is
+/// decided: alignment and `auto` columns both need the whole tree first.
+struct RowRender<'a> {
+    cfg: &'a config::RowCfg,
+    separator: &'a str,
+    cols: Vec<ColRender<'a>>,
+}
+
+/// One column of a [`RowRender`].
+struct ColRender<'a> {
+    cfg: &'a config::ColCfg,
+    /// The column's justification, with an inner row following its column
+    /// unless it set one of its own (SPEC § 4.3).
+    justify: config::Justify,
+    left: Vec<Vec<Segment>>,
+    right: Vec<Vec<Segment>>,
+    rows: Vec<RowRender<'a>>,
+}
+
+impl<'a> RowRender<'a> {
+    fn is_empty(&self) -> bool {
+        self.cols.iter().all(ColRender::is_empty)
+    }
+
+    fn to_layout(&'a self) -> crate::layout::Row<'a> {
+        crate::layout::Row {
+            cols: self.cols.iter().map(ColRender::to_layout).collect(),
+            gap: self.cfg.gap,
+            separator: self.separator,
+            title: self.cfg.title.as_ref(),
+            boxed: self.cfg.boxed.as_ref(),
+            blank: self.cfg.blank,
+        }
+    }
+}
+
+impl<'a> ColRender<'a> {
+    const fn is_empty(&self) -> bool {
+        self.left.is_empty() && self.right.is_empty() && self.rows.is_empty()
+    }
+
+    fn to_layout(&'a self) -> crate::layout::Col<'a> {
+        // A stack stays a stack once `hide_empty_rows` has emptied it, so
+        // its share renders as the empty lines of a stack (spaces) rather
+        // than as an empty flex column (a rule): the two look different, and
+        // the column's neighbours have not changed (SPEC § 4.3).
+        let content = if self.cfg.rows.is_empty() {
+            crate::layout::Content::Groups { left: &self.left, right: &self.right }
         } else {
-            // Left-packed, the right group follows the left one after a
-            // separator, so the line is one sequence of columns (SPEC § 4).
-            let split: Vec<usize> = lefts.iter().map(Vec::len).collect();
-            let mut rows: Vec<Vec<Vec<Segment>>> = lefts
-                .iter_mut()
-                .zip(rights.iter_mut())
-                .map(|(l, r)| {
-                    let mut row = std::mem::take(l);
-                    row.append(r);
-                    row
+            crate::layout::Content::Stack(self.rows.iter().map(RowRender::to_layout).collect())
+        };
+        crate::layout::Col {
+            width: self.cfg.width,
+            justify: self.justify,
+            valign: self.cfg.valign,
+            boxed: self.cfg.boxed.as_ref(),
+            content,
+        }
+    }
+}
+
+/// Render every module of one row, its stacks included.
+fn render_row<'a>(
+    ctx: &Ctx<'_>,
+    config: &'a Config,
+    row: &'a config::RowCfg,
+    separator: &'a str,
+    stale: (&str, &str),
+    ellipsis: &str,
+) -> RowRender<'a> {
+    let cols = row
+        .cols
+        .iter()
+        .map(|col| {
+            let rows = col
+                .rows
+                .iter()
+                .map(|inner| {
+                    // An inner row's own separator wins over the outer row's,
+                    // as a row's wins over the frame's (SPEC § 4.3).
+                    let sep = inner.separator.as_deref().unwrap_or(separator);
+                    let mut rendered = render_row(ctx, config, inner, sep, stale, ellipsis);
+                    // …and its own `justify` wins over the column's, which is
+                    // what places the stack when the inner row says nothing.
+                    for c in &mut rendered.cols {
+                        if !c.cfg.justify_set {
+                            c.justify = col.justify;
+                        }
+                    }
+                    rendered
                 })
                 .collect();
-            align_columns(&mut rows, false, false);
-            for ((mut row, n), (l, r)) in
-                rows.into_iter().zip(split).zip(lefts.iter_mut().zip(rights.iter_mut()))
-            {
-                *r = row.split_off(n.min(row.len()));
-                *l = row;
+            ColRender {
+                cfg: col,
+                justify: col.justify,
+                left: render_group(ctx, config, &col.left, stale, ellipsis),
+                right: render_group(ctx, config, &col.right, stale, ellipsis),
+                rows,
+            }
+        })
+        .collect();
+    RowRender { cfg: row, separator, cols }
+}
+
+/// `align = true` (SPEC § 4.3): module *k* of a column is padded to the
+/// widest module *k* of the columns in the same position, among the rows
+/// with the same column count. Inner rows align with the inner rows at the
+/// same position, never with the rows around them.
+fn align_tree(tree: &mut [RowRender<'_>], config: &Config) {
+    let mut buckets: std::collections::BTreeMap<(usize, usize, usize), Vec<&mut ColRender<'_>>> =
+        std::collections::BTreeMap::new();
+    for row in tree.iter_mut() {
+        let n = row.cols.len();
+        for (j, col) in row.cols.iter_mut().enumerate() {
+            if col.rows.is_empty() {
+                buckets.entry((n, j, 0)).or_default().push(col);
+            } else {
+                for inner in &mut col.rows {
+                    for c in &mut inner.cols {
+                        buckets.entry((n, j, 1)).or_default().push(c);
+                    }
+                }
             }
         }
     }
-    // A line whose modules all rendered nothing is dropped unless it is an
-    // intentional spacer or `hide_empty_lines = false`; the caps follow the
-    // survivors (SPEC § 4.1).
-    let kept: Vec<_> = config
-        .lines
-        .iter()
-        .zip(lefts.iter().zip(rights.iter()))
-        .map(|(line, (left, right))| (line, left, right))
-        .filter(|(line, left, right)| {
-            let empty = left.is_empty() && right.is_empty();
-            let hidden = config.hide_empty_lines && !line.spacer && empty;
-            !hidden
-        })
-        .collect();
-    let count = kept.len();
-    kept.into_iter()
-        .enumerate()
-        .map(|(i, (line, left, right))| {
-            let sep = config.separator_at(line, separator_frame);
-            let left = join_modules(left, sep, &config.theme);
-            let right = join_modules(right, sep, &config.theme);
-            let row = compose_line(&layout, &config.theme, i, count, &left, &right, sep);
-            if line.blank { keep_blank(row) } else { row }
-        })
-        .collect()
+    for cols in buckets.into_values() {
+        align_bucket(cols, config);
+    }
+}
+
+/// One bucket of columns aligned against each other.
+fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
+    let take = |cols: &mut Vec<&mut ColRender<'_>>, right: bool| -> Vec<Vec<Vec<Segment>>> {
+        cols.iter_mut()
+            .map(|c| std::mem::take(if right { &mut c.right } else { &mut c.left }))
+            .collect()
+    };
+    // A right-justified column hangs off the right edge, so its positions
+    // count from the right end as a `right` group's do, and `right_justify`
+    // picks the pad side for both (SPEC § 4, § 4.3). The columns of a bucket
+    // are at the same position in rows with the same column count, so the
+    // first one's justification is the bucket's.
+    let from_right = cols.first().is_some_and(|c| c.justify == config::Justify::Right);
+    let pad_left = config.right_justify == config::RightJustify::End;
+    if config.frame.fill {
+        let mut lefts = take(&mut cols, false);
+        align_columns(&mut lefts, from_right, from_right && pad_left);
+        let mut rights = take(&mut cols, true);
+        align_columns(&mut rights, true, pad_left);
+        for ((col, left), right) in cols.iter_mut().zip(lefts).zip(rights) {
+            col.left = left;
+            col.right = right;
+        }
+    } else {
+        // Left-packed, the right group follows the left one after a
+        // separator, so the column is one sequence of modules (SPEC § 4).
+        let lefts = take(&mut cols, false);
+        let rights = take(&mut cols, true);
+        let split: Vec<usize> = lefts.iter().map(Vec::len).collect();
+        let mut rows: Vec<Vec<Vec<Segment>>> = lefts
+            .into_iter()
+            .zip(rights)
+            .map(|(mut l, mut r)| {
+                l.append(&mut r);
+                l
+            })
+            .collect();
+        align_columns(&mut rows, false, false);
+        for ((col, mut row), n) in cols.iter_mut().zip(rows).zip(split) {
+            col.right = row.split_off(n.min(row.len()));
+            col.left = row;
+        }
+    }
 }
 
 /// The one cell that keeps an unframed spacer on screen (SPEC § 4.1).
@@ -324,7 +483,7 @@ pub const BLANK_CELL: char = '\u{2800}';
 /// row, `fill = false` with no frame, becomes that one cell); a row with a
 /// visible frame is returned as is. The width never changes: a whitespace
 /// character two cells wide is left alone.
-fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
+pub(crate) fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
     // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
     // which `plain_text` has already dropped): the same set as
     // `char::is_whitespace`, so this is the harness's own test.
@@ -606,7 +765,7 @@ mod tests {
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
         let out = render_loaded(&payload, &loaded, Some(160), false, false);
         let plain = render_plain(&payload, &loaded, Some(160));
-        assert_eq!(plain.lines().count(), loaded.config.lines.len(), "{plain}");
+        assert_eq!(plain.lines().count(), loaded.config.rows.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
         assert!(plain.contains("projects/demo") && plain.contains("agent"), "{plain}");
         // The only escapes are the painter's own SGR: no OSC 8 for a bad

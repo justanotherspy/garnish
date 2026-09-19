@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::config::schema::{
     COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Preset, Value, toml_string,
 };
-use crate::config::{self, Config, Overlay};
+use crate::config::{self, ColCfg, Config, Overlay};
 use crate::frame::FrameStyle;
 use crate::icons::IconSet;
 use crate::modules::SCHEMAS;
@@ -79,9 +79,9 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     comment(
         out,
         annotated,
-        "Drop a line whose modules all rendered nothing (a `modules = []` spacer is kept).",
+        "Drop a row whose modules all rendered nothing (a `modules = []` spacer is kept).",
     );
-    let _ = writeln!(out, "hide_empty_lines = {}", cfg.hide_empty_lines);
+    let _ = writeln!(out, "hide_empty_rows = {}", cfg.hide_empty_rows);
     comment(
         out,
         annotated,
@@ -137,7 +137,7 @@ pub fn config_toml(cfg: &Config, annotated: bool) -> String {
     write_top_level(&mut out, cfg, annotated);
     write_colors(&mut out, cfg, annotated);
     write_frame(&mut out, cfg, annotated);
-    write_lines(&mut out, cfg, annotated);
+    write_rows(&mut out, cfg, annotated);
     write_modules(&mut out, cfg, annotated);
     write_texts(&mut out, cfg, annotated);
     out
@@ -202,11 +202,25 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
         ] {
             let _ = writeln!(out, "{key} = {}", toml_string(value));
         }
+        // The box glyphs (SPEC § 4.3) only exist for a style with a box
+        // shape; an empty one is `none`'s invisible box, and writing it
+        // back would make `config show` disagree with itself.
+        for (key, value) in [
+            ("top_left", &ch.top_left),
+            ("top_right", &ch.top_right),
+            ("bottom_left", &ch.bottom_left),
+            ("bottom_right", &ch.bottom_right),
+            ("side", &ch.side),
+        ] {
+            if !value.is_empty() {
+                let _ = writeln!(out, "{key} = {}", toml_string(value));
+            }
+        }
     } else {
         comment(
             out,
             annotated,
-            "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad",
+            "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad, and the box glyphs top_left top_right bottom_left bottom_right side",
         );
     }
     comment(
@@ -227,30 +241,150 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
     let _ = writeln!(out);
 }
 
-/// `[[line]]` per configured line.
-fn write_lines(out: &mut String, cfg: &Config, annotated: bool) {
+/// `[[row]]` per configured row, with `[[row.col]]` and `[[row.col.row]]`
+/// only where the config has them (SPEC § 4.3), so a plain row round-trips
+/// as the plain form it was written in.
+fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
     comment(
         out,
         annotated,
-        "Lines: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.",
+        "Rows: `modules` are left-aligned, `right` are right-aligned. Any module may go anywhere.",
     );
-    for line in &cfg.lines {
-        // A line left with no ids by a reported mistake renders as an empty
-        // row that `hide_empty_lines` drops; written back as `modules = []`
+    comment(
+        out,
+        annotated,
+        "A row can hold columns side by side instead; see docs/config.md § [[row.col]]:",
+    );
+    comment(out, annotated, "[[row]]");
+    comment(out, annotated, "gap = 2");
+    comment(out, annotated, "[[row.col]]");
+    comment(out, annotated, "width = \"1fr\"        # \"<n>fr\" | \"auto\" | a cell count");
+    comment(out, annotated, "modules = [\"path\", \"branch\"]");
+    for row in &cfg.rows {
+        // A row left with no ids by a reported mistake renders as an empty
+        // row that `hide_empty_rows` drops; written back as `modules = []`
         // it would become a spacer that is always drawn, so it is left out.
-        if line.left.is_empty() && line.right.is_empty() && !line.spacer {
+        if row.cols.iter().all(ColCfg::is_empty) && !row.spacer {
             continue;
         }
-        let _ = writeln!(out, "[[line]]");
-        let _ = writeln!(out, "modules = {}", toml_list(&line.left));
-        if !line.right.is_empty() {
-            let _ = writeln!(out, "right = {}", toml_list(&line.right));
+        let _ = writeln!(out, "[[row]]");
+        if row.explicit_cols && row.gap != config::DEFAULT_GAP {
+            let _ = writeln!(out, "gap = {}", row.gap);
         }
-        if let Some(sep) = &line.separator {
+        if let Some(sep) = &row.separator {
             let _ = writeln!(out, "separator = {}", toml_string(sep));
         }
-        if line.blank {
+        write_title(out, row.title.as_ref());
+        write_box_ref(out, row.boxed.as_ref());
+        if row.blank {
             let _ = writeln!(out, "blank = true");
+        }
+        match row.single().filter(|_| !row.explicit_cols) {
+            // The plain form: one column, written as the row's own groups.
+            Some(col) => write_groups(out, col),
+            _ => {
+                for col in &row.cols {
+                    let _ = writeln!(out, "[[row.col]]");
+                    if col.width != config::Width::default() {
+                        let _ = writeln!(out, "width = {}", col.width.to_toml());
+                    }
+                    if col.justify_set {
+                        let _ = writeln!(out, "justify = {}", toml_string(col.justify.name()));
+                    }
+                    if col.valign != config::VAlign::default() {
+                        let _ = writeln!(out, "valign = {}", toml_string(col.valign.name()));
+                    }
+                    write_box_ref(out, col.boxed.as_ref());
+                    if col.rows.is_empty() {
+                        write_groups(out, col);
+                    }
+                    for inner in &col.rows {
+                        let _ = writeln!(out, "[[row.col.row]]");
+                        if let Some(sep) = &inner.separator {
+                            let _ = writeln!(out, "separator = {}", toml_string(sep));
+                        }
+                        write_title(out, inner.title.as_ref());
+                        write_box_ref(out, inner.boxed.as_ref());
+                        if inner.blank {
+                            let _ = writeln!(out, "blank = true");
+                        }
+                        if let Some(col) = inner.single() {
+                            write_groups(out, col);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = writeln!(out);
+    write_boxes(out, cfg, annotated);
+}
+
+/// The `modules` / `right` pair of one column.
+fn write_groups(out: &mut String, col: &ColCfg) {
+    let _ = writeln!(out, "modules = {}", toml_list(&col.left));
+    if !col.right.is_empty() {
+        let _ = writeln!(out, "right = {}", toml_list(&col.right));
+    }
+}
+
+/// The four `title*` keys of a row or a box, each only when it is set.
+fn write_title(out: &mut String, title: Option<&config::TitleCfg>) {
+    let Some(title) = title else { return };
+    let _ = writeln!(out, "title = {}", toml_string(&title.text));
+    if title.justify != config::Justify::default() {
+        let _ = writeln!(out, "title_justify = {}", toml_string(title.justify.name()));
+    }
+    if title.pad != config::DEFAULT_TITLE_PAD {
+        let _ = writeln!(out, "title_pad = {}", title.pad);
+    }
+    if let Some(color) = title.color {
+        let _ = writeln!(out, "title_color = {}", toml_string(&color.to_spec()));
+    }
+}
+
+/// `box = "<name>"` or `box = true`.
+fn write_box_ref(out: &mut String, boxed: Option<&config::BoxRef>) {
+    match boxed {
+        Some(config::BoxRef::Named(name)) => {
+            let _ = writeln!(out, "box = {}", toml_string(name));
+        }
+        Some(config::BoxRef::Anon) => {
+            let _ = writeln!(out, "box = true");
+        }
+        None => {}
+    }
+}
+
+/// The `[box.<name>]` tables (SPEC § 4.3), or, in an annotated file without
+/// any, one commented example so boxes are discoverable from `config init`.
+fn write_boxes(out: &mut String, cfg: &Config, annotated: bool) {
+    if cfg.boxes.is_empty() {
+        if annotated {
+            let _ = writeln!(out, "# A box frames a run of adjacent rows, or a whole column:");
+            let _ = writeln!(out, "# [box.repo]");
+            let _ = writeln!(out, "# title = \"Repository\"");
+            let _ = writeln!(out, "# title_justify = \"left\"  # left | center | right");
+            let _ =
+                writeln!(out, "# style = \"double\"        # inherits [frame] style when absent");
+            let _ = writeln!(out, "# fill = false            # draw the rule inside the box too");
+            let _ = writeln!(
+                out,
+                "# color = \"accent\"        # role or literal; frame colour when absent"
+            );
+            let _ = writeln!(out);
+        }
+        return;
+    }
+    for (name, b) in &cfg.boxes {
+        let _ = writeln!(out, "[box.{name}]");
+        write_title(out, b.title.as_ref());
+        if let Some(style) = b.style {
+            let _ = writeln!(out, "style = {}", toml_string(style.name()));
+        }
+        let _ = writeln!(out, "fill = {}", b.fill);
+        if let Some(color) = b.color {
+            let _ = writeln!(out, "color = {}", toml_string(&color.to_spec()));
         }
     }
     let _ = writeln!(out);
@@ -447,7 +581,7 @@ fn fixture(name: &str) -> Payload {
 /// Render one module alone with a preset and icon set, as plain text.
 fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
     let text = format!(
-        "icons = {}\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [{}]\n[modules.{id}]\npreset = {}\n",
+        "icons = {}\n[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [{}]\n[modules.{id}]\npreset = {}\n",
         toml_string(icons.name()),
         toml_string(id),
         toml_string(preset.name())
@@ -467,7 +601,7 @@ fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
 /// Render a small two-line status line with a frame style.
 fn frame_sample(style: FrameStyle) -> String {
     let text = format!(
-        "icons = \"unicode\"\n[frame]\nstyle = {}\n[[line]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[line]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"cache\"]\n",
+        "icons = \"unicode\"\n[frame]\nstyle = {}\n[[row]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[row]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"cache\"]\n",
         toml_string(style.name())
     );
     let (cfg, _) = config::parse(&text, &SCHEMAS);
@@ -542,7 +676,7 @@ pub fn module_page(schema: &ModuleSchema) -> String {
 }
 
 /// The config the text-module page renders: the SPEC § 3.7 example.
-const TEXT_SAMPLE: &str = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.motd\", \"text.clip\", \"text.tag\"]\n[modules.text.motd]\ntext = \"ship it before lunch, then write the docs\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\n[modules.text.clip]\ntext = \"a rather long note\"\nwidth = 8\noverflow = \"clip\"\n[modules.text.tag]\ntext = \"v0.2\"\nwidth = 8\njustify = \"right\"\npad = 1\ncolor = \"muted\"\n";
+const TEXT_SAMPLE: &str = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [\"text.motd\", \"text.clip\", \"text.tag\"]\n[modules.text.motd]\ntext = \"ship it before lunch, then write the docs\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\n[modules.text.clip]\ntext = \"a rather long note\"\nwidth = 8\noverflow = \"clip\"\n[modules.text.tag]\ntext = \"v0.2\"\nwidth = 8\njustify = \"right\"\npad = 1\ncolor = \"muted\"\n";
 
 /// The `docs/modules/text.md` page for the `text.<name>` family (SPEC § 3.7).
 #[must_use]
@@ -715,7 +849,7 @@ pub fn config_page() -> String {
         writeln!(o, "## Top-level keys\n\n| key | values | default | meaning |\n|---|---|---|---|");
     let _ = writeln!(
         o,
-        "| `preset` | `default` \\| `minimal` \\| `full` \\| `compact` | `default` | Which lines exist and which module preset they imply, when `[[line]]` is absent. |"
+        "| `preset` | `default` \\| `minimal` \\| `full` \\| `compact` | `default` | Which rows exist and which module preset they imply, when `[[row]]` is absent. |"
     );
     let _ = writeln!(
         o,
@@ -748,7 +882,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_lines` | bool | `true` | Drop a line whose modules all rendered nothing (outside a repository, a line of `branch sync pr` is empty); the frame's caps follow the surviving lines. A line configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a line of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
         steps = crate::config::STEP_BOUNDS
     );
     let _ = writeln!(
@@ -846,34 +980,97 @@ fn frame_section(o: &mut String) {
 /// Three lines whose first modules differ in width, with and without `align`.
 fn align_sample(align: bool) -> String {
     let text = format!(
-        "icons = \"unicode\"\nalign = {align}\ndurations = \"fixed\"\n[[line]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[line]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"lines\"]\n[[line]]\nmodules = [\"session\", \"api\", \"cache\"]\nright = [\"cost\"]\n"
+        "icons = \"unicode\"\nalign = {align}\ndurations = \"fixed\"\n[[row]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[row]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"lines\"]\n[[row]]\nmodules = [\"session\", \"api\", \"cache\"]\nright = [\"cost\"]\n"
     );
     let (cfg, _) = config::parse(&text, &SCHEMAS);
     render_plain_at(&fixture("subscription-full"), &cfg, Some(80), &Clock::fixed())
 }
 
+/// One sample config rendered at a width, for the layout sections.
+fn layout_sample(text: &str, columns: usize) -> String {
+    let (cfg, _) = config::parse(text, &SCHEMAS);
+    render_plain_at(&fixture("subscription-full"), &cfg, Some(columns), &Clock::fixed())
+}
+
+/// `[[row.col]]`: widths, `justify`, and stacks (SPEC § 4.3).
+fn columns_section(o: &mut String) {
+    let _ = writeln!(
+        o,
+        "## `[[row.col]]`\n\nA row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:\n\n| value | meaning |\n|---|---|\n| `\"<n>fr\"` | a share of the width left over once the others are placed (`\"1fr\"` by default, so three bare columns are thirds and six are sixths) |\n| `\"auto\"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = \"fixed\"`, a module with `max_width`), not for branch names |\n| an integer | that many cells |\n\n`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` (`left` \\| `center` \\| `right`) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = \"ticker\"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.\n"
+    );
+    let _ = writeln!(
+        o,
+        "```toml\n[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n```\n\n```text\n{}\n```\n",
+        layout_sample(
+            "icons = \"unicode\"\n[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n",
+            120,
+        )
+    );
+    let _ = writeln!(
+        o,
+        "A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` (`top` \\| `center` \\| `bottom`) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.\n"
+    );
+}
+
+/// Titles on a row's rule (SPEC § 4.3).
+fn titles_section(o: &mut String) {
+    let _ = writeln!(
+        o,
+        "## Titles\n\n`title` is plain text set into a row's rule in the frame colour, with `title_pad` spaces on each side (1 by default) and `title_color` for another role or literal. `title_justify` puts it right after the left cap, centred in the widest empty gap of the line, or right before the right cap. A title wider than its space is cut with `…` and never widens the line, and a row with only a title is a titled spacer that is always kept.\n"
+    );
+    let _ = writeln!(
+        o,
+        "```toml\n[[row]]\ntitle = \"Session\"\nmodules = []\n\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n```\n\n```text\n{}\n```\n",
+        layout_sample(
+            "icons = \"unicode\"\n[[row]]\ntitle = \"Session\"\nmodules = []\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n",
+            80,
+        )
+    );
+}
+
+/// `[box.<name>]` (SPEC § 4.3).
+fn boxes_section(o: &mut String) {
+    let _ = writeln!(
+        o,
+        "## `[box.<name>]`\n\nA box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = \"<name>\"` form one box, inside a stack as at the top level; `box = \"<name>\"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest. A box is one run of adjacent rows in the whole file, so a name that comes back anywhere after it is reported and that run left unboxed.\n\n| key | default | meaning |\n|---|---|---|\n| `title` `title_justify` `title_pad` `title_color` | none | the title set into the box's top rule, as for a row |\n| `style` | the `[frame]` style | `none` \\| `rounded` \\| `square` \\| `double` \\| `heavy` \\| `custom`; when the frame's style has no box shape (`none`, `powerline`) an unstyled box is `rounded`, and a box that asks for `none` itself is invisible |\n| `fill` | `false` | draw the rule between a row's groups inside the box; off by default, because a clean interior is what a box is for |\n| `color` | the frame colour | role or literal for the box's glyphs |\n"
+    );
+    let _ = writeln!(
+        o,
+        "```toml\n[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright   = [\"clock\"]\n\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n```\n\n```text\n{}\n```\n",
+        layout_sample(
+            "icons = \"unicode\"\n[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright = [\"clock\"]\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n",
+            60,
+        )
+    );
+}
+
 fn presets_section(o: &mut String) {
     let _ = writeln!(
         o,
-        "## `[[line]]`\n\nEach entry is one output row. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that line. Any module id may appear on any line, in any order; a module that has nothing to show is skipped, and a line whose modules all have nothing to show is dropped (`hide_empty_lines`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = \"none\"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output when colour is off (`color = \"never\"`, `NO_COLOR`; with colour on the rule's colour codes keep the row; `preview --color never` shows what the screen drops). `blank = true` on the spacer keeps it on screen either way by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and a font with the clock spinner's braille should draw empty). It is off by default, so the harness's own rule stands unless you opt in; on a line with modules it is reported.\n"
+        "## `[[row]]`\n\nEach entry is one row of the status line. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that row. Any module id may appear on any row, in any order; a module that has nothing to show is skipped, and a row whose modules all have nothing to show is dropped (`hide_empty_rows`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = \"none\"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output when colour is off (`color = \"never\"`, `NO_COLOR`; with colour on the rule's colour codes keep the row; `preview --color never` shows what the screen drops). `blank = true` on the spacer keeps it on screen either way by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and a font with the clock spinner's braille should draw empty). It is off by default, so the harness's own rule stands unless you opt in; on a row with modules it is reported.\n\n`[[line]]` is the permanent alias of `[[row]]`: every config written before rows existed keeps working, and `config check` says nothing about it. A file uses one name or the other — carrying both arrays is reported and the `[[line]]` entries ignored, because TOML gives no order between two arrays of tables.\n"
     );
     let _ = writeln!(
         o,
-        "```toml\n[[line]]\nmodules = [\"path\", \"branch\", \"sync\", \"pr\"]\nright   = [\"clock\"]\nseparator = \"  \"\n\n[[line]]\nmodules = []          # a spacer\nblank = true          # keep it on screen even without a frame\n```\n"
+        "```toml\n[[row]]\nmodules = [\"path\", \"branch\", \"sync\", \"pr\"]\nright   = [\"clock\"]\nseparator = \"  \"\n\n[[row]]\nmodules = []          # a spacer\nblank = true          # keep it on screen even without a frame\n```\n"
     );
+    columns_section(o);
+    titles_section(o);
+    boxes_section(o);
 
     let _ = writeln!(o, "## Top-level presets\n");
     for preset in config::presets::TopPreset::ALL {
         let lines: Vec<String> = preset
-            .lines()
+            .rows()
             .iter()
-            .map(|l| {
-                let right = if l.right.is_empty() {
+            .map(|r| {
+                // Preset rows are the plain one-column form.
+                let col = r.single().cloned().unwrap_or_default();
+                let right = if col.right.is_empty() {
                     String::new()
                 } else {
-                    format!(" ⟶ {}", l.right.join(" "))
+                    format!(" ⟶ {}", col.right.join(" "))
                 };
-                format!("`{}`{}", l.left.join(" "), right)
+                format!("`{}`{}", col.left.join(" "), right)
             })
             .collect();
         let _ = writeln!(

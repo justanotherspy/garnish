@@ -1,0 +1,29 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# A three-row stack beside three one-line columns, each placed by its own
+# `valign` (SPEC § 4.3): top, centre and bottom of the row's three lines. An
+# inner row carries its own `title` and another its own `separator`, both of
+# which belong to the inner row rather than to the row that holds the stack.
+
+[[row]]
+gap = 2
+[[row.col]]
+[[row.col.row]]
+title   = "Now"
+modules = ["model"]
+[[row.col.row]]
+separator = " · "
+modules   = ["effort", "context"]
+[[row.col.row]]
+modules = ["context"]
+[[row.col]]
+valign = "top"
+modules = ["session"]
+[[row.col]]
+valign = "center"
+modules = ["api"]
+[[row.col]]
+valign = "bottom"
+modules = ["clock"]

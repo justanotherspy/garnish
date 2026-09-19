@@ -33,7 +33,9 @@ free-text "describe what you want" at any point and map it onto the keys.
 |---|---|---|
 | Terminal and font: is a Nerd Font installed? | `icons = "nerd"`, else `"unicode"` (or `"emoji"`, `"ascii"`) | nerd if they are unsure but use Ghostty/Kitty/WezTerm/iTerm2 with a patched font |
 | Usual terminal width (columns; `echo $COLUMNS` in their own terminal, a shell without a tty does not know)? | preset and line count: < 90 → `minimal` or `compact`; 90–130 → `compact` or `default`; wider → `default` or `full` | `compact` |
-| What matters most: repo state, model/context, usage limits, timers? | which modules go on which line; `preset = "full"` on the modules they care about | the preset's lines |
+| What matters most: repo state, model/context, usage limits, timers? | which modules go on which row; `preset = "full"` on the modules they care about | the preset's rows |
+| Rows across the width, or panels side by side? | a plain `[[row]]` per line, or `[[row.col]]` columns with `width` (`"1fr"` \| `"auto"` \| cells), `justify` and `gap`; `[[row.col.row]]` stacks rows inside a column | plain rows |
+| Anything worth labelling or framing? | `title` (with `title_justify`) sets text into a row's rule; `[box.<name>]` frames a run of adjacent rows or a whole column, `box = true` one row alone | nothing framed |
 | Colour: a named theme or match the terminal? | `theme = garnish \| catppuccin-mocha \| nord \| dracula \| tokyonight \| mono`; `color = "256"` for terminals without truecolor | `garnish` |
 | Frame taste: rounded, square, double, heavy, powerline, none? | `[frame] style` | `rounded` |
 | Should columns line up across lines? | `align = true`, `durations = "fixed"`; `right_justify` | `align = true` when there are 2+ lines |
@@ -44,7 +46,30 @@ free-text "describe what you want" at any point and map it onto the keys.
 | A window's reset as time left, or the clock time it resets at? | `reset = "countdown" \| "absolute" \| "both"` on `limit5h`, `limit7d`, `spend` | `countdown` |
 
 If a gallery preset matches the answers (`garnish presets`), start from it;
-otherwise start from a built-in preset and add `[[line]]` blocks.
+otherwise start from a built-in preset and add `[[row]]` blocks. For a
+layout of panels rather than rows, `grid-three`, `grid-six`, `boxed-panels`
+and `dashboard-panels` are the gallery's worked examples; a row's columns
+look like this, and a box like that:
+
+```toml
+[[row]]
+gap = 2
+[[row.col]]
+width = "1fr"                 # "<n>fr" | "auto" | a cell count
+modules = ["path", "branch"]
+[[row.col]]
+justify = "center"            # default follows the column's position
+modules = ["model", "context"]
+
+[box.usage]
+title = "Usage"
+[[row]]
+box = "usage"                 # adjacent rows with the same name share one box
+modules = ["limit5h", "limit7d"]
+```
+
+A column's content is cut to its column, never into its neighbour, so check
+the preview at the width they gave you: a column too narrow shows `…`.
 
 ## 3. Draft, preview, validate, then write
 

@@ -1,5 +1,5 @@
 # name: packed-heavy
-# summary: custom heavy frame, left-packed lines, a separator per line
+# summary: custom heavy frame, left-packed rows, a separator per row
 # columns: 130
 # needs: nerd-font
 
@@ -25,16 +25,16 @@ right_single = ""
 pad          = " "
 separator    = " ⋮ "        # default separator for lines that do not set one
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync"]
 right   = ["session_name", "clock"]
 separator = "  "          # this line: two spaces, no bar
 
-[[line]]
+[[row]]
 modules = ["model", "effort", "context"]
 right   = ["limit5h", "limit7d"]
 
-[[line]]
+[[row]]
 modules = ["session", "api", "cache"]
 right   = ["lines"]
 separator = " • "

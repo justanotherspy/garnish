@@ -14,11 +14,11 @@ durations = "fixed"
 style = "powerline"
 pad   = " "               # powerline ships with no space between the caps and the text
 
-[[line]]
+[[row]]
 modules = ["path", "branch", "sync", "worktree", "pr"]
 right   = ["session_name", "clock"]
 
-[[line]]
+[[row]]
 modules = ["model", "context", "limit5h"]
 right   = ["session", "cost"]
 

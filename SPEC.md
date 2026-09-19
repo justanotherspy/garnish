@@ -917,16 +917,21 @@ color = "accent"               # role or literal for the box's glyphs; default t
   line tall). Inner rows take no `[[row.col]]` and no `gap`; a column
   with both `modules` and inner rows is reported and the stack wins.
 - **Frame and fill.** The `[frame]` caps sit at both ends of every
-  terminal line that is not a box line (first/middle/last decided over
-  all the config's lines, a multi-line row counting as one block); a box
+  terminal line that is not a box line: `first`, `middle` and `last` are
+  decided over those lines in order, so a tall row's own lines carry
+  `middle` between the first and the last, and a config whose only lines
+  are inside boxes shows no cap at all (the box draws its own ends). A box
   line carries the box's corners and sides at its ends instead, as the
-  samples show. On a one-line row, `fill` draws the rule glyph (or the
+  samples show. (Decided while building Phase 21: an earlier wording made
+  a multi-line row one block for this, which would have repeated `╭─` on
+  every line of a tall row.) On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is
-  `(cell index + frame) mod period` over the whole line, and the
-  shorter-than-one-period fallback of § 4.2 counts the line's rule cells
-  together, so the dots travel across column boundaries instead of
+  `(rule-cell index + frame) mod period`, the line's rule cells numbered
+  together and the cells a module occupies taking no pattern cell with
+  them, and the shorter-than-one-period fallback of § 4.2 counts those
+  same cells, so the dots travel across column boundaries instead of
   restarting at each (a one-column row is unchanged). On a multi-line
   row it draws only inside each inner row's own cells; gap cells and
   padding lines are spaces, since a rule running past a box's side would
@@ -939,9 +944,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
   § 5) set into the row's rule in the frame colour with `title_pad`
   spaces on each side; `title_color` picks another role or literal.
   `title_justify` puts it right after the left cap, centred, or right
-  before the right cap; on a line that carries modules a centred title
-  goes in the widest empty gap of the line, whichever column or `gap` it
-  lies in. A title needs no rule: with `fill = false` or `style = "none"`
+  before the right cap. A line that carries modules has several runs of
+  empty cells, one per column and one per `gap`: a centred title goes in
+  the widest of them, a left one in the first run wide enough to hold it
+  and a right one in the last, and either falls back to the widest run
+  when no run at its end can hold it (the alternative is a title cut to
+  its ellipsis in a one-cell gap). A title needs no rule: with `fill = false` or `style = "none"`
   it is the same text at the same place with `title_pad` spaces around
   it. On a multi-line row the title goes into the first line. On a
   `box = true` row the `title*` keys title that anonymous box (the one
@@ -970,9 +978,14 @@ color = "accent"               # role or literal for the box's glyphs; default t
   on a row boxes that row alone with no title, so three adjacent
   `box = true` rows are three boxes. Boxes never nest: a row inside a
   boxed column may not carry `box`, and a column may not carry `box` on
-  a row that has one; both are reported and the inner box ignored. A
-  name reused for a non-adjacent run is reported and the second run
-  unboxed. Lines outside every box keep the frame's caps as today. The
+  a row that has one; both are reported and the inner box ignored. The
+  three ways read the same wherever the rows are: adjacent rows of a
+  stack naming one box form one box in that column, as adjacent
+  `[[row]]`s do. A name reused for a non-adjacent run is reported and
+  the second run unboxed, and the run is one run in the whole config,
+  not one per list: a stack is a run of its own, so a name inside one is
+  never adjacent to a name outside it, and a name a column's own `box`
+  has taken is taken. Lines outside every box keep the frame's caps as today. The
   built-in styles gain their corners and side: `rounded` `╭ ╮ ╰ ╯ │`,
   `square` `┌ ┐ └ ┘ │`, `double` `╔ ╗ ╚ ╝ ║`, `heavy` `┏ ┓ ┗ ┛ ┃`, with
   `fill_char` as the horizontal; `none` draws an invisible box (lines
@@ -1004,12 +1017,25 @@ color = "accent"               # role or literal for the box's glyphs; default t
   row, as it pins a top-level row. Text modules sit in columns like any
   module; a text module with `overflow = "scroll"` inside an `auto`
   column has a fixed box width, so the column holds still. A `[[row]]`
-  with `[[row.col]]` entries and also `modules` at the row level is the
-  reported case above; `right` at the row level without `modules` is
-  reported as today. `padding` (§ 4) shrinks the box before columns are
+  with `[[row.col]]` entries and also `modules` or `right` at the row
+  level is the reported case above; a row with `right` and no columns is
+  the one-column row `[[line]]` has always been, and is not reported. `padding` (§ 4) shrinks the box before columns are
   shared. A `[box.<name>]` nobody joins is reported as unused. `config
   init` writes no columns or boxes into the annotated default file; they
   appear as a commented example, as text modules do.
+- **Pads, decided while building Phase 21.** A rule never runs into a
+  module's text: a column keeps one `pad` cell on each end its *content*
+  reaches (a flex column's two groups, a left- or right-justified lone
+  group, and both ends of an `auto` column, whose declared width is its
+  content plus those cells), and none where the rule already surrounds the
+  group or where the frame's cap or the box's side has padded it. A box's
+  interior pad is the frame's `pad`, or one cell when the frame has none,
+  so a box never has its content against its side and a `style = "none"`
+  box indents by it. A title right after a cap drops its own leading pad
+  for the same reason (`├─ Repository ──┤`, not `├─  Repository`), and the
+  cell goes back to the rule. A box's own top and bottom rules are static:
+  `fill_pattern` belongs to the frame, and a travelling box edge would
+  read as an error.
 - **Validation.** `config check` reports: `justify`/`valign` outside
   their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
   count (≤ 1024); `gap` above 16; more than 16 columns on a row or 16
