@@ -249,8 +249,11 @@ claim, which embeds the numeric owner and repository IDs
   it.** The action exchanges its OIDC token only when the workflow file is
   byte-identical to the copy on the default branch, and otherwise goes
   green in about twelve seconds having done nothing (`Workflow validation
-  failed`; the tell is the duration). A change to the workflow lands in
-  its own pull request, before the branch that wants the review.
+  failed`; the tell is the duration). The report step then has no
+  execution file and must say so and exit 0: PR #78 went red on that
+  step because `main`'s copy of the script took the empty argument as a
+  usage error. A change to the workflow lands in its own pull request,
+  before the branch that wants the review.
 - The checkout is `fetch-depth: 0` with the pull request's head as `ref`
   (three of the four triggers are comment events whose `GITHUB_REF` is the
   default branch); at depth 1 there is no merge base.

@@ -202,6 +202,15 @@ jobs:
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
         run: |
           set -euo pipefail
+          # The action skips itself, writing no execution file, when this
+          # workflow file differs from the default branch's copy (a pull
+          # request that edits it) or when it failed before Claude started;
+          # neither is a refused review.
+          if [ -z "${EXECUTION_FILE:-}" ]; then
+            echo "The action wrote no execution file, so there was no review to report on (it skips itself on a pull request that edits this workflow)." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           script="$RUNNER_TEMP/review-denials.sh"
           git fetch --depth 1 origin "$BASE_BRANCH"
           if ! git show "FETCH_HEAD:scripts/review-denials.sh" > "$script"; then

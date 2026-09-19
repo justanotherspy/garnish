@@ -20,7 +20,10 @@
 # is all that is needed to write the missing entry, and it keeps an argument
 # that might carry a path or a token out of a public job log.
 set -uo pipefail
-file="${1:?usage: review-denials.sh EXECUTION_FILE}"
+# An empty argument is what the workflow passes when the action wrote no
+# execution file (it skips itself on a pull request that edits the workflow
+# file), and `${1:?}` would have made that a red check of its own.
+file="${1:-}"
 
 if ! command -v jq > /dev/null 2>&1; then
   echo "### Claude review: cannot read the execution file"

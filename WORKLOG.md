@@ -745,3 +745,13 @@ was built, what the reviews found and what was decided, not how.
   second placement of a text module, the builder's edge rules, a
   scrolled line's hit test), and PLAN's backlog carries the three that
   need a helper or a spec decision. 275 → 284 tests.
+
+  Marked ready for review with the `claude-review` label, the pull
+  request's `review` check went red in thirteen seconds: the action had
+  skipped itself as `CLAUDE.md` says it does on a pull request that edits
+  the workflow file, and the report step then ran `main`'s copy of
+  `review-denials.sh` with an empty execution-file argument, which
+  `${1:?}` treats as a usage error. The step now says so and exits 0
+  before fetching the script, and the script takes an empty argument as
+  "no execution file"; neither is a review, and the fix reaches the
+  step's own path only once it is on `main`.
