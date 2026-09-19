@@ -214,6 +214,12 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
     } else {
         let _ = writeln!(out, "separator = {}", toml_string(&cfg.frame.chars.separator));
     }
+    comment(
+        out,
+        annotated,
+        "Every separator's colour: muted | inherit (the colour of the module before it) | a role or literal",
+    );
+    let _ = writeln!(out, "separator_color = {}", toml_string(cfg.frame.separator_color.spec()));
     if cfg.frame.style == FrameStyle::Custom || !annotated {
         let ch = &cfg.frame.chars;
         for (key, value) in [
@@ -1029,6 +1035,10 @@ fn frame_section(o: &mut String) {
         "| `fill` | `true` | Extend the rule between the left and right groups to the full width and close with the right cap. With `false`, lines are left-packed. |"
     );
     let _ = writeln!(o, "| `separator` | style-dependent | Default separator between modules. |");
+    let _ = writeln!(
+        o,
+        "| `separator_color` | `muted` | Every separator's colour: a theme role or a literal, or `inherit`, which paints each separator in the colour of the first coloured, undimmed segment of the module before it (an icon or a value, never a `label` or an align pad), falling back to `muted`. |"
+    );
     let _ = writeln!(
         o,
         "| `first` `middle` `last` `single` | style-dependent | Line prefixes (`single` when there is one line). |"

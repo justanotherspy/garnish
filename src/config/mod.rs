@@ -433,6 +433,33 @@ impl FillDirection {
     }
 }
 
+/// `[frame] separator_color` (SPEC § 4.1): one colour for every separator,
+/// or the colour of the module before each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeparatorColor {
+    /// A role or a literal, as written, and what it resolves to.
+    Fixed {
+        /// The value as the file wrote it (`muted` when unset), for `config show`.
+        spec: String,
+        /// The resolved colour.
+        color: Color,
+    },
+    /// The first coloured, undimmed segment of the module before the
+    /// separator (an icon or a value, never a label or an align pad).
+    Inherit,
+}
+
+impl SeparatorColor {
+    /// The value as written in a config.
+    #[must_use]
+    pub fn spec(&self) -> &str {
+        match self {
+            Self::Fixed { spec, .. } => spec,
+            Self::Inherit => "inherit",
+        }
+    }
+}
+
 /// Frame configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameCfg {
@@ -442,6 +469,8 @@ pub struct FrameCfg {
     pub chars: FrameChars,
     /// Fill the rule to the full width.
     pub fill: bool,
+    /// The colour of every separator (SPEC § 4.1).
+    pub separator_color: SeparatorColor,
     /// One-cell glyphs repeated across the rule instead of `fill_char`;
     /// empty means the static rule (SPEC § 4.2).
     pub fill_pattern: Vec<String>,
@@ -829,6 +858,7 @@ struct RawFrame {
     right_single: Option<String>,
     pad: Option<String>,
     separator: Option<String>,
+    separator_color: Option<String>,
     fill_pattern: Option<String>,
     fill_step: Option<f64>,
     fill_direction: Option<FillDirection>,
@@ -841,7 +871,7 @@ struct RawFrame {
     side: Option<String>,
 }
 
-const FRAME_KEYS: [&str; 23] = [
+const FRAME_KEYS: [&str; 24] = [
     "style",
     "fill",
     "first",
@@ -855,6 +885,7 @@ const FRAME_KEYS: [&str; 23] = [
     "right_single",
     "pad",
     "separator",
+    "separator_color",
     "fill_pattern",
     "fill_step",
     "fill_direction",
@@ -903,6 +934,8 @@ impl RawFrame {
             match key.as_str() {
                 "style" => f.style = enum_field(&path, value, &styles, errors),
                 "fill" => f.fill = field(&path, value, errors),
+                // A colour spec, resolved against the theme in `resolve_frame`.
+                "separator_color" => f.separator_color = field(&path, value, errors),
                 "fill_step" => f.fill_step = field(&path, value, errors),
                 "fill_direction" => {
                     f.fill_direction = enum_field(&path, value, FILL_DIRECTIONS, errors);
@@ -1905,7 +1938,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let overrides = resolve_colors(&raw.colors, errors);
     let theme = Theme::from_palette(pal, &overrides);
 
-    let frame = resolve_frame(raw.frame.as_ref(), preset, errors);
+    let frame = resolve_frame(raw.frame.as_ref(), preset, &theme, errors);
     let boxes = resolve_boxes(&raw.boxes, &theme, errors);
     let mut rows: Vec<RowCfg> = if raw.row.is_empty() {
         preset.rows()
@@ -2194,6 +2227,7 @@ fn resolve_stale_after(raw: Option<u32>, errors: &mut Vec<ConfigError>) -> u32 {
 fn resolve_frame(
     raw: Option<&RawFrame>,
     preset: TopPreset,
+    theme: &Theme,
     errors: &mut Vec<ConfigError>,
 ) -> FrameCfg {
     let fallback = if preset.framed() { FrameStyle::Rounded } else { FrameStyle::None };
@@ -2279,10 +2313,13 @@ fn resolve_frame(
                 .inspect_err(|msg| errors.push(problem("frame.separator_frames", msg)))
                 .unwrap_or_default()
         });
+    let separator_color =
+        resolve_separator_color(raw.and_then(|f| f.separator_color.as_deref()), theme, errors);
     FrameCfg {
         style,
         chars,
         fill,
+        separator_color,
         fill_pattern,
         fill_step: resolve_step("frame.fill_step", raw.and_then(|f| f.fill_step), errors),
         fill_direction: raw.and_then(|f| f.fill_direction).unwrap_or_default(),
@@ -2291,6 +2328,33 @@ fn resolve_frame(
             "frame.separator_step",
             raw.and_then(|f| f.separator_step),
             errors,
+        ),
+    }
+}
+
+/// SPEC § 4.1 `separator_color`: `inherit`, or a role or literal resolved
+/// now, the muted role standing in for a bad value as it does when unset.
+fn resolve_separator_color(
+    spec: Option<&str>,
+    theme: &Theme,
+    errors: &mut Vec<ConfigError>,
+) -> SeparatorColor {
+    let muted =
+        || SeparatorColor::Fixed { spec: "muted".to_owned(), color: theme.role(Role::Muted) };
+    match spec {
+        None => muted(),
+        Some("inherit") => SeparatorColor::Inherit,
+        Some(spec) => theme.resolve(spec).map_or_else(
+            || {
+                errors.push(problem(
+                    "frame.separator_color",
+                    &format!(
+                        "invalid color {spec:?}; use inherit, a role name, a color name, 0-255, or #rrggbb"
+                    ),
+                ));
+                muted()
+            },
+            |color| SeparatorColor::Fixed { spec: spec.to_owned(), color },
         ),
     }
 }
@@ -3780,6 +3844,49 @@ x = 1
                 "`{}` did not survive the config → `ModuleCfg` chain ({text})",
                 opt.key
             );
+        }
+    }
+
+    /// SPEC § 4.1 `separator_color`: a role or a literal resolved at config
+    /// time, `inherit`, the muted role when unset or bad, and `config show`
+    /// writes the value as it was written.
+    #[test]
+    fn separator_color_resolves_inherits_or_falls_back_to_muted() {
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse("", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(
+            c.frame.separator_color,
+            SeparatorColor::Fixed { spec: "muted".into(), color: c.theme.role(Role::Muted) }
+        );
+        let (c, errs) = parse("[frame]\nseparator_color = \"inherit\"\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_color, SeparatorColor::Inherit);
+        let (c, errs) = parse("[frame]\nseparator_color = \"accent\"\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(
+            c.frame.separator_color,
+            SeparatorColor::Fixed { spec: "accent".into(), color: c.theme.role(Role::Accent) }
+        );
+        let (c, errs) = parse("[frame]\nseparator_color = \"#ff8800\"\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_color.spec(), "#ff8800");
+        let (c, errs) = parse("[frame]\nseparator_color = \"nope\"\n", all);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "frame.separator_color");
+        assert!(errs[0].message.contains("inherit"), "{}", errs[0].message);
+        assert_eq!(c.frame.separator_color.spec(), "muted");
+        let (_, errs) = parse("[frame]\nseparator_color = 3\n", all);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "frame.separator_color");
+        // `config show` writes the value as written and it parses back.
+        for spec in ["inherit", "accent", "#ff8800", "muted"] {
+            let (c, _) = parse(&format!("[frame]\nseparator_color = \"{spec}\"\n"), all);
+            let shown = crate::docs::config_toml(&c, false);
+            assert!(shown.contains(&format!("separator_color = \"{spec}\"")), "{shown}");
+            let (again, errs) = parse(&shown, all);
+            assert_eq!(errs, Vec::new());
+            assert_eq!(again.frame, c.frame);
         }
     }
 

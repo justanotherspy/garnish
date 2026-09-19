@@ -9,10 +9,8 @@
 
 use std::ops::Range;
 
-use itertools::Itertools;
-
-use crate::ansi::{Segment, Style, display_width, scroll, segments_width, truncate};
-use crate::config::{BoxCfg, BoxRef, Justify, VAlign, Width};
+use crate::ansi::{Color, Segment, Style, display_width, scroll, segments_width, truncate};
+use crate::config::{BoxCfg, BoxRef, Justify, SeparatorColor, VAlign, Width};
 use crate::frame::{FrameChars, FrameStyle, Rule, Ticker};
 use crate::theme::{Role, Theme};
 
@@ -211,6 +209,8 @@ pub struct Layout<'a> {
     pub style: FrameStyle,
     /// The theme, for the frame and separator colours.
     pub theme: &'a Theme,
+    /// `[frame] separator_color` (SPEC § 4.1).
+    pub separator_color: &'a SeparatorColor,
     /// `[frame] fill`.
     pub fill: bool,
     /// Cut a line that overflows its width.
@@ -856,18 +856,36 @@ impl Layout<'_> {
     /// A module that rendered nothing is not a column of its own (SPEC § 4),
     /// so it takes no separator with it: the render has already left it out.
     fn group_pieces(&self, group: &[Vec<Segment>], ids: &[String], separator: &str) -> Vec<Piece> {
-        let modules = group.iter().enumerate().map(|(i, module)| Piece {
-            elem: Elem::Module(ids.get(i).cloned().unwrap_or_default()),
-            segs: module.clone(),
-        });
-        if separator.is_empty() {
-            return modules.collect();
+        let mut pieces: Vec<Piece> = Vec::with_capacity(group.len().saturating_mul(2));
+        for (i, module) in group.iter().enumerate() {
+            if !separator.is_empty()
+                && let Some(before) = i.checked_sub(1).and_then(|j| group.get(j))
+            {
+                pieces.push(self.separator_piece(separator, before));
+            }
+            pieces.push(Piece {
+                elem: Elem::Module(ids.get(i).cloned().unwrap_or_default()),
+                segs: module.clone(),
+            });
         }
-        let sep = Piece {
-            elem: Elem::Separator,
-            segs: vec![Segment::styled(separator, Style::fg(self.theme.role(Role::Muted)))],
+        pieces
+    }
+
+    /// A separator after the module `before` (SPEC § 4.1 `separator_color`):
+    /// in the fixed colour, or with `inherit` in the colour of the first
+    /// coloured, undimmed segment of that module (an icon or a value, never
+    /// a label or an align pad), muted when it has none.
+    fn separator_piece(&self, separator: &str, before: &[Segment]) -> Piece {
+        let color = match self.separator_color {
+            SeparatorColor::Fixed { color, .. } => *color,
+            SeparatorColor::Inherit => before
+                .iter()
+                .find(|s| {
+                    s.style.fg != Color::Default && !s.style.dim && !s.text().trim().is_empty()
+                })
+                .map_or_else(|| self.theme.role(Role::Muted), |s| s.style.fg),
         };
-        Itertools::intersperse(modules, sep).collect()
+        Piece { elem: Elem::Separator, segs: vec![Segment::styled(separator, Style::fg(color))] }
     }
 
     /// Cut or scroll a group that does not fit its budget (SPEC § 4.1): the
@@ -966,13 +984,8 @@ impl Layout<'_> {
             let mut pieces = self.fit_group(pieces, budget, cut, !exact);
             if right_w > 0 {
                 if !pieces.is_empty() && !separator.is_empty() {
-                    pieces.push(Piece {
-                        elem: Elem::Separator,
-                        segs: vec![Segment::styled(
-                            separator,
-                            Style::fg(self.theme.role(Role::Muted)),
-                        )],
-                    });
+                    let before = left.last().map_or(&[][..], Vec::as_slice);
+                    pieces.push(self.separator_piece(separator, before));
                 }
                 pieces.extend(right_pieces);
             }
@@ -1600,13 +1613,17 @@ mod tests {
         truncate: bool,
         ticker: Option<Ticker>,
         rule: Option<Rule>,
+        separator_color: SeparatorColor,
     }
 
     impl Fixture {
         fn new(style: FrameStyle, fill: bool, width: usize) -> Self {
+            let theme = Theme::default();
+            let separator_color =
+                SeparatorColor::Fixed { spec: "muted".into(), color: theme.role(Role::Muted) };
             Self {
                 chars: FrameChars::for_style(style),
-                theme: Theme::default(),
+                theme,
                 boxes: boxes(),
                 style,
                 fill,
@@ -1614,6 +1631,7 @@ mod tests {
                 truncate: true,
                 ticker: None,
                 rule: None,
+                separator_color,
             }
         }
 
@@ -1622,6 +1640,7 @@ mod tests {
                 chars: &self.chars,
                 style: self.style,
                 theme: &self.theme,
+                separator_color: &self.separator_color,
                 fill: self.fill,
                 truncate: self.truncate,
                 ellipsis: "…",
@@ -1689,6 +1708,64 @@ mod tests {
         let single = f.compose(0, 1, &left, &right, &sep);
         assert!(single.starts_with("── left") && single.ends_with("R ──"));
         assert_eq!(display_width(&single), 30);
+    }
+
+    /// SPEC § 4.1 `separator_color = "inherit"`: each separator takes the
+    /// first coloured, undimmed segment of the module before it, skipping a
+    /// muted label and an align pad, and is muted when there is none; the
+    /// packed join before the right group follows the last left module.
+    #[test]
+    fn inherited_separators_follow_the_module_before_them() {
+        let separators = |f: &Fixture| -> Vec<Color> {
+            let (red, green, blue) =
+                (Color::Rgb(255, 0, 0), Color::Rgb(0, 255, 0), Color::Rgb(0, 0, 255));
+            let left = vec![
+                vec![Segment::styled("a", Style::fg(red))],
+                vec![
+                    Segment::styled("lbl ", Style::fg(Color::Rgb(9, 9, 9)).dimmed()),
+                    Segment::plain("  "),
+                    Segment::styled("b", Style::fg(green)),
+                ],
+                vec![Segment::plain("plain only")],
+            ];
+            let right = vec![vec![Segment::styled("r", Style::fg(blue))]];
+            let row = Row {
+                cols: vec![Col {
+                    width: Width::Fr(1),
+                    justify: Justify::Left,
+                    valign: VAlign::Top,
+                    boxed: None,
+                    content: Content::Groups {
+                        left: &left,
+                        right: &right,
+                        left_ids: &[],
+                        right_ids: &[],
+                    },
+                }],
+                gap: 1,
+                separator: " | ",
+                title: None,
+                boxed: None,
+                blank: false,
+            };
+            let l = f.layout();
+            let inner = l.inner_width(&row, 0, 1);
+            let mut body = l.row_body(&row, inner, 1, Fill::Packed, Fit::default());
+            let drafts = body.pop().unwrap_or_default();
+            let line = l.wrap_frame(drafts, 0, 1, &row, Fill::Packed, None);
+            line.pieces
+                .iter()
+                .filter(|p| matches!(p.elem, Elem::Separator))
+                .map(|p| p.segs[0].style.fg)
+                .collect()
+        };
+        let mut f = Fixture::new(FrameStyle::Rounded, false, 80);
+        let muted = f.theme.role(Role::Muted);
+        assert_eq!(separators(&f), [muted, muted, muted], "the fixed default is muted");
+        f.separator_color = SeparatorColor::Inherit;
+        assert_eq!(separators(&f), [Color::Rgb(255, 0, 0), Color::Rgb(0, 255, 0), muted]);
+        f.separator_color = SeparatorColor::Fixed { spec: "x".into(), color: Color::Rgb(1, 2, 3) };
+        assert_eq!(separators(&f), [Color::Rgb(1, 2, 3); 3]);
     }
 
     #[test]

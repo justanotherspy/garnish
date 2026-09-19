@@ -397,7 +397,7 @@ screen). Adding any new dependency needs the user's OK first.
 | serde + serde_json | JSON: the stdin payload, Claude settings files (`preserve_order`, so `install` keeps the user's key order) | `payload.rs`, `claude_settings.rs`, `install.rs` |
 | toml | the TOML config file (parse; `preserve_order`, so `setup` writes a table back in the order it read it); config *generation* is hand-written in `docs.rs` | `config/`, `setup/draft.rs` |
 | jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
-| itertools | iterator helpers (interspersing, joining, grouping) | rendering |
+| itertools | iterator helpers (interspersing, joining, grouping); the chosen crate for the job, but not a dependency since 2026-09-19, when its last use (interspersing separators) was replaced by a loop that colours each one; add it back when a job needs it | rendering |
 | std::process + `git::run_program` | every external command (status, rev-list, fetch, `--version`): kill-on-timeout, pipes drained on threads | `git.rs` |
 | rayon | data parallelism: `refresh --all`, `preview --all`, docs generation, the render matrices in tests; **never on the tick path** | `cli.rs`, `docs.rs`, tests |
 | unicode-width | terminal cell width of text | `ansi.rs` |

@@ -74,6 +74,7 @@ Every module color defaults to a role; override a role here to restyle every mod
 | `style` | `rounded` (`none` for the `minimal` preset) | `none` \| `rounded` \| `square` \| `double` \| `heavy` \| `powerline` \| `custom` |
 | `fill` | `true` | Extend the rule between the left and right groups to the full width and close with the right cap. With `false`, lines are left-packed. |
 | `separator` | style-dependent | Default separator between modules. |
+| `separator_color` | `muted` | Every separator's colour: a theme role or a literal, or `inherit`, which paints each separator in the colour of the first coloured, undimmed segment of the module before it (an icon or a value, never a `label` or an align pad), falling back to `muted`. |
 | `first` `middle` `last` `single` | style-dependent | Line prefixes (`single` when there is one line). |
 | `right_first` `right_middle` `right_last` `right_single` | style-dependent | Right caps. |
 | `fill_char` | style-dependent | The rule character (must be one cell wide). |

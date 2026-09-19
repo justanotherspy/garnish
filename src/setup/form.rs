@@ -1166,6 +1166,20 @@ fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Ve
                 .with_choices(hints.choices(key)),
         );
     }
+    // Right after `separator`: a role, a literal, or `inherit` (SPEC § 4.1).
+    let mut choices = vec![Choice::noted("inherit", "the module before it")];
+    choices.extend(Role::ALL.iter().map(|r| Choice::noted(r.name(), "role")));
+    fields.insert(
+        3,
+        Field::new(
+            "separator_color",
+            "Every separator's colour: muted | inherit (the module before it) | a role or literal.",
+            SlotKind::Str,
+            s("separator_color"),
+        )
+        .valued(draft, Some(string(config.frame.separator_color.spec())), "muted")
+        .with_choices(choices),
+    );
     fields
 }
 

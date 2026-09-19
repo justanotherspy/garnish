@@ -267,6 +267,7 @@ pub fn render_tree_at(
         chars: &config.frame.chars,
         style: config.frame.style,
         theme: &config.theme,
+        separator_color: &config.frame.separator_color,
         fill: config.frame.fill,
         width,
         truncate: config.truncate,
