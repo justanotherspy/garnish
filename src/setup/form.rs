@@ -663,7 +663,7 @@ impl Suggestions {
     /// The distinct values seen for `key`, first seen first.
     #[must_use]
     pub fn for_key(&self, key: &str) -> Vec<String> {
-        self.by_key.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap_or_default()
+        self.by_key.iter().find(|(k, _)| k == key).map_or_default(|(_, v)| v.clone())
     }
 
     fn choices(&self, key: &str) -> Vec<Choice> {

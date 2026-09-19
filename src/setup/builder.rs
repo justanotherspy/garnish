@@ -96,11 +96,9 @@ pub struct Builder {
 
 /// The string list under `key` of a table.
 fn ids(table: &Table, key: &str) -> Vec<String> {
-    table
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
-        .unwrap_or_default()
+    table.get(key).and_then(Value::as_array).map_or_default(|items| {
+        items.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()
+    })
 }
 
 fn chips_of(table: &Table) -> Vec<Chip> {
@@ -765,7 +763,7 @@ mod tests {
     }
 
     fn ids_at(d: &Draft, at: RowAt, key: &str) -> Vec<String> {
-        d.row(at).map(|t| ids(t, key)).unwrap_or_default()
+        d.row(at).map_or_default(|t| ids(t, key))
     }
 
     #[test]
