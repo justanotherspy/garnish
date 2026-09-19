@@ -1,0 +1,24 @@
+p┌ top level ─────────────────────────────────────────────────────────────────┐i
+▶│  preset          default                     (default)                     │
+ │* icons           unicode                     (nerd)                        │
+r│  theme           garnish                     (garnish)                     │
+r│  color           auto                        (auto)                        │
+r│  truncate        true                        (true)                        │
+ │  stale_style     dim                         (dim)                         │
+ │  stale_after     5                           (5)                           │
+ │  padding         0                           (0)                           │
+ │  align           false                       (false)                       │
+ │  right_justify   end                         (end)                         │
+ │  hide_empty_rows true                        (true)                        │
+ │  overflow        truncate                    (truncate)                    │
+ │  ticker_step     1                           (1)                           │
+ │  ticker_gap      "   "                       ("   ")                       │
+ │  animate         (unset)                     (unset)                       │
+ │  durations       compact                     (compact)                     │
+ │                                                                            │
+ │                                                                            │
+ │Which rows exist and how much each module says: default | minimal | full |  │
+ │compact.                                                                    │
+ │                                                                            │
+ │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
+↑└────────────────────────────────────────────────────────────────────────────┘f

@@ -105,6 +105,46 @@ pub const fn glyph(
     Glyph { nerd, unicode, emoji, ascii }
 }
 
+/// Alternatives worth trying for an icon, by module id and icon key (SPEC § 14).
+///
+/// The `setup` glyph picker lists them after the four sets, and each module
+/// page lists them as *also try*. Every glyph here passes the width guard
+/// the built-in sets pass (one cell, no variation selector).
+#[must_use]
+pub fn suggestions(module: &str, key: &str) -> &'static [&'static str] {
+    // Nerd Font glyphs are written as escapes so an editor cannot drop
+    // them, and only from the BMP private-use area (U+E000–U+F8FF: Font
+    // Awesome, Octicons, Devicons, Seti), the one range every Nerd Font
+    // version draws.
+    match (module, key) {
+        ("model", "model") => &["\u{F0D0}", "\u{F135}", "\u{F477}", "❖", "✦", "✧"],
+        ("model", "fast") => &["⚡", "↯", "*"],
+        ("effort", "effort") => &["\u{F012}", "\u{F080}", "⚙", "✱"],
+        ("context", "context") => &["\u{F1C0}", "\u{F00A}", "⊞", "⊟", "⊡"],
+        ("context" | "limit5h" | "limit7d" | "spend", "fill") => &["█", "━", "▓", "#", "="],
+        ("context" | "limit5h" | "limit7d" | "spend", "empty") => &["░", "─", "▒", ".", "-"],
+        ("branch", "branch") => &["\u{F126}", "\u{F418}", "\u{E702}", "⎇", "⌥", "⑂"],
+        ("branch", "dirty") => &["✱", "*", "+", "~"],
+        ("path", "folder") => &["\u{F07C}", "\u{F413}", "\u{F015}", "❒", "❏"],
+        ("clock", "spinner") => &["⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "|/-\\", "▁▃▅▇█▇▅▃", "⣾⣽⣻⢿⡿⣟⣯⣷", "⠁⠂⠄⡀⢀⠠⠐⠈"],
+        ("session", "session") => &["\u{F252}", "\u{F1DA}", "⏱", "⌛"],
+        ("api", "api") => &["\u{F1E6}", "\u{F0C2}", "⇄", "⇵"],
+        ("cache", "cache") => &["\u{F0A0}", "\u{F187}", "⛁", "⛃"],
+        ("cost", "cost") => &["\u{F0D6}", "\u{F09D}", "$", "¢"],
+        ("limit5h" | "limit7d" | "spend", "window") => &["\u{F250}", "\u{F133}", "⏳", "≣", "⌛"],
+        ("pr", "pr") => &["\u{F419}", "\u{F126}", "⇄", "⇋"],
+        ("session_name", "name") => &["\u{F02E}", "\u{F292}", "❯", "›"],
+        ("agent", "agent") => &["\u{F007}", "\u{F17B}", "\u{F477}", "⚙"],
+        ("lines", "lines") => &["\u{F457}", "\u{F0CB}", "Δ", "∆"],
+        ("vim", "vim") => &["\u{E7C5}", "\u{F120}", "V"],
+        ("style", "style") => &["\u{F040}", "\u{F031}", "✎", "✏"],
+        ("worktree", "worktree") => &["\u{F0E8}", "\u{F1BB}", "\u{F402}", "⌂"],
+        ("sync", "ahead") => &["⇡", "⇈", "^"],
+        ("sync", "behind") => &["⇣", "⇊", "v"],
+        _ => &[],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

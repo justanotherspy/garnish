@@ -1,0 +1,24 @@
+p┌ [modules.path] ────────────────────────────────────────────────────────────┐i
+▶│  enabled         true                        (true)                        │
+ │  preset          default                     (default)                     │
+r│  refresh         0                           (0)                           │
+r│  label                                       ("")                          │
+r│  prefix               ┌ icons.folder ──────────────┐                       │
+ │  suffix               │ |1  nerd                  │                       │
+ │  hide_when_empty true │❒ |1  unicode               │                       │
+ │  max_width       0    │📁 |2  emoji                │                       │
+ │  show_icon       true │(blank)|0  ascii            │                       │
+ │  depth           2    │ |1  also try              │                       │
+ │  style           full │ |1  also try              │)                      │
+ │  show_subpath    true │ |1  also try              │                       │
+ │  show_added      false│❏ |1  also try              │                       │
+ │  icons.folder    ❒    │custom…                     │                       │
+ │  icons.added     +    │                            │                       │
+ │  colors.icon     #7dd3│type to filter: ▏           │)                      │
+ │  colors.base     #cdd6│↑↓ move  enter pick  esc bac│                       │
+ │  colors.subpath  #6c70└────────────────────────────┘                       │
+ │Folder icon.                                                                │
+ │                                                                            │
+ │                                                                            │
+ │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
+↑└────────────────────────────────────────────────────────────────────────────┘f

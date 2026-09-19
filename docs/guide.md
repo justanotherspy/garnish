@@ -34,10 +34,33 @@ set `icons = "unicode"` / `"emoji"` / `"ascii"`); OSC 8 hyperlink support
 (iTerm2, Kitty, WezTerm, Ghostty…) for clickable pull-request numbers,
 branch names (`branch.link = true`) and text boxes (`url`).
 
-## 2. Hook it into Claude Code
+## 2. Set it up
 
 ```sh
-garnish install         # merges the statusLine block into ~/.claude/settings.json (backup kept)
+garnish setup           # pick a preset or build a layout, previewed live, then hook it in
+```
+
+`setup` takes over the terminal while it runs. *Pick a preset* lists
+the four built-ins and the gallery, each rendered at your terminal's real
+width as you move through them (with a warning when the terminal is
+narrower than a preset wants, or shorter than Claude Code's fullscreen
+renderer shows whole); `Enter` writes it, and the install step follows
+when Claude Code has no `statusLine` yet. *Build a custom layout* opens
+the builder: the preview at the top, your rows below it, and single keys
+to add a module (`m`, with search), a row (`a`), a column (`C`), a stack
+(`S`), a title (`t`) or a box (`b`), to edit the selected module or row
+(`Enter`; a click in the preview selects, a second click edits), and to
+open the top-level keys (`1`), the frame (`2`) and the colours (`3`).
+`f` cycles the sample payloads, `w` previews at another width, `s`
+saves (a backup of the previous file is kept), `I` installs, `?` lists
+every key. When a config already exists, `setup` opens straight into the
+builder on it.
+
+Without the screen:
+
+```sh
+garnish setup --preset compact --install   # write a preset and hook it up
+garnish install                             # the settings alone (backup kept; --dry-run to look first)
 ```
 
 or by hand:
@@ -79,6 +102,7 @@ preview shows the intensity the screen will have.
 garnish config init     # ~/.config/garnish/garnish.toml, fully annotated
 garnish config check    # every problem, with its TOML path
 garnish config show     # the fully resolved result (what a tick actually uses)
+garnish setup           # the same file, edited in place with a live preview
 ```
 
 Start from a preset and override what you care about:
@@ -346,11 +370,12 @@ garnish ships three Claude Code skills (`skills/<name>/SKILL.md`, embedded in
 the binary and written to `~/.claude/skills/<name>/` by `garnish install` or
 `garnish skills install [--dir D]`; `garnish skills list` shows them):
 
-- `garnish-statusline` — an interactive config builder: it asks about your
-  terminal and font, width, what matters most, colours, frame and alignment,
-  drafts the config in a temp file, previews and validates it, and writes it
-  into place only once you approve. It never edits `settings.json` beyond
-  what `garnish install` does.
+- `garnish-statusline` — offers `garnish setup` first, or builds the
+  config from a conversation: it asks about your terminal and font, width,
+  what matters most, rows or panels, colours, frame, motion and links,
+  drafts the config in a temp file, previews and validates it, and writes
+  it into place only once you approve. It never edits `settings.json`
+  beyond what `garnish install` does.
 - `garnish-feedback` — files a GitHub issue on `justanotherspy/garnish` with
   the environment, `garnish config show`, `garnish doctor` (glyph grid
   included) and the plain rendered line, labelled `feedback` (and

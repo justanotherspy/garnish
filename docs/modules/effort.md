@@ -51,6 +51,8 @@ Shows `effort.level` (`low`, `medium`, `high`, `xhigh`, `max`). Hidden when the 
 | `effort` | `U+F0E4` | `⚙` | `🎯` | `` | Effort icon. |
 | `scale` | `▁▃▅▇█` | `▁▃▅▇█` | `▁▃▅▇█` | `.:=+#` | Five glyphs, one per level, lowest first. |
 
+Also try (`effort`: `U+F012` `U+F080` `⚙` `✱`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

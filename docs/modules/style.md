@@ -50,6 +50,8 @@ Shows `output_style.name`. By default the `default` style is hidden; the `full` 
 |---|---|---|---|---|---|
 | `style` | `U+F1FC` | `✎` | `🎨` | `style:` | Style icon. |
 
+Also try (`style`: `U+F040` `U+F031` `✎` `✏`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

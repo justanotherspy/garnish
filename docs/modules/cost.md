@@ -54,6 +54,8 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 | `added` | `+` | `+` | `+` | `+` | Lines-added glyph. |
 | `removed` | `−` | `−` | `−` | `-` | Lines-removed glyph. |
 
+Also try (`cost`: `U+F0D6` `U+F09D` `$` `¢`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

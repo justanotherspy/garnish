@@ -214,6 +214,48 @@ fn config_subcommands_and_doctor_work_end_to_end() {
     assert!(home.join(".claude/skills/garnish-statusline/SKILL.md").exists());
 }
 
+/// SPEC § 14: `setup --preset` writes the preset without a screen (with the
+/// backup rule and, with `--install`, the settings), the bare `garnish` at
+/// a terminal points at `setup` instead of waiting for a payload, and
+/// `setup` without a terminal on stdout refuses in one line.
+#[test]
+fn setup_preset_twin_and_the_tty_pointer_work_without_a_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join(".config/garnish/garnish.toml");
+    let (out, _, ok) = run(&["setup", "--preset", "compact"], home, &[]);
+    assert!(ok && out.starts_with("wrote ") && !out.contains("backup"), "{out}");
+    let written = std::fs::read_to_string(&cfg).unwrap();
+    assert!(written.contains("preset = \"compact\""), "{written}");
+    // A second write keeps the first as a backup, as `config init --force` does.
+    let (out, _, ok) = run(&["setup", "--preset", "minimal-clean", "--install"], home, &[]);
+    assert!(ok && out.contains("backup") && out.contains("wrote"), "{out}");
+    assert!(out.contains(".claude/settings.json"), "--install hooks it up: {out}");
+    assert!(out.contains("skills in "), "{out}");
+    let settings = std::fs::read_to_string(home.join(".claude/settings.json")).unwrap();
+    assert!(settings.contains("\"command\": \"garnish\""), "{settings}");
+    assert!(std::fs::read_to_string(&cfg).unwrap().contains("preset = \"minimal\""));
+    let (_, err, ok) = run(&["setup", "--preset", "nope"], home, &[]);
+    assert!(!ok && err.contains("gallery name"), "{err}");
+    // A file that does not parse is never rewritten, even by a preset.
+    std::fs::write(&cfg, "theme = \n").unwrap();
+    let (_, err, ok) = run(&["setup", "--preset", "compact"], home, &[]);
+    assert!(!ok && err.contains("never rewritten"), "{err}");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "theme = \n");
+    // No terminal on stdout: one line, exit 1, nothing drawn.
+    let (out, err, ok) = run(&["setup"], home, &[]);
+    assert!(!ok && err.contains("needs a terminal") && out.is_empty(), "{err}");
+    assert!(!err.contains("Location:"), "{err}");
+    // The bare `garnish` with a terminal on stdin points at `setup`; with a
+    // pipe it renders (an empty payload is a bad one, which is a row).
+    let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "1")]);
+    assert!(ok && out.contains("garnish setup"), "{out}");
+    let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "0")]);
+    assert!(ok && out.contains("bad payload"), "{out}");
+    let (out, _, ok) = run(&["render"], home, &[("GARNISH_STDIN_TTY", "1")]);
+    assert!(ok && out.contains("bad payload"), "the explicit render always reads stdin: {out}");
+}
+
 #[test]
 fn preview_of_an_unreadable_config_keeps_the_overrides() {
     // The feedback skill renders with `--color never` for people whose config

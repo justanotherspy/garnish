@@ -11,11 +11,13 @@ use std::sync::LazyLock;
 
 /// The embedded files, `(name, text)`, in alphabetical order (the unit test
 /// compares against the sorted directory listing).
-const FILES: [(&str, &str); 19] = [
+const FILES: [(&str, &str); 28] = [
     ("animated-dots", include_str!("../presets/animated-dots.toml")),
+    ("ascii-only", include_str!("../presets/ascii-only.toml")),
     ("bars-and-limits", include_str!("../presets/bars-and-limits.toml")),
     ("boxed-panels", include_str!("../presets/boxed-panels.toml")),
     ("compact-aligned", include_str!("../presets/compact-aligned.toml")),
+    ("compaction-watch", include_str!("../presets/compaction-watch.toml")),
     ("dashboard-panels", include_str!("../presets/dashboard-panels.toml")),
     ("dracula-256", include_str!("../presets/dracula-256.toml")),
     ("emoji-overrides", include_str!("../presets/emoji-overrides.toml")),
@@ -23,13 +25,20 @@ const FILES: [(&str, &str); 19] = [
     ("grid-six", include_str!("../presets/grid-six.toml")),
     ("grid-three", include_str!("../presets/grid-three.toml")),
     ("labels-and-placeholders", include_str!("../presets/labels-and-placeholders.toml")),
+    ("links-and-shortcuts", include_str!("../presets/links-and-shortcuts.toml")),
     ("minimal-clean", include_str!("../presets/minimal-clean.toml")),
     ("motd-ticker", include_str!("../presets/motd-ticker.toml")),
+    ("narrow-unicode", include_str!("../presets/narrow-unicode.toml")),
     ("packed-heavy", include_str!("../presets/packed-heavy.toml")),
     ("session-detail", include_str!("../presets/session-detail.toml")),
+    ("sidebar-panels", include_str!("../presets/sidebar-panels.toml")),
     ("single-line-full", include_str!("../presets/single-line-full.toml")),
+    ("slow-motion", include_str!("../presets/slow-motion.toml")),
+    ("still-life", include_str!("../presets/still-life.toml")),
     ("tall-eight-lines", include_str!("../presets/tall-eight-lines.toml")),
     ("three-lines-double", include_str!("../presets/three-lines-double.toml")),
+    ("ticker-two-step", include_str!("../presets/ticker-two-step.toml")),
+    ("titled-sections", include_str!("../presets/titled-sections.toml")),
     ("two-lines-powerline", include_str!("../presets/two-lines-powerline.toml")),
 ];
 

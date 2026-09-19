@@ -3,13 +3,14 @@
 Status: approved 2026-09-04 (`v0.1.0` the same day, `v0.2.0` on
 2026-09-06); revised 2026-09-12 with the layout model (§ 4.3), the
 interactive setup (§ 14) and the Phase 19–20 keys, and the same day with
-what Phase 19 found in the harness (§ 2.1); the Phase 20 keys (§ 3)
-shipped on 2026-09-13. Owner: Daniel Schwartz.
-Builder: Claude. This document is the target design of the whole system;
-when the design changes, it changes here first, with the reason
-(`CLAUDE.md` § Phase protocol). Everything without a "target state" mark
-is implemented; a section marked "target state; PLAN Phase N" is designed
-and not yet built. Progress lives in `PLAN.md`.
+what Phase 19 found in the harness (§ 2.1). The Phase 20 keys (§ 3)
+shipped on 2026-09-13, the layout model on 2026-09-17 and the setup on
+2026-09-19. Owner: Daniel Schwartz. Builder: Claude. This document is the
+target design of the whole system; when the design changes, it changes
+here first, with the reason (`CLAUDE.md` § Phase protocol). Everything in
+it is implemented; where something was built differently from its first
+design, the section says so and why. Progress lives in `PLAN.md`, the
+dated log in `WORKLOG.md`.
 
 ## 1. Purpose
 
@@ -125,7 +126,7 @@ the composer (the prompt box and its notices above the footer, the
 artifact panel and, outside fullscreen, the suggestions below it) and
 the REPL slot carry no height, `maxHeight` or `overflow`. What a tall
 status line does is decided by which of Claude Code's three renderers is
-active (read in the 2.1.270 binary on 2026-09-13, PLAN work log; read,
+active (read in the 2.1.270 binary on 2026-09-13, `WORKLOG.md`; read,
 not watched on a screen). The choice is made in this order: screen-reader
 mode, tmux's `-CC` mode, Windows over SSH, `CLAUDE_CODE_NO_FLICKER=0`,
 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN` and a crash auto-off force
@@ -794,7 +795,7 @@ branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame
   writes the key as a comment, like `durations`, so the setting keeps
   deciding after `init`.
 
-### 4.3 Layout: rows, columns and boxes (target state; PLAN Phase 21)
+### 4.3 Layout: rows, columns and boxes (PLAN Phase 21, shipped 2026-09-17)
 
 Decided 2026-09-12 with Daniel, consolidating three ideas from that day
 (grid columns, titled rules and boxes, panels of stacked boxes) into one
@@ -1254,7 +1255,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 
 | command | purpose |
 |---|---|
-| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). Target state (§ 14): the bare `garnish` with a terminal on stdin prints one line pointing at `garnish setup` and exits 0 instead of waiting; the explicit `garnish render` always reads stdin |
+| `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
@@ -1342,25 +1343,32 @@ per-module render cost.
   are what make that true of an option and not only of a module (added
   2026-09-16: without them every module-specific key sat at its schema
   default, Phase 20's own five included).
-- **Layout matrix** (target state; PLAN Phase 21): the column shares add
-  up to the line width and differ by at most one cell at every width from
-  10 to 400; every line of a multi-line row is exactly the box width with
-  stacks of unequal height; the resolved tree of every fixture and preset
-  renders byte-identically before and after the model (a plain line is
-  one column) and under either name (`[[line]]`, `[[row]]`); and the
-  lines-per-row output tiles each line exactly (Phase 22's placement map
-  reads it). `tests/presets.rs` stays as it is:
-  every preset renders without `…` at its declared width at three
-  instants, so a multi-column preset must give each column room for its
-  widest fixture render.
-- **Setup snapshots** (target state; PLAN Phase 22): every `setup` screen is
-  rendered into ratatui's `TestBackend` at two terminal sizes and compared
-  with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1` regenerates);
-  key sequences are driven through the same event loop the terminal feeds,
-  so the picker, the builder and the install dialog are tested without a
-  tty. Snapshots freeze the clock with `GARNISH_NOW` and pin `TZ=UTC`,
-  like the config goldens, since the preview pane runs on the live clock
-  and the `clock` module prints the local zone.
+- **Layout matrix** (PLAN Phase 21): the column shares add up to the line
+  width and differ by at most one cell at every width from 10 to 400;
+  every line of a multi-line row is exactly the box width with stacks of
+  unequal height; the resolved tree of every fixture and preset renders
+  byte-identically before and after the model (a plain line is one
+  column) and under either name (`[[line]]`, `[[row]]`); and the
+  lines-per-row output tiles each line exactly (the placement map of
+  § 14 reads it). `tests/presets.rs` renders every preset without `…` at
+  its declared width at three instants (a preset that promises motion
+  must differ between two of them, and a line ticker must slide exactly
+  `ticker_step` cells, so a scrolled row carries nothing that counts
+  seconds).
+- **Setup snapshots** (PLAN Phase 22): the `setup` screens are rendered
+  into ratatui's `TestBackend` (80 × 24, 100 × 30 and 140 × 40) and
+  compared with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1`
+  regenerates; the test lists every golden it writes, so a renamed screen
+  cannot leave a stale file): the home menu, the picker, the builder, the
+  module form, the module picker, the top-level form, the glyph picker,
+  a confirm dialog, the install screen and the help page have goldens,
+  and the other forms and pickers are asserted by content; key and mouse
+  sequences are driven through the same input path the terminal feeds,
+  so all of it is tested without a tty. The test app
+  pins the clock in-process (`Clock::fixed()`), aims the install plan at a
+  temporary home and shows paths under it as `~/…`, so no environment is
+  needed; `tests/cli.rs` covers `setup --preset [--install]` and the
+  stdin pointer end to end.
 
 ### Test hooks (environment)
 
@@ -1374,7 +1382,7 @@ per-module render cost.
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
 | `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets |
-| `GARNISH_STDIN_TTY` | target state (§ 14): `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish`, so the pointer path is testable without a pty |
+| `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish` (§ 7, § 14), so the pointer path is testable without a pty |
 
 ## 10. Documentation
 
@@ -1391,9 +1399,9 @@ per-module render cost.
   `CLAUDE.md`, `PLAN.md` and `SPRITE.md` are for building the project.
 - `presets/` (§ 12) holds complete, named example configs; `docs/presets.md`
   is generated from them.
-- Target state: `docs/config.md` gains generated sections for `[[row.col]]`,
-  `title` and `[box.<name>]` with samples at two widths (Phase 21), and
-  each module page lists its icon suggestions as *also try* (Phase 22).
+- `docs/config.md` has generated sections for `[[row.col]]`, `title` and
+  `[box.<name>]` with samples (Phase 21), and each module page lists the
+  glyph picker's alternatives as *also try* (Phase 22).
 
 ## 11. Assumptions
 
@@ -1438,8 +1446,14 @@ binary. Everything else is a **gallery preset**: a complete config file under
   target design until 2026-09-12 and was dropped in favour of the
   interactive setup (the picker shows a preset rendered at the person's
   own width, which no screenshot can).
-- **Seed set.** The configs exercised in the 2026-09-05 walkthrough
-  (`presets/` in this repository) are the first entries.
+- **The set.** The configs of the 2026-09-05 walkthrough were the first
+  entries; four came with the layout model, and nine added on 2026-09-19
+  show the rest of the vocabulary (titles at every position, links, the
+  compaction scale, cell and share widths, a boxed column, a narrow and
+  an ASCII-only terminal, half-speed animation, a two-cell ticker,
+  animation off), so every layout key and most module options appear in
+  at least one preset: 28 in all, and the `setup` picker (§ 14) is how
+  they are browsed.
 
 ## 13. Skills (PLAN Phase 18, shipped in v0.2.0)
 
@@ -1451,20 +1465,19 @@ Markdown with frontmatter (`name`, `description`) and instructions; none of
 them needs network access from garnish itself, they drive `gh` and the
 `garnish` CLI.
 
-- **`garnish-statusline`.** Conversational config builder (the hands-on
-  one is `garnish setup`, § 14; both write the same file, and the skill
-  will point at `setup` when the person would rather see the choices than
-  answer questions; target state, PLAN Phase 22). Asks, with
-  recommended defaults: terminal and font (Nerd Font? decides `icons`),
-  usual terminal width (decides preset and line count), what matters most
-  (repo, model/context, usage limits, timers), colour preference (theme,
-  or match the terminal), frame taste (rounded / powerline / none), whether
-  columns should line up (`align`, `durations`), and offers a free-text
-  "describe what you want" step. It drafts into a temp file, shows a
-  `garnish preview` of it, and only then copies it over the real one behind
-  the same `.bak-<epoch>` backup garnish itself keeps (§ 5), validates with
-  `config check`, and explains how to tweak it. It never edits
-  `settings.json` beyond what `garnish install` does.
+- **`garnish-statusline`.** Conversational config builder. The hands-on
+  one is `garnish setup` (§ 14); both write the same file, and the skill
+  offers `setup` first and keeps the conversational path for a person
+  who would rather describe what they want. It asks, with recommended
+  defaults: terminal and font (Nerd Font? decides `icons`), usual
+  terminal width (decides preset and row count), what matters most,
+  rows or columns, titles and boxes, colours, frame, alignment, motion,
+  caps and links, the context scale and the reset form; names gallery
+  presets that show the answers; drafts into a temp file, shows a
+  `garnish preview` of it, and only then copies it over the real one
+  behind the same `.bak-<epoch>` backup garnish itself keeps (§ 5),
+  validates with `config check`, and explains how to tweak it. It never
+  edits `settings.json` beyond what `garnish install` does.
 - **`garnish-feedback`.** Files a GitHub issue on `justanotherspy/garnish`
   with `gh issue create` using a template: terminal application and
   version, font, OS, `garnish --version`, the config (`garnish config
@@ -1486,7 +1499,7 @@ them needs network access from garnish itself, they drive `gh` and the
   person explicitly before `gh issue create`. Nothing leaves the machine on
   an unanswered or negative question.
 
-## 14. Interactive setup (target state; PLAN Phase 22)
+## 14. Interactive setup (PLAN Phase 22, shipped 2026-09-19)
 
 Decided 2026-09-12 with Daniel, from FUTURE-SPEC § 13 (option 7.3c): a
 full-screen `garnish setup` in the terminal, the way ccstatusline's TUI
@@ -1498,6 +1511,38 @@ already in `ModuleSchema`, as the docs are). It replaces the website idea
 of the earlier § 12: a preset rendered at the person's own width is a
 better sample than a screenshot at someone else's.
 
+**Built as designed below, with these differences, each decided while
+building (2026-09-19).** The draft is the config *file's* own table
+(TOML with its order kept), not a resolved `Config`: a save writes only
+the keys the file and the edits carry, in the file's order, so a
+hand-written file keeps its unset keys unset and its ordering, and only
+its comments live on in the backup alone (`config show` still prints the
+resolved form; `setup` never does). The option editors are a list of
+key / value / default rows with one-key actions (`Enter` picks or types,
+`←`/`→` steps, `d` unsets) rather than checkbox and radio widgets: the
+same information in less screen. The glyph suggestions are one table in
+`icons.rs` keyed by module and icon key rather than a field on each
+`IconSpec`, with the same guard test and the same *also try* list on the
+module pages, and the glyph picker prints each candidate's cell count
+(`|1`, `|2`) rather than the doctor's two-cell grid. The placement map is
+`layout::Line::modules()` over `render::render_tree_at`, which returns
+each row's lines as typed pieces. A click selects a module and a second
+click, or `Enter`, edits it; a click on a cap or the rule opens the frame
+form. A separator, a cap or the rule is reached by a click alone; keys
+reach modules, rows and columns, and `2` opens the frame form (the
+keyboard twin is in PLAN's backlog). The placement map names the outer
+row of a line, so a click on a title or a box edge inside a row of
+columns selects that row and names the list as the way to the column or
+inner row it may belong to (the same backlog item). `Esc` closes the innermost layer
+and, at the base of the builder or the picker, leaves it as `q` does. A
+module's editor is generated from `ModuleSchema`; the top-level, frame,
+row, column and box forms list their keys by hand, since those are not
+schema options, and the unit test walks both. The snapshot tests pin the
+clock in-process (`Clock::fixed()`) and need no `GARNISH_NOW` or `TZ`.
+The terminal minimum is 60 × 12. A `setup` cargo feature was not added:
+the release binary grew from 2.8 MB to 3.4 MB and the end-to-end cold
+tick did not move.
+
 **Two ways in, one file out.** The home screen offers *Pick a preset* and
 *Build a custom layout*, plus *Install* and *Quit*; when a config already
 exists it opens on that config in the builder, previewed, so `setup` is
@@ -1506,16 +1551,19 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
 (the round trip already exists), never anything the tick could not read.
 
 - **Preset picker.** The four built-in presets and every gallery preset
-  (§ 12) in a list; the highlighted one is rendered live on the right, at
-  the real width (`COLUMNS − 4 − padding`), with its summary, declared
+  (§ 12) in a list; the highlighted one is rendered live above the list,
+  at the real width (`COLUMNS − 4 − padding`), with its summary, declared
   width and `needs` line, and a warning when the terminal is narrower than
   the preset's declared width (the `…` cut is shown as it would be on
   screen, not hidden) or shorter than the fullscreen budget of § 2.1
   allows for the preset's row count (`⌊LINES / 2⌋ − 5` rows whole with an
-  empty prompt; the picker states the count either way). `Enter` applies it: the file is written with the
-  previous one kept by `install`'s backup rule (§ 5), and the install screen follows
-  if the settings file has no `statusLine` yet. `e` opens the highlighted
-  preset in the builder instead of applying it.
+  empty prompt; the pane states the line count either way). The warnings
+  have lines of their own under the facts they qualify, never the end of
+  a line that a narrow terminal cuts (found by the Phase 22 review).
+  `Enter` applies it: the file is written with the previous one kept by
+  `install`'s backup rule (§ 5), and the install screen follows if the
+  settings file has no `statusLine` yet. `e` opens the highlighted preset
+  in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen
   and re-renders on every change. Below it, the `[[row]]` list: each row
   shows its columns as chips (§ 4.3; a plain row is one column) and its
@@ -1562,32 +1610,33 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   `setup` runs and off when it exits, on `Ctrl+C` and on a panic, through
   a hook chained ahead of color-eyre's so the report prints on a restored
   terminal; the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
-  arrows move the selection; `Enter` or a click on the selected item
-  opens its editor as an **overlay panel** beside it; clicking the rule
-  opens the frame screen, a separator its picker, a cap the frame style
-  list. Everything the mouse does has a key, since tmux and some SSH
-  sessions swallow mouse events.
+  arrows move the selection; `Enter` or a second click on the selected
+  item opens its editor as an **overlay panel** over the screen; clicking
+  the rule or a cap opens the frame form, a separator the same form on
+  its `separator` key. Everything the mouse does has a key, since tmux
+  and some SSH sessions swallow mouse events (a separator, a cap and the
+  rule are reached through `2`, the frame form, see above).
 - **Editing by ticking.** The overlay lists every option of the selected
   module as a form: booleans as checkboxes (`[x] hide_when_empty`),
   `preset` and every enum as a radio list, integers as a stepper showing
   the `max`, colours as a swatch list of the theme's roles plus *custom*
   (a hex or 256 index, validated as `config check` would), and strings
   and icons as the pickers below. Every change re-renders the preview at
-  once; `Esc` always closes the innermost layer only (a picker over a
-  panel over the builder), `q` is the one way out of the builder and the
-  preset picker, and the module's chip shows a dot while it carries
-  overrides. The form is generated from `ModuleSchema` like the rest of
-  the builder, so a new option is a new row.
+  once; `Esc` closes the innermost layer (a picker over a panel over the
+  builder) and, with none open, leaves the builder or the preset picker
+  as `q` does, and the module's chip shows a dot while it carries
+  overrides. The form is generated from `ModuleSchema`, so a new option
+  is a new row.
 - **Freeform values come with suggestions.** A string option (`label`,
   `prefix`, `suffix`, `text`, `gap`, a line's `separator`, `ticker_gap`,
   the frame's `fill_char` and caps) opens a picker whose first entries are
-  the distinct values the built-in presets, frame styles and the gallery
-  presets already use (gathered from `gallery::PRESETS` and the frame
-  tables at start-up, deduplicated, each drawn as it would render), then
-  *custom…*, which opens an input line that is reduced to plain text and
-  width-checked the way the config parser does (§ 5). So a separator
-  picker offers ` │ `, ` ┃ `, `  `, ` · `, the powerline glyphs, and
-  whatever a preset author found, before asking anyone to type one.
+  the distinct values the frame styles and the gallery presets already
+  use (gathered from the frame tables and `gallery::PRESETS` at start-up,
+  deduplicated, each shown with its cell count), then *custom…*, which
+  opens an input line that is reduced to plain text and width-checked the
+  way the config parser does (§ 5). So a separator picker offers ` │ `,
+  ` ┃ `, `  `, ` · `, the powerline glyphs, and whatever a preset author
+  found, before asking anyone to type one.
 - **Glyph picker.** An icon key opens a picker with one row per icon set
   (the nerd, unicode, emoji and ascii glyphs for that key) followed by
   the key's **suggested alternatives**, a short list per key declared in
@@ -1607,30 +1656,32 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
 - **Preview.** Rendered in-process through `render_lines_at`, exactly as
   `garnish preview` renders a fixture: the same clock (live, so animations
   move; `GARNISH_ANIMATE=0` freezes them as everywhere), no git discovery,
-  no cache, no settings. `f` cycles the bundled fixtures (subscription,
-  API key, before the first response, no git, the PR states, 1M at 96 %)
-  so the person sees what an absent field does to their layout; `w` sets
-  a terminal width other than the real one (the box is then
-  `w − 4 − padding`, and a `padding` edit re-shrinks the box at once).
-  ratatui does not interpret escape bytes, so the pane is drawn by a
-  second painter target in `ansi.rs` that turns the same segments into
-  ratatui spans (no new crate); a unit test paints the rows both ways and
-  checks the cell text and the styles agree, which is the "what you see
-  is what the status line prints" guarantee. The pane dims every row as
-  the harness does (§ 2.1: the `DIM` modifier on every span, the twin of
+  no cache, no settings. `f` cycles every bundled fixture
+  (`fixtures::FIXTURES`: subscription, API key, before the first
+  response, no git, the PR states, 1M at 96 % and the rest of
+  `tests/fixtures/payloads/`) so the person sees what an absent field does
+  to their layout; `w` sets a terminal width other than the real one (the
+  box is then `w − 4 − padding`, and a `padding` edit re-shrinks the box
+  at once). ratatui does not interpret escape bytes, so the pane is drawn
+  by `setup::paint`, a second painter target over
+  `Painter::painted_style` that turns the same segments into ratatui spans
+  (no new crate); a unit test paints the rows both ways and checks the
+  cell text and the styles agree, which is the "what you see is what the
+  status line prints" guarantee. The pane dims every row as the harness
+  does (§ 2.1: the `DIM` modifier on every span, the twin of
   `Painter.dim`), so it also shows the intensity the screen will have.
-- **Saving.** Edits live in memory as a resolved config, and `s` writes
-  it the way `config show` prints it (with the § 5 backup), so a
-  hand-written file's comments and ordering do not survive a save; the
-  status bar says so before the first save and the backup keeps the
-  original. Because the tick re-reads the config every second, a saved
+- **Saving.** Edits live in memory as the file's own table (see the
+  differences above), and `s` writes it back (with the § 5 backup), so a
+  hand-written file's ordering survives a save and its comments do not;
+  the status bar says so with the first save that keeps a backup, and the
+  backup keeps the original. Because the tick re-reads the config every second, a saved
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
   says so in the status bar, and `s` refuses until the file is moved.
 - **Install.** The install screen mirrors `install --dry-run`: it lists
   the settings path, the exact `statusLine` object it will merge, the
-  backup name, whether the skills will be written and the PATH warning if
+  backup rule, whether the skills will be written and the PATH warning if
   any, and asks once. It runs the same code as `garnish install`; nothing
   in `setup` writes to `settings.json` by another route.
 - **Non-interactive twin.** `garnish setup --preset <name> [--install]`
@@ -1640,9 +1691,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   one; without `--preset`, `setup` needs a terminal on stdout and exits 1
   with one line otherwise. The bare `garnish` typed at a terminal (stdin
   is a tty, so no payload is coming) prints one line pointing at
-  `garnish setup` and exits 0 instead of waiting for JSON; the explicit
-  `garnish render` always reads stdin, and the harness always pipes, so
-  rendering is unchanged (§ 7).
+  `garnish setup` (two lines) and exits 0 instead of waiting for JSON;
+  the explicit `garnish render` always reads stdin, and the harness
+  always pipes, so rendering is unchanged (§ 7).
 - **Traps, decided.** `setup` honours the global `--config` flag and
   `GARNISH_CONFIG` like every command, so it edits the file the tick
   reads; without a home directory and without either it refuses with the
@@ -1652,23 +1703,23 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   with no repository at hand. The preview honours the config's `color`
   and `NO_COLOR` for the rendered rows while the screen's own chrome
   uses the terminal's default colours, so a `color = "never"` config
-  previews plain; in that case the status bar says "colours off: edits
-  are saved, not previewed" and the swatch lists show role names only.
-  A terminal smaller than 60 × 12 gets one line asking
-  for more room instead of a broken layout, and a resize redraws
-  everything at the new width (the preview's box width follows it). A
-  config that parses with problems opens on the per-key fallbacks (§ 5)
-  with the problems listed in the status bar; saving writes the resolved
-  config, which drops the bad keys for their defaults, exactly as
-  `config show` would print it, and the status bar says so before the
-  first save. If the file on disk changes while `setup` is open (another
+  previews plain; in that case the preview's header says "colours off:
+  edits are saved, not previewed". A terminal smaller than 60 × 12 gets
+  one line asking for more room instead of a broken layout, and a resize
+  redraws everything at the new width (the preview's box width follows
+  it). A config that parses with problems opens on the per-key fallbacks
+  (§ 5) with the first problem in the status bar and a count of the
+  rest; saving writes the file's keys as they are, the bad values
+  included (the tick keeps reporting them until they are fixed, and `d`
+  in a form unsets one), and the status bar says so on opening. If the
+  file on disk changes while `setup` is open (another
   session, the skill, an editor), `s` notices (a best-effort compare of
   mtime and length; a file absent at open and present at save counts as
   changed) and asks whether to overwrite or reload; it never merges. A
   save or an install that fails (a read-only directory, an unwritable
   `settings.json`; a symlinked settings file is written through the link
-  as `install` does) shows the OS error in the status bar, keeps the
-  draft and never exits. The picker and the builder never run a module's
+  as `install` does) shows the OS error (a failed save in the status bar,
+  a failed install in its own screen), keeps the draft and never exits. The picker and the builder never run a module's
   worker or git: repo modules render from the fixture's fields, as in
   `preview`.
 - **Cost and shape.** The TUI lives in its own module tree (`src/setup/`)
@@ -1680,4 +1731,4 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   no live pane; a WebAssembly page was the other and is the website again
   by another name). `setup` reads the schemas, the presets, the bundled
   fixtures and the config; it runs no command and makes no network call.
-  Every screen has a snapshot test (§ 9).
+  The screens have snapshot tests (§ 9).

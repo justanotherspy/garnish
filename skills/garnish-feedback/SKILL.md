@@ -6,60 +6,49 @@ description: "File a garnish bug report or feedback as a GitHub issue on justano
 # garnish-feedback
 
 You are filing an issue for [garnish](https://github.com/justanotherspy/garnish)
-with `gh`. The maintainer needs to reproduce the row exactly, so collect the
-facts below verbatim; do not paraphrase renders.
+with `gh`. The maintainer needs to reproduce the row exactly, so collect
+the facts verbatim; never paraphrase a render.
 
 ## 1. Collect
 
 ```sh
 garnish --version
-garnish doctor                                  # toolchain, settings, config, cache, glyph grid
-garnish config show                             # the fully resolved config
+garnish doctor                          # toolchain, settings, config, cache, glyph grid
+garnish config show                     # the fully resolved config
 garnish config path
-echo "$TERM_PROGRAM $TERM"                       # a hint at the terminal application
+echo "$TERM_PROGRAM $TERM"
+garnish preview "$PAYLOAD" --color never   # a saved payload, or the sample in garnish-statusline
 ```
 
-Ask the person for what the commands cannot tell: the terminal application
-and version, the font (and whether it is a Nerd Font), the OS, the terminal
-width (`echo $COLUMNS` in their own terminal; a shell without a tty reports
-80 or nothing), and one sentence on what looks wrong versus what they
-expected. If the complaint is
-about widths or alignment (a wandering right edge, a `…` that should not be
-there, a glyph drawn wide), the doctor's **glyph grid** is the key evidence:
-keep it whole.
-
-Render the line as plain text so it can be pasted:
-
-```sh
-garnish preview "$PAYLOAD" --color never          # a saved payload, or the sample from garnish-statusline
-```
+Ask for what the commands cannot tell: the terminal application and
+version, the font (a Nerd Font?), the OS, the terminal width (`echo
+$COLUMNS` in their own terminal), and one sentence on what looks wrong
+against what they expected. For a width or alignment problem (a wandering
+right edge, an unexpected `…`, a glyph drawn wide) the doctor's **glyph
+grid** is the evidence: keep it whole.
 
 ## 2. Write the issue
 
 Title: one line naming the symptom (`unicode set: right edge wanders on the
-usage line in COSMIC`). Body (Markdown, in this order):
+usage line in COSMIC`). Body, in this order:
 
-1. **What I see / what I expected** (their words).
-2. **Environment**: terminal + version, font, OS, `garnish --version`,
-   terminal width.
-3. **Rendered line** in a `text` code block (from `--color never`).
-4. **Config** (`garnish config show`) in a `toml` code block.
-5. **Doctor** output in a `text` code block, glyph grid included.
-6. **Screenshot**: ask them to take one and attach it to the issue after it
-   is created (drag it into the issue on GitHub); note "screenshot to
-   follow" in the body.
+1. **What I see / what I expected**, in their words.
+2. **Environment**: terminal and version, font, OS, `garnish --version`,
+   width.
+3. **Rendered line** in a `text` block (from `--color never`).
+4. **Config** (`config show`) in a `toml` block.
+5. **Doctor** output in a `text` block, glyph grid included.
+6. **Screenshot**: ask them to attach one after the issue exists; write
+   "screenshot to follow".
 
-Labels: `feedback`, plus `alignment` when the report is about widths,
-glyphs or the right edge.
+Labels: `feedback`, plus `alignment` for widths, glyphs or the right edge.
 
-## 3. Show it, ask, then post
+## 3. Redact, show, ask, post
 
-The issue is public. Before anything leaves the machine, redact: replace
-the home directory in every path with `~` (`doctor` already collapses it
-and `config show` prints no path, so this catches anything pasted by
-hand, since a path carries the username), and keep only the `GARNISH_*`
-lines of the doctor's `environment` section. Then print the **whole body**
-so the person can read it, and ask (AskUserQuestion when available):
+The issue is public. Replace the home directory in every path with `~`
+(`doctor` already does; `config show` prints no path), keep only the
+`GARNISH_*` lines of the doctor's environment section, print the **whole
+body**, and ask (AskUserQuestion when available):
 "post this to justanotherspy/garnish as a public issue?". Only a yes runs:
 
 ```sh
@@ -67,6 +56,6 @@ gh issue create --repo justanotherspy/garnish --title "$TITLE" --body-file "$BOD
   --label feedback [--label alignment]
 ```
 
-If a label does not exist yet, `gh` reports it: create the issue without it
-and say so. Show the issue URL and remind them about the screenshot. Do not
-change their config while filing.
+A label that does not exist: create the issue without it and say so. Show
+the URL and remind them about the screenshot. Change nothing in their
+config while filing.

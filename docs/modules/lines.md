@@ -53,6 +53,8 @@ Lines added and removed this session.
 | `added` | `+` | `+` | `+` | `+` | Added glyph. |
 | `removed` | `−` | `−` | `−` | `-` | Removed glyph. |
 
+Also try (`lines`: `U+F457` `U+F0CB` `Δ` `∆`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

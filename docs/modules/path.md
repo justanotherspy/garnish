@@ -54,6 +54,8 @@ The base directory is the git top level when inside a repository, otherwise `wor
 | `folder` | `U+F07B` | `❒` | `📁` | `` | Folder icon. |
 | `added` | `U+F067` | `+` | `➕` | `+` | Added-directories glyph. |
 
+Also try (`folder`: `U+F07C` `U+F413` `U+F015` `❒` `❏`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

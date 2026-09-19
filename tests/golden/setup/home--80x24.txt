@@ -1,0 +1,24 @@
+preview  80 cols, box 76  ·  4 lines  ·  subscription-full: a Pro/Max session wi
+  ╭─  ~/projects/garnish │  #42  ─────────────────────────  garnish-dev ─╮
+  ├─  Opus │  ▁▃▅▇█ │  ████████▍░░░░░░░░░░▏ 42% ──────────────────────────┤
+  ├─  24%  2h13m │  41%  3d4h ──────────────────────────────  +156 −23 ─┤
+  ╰─  1h12m │  8m20s │  91% 1h  47m ──────────────────────── ⠋ 16:00:00 ─╯
+
+garnish setup
+no config file yet
+
+ 1  Pick a preset
+ 2  Build a custom layout
+ 3  Install into Claude Code
+ 4  Quit
+
+
+
+
+
+
+
+
+
+
+↑↓ choose  enter open  q quit  ? help

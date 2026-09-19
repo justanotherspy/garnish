@@ -1,0 +1,53 @@
+# name: narrow-unicode
+# summary: three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules
+# columns: 72
+
+# Made for a narrow pane: the unicode set needs no patched font, the frame
+# is off with two spaces between modules, every module that can grow is
+# capped with `max_width`, and an overdue cached value hides rather than
+# dims (`stale_style`) after two missed refreshes.
+
+preset = "compact"
+icons  = "unicode"
+theme  = "garnish"
+color  = "auto"
+stale_style = "hide"
+stale_after = 2
+
+[frame]
+style = "none"
+separator = "  "
+
+[[row]]
+modules = ["path", "branch", "pr"]
+right   = ["clock"]
+
+[[row]]
+modules = ["model", "context"]
+right   = ["session"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["cache"]
+
+[modules.path]
+depth = 1
+max_width = 18
+
+[modules.branch]
+max_width = 16
+
+[modules.model]
+max_width = 12
+
+[modules.context]
+width = 12
+
+[modules.clock]
+preset = "minimal"        # 16:00, no spinner
+
+[modules.session]
+preset = "minimal"
+
+[modules.cache]
+preset = "minimal"

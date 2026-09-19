@@ -395,7 +395,7 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
 }
 
 /// The longest prefix of `s` that is at most `width` cells.
-fn fit(s: &str, width: usize) -> &str {
+pub(crate) fn fit(s: &str, width: usize) -> &str {
     let mut used = 0_usize;
     let mut end = 0_usize;
     for (i, c) in s.char_indices() {
@@ -539,6 +539,31 @@ impl Painter {
     /// Painter that emits nothing but text.
     pub const PLAIN: Self = Self { mode: ColorMode::Never, links: false, dim: false };
 
+    /// The style a segment is drawn with under this painter: `dim` folded in,
+    /// no colour under [`ColorMode::Never`], and an RGB colour quantised to
+    /// the 256-colour cube under [`ColorMode::Ansi256`].
+    ///
+    /// [`Painter::paint`] and the `setup` pane's spans both go through here,
+    /// which is what makes the pane show the colours the status line prints
+    /// (SPEC § 14).
+    #[must_use]
+    pub fn painted_style(&self, style: Style) -> Style {
+        let style = if self.dim { style.dimmed() } else { style };
+        let fg = match (style.fg, self.mode) {
+            (_, ColorMode::Never) => Color::Default,
+            (Color::Rgb(r, g, b), ColorMode::Ansi256) => Color::Indexed(rgb_to_256(r, g, b)),
+            (fg, ColorMode::Ansi256 | ColorMode::TrueColor) => fg,
+        };
+        Style { fg, ..style }
+    }
+
+    /// Whether this painter emits a link for `url`: links on, and an OSC 8
+    /// target it is willing to emit ([`safe_link`]).
+    #[must_use]
+    pub fn links_to(&self, url: &str) -> bool {
+        self.links && safe_link(url)
+    }
+
     /// Render segments to a single line (no trailing newline).
     #[must_use]
     pub fn paint(&self, segments: &[Segment]) -> String {
@@ -547,9 +572,9 @@ impl Painter {
             if seg.text.is_empty() {
                 continue;
             }
-            let style = if self.dim { seg.style.dimmed() } else { seg.style };
+            let style = self.painted_style(seg.style);
             let sgr = style.sgr(self.mode);
-            let link = seg.link.as_deref().filter(|u| self.links && safe_link(u));
+            let link = seg.link.as_deref().filter(|u| self.links_to(u));
             if let Some(url) = link {
                 let _ = write!(out, "\x1b]8;;{url}\x1b\\");
             }

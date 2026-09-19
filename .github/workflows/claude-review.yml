@@ -1,19 +1,19 @@
 name: Claude Review
 
-# An on-demand code review by Claude. It authenticates to the Claude API by
-# exchanging this workflow's GitHub OIDC token for a short-lived access token
-# (workload identity federation), so there is no ANTHROPIC_API_KEY secret.
-#
-# A review costs real money, so it is always asked for and never automatic. It
-# runs only when every one of these holds:
+# An on-demand code review by Claude, authenticated by exchanging this
+# workflow's GitHub OIDC token for a short-lived Claude token (workload
+# identity federation; no API key secret). A review costs money, so it never
+# runs on a push: it runs when every one of these holds:
 #
 #   - the pull request was opened by justanotherspy;
-#   - the pull request is open and NOT a draft;
-#   - somebody wrote @claude in a comment or a review, or the `claude-review`
-#     label was added.
+#   - it is open and not a draft (checked against live state below);
+#   - somebody wrote @claude in a comment or a review, or added the
+#     `claude-review` label.
 #
-# Note there is deliberately no `synchronize` trigger: pushing to a branch does
-# not re-run the review. Ask for it again with @claude.
+# The job collects everything the review needs (the pull request, its diff,
+# its CI state) into files with plain job shell, then hands the action a short
+# prompt that points at them. CLAUDE.md § Claude review has the history of
+# why it is shaped this way.
 
 on:
   issue_comment:
@@ -29,16 +29,9 @@ on:
 # version comments current).
 jobs:
   review:
-    # The cheap gates, on payload fields that are present for every one of the
-    # four events above, so an unwanted trigger never starts a runner. The
-    # draft and open checks live in the guard step below, because the
-    # `issue_comment` payload describes the pull request as an *issue* and the
-    # shape of that object is not worth betting the gate on.
-    #
-    # Bot authors are excluded because this review talks on the very events it
-    # listens to: `track_progress` posts a tracking comment and the review
-    # posts its summary through `gh pr comment`, both as `claude[bot]`, and
-    # both arrive back here as `issue_comment: created`.
+    # Bot authors are excluded because the review talks on the events it
+    # listens to: its tracking comment and its summary come back here as
+    # `issue_comment: created`.
     if: |
       (
         github.event_name == 'issue_comment' &&
@@ -61,17 +54,9 @@ jobs:
         github.event.pull_request.user.login == 'justanotherspy' &&
         github.event.label.name == 'claude-review'
       )
-    # One review per pull request at a time: a newer request cancels one that
-    # is still running rather than paying for both.
-    #
-    # This MUST stay on the job and never move up to the workflow. A
-    # workflow-level group is claimed when the run is *created*, before any
-    # job `if` is evaluated, so a run that goes on to skip every job still
-    # evicts the run holding the group. That is not hypothetical: it killed
-    # the first real review 80 seconds in (run 34878106655), because the
-    # tracking comment the review had just posted created a second run that
-    # claimed the group and was then skipped. On the job, a skipped job never
-    # joins the group.
+    # One review per pull request at a time. The group stays on the job: a
+    # workflow-level group is claimed before any `if` runs, so a run that
+    # then skips every job would still cancel the review in progress.
     concurrency:
       group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
@@ -81,18 +66,19 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write # Required: fetches the GitHub OIDC token for the federation exchange
-      actions: read # Required for Claude to read CI results on the pull request
+      id-token: write # the OIDC token for the federation exchange
+      actions: read # CI results on the pull request
+    env:
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+      BASE_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      # Authoritative draft/open check against live state: a pull request can
-      # be converted back to a draft after the comment that triggered this, and
-      # the webhook payload is a snapshot from before that.
+      # Live state, because a pull request can be converted to a draft after
+      # the comment that triggered this, and the payload predates that.
       - name: Check the pull request is open and not a draft
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
         run: |
           set -euo pipefail
           state=$(gh pr view "$PR" --repo "$REPO" --json state,isDraft \
@@ -105,281 +91,126 @@ jobs:
             echo "Skipping: a review runs only on an open, ready-for-review pull request." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # The pull request's own head, named explicitly. Three of the four
-      # triggers are comment events, whose `GITHUB_REF` is the default
-      # branch, not the pull request, so without a `ref:` the review reads
-      # `main`'s tree while reasoning about the pull request's diff, which
-      # is exactly what the prompt below assumes away ("The PR branch is
-      # already checked out"). The `labeled` trigger is a `pull_request`
-      # event and was unaffected, which is why this went unnoticed.
-      - name: Checkout repository
+      # The pull request's head, named explicitly: three of the four triggers
+      # are comment events whose GITHUB_REF is the default branch. Full
+      # history, so the merge base resolves.
+      - name: Checkout the pull request
         if: steps.gate.outputs.review == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        #
-        # Full history, not a shallow head. At depth 1 there is no merge base
-        # with the base branch, so `git diff main...HEAD` and `git log
-        # main..HEAD` - the commands the allowlist and the prompt both point
-        # the review at - cannot resolve, and it is left with `gh pr diff`
-        # alone. This repository is 52 commits and under 5 MB, so the whole
-        # history costs nothing.
         with:
           ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head
           fetch-depth: 0
 
-      # The diff, handed to the review as a file rather than left for it to
-      # fetch. Five runs in a row died trying to get or slice it through
-      # `Bash`, the last one on `git diff … | wc -l` with *both* `Bash(git:*)`
-      # and `Bash(wc:*)` allowed (run 35453133607), which is the run that
-      # settled it: a compound command is refused here whatever its parts are
-      # allowed to do, so no allowlist can buy the review a pipeline. `Read`
-      # needs no allowlist entry at all, and this step is plain job shell with
-      # no permission system in front of it.
-      - name: Collect the diff for the review
-        id: diff
+      # Everything the review reads, written by job shell where no permission
+      # system stands: the pull request itself, the diff against the merge
+      # base, and the CI state of the head commit.
+      - name: Collect the pull request for the review
         if: steps.gate.outputs.review == 'true'
         env:
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          dir="$RUNNER_TEMP/review"
+          mkdir -p "$dir"
           git fetch origin "$BASE_BRANCH"
           base="$(git merge-base FETCH_HEAD HEAD)"
-          git diff --stat "$base" HEAD > "$RUNNER_TEMP/pr.diffstat"
-          git diff "$base" HEAD > "$RUNNER_TEMP/pr.diff"
-          echo "Collected $(wc -l < "$RUNNER_TEMP/pr.diff") lines of diff against $BASE_BRANCH ($base)."
+          gh pr view "$PR" --repo "$REPO" \
+            --json number,title,body,author,baseRefName,headRefName,additions,deletions,changedFiles \
+            --template '# {{.title}} (#{{.number}})
+
+          author: {{.author.login}} · base: {{.baseRefName}} · head: {{.headRefName}} · +{{.additions}} −{{.deletions}} in {{.changedFiles}} files
+
+          {{.body}}
+          ' > "$dir/pr.md"
+          {
+            echo "# Commits (oldest first)"
+            git log --reverse --format='- %h %s' "$base..HEAD"
+          } > "$dir/commits.md"
+          git diff --stat "$base" HEAD > "$dir/diffstat.txt"
+          git diff --name-status "$base" HEAD > "$dir/files.txt"
+          git diff "$base" HEAD > "$dir/diff.patch"
+          # Non-zero when a check is failing or pending; the table is what matters.
+          gh pr checks "$PR" --repo "$REPO" > "$dir/checks.txt" 2>&1 || true
+          echo "Collected $(wc -l < "$dir/diff.patch") lines of diff against $BASE_BRANCH ($base) into $dir:"
+          ls -l "$dir"
 
       - name: Review
         id: review
         if: steps.gate.outputs.review == 'true'
         uses: anthropics/claude-code-action@3b8197d3d486006dd4af54613517f21ac6ac625e # v1.0.227
         with:
-          # These values are identifiers, not secrets. The federation rule is
-          # what restricts which OIDC subject may exchange for a token.
+          # Identifiers, not secrets: the federation rule's subject pattern is
+          # what restricts who may exchange a token.
           anthropic_federation_rule_id: fdrl_01Sf3P3B65XKxK66EWBeNrxh
           anthropic_organization_id: c419af23-49f3-48ec-b346-a345f64ee5ec
           anthropic_service_account_id: svac_01So6woBVPFG4GmNRJT2QKVz
-          # Required here because the federation rule spans every workspace;
-          # without it the exchange returns 400 workspace_id_required.
+          # The federation rule spans every workspace, so one must be named.
           anthropic_workspace_id: wrkspc_01FrtuNtJAYdwk63f9DRj7UY
 
-          # Forces tag mode with a tracking comment on the `labeled` event.
-          # The three comment events already run in tag mode, where the
-          # tracking comment is the default, so this changes nothing for them.
+          # A tracking comment on every trigger; the summary is written into it.
           track_progress: true
 
           prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+            Review pull request #${{ github.event.issue.number || github.event.pull_request.number }} of ${{ github.repository }}.
 
-            Review this pull request. The PR branch is already checked out in
-            the working directory.
+            Everything you need is already on disk under `${{ runner.temp }}/review/`; do not fetch any of it again:
 
-            **The diff is already collected for you. Do not fetch it.**
+            - `pr.md`: title, author, branches and the description.
+            - `commits.md`: the commits, oldest first.
+            - `diffstat.txt` and `files.txt`: what changed. Read these first.
+            - `diff.patch`: the whole diff against the merge base. Read it in slices or Grep it.
+            - `checks.txt`: the CI state of the head commit. Factor a failure in; do not repeat what CI says.
 
-            - `${{ runner.temp }}/pr.diffstat` - the per-file summary. Read
-              this first; it is small and it tells you where to look.
-            - `${{ runner.temp }}/pr.diff` - the full diff against the merge
-              base. `Read` it in slices, or `Grep` it, rather than in one go.
+            The pull request's branch is checked out in the working directory. `CLAUDE.md` and `SPEC.md` are the project's own rules and the standard to review against: prefer a finding that cites one of them over a generic one.
 
-            `Read` and `Grep` need no permission and cannot be refused. Use
-            them for the diff and for the tree. `git` is available if you want
-            history a diff cannot show, but you should not need it to see what
-            changed.
+            Review for, in this order:
 
-            Read `CLAUDE.md` first, and `SPEC.md` when the change touches
-            behaviour rather than only internals. They are the project's own
-            rules, and they are the standard to review against: prefer a
-            finding that cites a rule in those files over a generic one.
+            1. Correctness: logic errors, edge cases, and the invariants in CLAUDE.md (cache and workers, the repository is not the user's file, the layout rules).
+            2. The lint policy: a new panic path, bare index, `as` cast or unchecked arithmetic outside tests; an `#[allow]` without its one-line reason.
+            3. Security: untrusted input (payload, git output, config strings) reaching a path, a command or a rendered row; a token or a path in a log.
+            4. The warm-tick budget: new work on the render path, allocation in a loop, a settings read outside `Ctx::settings()`, a process on a warm tick.
+            5. Tests: each behaviour change covered (a unit test per bug, a golden or integration test for anything user-visible); a test weakened or removed.
+            6. Documents and generated files: a schema change carries regenerated `docs/`, `examples/` and `tests/golden/`; `SPEC.md`, `PLAN.md` and `README.md` follow the change.
 
-            Cover all of:
+            Post each specific finding as an inline comment on the line it concerns, then finish the tracking comment with the summary: one line per finding, blocking ones first, nits last, and what you could not check. Write tersely: lead with the finding, then only the evidence needed to act on it, under 120 words a comment, a `suggestion` block over prose. Never post praise alone.
 
-            1. **Correctness** - logic errors, wrong edge-case handling, broken
-               invariants. Read the cache/worker invariants in `CLAUDE.md`
-               before judging anything under `src/` that touches a cache entry,
-               a lock file or a spawned worker.
-            2. **Panic safety and the lint policy** - this crate denies
-               `unwrap_used`, `expect_used`, `indexing_slicing`,
-               `arithmetic_side_effects`, `as_conversions`, `panic` and friends
-               outside `#[cfg(test)]`. Flag any new panic path, bare index,
-               `as` cast, or unchecked arithmetic in non-test code, and any
-               `#[allow(...)]` added without a one-line justification.
-            3. **Security** - untrusted input reaching a path, a command, or a
-               rendered row; anything that could put an escape sequence on the
-               status line; secrets or tokens in logs or committed files.
-            4. **Performance** - the warm-tick budget is mean < 3 ms and
-               p99 < 8 ms. Flag work added to the render path, especially
-               allocation in a loop, a settings read outside `Ctx::settings()`,
-               or a child process on a warm tick.
-            5. **Tests** - is each behaviour change covered? Bugs need a unit
-               test, and user-visible behaviour needs an integration or golden
-               test. Flag a test that was weakened or removed.
-            6. **Documentation and generated files** - a schema change must
-               carry regenerated `docs/`, `examples/` and `tests/golden/`.
-               `README.md` changes when anything a user needs changes;
-               `SPEC.md` and `PLAN.md` change when the target design does.
+            Do not run `cargo`, `make` or the tests: CI does, and a build here costs minutes for nothing. You have no subagents; review the diff yourself. When the turn budget runs low, fold the remaining findings into the summary rather than posting them one by one, and never end without the summary.
 
-            Check the CI status for this pull request and factor a failure into
-            the review rather than repeating what CI already says.
-
-            Post specific issues as inline comments on the lines they concern,
-            and one top-level comment summarising the review. Say which
-            findings are blocking and which are nits. Do not post a comment
-            that only offers praise.
-
-            **Write tersely.** Lead each comment with the finding in one
-            sentence, then only the evidence needed to act on it. No preamble,
-            no restating the diff, no narrating what you are about to say, no
-            recap of your own reasoning. Prefer a short code block or a
-            ```suggestion``` block over prose describing a change. Aim for
-            under 120 words per inline comment; go longer only when a subtle
-            correctness argument genuinely needs it. The summary is a short
-            list, one line per finding, blocking ones first. A reviewer should
-            be able to read the whole review in a minute.
-
-            **You have no subagents.** `Task` is not available to you, on
-            purpose: six runs in a row ended with the parent stopping while a
-            subagent was still working, posting nothing at all. Review the
-            diff yourself. Your context window holds one this size several
-            times over, and the whole diff is already on disk.
-
-            You have a turn budget, and every inline comment, every progress
-            update and every subagent spends from it. The summary comment is
-            the most useful thing you produce, so protect it: as the budget
-            runs low, fold your remaining findings into the summary rather
-            than posting them one by one. Run short on inline comments, never
-            on the summary. **Never end without posting the summary** - a run
-            that finishes having posted nothing has wasted everything it
-            spent, whatever its checklist says.
-
-            Keep the review to the diff and the code it touches. Do NOT run
-            `cargo build`, `cargo test`, `cargo clippy` or `make check` - CI
-            already runs all of those, and a toolchain build here costs
-            several minutes for nothing.
-
-            **Your tools are an allowlist, and a denied call still costs a
-            turn.** You have `Read`, `Grep`, `Glob`, `LS` and `TodoWrite`;
-            `git`, in full, so fetch the base branch yourself if
-            `main...HEAD` does not resolve; and `Bash` for `gh pr diff|view`,
-            `rg`, `grep`, `cat`, `sed`, `awk`, `sort`, `uniq`, `cut`, `jq`,
-            `wc`, `head`, `tail`, `ls`, `find` - plus the two that post
-            (`gh pr comment`, the inline-comment tool). Anything else is
-            refused.
-
-            **A compound command is refused even when each part of it is
-            allowed.** `git diff … | wc -l` was refused with both `git` and
-            `wc` on this list. So no pipe, no `&&`, no `;`, no `$(…)` - one
-            command per call, always. When you want less output, ask for less
-            of it (`--stat`, `-- <path>`) rather than piping it through
-            something. Reach for `Read` and `Grep` first; if a call is
-            denied, do not retry it and do not look for another way around it
-            - use the tools you have, and say in the summary what you could
-            not check. The same allowlist binds every subagent, so tell each
-            one this too. A run that spends its turns on refusals and posts
-            nothing is the worst outcome there is.
-
-          # `claude_args` is a block scalar: every line is passed to the CLI
-          # verbatim, so a `#` line here would become an argument, not a
-          # comment. Keep notes above this key.
-          #
-          # --max-turns: 15 was not enough. The first real review
-          # (run 34879256227) died on error_max_turns three seconds after its
-          # second inline comment, with the summary still unwritten.
-          # `track_progress` is part of that cost, since each checklist update
-          # is a turn, and so is each inline comment. 50 was not enough
-          # either, for a different reason: see Task below. 100 is the cap
-          # now, because a truncated review wastes everything it has spent
-          # and a fanned-out one spends turns faster.
-          #
-          # Task is NOT here, and that is the fix of last resort after three
-          # prompt rules failed to do the same job. Every one of the six runs
-          # that posted nothing ended the same way: the parent stopped while a
-          # subagent was still working. The prompt was told never to end
-          # without the summary (after PR #66), then never to end with a
-          # subagent unfinished, then to prefer reviewing the diff itself
-          # (#75). All three were ignored; the sixth run delegated anyway and
-          # stopped at 47 turns of its 100, $2.77, with three trivial denials
-          # and no summary (run 35458733807). An instruction the model does
-          # not follow is not a control. Without `Task` there is no delegate
-          # to abandon, and the diff is already on disk for it to read.
-          #
-          # The read-only Bash entries are the second half of that same
-          # lesson. With `Task` allowed but nothing else to run, the review of
-          # PR #69 fanned out to three subagents and died of refusals instead:
-          # `permission_denials_count: 12` against `num_turns: 11`, ending
-          # `"subtype": "success"` after 76 seconds and $0.89 with three of six
-          # checklist boxes still "subagent running" and no summary. A
-          # subagent inherits this allowlist, so a review it cannot run `git
-          # diff` or `rg` in spends its budget being told no. These entries
-          # are read-only by intent, not by enforcement - a shell can redirect
-          # whatever it likes - which is acceptable because the checkout is
-          # thrown away and the action already allows `git add|commit` and its
-          # own push script. The prompt above tells the review the same thing,
-          # because the allowlist alone only refuses; it does not explain.
-          #
-          # The third silent run (run 35451305473) is why the list below grew
-          # again, and why the step after this one exists. The allowlist from
-          # the round before it *did* apply - the job log's "SDK options" shows
-          # `Task` and every read-only `Bash` entry present - and the review
-          # still ended `"subtype": "success"` after 10 turns and $0.95 with
-          # `permission_denials_count: 10`, no summary and no inline comments.
-          # Ten turns, ten refusals.
-          #
-          # That step then reported, on the very next run (35452476655), what
-          # four rounds of inference had not: every one of the twelve denials
-          # was a `git` call, and nothing else. Not `TodoWrite`, not the text
-          # tools - those guesses were simply wrong.
-          #
-          #     5  Bash(git:*)
-          #     4  Bash(git diff:*)
-          #     3  Bash(git fetch origin:*)
-          #
-          # The middle line is the one that matters: `Bash(git diff:*)` was in
-          # the allowlist already and was refused anyway, so those calls died
-          # on their *shape* rather than their verb - a flag before the
-          # subcommand (`git --no-pager diff`, `git -C . diff`), which is also
-          # what the `Bash(git:*)` group is, or a pipe into something the list
-          # does not carry. An allowlist of git subcommands cannot express
-          # that, because it matches on a prefix and git's flags may precede
-          # the verb.
-          #
-          # So git is allowed whole. What that actually widens is small: the
-          # job holds `contents: read`, so a push cannot succeed, and the only
-          # tree a write could touch is a checkout thrown away when the runner
-          # goes. The action's own defaults already hand the review
-          # `git add`, `git commit`, `git rm` and its push script, so git
-          # writes were never outside the surface to begin with.
-          #
-          # --model / --effort: Sonnet 5 at high effort. Sonnet is ~2.5x
-          # cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), which
-          # is what pays for the ceiling: 16 Opus turns cost $0.95, so even
-          # 100 Sonnet turns stay in the same range.
+          # `claude_args` is a block scalar: every line reaches the CLI verbatim,
+          # so notes go here, not inside it. Sonnet 5 at high effort keeps a
+          # 100-turn ceiling in the price range of a short Opus run. `Task` is
+          # deliberately absent: a delegate the parent stops waiting for is how
+          # six reviews posted nothing, and no prompt rule prevented it. The
+          # file tools, `Bash` whole and the GitHub MCP tools are allowed: the
+          # job holds `contents: read`, the checkout is disposable, and an
+          # allowlist of verbs refused compound commands whatever it carried.
           claude_args: |
             --model claude-sonnet-5
             --effort high
             --max-turns 100
-            --allowedTools "TodoWrite,mcp__github_inline_comment__create_inline_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(git:*),Bash(rg:*),Bash(grep:*),Bash(cat:*),Bash(sed:*),Bash(awk:*),Bash(sort:*),Bash(uniq:*),Bash(cut:*),Bash(jq:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(ls:*),Bash(find:*)"
+            --allowedTools "Bash,Read,Write,Edit,Grep,Glob,LS,TodoWrite,mcp__github_inline_comment,mcp__github_inline_comment__create_inline_comment,mcp__github_comment,mcp__github_comment__update_claude_comment,mcp__github_ci,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,mcp__github"
 
-      # The action's own conclusion is not a verdict on the review: it reports
-      # success whenever Claude returned a result, so three runs in a row went
-      # green having posted nothing at all. This reads the execution file the
-      # action writes - the full transcript, kept on disk whatever
-      # `show_full_output` says - and turns the two silent failures into a red
-      # check with the reason in the job summary: a refused call, named, and a
-      # run that never posted its summary.
-      #
-      # It runs the *base branch's* copy of the script, not the checkout's.
-      # The checkout is the pull request's head, which the action treats as
-      # untrusted for exactly this reason (it restores `CLAUDE.md`, `.claude`
-      # and the rest from the base before letting Claude near them), and this
-      # step holds the job's token. The gate above already limits the workflow
-      # to Daniel's own pull requests, so this is defence in depth rather than
-      # the only thing standing there.
+      # The action reports success whenever Claude returned a result, so a
+      # review that posted nothing, or spent its turns being refused, went
+      # green. This reads the execution file the action writes and makes both
+      # red, with the reason in the job summary. It runs the base branch's copy
+      # of the script, because the checkout is the untrusted head and this
+      # step holds the job's token.
       - name: Report what the review was refused
         if: always() && steps.gate.outputs.review == 'true'
         env:
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          # The action skips itself, writing no execution file, when this
+          # workflow file differs from the default branch's copy (a pull
+          # request that edits it) or when it failed before Claude started;
+          # neither is a refused review.
+          if [ -z "${EXECUTION_FILE:-}" ]; then
+            echo "The action wrote no execution file, so there was no review to report on (it skips itself on a pull request that edits this workflow)." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           script="$RUNNER_TEMP/review-denials.sh"
           git fetch --depth 1 origin "$BASE_BRANCH"
           if ! git show "FETCH_HEAD:scripts/review-denials.sh" > "$script"; then

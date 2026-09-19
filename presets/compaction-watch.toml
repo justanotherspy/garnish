@@ -1,0 +1,63 @@
+# name: compaction-watch
+# summary: the context bar measured to the compaction point, resets as clock times, line-style bars
+# columns: 120
+# needs: nerd-font
+
+# `scale = "usable"` makes 100 % the auto-compaction threshold (SPEC § 3.2),
+# so the bar and its percentage say how close compaction is; the window tag
+# still names the real window, and a badge appears from `warn_at` up. The
+# limit windows print when they reset as a wall-clock time rather than a
+# countdown, and every bar is line-style, whole cells only.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch"]
+right   = ["model", "effort"]
+
+[[row]]
+modules = ["context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d", "spend"]
+right   = ["cost"]
+
+[modules.context]
+scale = "usable"
+width = 30
+bar = "line"
+show_window = true
+exceeds_200k = true
+warn_at = 40
+thresholds = [40, 60, 80]
+band_colors = ["ok", "warn", "hot", "danger"]
+
+[modules.limit5h]
+reset = "absolute"        # ⏱ 14:30 instead of a countdown
+bar_width = 8
+bar = "line"
+
+[modules.limit7d]
+reset = "both"            # 3d4h (Tue 14:30)
+bar_width = 8
+bar = "line"
+durations = "fixed"
+
+[modules.spend]
+reset = "absolute"        # ⏱ Mar 1: weeks away, so the date
+bar_width = 8
+bar = "line"
+
+[modules.effort]
+style = "both"
+
+[modules.clock]
+format = "12h"

@@ -67,6 +67,8 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `exceeds` | `‼` | `‼` | `‼` | `!!` | Exceeds-200k indicator. |
 | `warn` | `U+F071` | `⚠` | `⚠` | `!` | Warning badge. |
 
+Also try (`context`: `U+F1C0` `U+F00A` `⊞` `⊟` `⊡`; `fill`: `█` `━` `▓` `#` `=`; `empty`: `░` `─` `▒` `.` `-`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

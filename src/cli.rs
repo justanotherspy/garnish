@@ -173,6 +173,16 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Set garnish up full-screen: pick a preset, build a layout, install.
+    Setup {
+        /// Write this preset (a built-in or a gallery name) without opening
+        /// the screen, keeping a backup of the file it replaces.
+        #[arg(long, value_name = "NAME")]
+        preset: Option<String>,
+        /// With `--preset`: hook garnish into Claude Code's settings.json too.
+        #[arg(long, requires = "preset")]
+        install: bool,
+    },
 }
 
 /// `garnish skills …`.
@@ -243,7 +253,22 @@ pub fn run() -> Result<std::process::ExitCode> {
 fn run_command() -> Result<()> {
     let cli = Cli::parse();
     let config_path = cli.config.as_deref();
-    let command = cli.command.unwrap_or(Command::Render);
+    let command = match cli.command {
+        Some(command) => command,
+        // A bare `garnish` at a terminal is a person, not the harness: no
+        // payload is coming, so point at `setup` instead of waiting for
+        // one (SPEC § 14). The explicit `render` always reads stdin.
+        None if stdin_is_terminal() => {
+            let mut stdout = std::io::stdout().lock();
+            writeln!(
+                stdout,
+                "garnish renders the status line from the JSON Claude Code pipes to it.\n\
+                 Run `garnish setup` to configure it, or `garnish --help` for the commands."
+            )?;
+            return Ok(());
+        }
+        None => Command::Render,
+    };
     // The render path cannot return an error, so it skips color-eyre's
     // report handler installation; every other subcommand gets pretty errors.
     if !matches!(command, Command::Render) {
@@ -251,30 +276,7 @@ fn run_command() -> Result<()> {
     }
     match command {
         Command::Render => {
-            // The render path never fails and never prints nothing (SPEC § 5):
-            // unreadable or non-UTF-8 stdin becomes a warning line, and a
-            // closed stdout (EPIPE) is not worth an error report.
-            let mut bytes = Vec::with_capacity(8 * 1024);
-            let input = match std::io::stdin().read_to_end(&mut bytes) {
-                Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
-                Err(e) => {
-                    eprintln!("garnish: reading stdin: {e}");
-                    String::new()
-                }
-            };
-            let req = Request {
-                payload_json: &input,
-                config_path,
-                overlay: Overlay::default(),
-                columns: env_columns(),
-                no_color: std::env::var_os("NO_COLOR").is_some(),
-                dim: false,
-            };
-            let out = render::render(&req);
-            let mut stdout = std::io::stdout().lock();
-            let _ = stdout.write_all(out.as_bytes());
-            let _ = stdout.flush();
-            tick_note(&input, req.columns, &out);
+            render_stdin(config_path);
             Ok(())
         }
         Command::Preview { path, args } => preview(&path, config_path, &args),
@@ -323,6 +325,9 @@ fn run_command() -> Result<()> {
             config_path,
         ),
         Command::Skills { action } => skills(action),
+        Command::Setup { preset, install } => {
+            crate::setup::run(&crate::setup::Args { preset, install, config_path })
+        }
         Command::Doctor => {
             std::io::stdout().lock().write_all(crate::doctor::report(config_path).as_bytes())?;
             Ok(())
@@ -338,6 +343,35 @@ fn run_command() -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// The tick: the payload on stdin rendered to stdout.
+///
+/// The render path never fails and never prints nothing (SPEC § 5):
+/// unreadable or non-UTF-8 stdin becomes a warning line, and a closed
+/// stdout (EPIPE) is not worth an error report.
+fn render_stdin(config_path: Option<&Path>) {
+    let mut bytes = Vec::with_capacity(8 * 1024);
+    let input = match std::io::stdin().read_to_end(&mut bytes) {
+        Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(e) => {
+            eprintln!("garnish: reading stdin: {e}");
+            String::new()
+        }
+    };
+    let req = Request {
+        payload_json: &input,
+        config_path,
+        overlay: Overlay::default(),
+        columns: env_columns(),
+        no_color: std::env::var_os("NO_COLOR").is_some(),
+        dim: false,
+    };
+    let out = render::render(&req);
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(out.as_bytes());
+    let _ = stdout.flush();
+    tick_note(&input, req.columns, &out);
 }
 
 fn refresh(
@@ -425,94 +459,37 @@ fn install(
     dry_run: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    use crate::install::{self as inst, Plan};
+    let options = crate::install::Options {
+        settings,
+        refresh_interval,
+        padding,
+        absolute,
+        write_config: !skip.config,
+        write_skills: !skip.skills,
+        config_path: config_path.map(Path::to_path_buf),
+    };
+    let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
     let mut stdout = std::io::stdout().lock();
-    let command = if absolute {
-        std::env::current_exe().context("locating this binary")?.display().to_string()
-    } else {
-        "garnish".to_owned()
-    };
-    let Some(settings) = settings.or_else(inst::default_settings_path) else {
-        return Err(no_home("--settings <FILE>", "settings.json is"));
-    };
-    let plan = Plan { settings, command, refresh_interval: refresh_interval.max(1), padding };
-    if !absolute && !inst::on_path("garnish", std::env::var_os("PATH").as_deref()) {
-        eprintln!("warning: `garnish` is not on PATH; run `make install` first or use --absolute");
+    // Advice goes to stderr: --dry-run's stdout is the settings preview.
+    for note in steps.notes() {
+        eprintln!("{note}");
     }
-    let existing = inst::read_existing(&plan.settings).map_err(|e| eyre!(e))?;
-    let merged = match inst::merge(existing.as_deref().unwrap_or(""), &plan) {
-        Ok(merged) => merged,
-        Err(problem) => return Err(refuse_unparsable(&plan.settings, &problem)),
-    };
-    if dry_run {
-        writeln!(stdout, "would write {}:", plan.settings.display())?;
-        stdout.write_all(merged.as_bytes())?;
-    } else {
-        let outcome = inst::apply(&plan).map_err(|e| eyre!(e))?;
-        match (outcome.changed, outcome.backup) {
-            (false, _) => writeln!(stdout, "{} already up to date", plan.settings.display())?,
-            (true, Some(b)) => {
-                writeln!(stdout, "updated {} (backup: {})", plan.settings.display(), b.display())?;
-            }
-            (true, None) => writeln!(stdout, "wrote {}", plan.settings.display())?,
-        }
-    }
-    if !skip.config {
-        install_default_config(&mut stdout, config_path, padding, dry_run)?;
-    }
-    // The skills (SPEC § 13) go next to the settings file, in ~/.claude/skills.
-    // They come last: they are the optional part, so a problem with them
-    // never leaves the settings updated and the config unwritten.
-    if !skip.skills {
-        let dir = crate::skills::default_dir(&plan.settings);
-        if dry_run {
-            writeln!(
-                stdout,
-                "would write {} skill(s) to {}",
-                crate::skills::SKILLS.len(),
-                dir.display()
-            )?;
-        } else {
-            let report = crate::skills::install(&dir)
-                .with_context(|| format!("writing skills to {}", dir.display()))?;
-            writeln!(stdout, "{}", report.summary())?;
-        }
+    let lines = if dry_run { steps.dry_run() } else { steps.apply().map_err(refusal)?.lines };
+    for line in lines {
+        writeln!(stdout, "{line}")?;
     }
     Ok(())
 }
 
-/// The config half of `garnish install`: write the annotated default file
-/// when none exists, seeded with `padding` when `--padding` was given.
-fn install_default_config(
-    stdout: &mut impl Write,
-    config_path: Option<&Path>,
-    padding: Option<u64>,
-    dry_run: bool,
-) -> Result<()> {
-    let Some(target) = config_target(config_path) else {
-        return Err(no_home("--config <FILE>", "the config goes"));
-    };
-    // The harness pads both sides, so the config mirrors statusLine.padding doubled (SPEC § 2.1).
-    let config_padding = padding.map(|p| p.saturating_mul(2));
-    let seeded = config_padding.map_or_else(String::new, |p| format!(" (padding = {p})"));
-    if target.exists() {
-        // stderr, like the PATH warning: --dry-run's stdout is the settings preview.
-        if let Some(p) = config_padding {
-            eprintln!(
-                "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
-                target.display()
-            );
-        }
-    } else if dry_run {
-        writeln!(stdout, "would write a default config to {}{seeded}", target.display())?;
-    } else {
-        let seed = config_padding.map_or_else(String::new, |p| format!("padding = {p}\n"));
-        let (cfg, _) = config::parse(&seed, &SCHEMAS);
-        crate::install::replace_file(&target, &crate::docs::config_toml(&cfg, true), false)
-            .map_err(|e| eyre!(e))?;
-        writeln!(stdout, "wrote default config to {}{seeded}", target.display())?;
+/// An install refusal as the CLI reports it: the quiet one-liners of SPEC
+/// § 5 for a missing home or an unparsable file, an error report for I/O.
+fn refusal(r: crate::install::Refusal) -> color_eyre::Report {
+    use crate::install::Refusal;
+    match r {
+        Refusal::NoHome { flag, what } => no_home(flag, what),
+        Refusal::Unparsable { path, problem } => refuse_unparsable(&path, &problem),
+        Refusal::Io(e) => eyre!(e),
     }
-    Ok(())
 }
 
 /// Where a written config goes: `--config`, then `GARNISH_CONFIG`, then the
@@ -565,6 +542,30 @@ fn tick_note(input: &str, columns: Option<usize>, out: &str) {
 
 /// Environment variable naming the width when `COLUMNS` is absent.
 pub const COLUMNS_ENV: &str = "GARNISH_COLUMNS";
+
+/// Environment variable that overrides the "is stdin a terminal" check of
+/// the bare `garnish` (`1` or `0`), so both paths are testable without a
+/// pty (SPEC § 9).
+pub const STDIN_TTY_ENV: &str = "GARNISH_STDIN_TTY";
+
+/// Whether stdin is a terminal, as the bare `garnish` decides it: the
+/// [`STDIN_TTY_ENV`] hook first, then the descriptor itself.
+#[must_use]
+pub fn stdin_is_terminal() -> bool {
+    use std::io::IsTerminal as _;
+    match std::env::var(STDIN_TTY_ENV).ok().as_deref().map(str::trim) {
+        Some("1") => true,
+        Some("0") => false,
+        _ => std::io::stdin().is_terminal(),
+    }
+}
+
+/// Whether stdout is a terminal, which the `setup` screen needs.
+#[must_use]
+pub fn stdout_is_terminal() -> bool {
+    use std::io::IsTerminal as _;
+    std::io::stdout().is_terminal()
+}
 
 /// `COLUMNS`, then [`COLUMNS_ENV`].
 #[must_use]
@@ -651,52 +652,11 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             stdout.write_all(crate::docs::config_toml(&cfg, false).as_bytes())?;
         }
         ConfigAction::Init { force, preset } => {
-            // A built-in name gets the annotated default file for that preset;
-            // a gallery name gets the preset's file without its tooling header.
-            let text = if let Some(top) = TopPreset::parse(preset) {
-                let (cfg, _) = config::parse_with(
-                    "",
-                    &SCHEMAS,
-                    &Overlay { preset: Some(top), ..Default::default() },
-                );
-                crate::docs::config_toml(&cfg, true)
-            } else {
-                {
-                    let Some(p) = crate::gallery::find(preset) else {
-                        // A typo, not a fault: one line, no report (bug 7).
-                        eprintln!(
-                            "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
-                            crate::gallery::PRESETS
-                                .iter()
-                                .map(|p| p.name)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        );
-                        return Err(Quiet.into());
-                    };
-                    crate::gallery::body(p.source)
-                }
-            };
+            let text = preset_text(preset)?;
             let Some(target) = config_target(config_path) else {
                 return Err(no_home("--config <FILE>", "the config goes"));
             };
-            let existed = target.exists();
-            if existed && !force {
-                eprintln!("{} exists; pass --force to overwrite", target.display());
-                return Err(Quiet.into());
-            }
-            if existed {
-                // A file that does not parse is never rewritten (SPEC § 5):
-                // the only way past is fixing or moving it by hand. A file
-                // with bad values parses, and is replaced under its backup.
-                let current = std::fs::read_to_string(&target)
-                    .with_context(|| format!("reading {}", target.display()))?;
-                if let Some(problem) = config::syntax_error(&current) {
-                    return Err(refuse_unparsable(&target, &problem));
-                }
-            }
-            let backup =
-                crate::install::replace_file(&target, &text, existed).map_err(|e| eyre!(e))?;
+            let backup = write_config_file(&target, &text, *force)?;
             match backup {
                 Some(b) => {
                     writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?;
@@ -706,4 +666,64 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The file `config init --preset <name>` and `setup --preset <name>` write:
+/// the annotated default file for a built-in preset, a gallery preset's file
+/// without its tooling header.
+///
+/// # Errors
+/// An unknown name is a one-line note and a [`Quiet`] failure.
+pub fn preset_text(preset: &str) -> Result<String> {
+    if let Some(top) = TopPreset::parse(preset) {
+        let (cfg, _) =
+            config::parse_with("", &SCHEMAS, &Overlay { preset: Some(top), ..Default::default() });
+        return Ok(crate::docs::config_toml(&cfg, true));
+    }
+    let Some(p) = crate::gallery::find(preset) else {
+        // A typo, not a fault: one line, no report (bug 7).
+        eprintln!(
+            "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
+            crate::gallery::PRESETS.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")
+        );
+        return Err(Quiet.into());
+    };
+    Ok(crate::gallery::body(p.source))
+}
+
+/// Write a config file the way every garnish command does (SPEC § 5).
+///
+/// An existing file is refused without `force`, a file that does not parse
+/// is never rewritten, and a replaced file is kept as a backup, whose path
+/// comes back.
+///
+/// # Errors
+/// The refusals above are one stderr line and [`Quiet`]; an I/O failure is
+/// an error naming the file.
+pub fn write_config_file(target: &Path, text: &str, force: bool) -> Result<Option<PathBuf>> {
+    let existed = target.exists();
+    if existed && !force {
+        eprintln!("{} exists; pass --force to overwrite", target.display());
+        return Err(Quiet.into());
+    }
+    if existed {
+        // A file that does not parse is never rewritten (SPEC § 5): the only
+        // way past is fixing or moving it by hand. A file with bad values
+        // parses, and is replaced under its backup.
+        let current = std::fs::read_to_string(target)
+            .with_context(|| format!("reading {}", target.display()))?;
+        if let Some(problem) = config::syntax_error(&current) {
+            return Err(refuse_unparsable(target, &problem));
+        }
+    }
+    crate::install::replace_file(target, text, existed).map_err(|e| eyre!(e))
+}
+
+/// Where the config a command writes goes (`--config`, `GARNISH_CONFIG`,
+/// the default), or a [`Quiet`] refusal without a home directory.
+///
+/// # Errors
+/// [`Quiet`] after the one-line note, without a home.
+pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
+    config_target(explicit).ok_or_else(|| no_home("--config <FILE>", "the config goes"))
 }

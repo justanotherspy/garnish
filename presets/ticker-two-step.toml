@@ -1,0 +1,34 @@
+# name: ticker-two-step
+# summary: a long first row scrolling two cells a tick behind a still clock, a second row that fits, 90 columns
+# columns: 90
+# needs: nerd-font
+
+# `overflow = "ticker"` scrolls a left group wider than its budget instead
+# of cutting it (SPEC § 4.1): `ticker_step = 2` moves it two cells a tick
+# and `ticker_gap` separates the end from the wrapped-around start. The
+# right group holds still, and so does the second row, which fits. Timers
+# default to `durations = "fixed"` under a ticker, so the window slides
+# rather than jumps; the scrolled row carries nothing that counts seconds,
+# so the only movement in it is the slide.
+
+preset = "default"
+icons  = "nerd"
+theme  = "tokyonight"
+overflow    = "ticker"
+ticker_step = 2
+ticker_gap  = "  ⋯  "
+
+[frame]
+style = "square"
+
+[[row]]
+modules = ["path", "branch", "sync", "pr", "session_name", "model", "effort", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "lines"]
+right   = ["session", "api"]
+
+[modules.clock]
+seconds = false
+spinner = false

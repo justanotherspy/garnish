@@ -5,9 +5,11 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | name | summary | columns | needs |
 |---|---|---|---|
 | [`animated-dots`](#animated-dots) | dots travelling along the rule, a pulsing separator and a cycling model icon | 100 | nerd-font |
+| [`ascii-only`](#ascii-only) | 7-bit ASCII throughout: ascii icons, a custom +-| frame, no colour codes at all | 100 | — |
 | [`bars-and-limits`](#bars-and-limits) | 40-cell line-style context bar with window tag, mini bars on the limits | 130 | nerd-font |
 | [`boxed-panels`](#boxed-panels) | two titled boxes, one around the repo rows and one around usage | 120 | nerd-font |
 | [`compact-aligned`](#compact-aligned) | two rounded lines with stacked bars, Catppuccin Mocha | 110 | nerd-font |
+| [`compaction-watch`](#compaction-watch) | the context bar measured to the compaction point, resets as clock times, line-style bars | 120 | nerd-font |
 | [`dashboard-panels`](#dashboard-panels) | a full-height repo box, a centred column, and three stacked panels | 150 | nerd-font |
 | [`dracula-256`](#dracula-256) | Dracula with role and per-module colour overrides in 256-colour mode | 130 | nerd-font |
 | [`emoji-overrides`](#emoji-overrides) | emoji icons with per-module glyph overrides and name limits | 130 | emoji |
@@ -15,13 +17,20 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | [`grid-six`](#grid-six) | six equal columns, one module each, over a full-width flex row | 170 | nerd-font |
 | [`grid-three`](#grid-three) | three columns side by side — repo, model, usage — reading left, centre, right | 140 | nerd-font |
 | [`labels-and-placeholders`](#labels-and-placeholders) | labels, brackets, dim – for absent modules, UTC clock with date | 170 | nerd-font |
+| [`links-and-shortcuts`](#links-and-shortcuts) | clickable branch and pull request, a fish-style path, two link buttons in fixed boxes | 110 | nerd-font |
 | [`minimal-clean`](#minimal-clean) | one unframed line: path, context, limit, clock | 80 | nerd-font |
 | [`motd-ticker`](#motd-ticker) | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
+| [`narrow-unicode`](#narrow-unicode) | three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules | 72 | — |
 | [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed rows, a separator per row | 130 | nerd-font |
 | [`session-detail`](#session-detail) | session, api, cache and cost detail, plain stale style, 1 s git refresh | 130 | nerd-font |
+| [`sidebar-panels`](#sidebar-panels) | a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column | 140 | nerd-font |
 | [`single-line-full`](#single-line-full) | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
+| [`slow-motion`](#slow-motion) | half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed | 100 | nerd-font |
+| [`still-life`](#still-life) | nothing moves: animation off, no spinner or seconds, fixed-width timers, plain stale values | 110 | nerd-font |
 | [`tall-eight-lines`](#tall-eight-lines) | one module per row, eight rows, square frame | 100 | nerd-font |
 | [`three-lines-double`](#three-lines-double) | repo / model / timers in a double frame | 130 | nerd-font |
+| [`ticker-two-step`](#ticker-two-step) | a long first row scrolling two cells a tick behind a still clock, a second row that fits, 90 columns | 90 | nerd-font |
+| [`titled-sections`](#titled-sections) | a title in every rule, left, centred and right, a titled spacer and one boxed row, Nord | 120 | nerd-font |
 | [`two-lines-powerline`](#two-lines-powerline) | location and model only, powerline caps, no colour | 110 | nerd-font |
 
 ## `animated-dots`
@@ -68,6 +77,70 @@ right   = ["cache"]
 
 [modules.model.icons]
 model_frames = ["", "", "", ""]
+```
+
+</details>
+
+## `ascii-only`
+
+7-bit ASCII throughout: ascii icons, a custom +-| frame, no colour codes at all
+
+At 100 columns:
+
+```text
++- ~/projects/garnish | PR #42 .. ----------------------------------------------- garnish-dev -+
+|- Opus               | .:=+# | ctx: ======---------| 42% ------------------------ | 16:00:00 -|
++- 5h 24% reset 2h13m | 7d 41% reset 3d04h ------------------------------ t: 1h12m | +156 -23 -+
+```
+
+<details><summary><code>presets/ascii-only.toml</code></summary>
+
+```toml
+# name: ascii-only
+# summary: 7-bit ASCII throughout: ascii icons, a custom +-| frame, no colour codes at all
+# columns: 100
+
+# For a terminal or a log with no fonts and no colour: the ascii icon set,
+# `color = "never"`, and a custom frame drawn from `+`, `-` and `|`. Every
+# cut ends in `..` rather than `…`, so nothing outside ASCII ever reaches
+# the row.
+
+preset = "default"
+icons  = "ascii"
+theme  = "mono"
+color  = "never"
+align  = true
+durations = "fixed"
+
+[frame]
+style        = "custom"
+first        = "+-"
+middle       = "|-"
+last         = "+-"
+single       = "--"
+right_first  = "-+"
+right_middle = "-|"
+right_last   = "-+"
+right_single = "--"
+fill_char    = "-"
+pad          = " "
+separator    = " | "
+
+[[row]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+modules = ["model", "effort", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["session", "lines"]
+
+[modules.context]
+bar = "line"
+width = 16
 ```
 
 </details>
@@ -235,6 +308,88 @@ theme  = "catppuccin-mocha"
 color  = "auto"
 align  = true
 durations = "fixed"
+```
+
+</details>
+
+## `compaction-watch`
+
+the context bar measured to the compaction point, resets as clock times, line-style bars
+
+At 120 columns, needs nerd-font:
+
+```text
+╭─  ~/projects/garnish ───────────────────────────────────────────────────────────────────  Opus │  ▁▃▅▇█ high ─╮
+├─  ━━━━━━━━━━━━────────────────── 43% 1.0M ‼  ────────────────────────────────────────────────── ⠋ 04:00:00 PM ─┤
+╰─  ━─────── 24%  18:13 │  ━━━───── 41%  3d04h (Tue 20:00) ────────────────────────────────────────────────────╯
+```
+
+<details><summary><code>presets/compaction-watch.toml</code></summary>
+
+```toml
+# name: compaction-watch
+# summary: the context bar measured to the compaction point, resets as clock times, line-style bars
+# columns: 120
+# needs: nerd-font
+
+# `scale = "usable"` makes 100 % the auto-compaction threshold (SPEC § 3.2),
+# so the bar and its percentage say how close compaction is; the window tag
+# still names the real window, and a badge appears from `warn_at` up. The
+# limit windows print when they reset as a wall-clock time rather than a
+# countdown, and every bar is line-style, whole cells only.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch"]
+right   = ["model", "effort"]
+
+[[row]]
+modules = ["context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d", "spend"]
+right   = ["cost"]
+
+[modules.context]
+scale = "usable"
+width = 30
+bar = "line"
+show_window = true
+exceeds_200k = true
+warn_at = 40
+thresholds = [40, 60, 80]
+band_colors = ["ok", "warn", "hot", "danger"]
+
+[modules.limit5h]
+reset = "absolute"        # ⏱ 14:30 instead of a countdown
+bar_width = 8
+bar = "line"
+
+[modules.limit7d]
+reset = "both"            # 3d4h (Tue 14:30)
+bar_width = 8
+bar = "line"
+durations = "fixed"
+
+[modules.spend]
+reset = "absolute"        # ⏱ Mar 1: weeks away, so the date
+bar_width = 8
+bar = "line"
+
+[modules.effort]
+style = "both"
+
+[modules.clock]
+format = "12h"
 ```
 
 </details>
@@ -663,6 +818,77 @@ show_share = true
 
 </details>
 
+## `links-and-shortcuts`
+
+clickable branch and pull request, a fish-style path, two link buttons in fixed boxes
+
+At 110 columns, needs nerd-font:
+
+```text
+╭─  ~/p/garnish │  #42  pending ───────────────────────────────────────   docs │ issues │ ⠋ 16:00:00 ─╮
+╰─  Opus │  ████████▍░░░░░░░░░░▏ 42% │  24%  2h13m ───────────────────────  1h12m │  91% 1h  47m ─╯
+```
+
+<details><summary><code>presets/links-and-shortcuts.toml</code></summary>
+
+```toml
+# name: links-and-shortcuts
+# summary: clickable branch and pull request, a fish-style path, two link buttons in fixed boxes
+# columns: 110
+# needs: nerd-font
+
+# OSC 8 links, in a terminal that draws them (SPEC § 4.1): `branch.link`
+# opens the branch on the forge, the pull request number opens its page,
+# and a text module with `url` is a button. The buttons are boxes of a
+# fixed `width` with the text right-justified, so the row keeps its shape
+# whatever they say; the path is abbreviated the way the fish shell
+# prompts.
+
+preset = "compact"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch", "pr"]
+right   = ["text.docs", "text.issues", "clock"]
+
+[[row]]
+modules = ["model", "context", "limit5h"]
+right   = ["session", "cache"]
+
+[modules.path]
+style = "fish"            # ~/p/garnish
+depth = 3
+
+[modules.branch]
+link = true               # https://<host>/<owner>/<name>/tree/<branch>
+max_length = 24
+
+[modules.pr]
+link = true
+show_state_word = true
+
+[modules.text.docs]
+text    = "docs"
+width   = 6
+justify = "right"
+url     = "https://github.com/justanotherspy/garnish/blob/main/docs/guide.md"
+color   = "accent2"
+
+[modules.text.issues]
+text    = "issues"
+width   = 6
+justify = "right"
+url     = "https://github.com/justanotherspy/garnish/issues"
+color   = "accent2"
+```
+
+</details>
+
 ## `minimal-clean`
 
 one unframed line: path, context, limit, clock
@@ -734,6 +960,78 @@ width    = 24
 overflow = "scroll-wrap"
 gap      = " · "
 color    = "accent2"
+```
+
+</details>
+
+## `narrow-unicode`
+
+three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules
+
+At 72 columns:
+
+```text
+❒ ~/garnish  ⇄ #42 ❍                                           16:00
+❖ Opus  ⊞ █████░░░░░░▏ 42%                                     1h12m
+⏳ 24% ⏱ 2h13m  ≣ 41% ⏱ 3d4h                                     91%
+```
+
+<details><summary><code>presets/narrow-unicode.toml</code></summary>
+
+```toml
+# name: narrow-unicode
+# summary: three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules
+# columns: 72
+
+# Made for a narrow pane: the unicode set needs no patched font, the frame
+# is off with two spaces between modules, every module that can grow is
+# capped with `max_width`, and an overdue cached value hides rather than
+# dims (`stale_style`) after two missed refreshes.
+
+preset = "compact"
+icons  = "unicode"
+theme  = "garnish"
+color  = "auto"
+stale_style = "hide"
+stale_after = 2
+
+[frame]
+style = "none"
+separator = "  "
+
+[[row]]
+modules = ["path", "branch", "pr"]
+right   = ["clock"]
+
+[[row]]
+modules = ["model", "context"]
+right   = ["session"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["cache"]
+
+[modules.path]
+depth = 1
+max_width = 18
+
+[modules.branch]
+max_width = 16
+
+[modules.model]
+max_width = 12
+
+[modules.context]
+width = 12
+
+[modules.clock]
+preset = "minimal"        # 16:00, no spinner
+
+[modules.session]
+preset = "minimal"
+
+[modules.cache]
+preset = "minimal"
 ```
 
 </details>
@@ -868,6 +1166,93 @@ seconds = false
 
 </details>
 
+## `sidebar-panels`
+
+a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column
+
+At 140 columns, needs nerd-font:
+
+```text
+╭─ ┏━━━━━━━━━━━━━ Repo ━━━━━━━━━━━━━┓   Model ───────────────  Opus │  ▁▃▅▇█ ─────────────────────                                  ─╮
+├─ ┃  ~/projects/garnish ───────── ┃   ──────────────────  ██████▋░░░░░░░░▏ 42% ───────── Context                                   ─┤
+├─ ┃  #42  ────────────────────── ┃   ──────────────  24%  2h13m │  41%  3d04h ──── Usage ────                                  ─┤
+├─ ┃  garnish-dev ──────────────── ┃                                                                  ────────────  1h12m │  8m20s ─┤
+╰─ ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                                                                  ─────────────────── ⠋ 16:00:00 ─╯
+```
+
+<details><summary><code>presets/sidebar-panels.toml</code></summary>
+
+```toml
+# name: sidebar-panels
+# summary: a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column
+# columns: 140
+# needs: nerd-font
+
+# Column widths in cells and in shares (SPEC § 4.3): the sidebar is exactly
+# 34 cells and boxed by name, with the box's own style, colour and a filled
+# rule inside; the middle column takes two shares of what is left and
+# stacks three titled rows; the last column sits at the bottom of the row.
+
+preset = "default"
+icons  = "nerd"
+theme  = "catppuccin-mocha"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[box.side]
+title = "Repo"
+title_justify = "center"
+style = "heavy"
+fill  = true
+color = "accent2"
+
+[[row]]
+gap = 3
+
+[[row.col]]
+width = 34
+box = "side"
+[[row.col.row]]
+modules = ["path"]
+[[row.col.row]]
+modules = ["branch", "pr"]
+[[row.col.row]]
+modules = ["sync", "worktree", "session_name"]
+
+[[row.col]]
+width = "2fr"
+[[row.col.row]]
+title = "Model"
+modules = ["model", "effort"]
+right   = ["vim"]
+[[row.col.row]]
+title = "Context"
+title_justify = "right"
+modules = ["context"]
+[[row.col.row]]
+title = "Usage"
+title_justify = "center"
+modules = ["limit5h", "limit7d"]
+right   = ["cost"]
+
+[[row.col]]
+width = "1fr"
+valign = "bottom"
+justify = "right"
+[[row.col.row]]
+modules = ["session", "api"]
+[[row.col.row]]
+modules = ["clock"]
+
+[modules.context]
+width = 16
+```
+
+</details>
+
 ## `single-line-full`
 
 everything on one row, always scrolling as a ticker (200 columns is a comfortable window)
@@ -906,6 +1291,131 @@ style = "rounded"
 [[row]]
 modules = ["path", "branch", "sync", "worktree", "pr", "model", "effort", "context", "style", "limit5h", "limit7d", "spend", "cost", "session", "api", "cache"]
 right   = ["session_name", "agent", "vim", "lines", "clock"]
+```
+
+</details>
+
+## `slow-motion`
+
+half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed
+
+At 100 columns, needs nerd-font:
+
+```text
+╭─  ~/projects/garnish │  #42  ─ ─ ╌ ─ ─ ╌ ─ ─ ╌ ─ ─  half speed: this note   │ ⠁ 16:00:00 ─╮
+╰─  Opus │  ████████▍░░░░░░░░░░▏ 42% │  24%  2h13m ─ ─ ╌ ─ ─ ╌ ─ ─ ╌ ─ ─ ╌  91% 1h  47m ─╯
+```
+
+<details><summary><code>presets/slow-motion.toml</code></summary>
+
+```toml
+# name: slow-motion
+# summary: half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed
+# columns: 100
+# needs: nerd-font
+
+# The step keys (SPEC § 4.2) slow an animation down: 0.5 advances every
+# second tick. The rule pattern travels left and the separator alternates
+# at half speed, and a note scrolls through its box at half speed and
+# restarts after the end. Icon frames take no step, so the context bar's
+# filled cells pulse through two glyphs and the clock spins on eight
+# braille dots once a tick.
+
+preset = "compact"
+icons  = "nerd"
+theme  = "dracula"
+
+[frame]
+style            = "rounded"
+fill_pattern     = "─ ─ ╌ "
+fill_direction   = "left"
+fill_step        = 0.5
+separator_frames = [" │ ", " ┆ "]
+separator_step   = 0.5
+
+[[row]]
+modules = ["path", "branch", "pr"]
+right   = ["text.note", "clock"]
+
+[[row]]
+modules = ["model", "context", "limit5h"]
+right   = ["cache"]
+
+[modules.context.icons]
+fill_frames = ["█", "▓"]
+
+[modules.clock.icons]
+spinner_frames = ["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]
+
+[modules.text.note]
+text     = "half speed: this note moves every second tick"
+width    = 22
+pad      = 1
+overflow = "scroll"
+step     = 0.5
+```
+
+</details>
+
+## `still-life`
+
+nothing moves: animation off, no spinner or seconds, fixed-width timers, plain stale values
+
+At 110 columns, needs nerd-font:
+
+```text
+╔═  ~/projects/garnish │  #42  ═══════════════════════════════════════════════════════  garnish-dev ═╗
+╠═  Opus               │  ▁▃▅▇█ │  ████████▍░░░░░░░░░░▏ 42% ════════════════════════  1h12m │ 16:00 ═╣
+╚═  24%  2h13m        │  41%  3d04h ══════════════════════════════════════════════════════  91% 1h ═╝
+```
+
+<details><summary><code>presets/still-life.toml</code></summary>
+
+```toml
+# name: still-life
+# summary: nothing moves: animation off, no spinner or seconds, fixed-width timers, plain stale values
+# columns: 110
+# needs: nerd-font
+
+# For a recording, a screen reader, or a status line that should not draw
+# the eye: `animate = false` freezes every animation at frame 0 (SPEC
+# § 4.2), the clock shows neither spinner nor seconds so it changes once a
+# minute, timers keep their width, and an overdue cached value stays as it
+# was instead of dimming.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+animate = false
+durations = "fixed"
+stale_style = "plain"
+
+[frame]
+style = "double"
+
+[[row]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+modules = ["model", "effort", "context"]
+right   = ["session", "clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["cache"]
+
+[modules.clock]
+seconds = false
+spinner = false
+
+[modules.context]
+width = 20
+
+[modules.cache]
+show_countdown = false    # the warm countdown is the one value that ticks
 ```
 
 </details>
@@ -1013,6 +1523,136 @@ right   = ["lines", "clock"]
 [modules.context]
 preset = "full"           # bar plus token counts and the compaction marker
 width  = 30
+```
+
+</details>
+
+## `ticker-two-step`
+
+a long first row scrolling two cells a tick behind a still clock, a second row that fits, 90 columns
+
+At 90 columns, needs nerd-font:
+
+```text
+┌─  ~/projects/garnish │  #42  │  garnish-dev │  Opus │  ▁▃▅▇█ │  █… ─ 16:00 ─┐
+└─  24%  2h13m │  +156 −23 ───────────────────────────────────  1h12m │  8m20s ─┘
+```
+
+<details><summary><code>presets/ticker-two-step.toml</code></summary>
+
+```toml
+# name: ticker-two-step
+# summary: a long first row scrolling two cells a tick behind a still clock, a second row that fits, 90 columns
+# columns: 90
+# needs: nerd-font
+
+# `overflow = "ticker"` scrolls a left group wider than its budget instead
+# of cutting it (SPEC § 4.1): `ticker_step = 2` moves it two cells a tick
+# and `ticker_gap` separates the end from the wrapped-around start. The
+# right group holds still, and so does the second row, which fits. Timers
+# default to `durations = "fixed"` under a ticker, so the window slides
+# rather than jumps; the scrolled row carries nothing that counts seconds,
+# so the only movement in it is the slide.
+
+preset = "default"
+icons  = "nerd"
+theme  = "tokyonight"
+overflow    = "ticker"
+ticker_step = 2
+ticker_gap  = "  ⋯  "
+
+[frame]
+style = "square"
+
+[[row]]
+modules = ["path", "branch", "sync", "pr", "session_name", "model", "effort", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "lines"]
+right   = ["session", "api"]
+
+[modules.clock]
+seconds = false
+spinner = false
+```
+
+</details>
+
+## `titled-sections`
+
+a title in every rule, left, centred and right, a titled spacer and one boxed row, Nord
+
+At 120 columns, needs nerd-font:
+
+```text
+╭─  ~/projects/garnish │  #42   Repository ─────────────────────────────────────────────────────  garnish-dev ─╮
+├─  Opus               │  ▁▃▅▇█ │  ██████▋░░░░░░░░▏ 42% ───────────────────────  Model  ────────────────────────┤
+├─  24%  2h13m        │  41%  3d04h ─────────────────────────────────────────────────────── Usage   +156 −23 ─┤
+╰─ ──────────────────────────────────────────────────── · · · ─────────────────────────────────────────────────────╯
+╭─ Session ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  1h12m              │  8m20s │  91% 1h  47m00s                                                    ⠋ 16:00:00 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+<details><summary><code>presets/titled-sections.toml</code></summary>
+
+```toml
+# name: titled-sections
+# summary: a title in every rule, left, centred and right, a titled spacer and one boxed row, Nord
+# columns: 120
+# needs: nerd-font
+
+# A title is text set into a row's rule (SPEC § 4.3): in the first empty
+# run of the line (after the modules, or after the cap on a spacer), the
+# widest, or the last one before the right group, with `title_pad` spaces
+# each side and `title_color` for a role or a literal. A row with only a
+# title is a titled spacer, and `box = true` boxes one row alone with its
+# own `title*` keys on that box's top rule.
+
+preset = "default"
+icons  = "nerd"
+theme  = "nord"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+title = "Repository"
+title_color = "accent"
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+title = "Model"
+title_justify = "center"
+title_pad = 2
+modules = ["model", "effort", "context"]
+right   = ["vim"]
+
+[[row]]
+title = "Usage"
+title_justify = "right"
+title_color = "#88c0d0"
+modules = ["limit5h", "limit7d", "spend"]
+right   = ["lines"]
+
+[[row]]
+title = "· · ·"
+title_justify = "center"
+modules = []
+
+[[row]]
+box = true
+title = "Session"
+modules = ["session", "api", "cache"]
+right   = ["clock"]
+
+[modules.context]
+width = 16
 ```
 
 </details>

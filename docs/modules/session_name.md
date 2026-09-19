@@ -51,6 +51,8 @@ The name set with `--name` or `/rename`, or the AI-generated title. Hidden when 
 |---|---|---|---|---|---|
 | `name` | `U+F02B` | `❯` | `🔖` | `` | Name icon. |
 
+Also try (`name`: `U+F02E` `U+F292` `❯` `›`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

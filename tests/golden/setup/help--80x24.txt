@@ -1,0 +1,24 @@
+preview  8┌ Builder ─────────────────────────────────────────────────┐session wi
+▶ ╭─ ❒ ~/p│↑↓          select a row, column or inner row             │00:00 ─╮
+  ╰─ ❖ Opu│←→ tab      select a module                               │───────╯
+rows  ~/ga│enter       edit the selection                            │
+row 1     │m           add a module after the selection              │
+row 2     │x del       remove the module or line                     │
+          │a / i       add a row after / before                      │
+          │c           clone the line                                │
+          │J / K       move the line or module down / up             │
+          │r           move the module to the other side             │
+          │[ / ]       move the module a column left / right         │
+          │C           add a column                                  │
+          │S           stack the column (or add an inner row)        │
+          │t           title the row                                 │
+          │b           box the row or column                         │
+          │space       make the row a spacer                         │
+          │1 2 3       top-level keys / frame / colours              │
+          │p           start from a preset                           │
+          │f / F       next / previous sample payload                │
+          │w           preview at another terminal width             │
+          │s           save                                          │
+          │I           install into Claude Code                      │
+          │q / esc     quit (esc inside a form or picker closes it)  │
+↑↓←→ selec└──────────────────────────────────────────────────────────┘2 3 keys f

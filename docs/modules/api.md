@@ -51,6 +51,8 @@ Time spent waiting for API responses.
 |---|---|---|---|---|---|
 | `api` | `U+F0EC` | `⇄` | `📡` | `api:` | API icon. |
 
+Also try (`api`: `U+F1E6` `U+F0C2` `⇄` `⇵`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 
