@@ -5,12 +5,15 @@ Status: approved 2026-09-04 (`v0.1.0` the same day, `v0.2.0` on
 interactive setup (§ 14) and the Phase 19–20 keys, and the same day with
 what Phase 19 found in the harness (§ 2.1). The Phase 20 keys (§ 3)
 shipped on 2026-09-13, the layout model on 2026-09-17 and the setup on
-2026-09-19. Owner: Daniel Schwartz. Builder: Claude. This document is the
-target design of the whole system; when the design changes, it changes
-here first, with the reason (`CLAUDE.md` § Phase protocol). Everything in
-it is implemented; where something was built differently from its first
-design, the section says so and why. Progress lives in `PLAN.md`, the
-dated log in `WORKLOG.md`.
+2026-09-19; revised the same day with the Phase 23 keys (`hide` in § 3,
+pace in § 3.3, the four modules of § 3.8, `[format]` and
+`separator_color` in § 4), which `PLAN.md` Phase 23 is building. Owner:
+Daniel Schwartz. Builder: Claude. This document is the target design of
+the whole system; when the design changes, it changes here first, with
+the reason (`CLAUDE.md` § Phase protocol). Everything in it is
+implemented or named as the open phase in `PLAN.md`; where something was
+built differently from its first design, the section says so and why.
+Progress lives in `PLAN.md`, the dated log in `WORKLOG.md`.
 
 ## 1. Purpose
 
@@ -26,7 +29,7 @@ sessions on one host do not notice it running.
 - **Fast**: a warm tick averages < 3 ms (p99 < 8 ms) in release; cold < 30 ms.
 - **Never blocks**: anything slow (git ahead/behind, dirty state, optional
   `git fetch`) runs in a detached worker; the tick renders cached data.
-- **Composable**: 21 granular modules plus static text modules, any of them
+- **Composable**: 25 granular modules plus static text modules, any of them
   on any line, each with `minimal` / `default` / `full` presets; lines are
   columns of modules or stacks, with titles and boxes (§ 4.3).
 - **Beautiful**: Nerd Font glyphs, smooth gradient bars, framed lines, named
@@ -198,7 +201,7 @@ says which (§ 7).
 | `session_name` | string? | custom or AI title; absent for default names |
 | `prompt_id` | string? | |
 | `transcript_path` | string | not used |
-| `version` | string | Claude Code version |
+| `version` | string | Claude Code version; the `version` module (§ 3.8) shows it |
 | `model.{id,display_name}` | string | |
 | `output_style.name` | string | |
 | `cost.total_cost_usd` | number | estimate; resets on `/clear` |
@@ -244,7 +247,8 @@ configurable (`modules.context.compact_buffer_tokens`).
 Every module has: `enabled` (bool), `preset` (`minimal|default|full`),
 `refresh` (seconds; `0` = payload-only, rendered every tick; `> 0` = cached with
 that TTL and refreshed by a worker), `icons.<key>`, `colors.<key>`, `label`,
-`prefix`, `suffix`, `hide_when_empty`, `max_width`. Option resolution: built-in default →
+`prefix`, `suffix`, `hide_when_empty`, `hide` (a list of states, below),
+`max_width`. Option resolution: built-in default →
 icon-set default → module preset → top-level preset → explicit key.
 
 `max_width` (PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps one module's
@@ -260,6 +264,27 @@ Text modules (§ 3.7) have `width` for the same purpose and no `max_width`;
 `config check` reports one and names `width`. The common options (this
 one, `label`, `prefix`, `suffix`, `hide_when_empty`) are specs in
 `config::schema::COMMON_OPTS`, bounded and documented like a module's own.
+
+`hide = [...]` (PLAN Phase 23; from FUTURE-SPEC § 7.4, A4) lists the
+states in which the module leaves its row, each named by the schema:
+`empty` (nothing to show, what `hide_when_empty` hides), `zero` (a count
+or an amount that is zero: `cost` at `$0.00`, `lines` at `+0 −0`, `sync`
+at `⇡0 ⇣0`), and `below:N` / `above:N` for a module whose value is a
+percentage (`context`, `limit5h`, `limit7d`, `spend`, `cache`'s hit
+ratio, `api`'s share of the session), compared with the rounded number
+the row prints. Which states a module accepts follows from the *measure*
+its schema declares (a count, an amount, a percentage, or none): every
+module takes `empty`, a text module (§ 3.7) nothing else, and `config
+check` names the accepted states when it refuses one. The list and
+`hide_when_empty` are a union (`hide = ["zero"]` on `cost` still hides
+an absent cost), so `hide_when_empty` is the older spelling of `empty`,
+as `lines.hide_zero` is of `zero`, and both stay. A hidden module is a
+module that rendered nothing (§ 4: not a column, its row dropped under
+`hide_empty_rows`), never a `–`. The default is `[]`, so nothing on disk
+changes. The rule is applied once, in the render loop, from the measure
+a module attaches to its output; no module reads the list itself, and
+the parser, the reference and the `setup` form all take the vocabulary
+from the schema's measure.
 
 ### 3.1 Repo group
 
@@ -408,6 +433,43 @@ the one the `clock` module uses unless it sets its own `tz`, so the two
 agree. The harness re-runs the line at each `resets_at`, so neither form
 is stale at the boundary.
 
+Pace, eta and the elapsed view (PLAN Phase 23; from FUTURE-SPEC § 8.2
+and § 8.5, A10 and N11) on `limit5h` and `limit7d`, whose windows have a
+known length (5 h, 7 d); `spend` has none, so it takes none of these
+keys. The window's *elapsed* share is `1 − (resets_at − now) ÷ length`,
+clamped to the window, from the payload's `resets_at` alone.
+
+- `pace = true` prints the difference between the share used and the
+  share elapsed after the percentage, as `⇡14%` (ahead of pace, in
+  `colors.ahead`, `hot` by default: at this rate the window runs out
+  before it resets) or `⇣32%` (behind, `colors.behind`, `ok`); a zero
+  difference prints `0%` in the `behind` colour. The arrows are `sync`'s,
+  overridable as `icons.ahead` / `icons.behind`.
+- `pace_colors = true` colours the percentage by the pace band instead of
+  the `thresholds` bands: the ratio `used ÷ max(elapsed, 1 %)` is
+  *nominal* at or below 1 (`colors.pace_nominal`, `ok`), *caution* at or
+  below 1.5 (`pace_caution`, `warn`), *critical* above (`pace_critical`,
+  `danger`); below 20 % used the ratio is noise and the thresholds bands
+  stand, above 80 % used the band is critical whatever the ratio.
+- `eta = true` prints, after the pace, the time until the window reaches
+  100 % at the current rate (`⇥1h37m`: `icons.eta`, `colors.eta`, in the
+  module's `durations` style): `elapsed × (100 − used) ÷ used`, and only
+  when that lands before the reset; a window that resets first shows
+  nothing, since nothing runs out.
+- `reset = "elapsed"` is a fourth form of the reset (the three above
+  stay): the time into the window over its length, `⏱2h46m/5h`,
+  `⏱3d20h/7d`, for people who think in blocks rather than deadlines. It
+  sits behind `show_reset` and follows `durations` like the countdown.
+- `elapsed_marker = true` draws the module's `marker` glyph (`▏`; one
+  cell, may be blank, the same key and rule as `context`'s compaction
+  marker) on the mini bar at the elapsed share, so "60 % used at 20 %
+  elapsed" is visible at a glance; it needs `bar_width > 0`.
+
+All five are off by default (`countdown` for `reset`), and the `full`
+preset leaves them off, so every existing render is byte-identical. The
+harness re-runs the line at `resets_at`, and a window whose reset has
+passed prints none of them.
+
 ### 3.4 Session group
 
 | id | shows | minimal | default | full | refresh |
@@ -445,8 +507,9 @@ value on every fifth tick, which read as flicker.)
 
 ### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
-The 21 built-in modules stay the only ones that read the payload or run
-anything. **Text modules** are the one user-defined kind: a fixed string in
+The 25 built-in modules (§ 3.1–3.5 and § 3.8) stay the only ones that
+read the payload, a settings file or the cache, or run anything. **Text
+modules** are the one user-defined kind: a fixed string in
 a box of configurable width, declared under `[modules.text.<name>]` and
 placed on a line as `text.<name>`. Any number may exist. They never run a
 command, read a file or touch the cache, so they cost nothing on the tick.
@@ -506,6 +569,51 @@ color = "muted"
   `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
   table.
 
+### 3.8 Harness identity and settings badges (PLAN Phase 23)
+
+Decided 2026-09-19 with Daniel, from FUTURE-SPEC § 8.1 and § 8.4 (A9,
+A12): four more ids, the module set staying fixed at 25 (§ 0 of that
+document decides the count for these four alone).
+
+| id | shows | minimal | default | full | refresh |
+|---|---|---|---|---|---|
+| `version` | the payload's `version` | `v2.1.270` | dim `v2.1.270` | icon + dim `v2.1.270` | 0 |
+| `sandbox` | `sandbox.enabled` in the settings chain | glyph | glyph | glyph + `sandbox` | 0 (the § 2.3 chain, read at most once per tick) |
+| `voice` | `voice.enabled` in the settings chain | glyph | glyph | glyph + `voice` | 0 (the same read) |
+| `account` | `oauthAccount.emailAddress` from `~/.claude.json` | the part before `@` | icon + the email | icon + the email | 600 (a worker; the tick reads its cache entry) |
+
+- `version` renders nothing when the payload carries no version (so the
+  default hides it and `hide_when_empty = false` shows `–`, like every
+  payload module); a leading `v` in the payload is not doubled.
+  `show_icon` is off except in `full`: the value is the badge.
+- `sandbox` and `voice` are glyph badges: nothing unless the first file
+  of the § 2.3 chain that sets the key sets it to `true`, resolved as
+  `prefersReducedMotion` is (§ 4.2); `style = "glyph" | "word"` adds the
+  word. They share the one settings read a tick makes, so a config
+  without them reads nothing new, and `doctor` lists both keys with the
+  others (§ 7). The harness hides its own voice hint when a custom
+  status line is set, which is why `voice` exists.
+- `account` is the one cached module outside the repo group: its worker
+  (`garnish refresh --module account`, § 6; a session-scoped entry with
+  a 600 s TTL) reads `$CLAUDE_CONFIG_DIR/.claude.json` when that variable
+  is set and non-empty (the § 5 rule for path variables), else
+  `~/.claude.json`, up to 8 MiB, and stores the email; the tick reads
+  the entry as it reads `sync`'s. The file can be hundreds of KB (the
+  harness keeps its own state in it), which is why it is never parsed on
+  the tick. An absent file is an `ok` entry with no email (an API-key
+  user has no account: nothing to show, never `✗`); an unreadable,
+  unparsable or oversized one is a failed entry (`✗`, retried once per
+  TTL). The field name is what the community documents for the file
+  (FUTURE-SPEC grades it C), so a file without it shows nothing rather
+  than guessing. `style = "email" | "user"` picks the whole address or
+  the part before `@`. The settings chain of § 2.3 keeps ignoring
+  `CLAUDE_CONFIG_DIR` (PLAN's backlog).
+- None of the four is in a built-in preset's rows: they are added by
+  hand or through the `session-badges` gallery preset (§ 12). The
+  generated pages show `sandbox` and `voice` on, from keys the pinned
+  clock seeds in-process (§ 9), and `account` with a note that the
+  worker fills it in.
+
 ## 4. Configuration
 
 Location: `--config` > `$GARNISH_CONFIG` > `$XDG_CONFIG_HOME/garnish/garnish.toml`
@@ -530,6 +638,12 @@ ticker_gap = "   "        # text between the end and the wrapped-around start
 # animate = true          # master switch for every animation; false freezes them at frame 0 and cuts a ticker line with …; unset, follows Claude Code's prefersReducedMotion (§ 4.2)
 durations = "compact"     # compact (8m20s, 9m, 2h) | fixed (8m20s, 9m00s, 2h00m): how elapsed times and countdowns print; fixed by default with overflow = "ticker", and each timer module has its own (§ 4.1)
 
+[format]                  # number styles (Number formats, below); each module that prints a kind has the same key with `inherit`
+tokens  = "compact"       # compact (128k, 1.0M) | precise (128,400) | whole (128400)
+percent = "whole"         # whole (42%) | precise (42.3%)
+cost    = "precise"       # precise ($1.23, `cost.decimals` places; $1.2k from 1000) | whole ($1)
+parens  = "plain"         # plain | dim: parenthesised details in the muted role
+
 [colors]                  # role overrides: accent accent2 muted text ok warn hot danger frame band1..band4
 accent = "#89b4fa"
 
@@ -537,6 +651,7 @@ accent = "#89b4fa"
 style = "rounded"         # none | rounded | square | double | heavy | powerline | custom
 fill = true               # rule to the full width (§ 2.1) and close with the right cap
 separator = " │ "
+separator_color = "muted" # muted | inherit (the colour of the module before it) | a role or literal (§ 4.1)
 # custom: first middle last single fill_char right_first right_middle right_last right_single separator pad
 # boxes (§ 4.3): top_left top_right bottom_left bottom_right side
 # animation (§ 4.2): fill_pattern fill_step fill_direction separator_frames separator_step
@@ -612,6 +727,27 @@ with the small one zero-padded to two digits (`0m47s`, `9m00s`, `2h00m`,
 digit or the unit pair changes (`59m59s` → `1h00m`). Applies to every
 elapsed time and countdown: `session`, `api`, the `cache` warm countdown,
 the `limit5h`/`limit7d`/`spend` resets and the `sync` fetch age.
+
+Number formats (`[format]`, PLAN Phase 23; from FUTURE-SPEC § 7.3, A6):
+one style per kind of number, each with today's rendering as its
+default. `tokens`: `compact` (`12k`, `128k`, `1.0M`), `precise`
+(`128,400`, thousands separated), `whole` (`128400`). `percent`: `whole`
+(`42%`) or `precise` (`42.3%`, one decimal). `cost`: `precise` (`$1.23`,
+`cost.decimals` places, `$1.2k` from a thousand up) or `whole` (`$1`). A
+module that prints a kind carries the same-named option with `inherit`
+as its default (`context` and `cache` print tokens; the limits,
+`context`, `cache` and `api` print percentages; `cost` prints money), so
+one module can be pinned while the rest follow the table, exactly as
+`durations` works; the module pages say which kinds each prints, and a
+style on a module that prints no such number is an unknown key. `parens
+= "dim"` draws every parenthesised detail (`api`'s share of the session,
+`lines`' net, the `both` reset form's absolute time) in the muted role,
+the way a `label` is drawn: the harness already dims every row (§ 2.1),
+so a bare SGR 2 would not show, and the muted role is what "dim" visibly
+means. A detail is one segment when `plain` and two when `dim`, decided
+in one helper, so the colour-on renders of today's configs are
+byte-identical. Bands and thresholds compare the number the row prints,
+whichever style.
 
 ### 4.1 Layout keys decided on 2026-09-05 (PLAN Phases 13 and 15, shipped in v0.2.0)
 
@@ -708,6 +844,12 @@ blank = false             # true keeps an unframed spacer on screen with one inv
 - **Frames.** The `powerline` style pads its caps with one space by default.
 - **Separators.** With `fill = false`, the separator between the left and
   right groups is the line's own `separator`, not the frame default.
+  `separator_color` (PLAN Phase 23; from FUTURE-SPEC § 6.3, A13) colours
+  every separator: `muted` (default, today's role), a role or a literal,
+  or `inherit`, which paints each separator in the colour of the first
+  coloured, undimmed segment of the module before it (an icon or a
+  value, never a `label` or an `align` pad), falling back to muted, so a
+  separator reads as part of the module it follows.
 - **`sync`.** Zero counts shown by `show_zero` use the muted role; only
   non-zero counts carry the ahead/behind colours. The fetch-age hint has a
   space between its glyph and the age like every other module.
@@ -1192,7 +1334,9 @@ without an error report.
   hand against the same constant. A Claude settings file of the § 2.3 chain (which a cloned
   repository can contribute to) is read up to 1 MiB and skipped past
   that; `doctor` shows a `statusLine.command` from any of them as plain
-  text, cut to 200 characters. Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
+  text, cut to 200 characters. The `account` worker reads `~/.claude.json`
+  up to 8 MiB and records a failed entry past that (§ 3.8); a `below:N`
+  or `above:N` hide state takes `N` up to 1000 (§ 3). Without a home directory (`HOME` unset, no `XDG_CONFIG_HOME`) there
   is no default config or settings location: `install`, `config init`,
   `config path` and `skills install` refuse with a one-line note naming the
   flag to pass, rather than writing into the current directory. A `*_step` must lie in `0.001..=1000`: below, nothing ever moves;
@@ -1215,7 +1359,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   sessions in one worktree share it. Never keyed on `transcript_path`.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
   or the error text. Malformed = miss. Written as `.<module>.tmp.<pid>` in
-  the entry's directory + rename.
+  the entry's directory + rename. `account` (§ 3.8) keeps
+  `<root>/sessions/<session_id>/account.cache` with an `email` line; an
+  absent `.claude.json` is an `ok` entry without the line.
 - Tick: fresh → render; past TTL → spawn worker unless `<module>.lock` is
   live, rendering the last value unchanged; older than `stale_after` TTLs
   (or computed for another head/upstream) → dim `⟳`; `err` → dim `✗`. A failed entry is fresh for its TTL like any
@@ -1258,7 +1404,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
@@ -1311,7 +1457,7 @@ per-module render cost.
   killed with the `kill` binary, so the test fails if the worker is not in
   a group of its own); 32 concurrent ticks → exactly one worker; GC bounds.
 - **Config matrix**: every preset × icon set × fixture, every frame style,
-  one-module-per-line (21 rows with `hide_empty_lines = false`) and
+  one-module-per-line (25 rows with `hide_empty_lines = false`) and
   all-on-one-line (one row, cut with `…`) → no panic, correct line count,
   width ≤ `COLUMNS − 4` (§ 2.1); golden files under `tests/golden/`
   (`UPDATE_GOLDEN=1` regenerates). The goldens render with `--color
@@ -1327,6 +1473,13 @@ per-module render cost.
   a golden; one CLI test points the hook at a fixture instead.
 - **Docs sync**: `garnish docs` output must equal committed `docs/`, and
   `config init` output must equal `examples/garnish.toml`.
+- **Pinned renders spawn nothing** (PLAN Phase 23): `Clock::fixed()`
+  turns workers off as it turns git and the settings chain off, so a
+  cached module outside the repo group (`account`, § 3.8) renders its
+  empty state in the docs and the in-process matrices without a cache
+  directory (`tests/docs_sync.rs` asserts none appears), and the
+  settings badges render on from keys the clock seeds in-process rather
+  than from any file.
 - **Module matrix from the schema** (PLAN Phase 20; from FUTURE-SPEC § 15
   item 11): an in-crate rayon test generated from `ModuleSchema` renders
   every module × every preset × every icon set × `max_width ∈ {0, 1, 4,
@@ -1452,8 +1605,9 @@ binary. Everything else is a **gallery preset**: a complete config file under
   compaction scale, cell and share widths, a boxed column, a narrow and
   an ASCII-only terminal, half-speed animation, a two-cell ticker,
   animation off), so every layout key and most module options appear in
-  at least one preset: 28 in all, and the `setup` picker (§ 14) is how
-  they are browsed.
+  at least one preset; four more with PLAN Phase 23 show pace and eta,
+  the number formats, hide lists and the badges of § 3.8: 32 in all, and
+  the `setup` picker (§ 14) is how they are browsed.
 
 ## 13. Skills (PLAN Phase 18, shipped in v0.2.0)
 
@@ -1572,7 +1726,7 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   move a module within a column or into the next one, mark a row as a
   spacer, give it a title, wrap a selected run of rows in a titled box
   and box a whole column. Adding a module opens a **picker**
-  with fuzzy and initialism search over the 21 ids, the config's existing
+  with fuzzy and initialism search over the 25 ids, the config's existing
   `text.<name>` tables and *New text module…* (`sy` finds `sync`, `sn`
   finds `session_name`), each with its one-line summary from
   `garnish modules`; the new-text entry asks for a name checked by the
@@ -1580,15 +1734,16 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   editor, and removing a text module's last placement asks whether to
   drop the table. `Enter` on a module
   opens its **editor**: one row per schema option (`preset`, `refresh`,
-  `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then the
-  module's own options, then `icons.*` for the active icon set and
+  `hide`, `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
+  the module's own options, then `icons.*` for the active icon set and
   `colors.*`), showing the default, the current value and the doc string;
   enums cycle, booleans toggle, integers edit with their `max` shown,
   colours offer the theme's roles and accept a literal, icons accept any
   string and show the cell count `doctor` would. A text module's editor is
   the same screen over the text schema. Separate screens set the top-level
-  keys (`preset`, `icons`, `theme`, `color`, `frame` style/fill/separator,
-  `align`, `durations`, `right_justify`, `overflow`, `animate`, `padding`)
+  keys (`preset`, `icons`, `theme`, `color`, `frame`
+  style/fill/separator/`separator_color`, `align`, `durations`, the
+  `[format]` styles, `right_justify`, `overflow`, `animate`, `padding`)
   and the `[colors]` role overrides, each with the same row shape. Nothing
   in the builder is hand-coded per option: a unit test walks every
   `OptSpec` kind and every top-level key and asserts an editor exists for

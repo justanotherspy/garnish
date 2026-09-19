@@ -1,7 +1,7 @@
 # PLAN.md — the drift between SPEC and the code
 
 `SPEC.md` is the target design. This file is what the code still lacks of
-it (nothing, today), a compact table of what has landed, and the backlog.
+it (Phase 23, below), a compact table of what has landed, and the backlog.
 The dated log of how the project got here is `WORKLOG.md`; the rules for
 working here are `CLAUDE.md`. Host trouble does not belong in this file.
 
@@ -16,11 +16,54 @@ the three bundled skills. Phases 19–22 landed between 2026-09-13 and
 waits for its first tag, which will be `v0.3.0`; `CHANGELOG.md`
 § Unreleased is its section.
 
-**The drift between `SPEC.md` and the code is the short list under
-*Setup, when asked* in the backlog** (a keyboard path to a separator or a
-cap, undo, a cargo feature); everything else in the spec is implemented,
-and where Phase 22 was built differently from its design, SPEC § 14 says
-so and why.
+**The drift between `SPEC.md` and the code is Phase 23 below**, plus the
+short list under *When asked* in the backlog (a keyboard path to a
+separator or a cap, undo, a cargo feature); everything else in the spec
+is implemented, and where Phase 22 was built differently from its design,
+SPEC § 14 says so and why.
+
+## Phase 23 — usage views and formats (SPEC § 3, § 3.3, § 3.8, § 4)
+
+Decided 2026-09-19 with Daniel: the Tier A ideas of `FUTURE-SPEC.md`
+(PR #27) that Phases 19–20 left, plus four more module ids (`version`,
+`sandbox`, `voice`, `account`; that document's § 0 "module count" is
+decided for those four, the rest of its § 0 stays open). Payload-only or
+a settings read, no new crate, no process on the tick; every config on
+disk renders byte for byte as before, the golden suite being the
+regression test. One branch of small signed commits, one per layer, as
+Phases 19 and 20 landed (no `gh stack` in the session); the review
+workflow is untouched, so the pull request can be reviewed by it.
+
+Code map (2026-09-19, `1b8fe45`; navigate by symbol if the lines drift):
+`decorate` applies `hide_when_empty` (`src/modules/mod.rs:457`) and
+`render_group` calls it after the stale mapping (`src/render.rs:623-630`);
+`parse_overrides` hand-parses `enabled`, `preset` and `refresh` before
+the `COMMON_OPTS`/schema lookup (`src/config/mod.rs:2257-2295`) and
+`common_keys()` names the hand-parsed keys (`src/config/schema.rs:349`);
+`[frame]` is parsed by `RawFrame::from_table` (`src/config/mod.rs:860`)
+and resolved by `resolve_frame` (`:2141`), the model for `[format]`;
+`durations_opt()` and `Ctx::durations_for` (`src/modules/mod.rs:34`,
+`:145`) are the shape of a per-module override with `inherit`;
+separators are styled `Role::Muted` in `Layout::group_pieces`
+(`src/layout.rs:868`) and the packed join (`:973`); `Clock::fixed()`
+keeps pinned renders off the cache only through `git: false`
+(`src/render.rs:154`), which covers repo modules alone; the settings
+chain is read once per tick through `Ctx::settings()`
+(`src/modules/mod.rs:132`) and `parse_settings_json` is lenient per key
+(`src/claude_settings.rs:214`); `util::bar` already takes a marker
+(`src/modules/util.rs:19`); the pinned instant is 1738425600 and the
+`subscription-full` fixture's windows reset at 1738433620 (5 h) and
+1738699200 (7 d), so pace and eta goldens are arithmetic.
+
+- [ ] `hide`: `MeasureKind` on `ModuleSchema`, `HideRule`, the hand-parsed `hide` key validated against the schema's measure (`common_keys()` names it), `Rendered.measure` set by one call, `modules::hidden_by` applied in `render_group` before `decorate`; measures on `cost`, `lines`, `sync`, `context`, the limits, `cache`, `api`; the reference row and the module form row; unit tests and the `hide-states` config golden
+- [ ] `format`: `FormatCfg` parsed like `[frame]`, `format_opt(kind)` on the modules that print the kind, `Ctx::tokens/percent/dollars` with `inherit`, the `detail()` helper for parenthesised details (`api`, `lines`, the `both` reset) and its key-scan pattern, `[format]` in `config init`/`show`, the reference and the top-level form; `format-precise` (colour on) and `format-inherit` goldens
+- [ ] `pace`: `Window::length_secs`, `pace()` and `pace_band()`, the five options with their icons and colours on `limit5h`/`limit7d` only, `reset = "elapsed"`, the marker on the bar; unit tests at two instants; `limits-pace` (two instants) and `limits-elapsed` goldens
+- [ ] `separator-color`: `SeparatorColor` on `FrameCfg`, `Layout::separator_style` used by both separator sites, the reference row, the frame form row, a layout unit test and the `separator-inherit` golden (colour on)
+- [ ] `version`: the module in `identity.rs`, glyphs through the width guard, registered after `lines`
+- [ ] `settings-badges`: `FileKeys.sandbox_enabled`/`voice_enabled`, `claude_settings::flag`, `badges.rs` with `sandbox` and `voice`, `Clock.settings_keys` seeding the docs samples, two doctor rows, the `settings-badges` golden over a settings fixture
+- [ ] `account`: `claude_json_path` (`CLAUDE_CONFIG_DIR`), the cached module with its worker, `Clock.workers` gating `Ctx::cached` under the pinned clock, `worker_account_*` tests, `cargo bench --no-run`
+- [ ] `presets`: `pace-and-eta`, `precise-numbers`, `quiet-when-idle`, `session-badges`; `gallery::FILES` 28 → 32; `make docs`
+- [ ] `records`: README, guide, `CLAUDE.md` (25 ids, the hand-parsed-key trace, the workers gate, the settings seed), the CHANGELOG body, WORKLOG; the adversarial review (three agents in worktrees, no git in the tree) and its fixes with tests; the fresh-nightly clippy; the done-table row
 
 ## Done
 
@@ -64,11 +107,6 @@ Open items only; closed ones are in `WORKLOG.md`.
   `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first
   release" note from the tap's README, and the "from the first tagged
   release" qualifier from README § Install and guide § 1
-- [ ] The review workflow changed in the same pull request as Phase 22, so
-  that pull request cannot be reviewed by it (the action refuses a branch
-  whose copy of the workflow differs from `main`'s; `CLAUDE.md` § Claude
-  review). Either merge and review the next one, or split the workflow
-  commit out first if a review of #78 itself is wanted
 - [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's
   fullscreen and classic renderers (`/tui`) to confirm the § 2.1
   arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt), then
@@ -88,8 +126,12 @@ Open items only; closed ones are in `WORKLOG.md`.
   rule (SPEC § 4.3 says spaces, "since a rule running past a box's side
   would look wrong", which is about boxes, not bare columns)
 
-**Setup, when asked** (small; none blocks anything)
+**When asked** (small; none blocks anything)
 
+- [ ] The Claude settings chain (SPEC § 2.3) ignores `CLAUDE_CONFIG_DIR`,
+  which moves the user file; only the `account` worker honours it for
+  `.claude.json` (SPEC § 3.8). Honouring it in the chain means one more
+  path rule in `claude_settings::settings_files` and a doctor line
 - [ ] A `setup` cargo feature, if the binary size ever matters: the
   release binary grew from 2.8 MB to 3.4 MB with ratatui and crossterm,
   the end-to-end cold tick did not move (about 2 ms either way, 200 runs
@@ -126,12 +168,11 @@ Open items only; closed ones are in `WORKLOG.md`.
 - [ ] Optional headroom: cache the resolved config keyed by mtime, cache the
   settings-chain reads for 30 s, but only if the tick budget is ever
   threatened
-- [ ] From `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas
-  not taken into Phases 19–20 stay in that document until asked for:
-  `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"`
-  (A6), separator colour inheritance (A13), a `version` module (A12), the
-  settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn
-  on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and
-  `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1).
-  Everything Tier B/C (workers, hooks, network, transcript, the companion,
-  garlic) is a § 0 decision there, untouched
+- [ ] From `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12; Phase 23 took
+  A4, A6, A9, A10, A12, A13 and N11 on 2026-09-19): the Tier A ideas
+  still in that document, until asked for: theme rotation (§ 12.3),
+  `config share`/`apply`, `preview --config` and `preview --html`
+  (§ 12.2), gradients (A3), Powerline segments (B1), the `provider`
+  badge (§ 8.4) and the `remote` module (A9's fourth, a duplicate of the
+  harness's own indicator). Everything Tier B/C (workers, hooks, network,
+  transcript, the companion, garlic) is a § 0 decision there, untouched

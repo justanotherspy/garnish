@@ -5,6 +5,28 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 ## Unreleased
 
+**Usage views and formats** (PLAN Phase 23)
+
+- `hide = ["zero", "below:10"]` on a module names the states in which it
+  leaves its row (`empty`, `zero`, `below:N`, `above:N`; each module page
+  lists the ones it takes); `hide_when_empty` stays as the alias of
+  `empty`.
+- `[format]` picks how numbers print (`tokens`, `percent`, `cost`), with
+  the same-named option on each module that prints that kind, and
+  `parens = "dim"` draws every parenthesised detail in the muted role.
+- `limit5h` and `limit7d` gain `pace` (`⇡14%` ahead of the window, `⇣32%`
+  behind), `pace_colors`, `eta` (`⇥1h37m` until the window is spent, only
+  when that comes before the reset), `reset = "elapsed"` (`⏱2h46m/5h`)
+  and `elapsed_marker` on the mini bar.
+- `[frame] separator_color = "inherit"` paints each separator in the
+  colour of the module before it; a role or a literal colour fixes it.
+- Four modules: `version` (the Claude Code version, dim), `sandbox` and
+  `voice` (badges from the settings chain), `account` (the email from
+  `~/.claude.json`, read by a worker every ten minutes; `style = "user"`
+  for the part before `@`).
+- Four gallery presets show them: `pace-and-eta`, `precise-numbers`,
+  `quiet-when-idle`, `session-badges`.
+
 **`garnish setup`** (PLAN Phase 22)
 
 - A full-screen setup in the terminal. The **preset picker** shows the
