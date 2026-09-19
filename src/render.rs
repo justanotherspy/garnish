@@ -247,6 +247,7 @@ pub fn render_tree_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
+        format: config.format,
         animate: false,
         dirs: std::cell::OnceCell::new(),
         settings_files: clock.settings_files(payload),

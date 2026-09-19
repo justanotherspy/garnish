@@ -86,6 +86,7 @@ fn render_modules(c: &mut Criterion) {
         git: clock.git,
         stale_after: cfg.stale_after,
         durations: cfg.durations,
+        format: cfg.format,
         animate: clock.animate,
         dirs: std::cell::OnceCell::new(),
         settings_files: Vec::new(),

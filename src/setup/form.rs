@@ -936,11 +936,49 @@ fn string(v: &str) -> Value {
     Value::String(v.to_owned())
 }
 
-/// The top-level keys: what the line looks like, then how it is laid out.
+/// The top-level keys: what the line looks like, how it is laid out, then
+/// the `[format]` table.
 fn top_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let mut fields = look_fields(draft, config);
     fields.extend(layout_fields(draft, config, hints));
+    fields.extend(format_fields(draft, config));
     fields
+}
+
+/// `[format]`: the number styles (SPEC § 4), each row keyed `format.<key>`.
+fn format_fields(draft: &Draft, config: &Config) -> Vec<Field> {
+    let s = |key: &str| Slot::table(&["format"], key);
+    let f = &config.format;
+    vec![
+        Field::new(
+            "format.tokens",
+            "Token counts: compact (128k, 1.0M) | precise (128,400) | whole (128400).",
+            names(&["compact", "precise", "whole"]),
+            s("tokens"),
+        )
+        .valued(draft, Some(string(f.tokens.name())), "compact"),
+        Field::new(
+            "format.percent",
+            "Percentages: whole (42%) | precise (42.3%).",
+            names(&["whole", "precise"]),
+            s("percent"),
+        )
+        .valued(draft, Some(string(f.percent.name())), "whole"),
+        Field::new(
+            "format.cost",
+            "Money: precise ($1.23, cost.decimals places) | whole ($1).",
+            names(&["precise", "whole"]),
+            s("cost"),
+        )
+        .valued(draft, Some(string(f.cost.name())), "precise"),
+        Field::new(
+            "format.parens",
+            "Parenthesised details (api's share, lines' net, a both reset): plain | dim (the muted role).",
+            names(&["plain", "dim"]),
+            s("parens"),
+        )
+        .valued(draft, Some(string(f.parens.name())), "plain"),
+    ]
 }
 
 /// The top-level keys that pick the preset, the glyphs and the colours.
@@ -1383,9 +1421,20 @@ mod tests {
         for key in config::TOP_KEYS {
             let table = matches!(
                 key,
-                "colors" | "frame" | "row" | "line" | "box" | "modules" | "hide_empty_lines"
+                "colors"
+                    | "frame"
+                    | "format"
+                    | "row"
+                    | "line"
+                    | "box"
+                    | "modules"
+                    | "hide_empty_lines"
             );
             assert!(table || keys.contains(&key), "{key} has no field");
+        }
+        // The `[format]` table's four keys sit on the same screen.
+        for key in ["format.tokens", "format.percent", "format.cost", "format.parens"] {
+            assert!(keys.contains(&key), "{key} has no field");
         }
         for schema in SCHEMAS.iter() {
             let (form, _) = built("", &FormKind::Module(schema.id.to_owned()));

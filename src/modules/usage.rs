@@ -8,10 +8,8 @@ use crate::icons::{Glyph, glyph};
 use crate::payload::RateWindow;
 use crate::time::WallClock;
 
-use super::util::{
-    BAR_STYLES, bar, dollars, percent, percent_unclamped, rounded, rounded_unclamped,
-};
-use super::{Ctx, Module, Rendered, glyph_prefix, lead, seg};
+use super::util::{BAR_STYLES, bar, rounded, rounded_unclamped};
+use super::{Ctx, Module, Rendered, detail, glyph_prefix, lead, seg};
 
 /// Which rate-limit window a limit module shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +142,7 @@ impl Module for LimitModule {
                     Value::NumList(vec![50.0, 75.0, 90.0]),
                 ),
                 super::durations_opt(),
+                super::format_opt(super::NumberKind::Percent),
                 OptSpec::new(
                     "band_colors",
                     Kind::ColorList,
@@ -202,29 +201,42 @@ impl Module for LimitModule {
             ));
             segs.push(Segment::plain(" "));
         }
-        let text = if self.0 == Window::Spend { percent_unclamped(used) } else { percent(used) };
+        let text = if self.0 == Window::Spend {
+            ctx.percent_unclamped(cfg, used)
+        } else {
+            ctx.percent(cfg, used)
+        };
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
         if cfg.bool("show_reset")
             && let Some(at) = w.resets_at
-            && let Some(reset) = reset_text(ctx, cfg, at, self.0.wall_clock())
+            && let Some((reset, extra)) = reset_text(ctx, cfg, at, self.0.wall_clock())
         {
-            segs.push(seg(cfg, format!(" {}{reset}", glyph_prefix(cfg, "reset")), "reset"));
+            let before = format!(" {}{reset}", glyph_prefix(cfg, "reset"));
+            match extra {
+                Some(inner) => segs.extend(detail(ctx, cfg, &before, &inner, "reset")),
+                None => segs.push(seg(cfg, before, "reset")),
+            }
         }
         Rendered::fresh(segs).measured(super::Measure::Percent(shown))
     }
 }
 
-/// The reset in the module's `reset` form (SPEC § 3.3): the countdown, the
-/// absolute time in the tick's zone in this window's [`WallClock`] shape,
-/// or the countdown followed by that time in parentheses. `None` once the
-/// instant has passed, whichever the form.
-fn reset_text(ctx: &Ctx<'_>, cfg: &ModuleCfg, at: i64, form: WallClock) -> Option<String> {
+/// The reset in the module's `reset` form (SPEC § 3.3): the countdown or
+/// the absolute time in the tick's zone in this window's [`WallClock`]
+/// shape, and for `both` the countdown with that time as the parenthesised
+/// detail. `None` once the instant has passed, whichever the form.
+fn reset_text(
+    ctx: &Ctx<'_>,
+    cfg: &ModuleCfg,
+    at: i64,
+    form: WallClock,
+) -> Option<(String, Option<String>)> {
     let countdown = ctx.countdown(cfg, at);
     let clock = ctx.wall_clock(at, form);
     match cfg.str("reset") {
-        "absolute" => clock,
-        "both" => countdown.zip(clock).map(|(c, t)| format!("{c} ({t})")),
-        _ => countdown,
+        "absolute" => clock.map(|t| (t, None)),
+        "both" => countdown.zip(clock).map(|(c, t)| (c, Some(t))),
+        _ => countdown.map(|c| (c, None)),
     }
 }
 
@@ -263,6 +275,7 @@ impl Module for CostModule {
                     Value::Bool(false),
                 )
                 .full(Value::Bool(true)),
+                super::format_opt(super::NumberKind::Cost),
             ],
             icons: vec![
                 IconSpec {
@@ -296,7 +309,7 @@ impl Module for CostModule {
         let usd = cost.total_cost_usd.unwrap_or(0.0);
         let mut segs: Vec<Segment> = lead(cfg, "cost");
         segs.push(Segment::styled(
-            dollars(usd, cfg.size("decimals")),
+            ctx.dollars(cfg, usd, cfg.size("decimals")),
             Style::fg(cfg.color("amount")).bolded(),
         ));
         if cfg.bool("show_lines") {

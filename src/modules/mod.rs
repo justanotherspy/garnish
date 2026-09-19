@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::ansi::{Segment, Style};
 use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
+use crate::config::format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
 use crate::config::schema::{HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
 use crate::payload::Payload;
@@ -38,6 +39,52 @@ pub fn durations_opt() -> OptSpec {
         "How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module.",
         Value::Str("inherit".into()),
     )
+}
+
+/// The kinds of number a module prints, each with a `[format]` style and a
+/// per-module override of the same name (SPEC § 4, Number formats).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumberKind {
+    /// Token counts (`tokens`).
+    Tokens,
+    /// Percentages (`percent`).
+    Percent,
+    /// Money (`cost`).
+    Cost,
+}
+
+/// Choices of the per-module `tokens` option; `inherit` follows `[format]`.
+pub const TOKEN_CHOICES: &[&str] = &["inherit", "compact", "precise", "whole"];
+/// Choices of the per-module `percent` option; `inherit` follows `[format]`.
+pub const PERCENT_CHOICES: &[&str] = &["inherit", "whole", "precise"];
+/// Choices of the per-module `cost` option; `inherit` follows `[format]`.
+pub const COST_CHOICES: &[&str] = &["inherit", "precise", "whole"];
+
+/// The per-module override of one `[format]` style, carried by every module
+/// that prints that kind of number, so one module can be pinned while the
+/// rest follow the table (the shape of [`durations_opt`]).
+#[must_use]
+pub fn format_opt(kind: NumberKind) -> OptSpec {
+    match kind {
+        NumberKind::Tokens => OptSpec::new(
+            "tokens",
+            Kind::Enum(TOKEN_CHOICES),
+            "How this module's token counts print: `inherit` follows `[format] tokens`; `compact` (128k, 1.0M), `precise` (128,400) or `whole` (128400) pins this module.",
+            Value::Str("inherit".into()),
+        ),
+        NumberKind::Percent => OptSpec::new(
+            "percent",
+            Kind::Enum(PERCENT_CHOICES),
+            "How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module.",
+            Value::Str("inherit".into()),
+        ),
+        NumberKind::Cost => OptSpec::new(
+            "cost",
+            Kind::Enum(COST_CHOICES),
+            "How this module's amounts print: `inherit` follows `[format] cost`; `precise` ($1.23, `decimals` places) or `whole` ($1) pins this module.",
+            Value::Str("inherit".into()),
+        ),
+    }
 }
 
 /// How fresh a module's data is.
@@ -156,6 +203,8 @@ pub struct Ctx<'a> {
     pub stale_after: u32,
     /// How elapsed times and countdowns print (`durations`).
     pub durations: crate::time::DurationStyle,
+    /// How numbers print (`[format]`, SPEC § 4).
+    pub format: FormatCfg,
     /// Whether animations advance with the clock (SPEC § 4.2); off, every
     /// [`Ctx::frame`] is 0.
     pub animate: bool,
@@ -199,6 +248,37 @@ impl Ctx<'_> {
     #[must_use]
     pub fn duration(&self, cfg: &ModuleCfg, total_secs: u64) -> String {
         self.durations_for(cfg).format(total_secs)
+    }
+
+    /// A token count in the module's style: its `tokens` option unless that
+    /// is `inherit`, then `[format] tokens` (SPEC § 4, Number formats).
+    #[must_use]
+    pub fn tokens(&self, cfg: &ModuleCfg, n: u64) -> String {
+        TokenStyle::parse(cfg.str("tokens")).unwrap_or(self.format.tokens).format(n)
+    }
+
+    /// A percentage held to `0..=100` in the module's style: its `percent`
+    /// option unless that is `inherit`, then `[format] percent`.
+    #[must_use]
+    pub fn percent(&self, cfg: &ModuleCfg, p: f64) -> String {
+        self.percent_style(cfg).format(p, true)
+    }
+
+    /// [`Ctx::percent`] for a number that may pass 100 (`spend`, SPEC § 3.3).
+    #[must_use]
+    pub fn percent_unclamped(&self, cfg: &ModuleCfg, p: f64) -> String {
+        self.percent_style(cfg).format(p, false)
+    }
+
+    fn percent_style(&self, cfg: &ModuleCfg) -> PercentStyle {
+        PercentStyle::parse(cfg.str("percent")).unwrap_or(self.format.percent)
+    }
+
+    /// An amount in the module's style: its `cost` option unless that is
+    /// `inherit`, then `[format] cost`; `decimals` is read by `precise`.
+    #[must_use]
+    pub fn dollars(&self, cfg: &ModuleCfg, usd: f64, decimals: usize) -> String {
+        CostStyle::parse(cfg.str("cost")).unwrap_or(self.format.cost).format(usd, decimals)
     }
 
     /// Countdown from this tick's clock to an epoch-seconds instant in the
@@ -476,6 +556,35 @@ pub fn muted(theme: &Theme, text: impl Into<String>) -> Segment {
     Segment::styled(text, Style::fg(theme.role(crate::theme::Role::Muted)).dimmed())
 }
 
+/// A parenthesised detail after a value (`api`'s share, `lines`' net, the
+/// `both` reset form's time), drawn as `[format] parens` says (SPEC § 4).
+///
+/// `plain` is one segment, `before (inner)` in the module's colour, so a
+/// config that leaves the default renders byte for byte as it always has;
+/// `dim` is `before` in that colour and ` (inner)` in the muted role, the
+/// way a `label` is drawn. `before` carries its own leading space, as the
+/// segment it replaces did, and may be empty.
+#[must_use]
+pub fn detail(
+    ctx: &Ctx<'_>,
+    cfg: &ModuleCfg,
+    before: &str,
+    inner: &str,
+    color_key: &str,
+) -> Vec<Segment> {
+    match ctx.format.parens {
+        ParensStyle::Plain => vec![seg(cfg, format!("{before} ({inner})"), color_key)],
+        ParensStyle::Dim => {
+            let mut out: Vec<Segment> = Vec::new();
+            if !before.is_empty() {
+                out.push(seg(cfg, before, color_key));
+            }
+            out.push(muted(ctx.theme, format!(" ({inner})")));
+            out
+        }
+    }
+}
+
 /// Apply `label`, `prefix`, `suffix`, and staleness styling to a render.
 ///
 /// A *failed* module keeps its `✗` (SPEC § 3.6) even when it had nothing to
@@ -742,12 +851,15 @@ mod tests {
                     check(key, at);
                 }
             }
-            // `seg(cfg, text, "color")`: the key is the last argument, when
-            // that is a literal (`seg(cfg, x, key)` passes a variable).
-            for (at, _) in src.match_indices("seg(") {
-                let (literals, last_is_literal) = literal_arguments(&src, at + "seg(".len());
-                if last_is_literal && let Some(key) = literals.last() {
-                    check(key, at);
+            // `seg(cfg, text, "color")` and `detail(ctx, cfg, before, inner,
+            // "color")`: the key is the last argument, when that is a
+            // literal (`seg(cfg, x, key)` passes a variable).
+            for call in ["seg(", " detail(", "(detail("] {
+                for (at, _) in src.match_indices(call) {
+                    let (literals, last_is_literal) = literal_arguments(&src, at + call.len());
+                    if last_is_literal && let Some(key) = literals.last() {
+                        check(key, at);
+                    }
                 }
             }
             // `icon(cfg, "icon", "color")` and `badge(cfg, "icon", "color")`:
@@ -810,6 +922,68 @@ mod tests {
         // `measured` takes the measure or an option of one.
         assert_eq!(Rendered::empty().measured(Measure::Count(2)).measure, Some(Measure::Count(2)));
         assert_eq!(Rendered::empty().measured(None).measure, None);
+    }
+
+    /// SPEC § 4 `parens`: a detail is one segment with its value under
+    /// `plain`, so today's renders keep their bytes, and its own muted
+    /// segment under `dim`; an empty `before` leaves only the detail.
+    #[test]
+    fn a_detail_is_one_segment_plain_and_two_dim() {
+        let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let theme = Theme::default();
+        let cache = Cache::at(std::env::temp_dir().join("garnish-detail-test"));
+        let (config, _) = crate::config::parse("", &SCHEMAS);
+        let cfg = config.modules.get("api").unwrap();
+        let mut ctx = Ctx {
+            payload: &payload,
+            theme: &theme,
+            icons: IconSet::Unicode,
+            now: Timestamp::from_second(1_738_425_600).unwrap(),
+            width: 80,
+            cache: &cache,
+            tz: jiff::tz::TimeZone::UTC,
+            home: None,
+            settings_env: crate::claude_settings::Env::default(),
+            git: false,
+            stale_after: 5,
+            durations: crate::time::DurationStyle::Compact,
+            format: FormatCfg::default(),
+            animate: false,
+            dirs: std::cell::OnceCell::new(),
+            settings_files: Vec::new(),
+            settings: std::cell::OnceCell::new(),
+        };
+        let plain = detail(&ctx, cfg, " 8m20s", "12%", "share");
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0].text(), " 8m20s (12%)");
+        assert_eq!(plain[0].style, Style::fg(cfg.color("share")));
+        let bare = detail(&ctx, cfg, "", "12%", "share");
+        assert_eq!(bare.len(), 1);
+        assert_eq!(bare[0].text(), " (12%)");
+        ctx.format.parens = ParensStyle::Dim;
+        let dim = detail(&ctx, cfg, " 8m20s", "12%", "share");
+        assert_eq!(dim.len(), 2);
+        assert_eq!((dim[0].text(), dim[1].text()), (" 8m20s", " (12%)"));
+        assert_eq!(dim[0].style, Style::fg(cfg.color("share")));
+        assert_eq!(dim[1], muted(&theme, " (12%)"));
+        let bare = detail(&ctx, cfg, "", "12%", "share");
+        assert_eq!(bare.len(), 1);
+        assert_eq!(bare[0], muted(&theme, " (12%)"));
+        // The number styles resolve `inherit` to the table and a module
+        // option pins its own.
+        ctx.format.tokens = TokenStyle::Precise;
+        assert_eq!(ctx.tokens(cfg, 128_400), "128,400");
+        let (config, _) = crate::config::parse(
+            "[modules.context]\ntokens = \"whole\"\npercent = \"precise\"\n[modules.cost]\ncost = \"whole\"\n",
+            &SCHEMAS,
+        );
+        let context = config.modules.get("context").unwrap();
+        assert_eq!(ctx.tokens(context, 128_400), "128400");
+        assert_eq!(ctx.percent(context, 42.34), "42.3%");
+        assert_eq!(ctx.percent(cfg, 42.34), "42%");
+        assert_eq!(ctx.percent_unclamped(cfg, 112.4), "112%");
+        assert_eq!(ctx.dollars(config.modules.get("cost").unwrap(), 1.2345, 2), "$1");
+        assert_eq!(ctx.dollars(cfg, 1.2345, 2), "$1.23");
     }
 
     #[test]

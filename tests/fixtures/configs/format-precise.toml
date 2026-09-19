@@ -1,0 +1,42 @@
+# fixture: subscription-full
+# columns: 132
+# icons: unicode
+# color: always
+# `[format]` (SPEC § 4, Number formats) with every style away from its
+# default: token counts with thousands separators, percentages with a
+# decimal, money whole, and the parenthesised details (`api`'s share,
+# `lines`' net, the `both` reset form's time) drawn in the muted role.
+# Colour on, so the golden pins the segment shapes: a dimmed detail is its
+# own muted segment after the value it follows.
+
+[format]
+tokens  = "precise"
+percent = "precise"
+cost    = "whole"
+parens  = "dim"
+
+[[line]]
+modules = ["context", "api", "cache"]
+right   = ["lines"]
+
+[[line]]
+modules = ["limit5h", "limit7d", "cost"]
+
+[modules.context]
+show_window = true
+show_compaction_percent = true
+
+[modules.api]
+show_share = true
+
+[modules.cache]
+show_writes = true
+
+[modules.lines]
+show_net = true
+
+[modules.limit5h]
+reset = "both"
+
+[modules.cost]
+only_without_rate_limits = false

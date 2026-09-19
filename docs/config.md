@@ -25,6 +25,17 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 | `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |
 | `durations` | `compact` \| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = "ticker"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \| `compact` \| `fixed`) to pin one module. |
 
+## `[format]` — number styles
+
+One style per kind of number, each defaulting to what garnish has always printed. Every module that prints a kind carries the same key with `inherit` as its default, to pin one module while the rest follow the table, the way `durations` works; a style on a module that prints no such number is an unknown key.
+
+| key | values | default | meaning |
+|---|---|---|---|
+| `tokens` | `compact` \| `precise` \| `whole` | `compact` | Token counts: `128k` and `1.0M`; `128,400`; `128400`. Printed by `context`, `cache`. |
+| `percent` | `whole` \| `precise` | `whole` | Percentages: `42%`; `42.3%`. Bands and thresholds compare the number printed, whichever style. Printed by `context`, `limit5h`, `limit7d`, `spend`, `api`, `cache`. |
+| `cost` | `precise` \| `whole` | `precise` | Money: `$1.23` (`cost.decimals` places, `$1.2k` from a thousand up); `$1`. Printed by `cost`. |
+| `parens` | `plain` \| `dim` | `plain` | The parenthesised details (`api`'s share of the session, `lines`' net, the `both` reset form's time): in the colour of the value they follow, or in the muted role the way a `label` is drawn (Claude Code already dims every row, so the muted colour is what "dim" visibly means). |
+
 ## `[colors]` — theme roles
 
 Every module color defaults to a role; override a role here to restyle every module at once.

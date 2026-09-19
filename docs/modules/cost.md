@@ -44,6 +44,7 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 | `decimals` | integer ≤ 8 | `2` | `2` | `2` | Decimal places. |
 | `only_without_rate_limits` | bool | `true` | `true` | `true` | Hide when the harness reports subscription rate limits. |
 | `show_lines` | bool | `false` | `false` | `true` | Append lines added/removed. |
+| `cost` | `inherit` \| `precise` \| `whole` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's amounts print: `inherit` follows `[format] cost`; `precise` ($1.23, `decimals` places) or `whole` ($1) pins this module. |
 
 ## Icons
 

@@ -46,6 +46,8 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 | `show_misses` | bool | `false` | `false` | `true` | Show the miss count. |
 | `show_writes` | bool | `false` | `false` | `true` | Show tokens written to the cache. |
 | `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
+| `tokens` | `inherit` \| `compact` \| `precise` \| `whole` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's token counts print: `inherit` follows `[format] tokens`; `compact` (128k, 1.0M), `precise` (128,400) or `whole` (128400) pins this module. |
+| `percent` | `inherit` \| `whole` \| `precise` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. |
 
 ## Icons
 

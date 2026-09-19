@@ -123,6 +123,34 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     let prefix = if annotated { "# " } else { "" };
     let _ = writeln!(out, "{prefix}durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
+    write_format(out, cfg, annotated);
+}
+
+/// The `[format]` table (SPEC § 4, Number formats), after the top-level keys.
+fn write_format(out: &mut String, cfg: &Config, annotated: bool) {
+    comment(
+        out,
+        annotated,
+        "Number formats (docs/config.md § [format]): each module that prints a kind has the same key with `inherit`.",
+    );
+    let _ = writeln!(out, "[format]");
+    comment(
+        out,
+        annotated,
+        "Token counts: compact (128k, 1.0M) | precise (128,400) | whole (128400)",
+    );
+    let _ = writeln!(out, "tokens = {}", toml_string(cfg.format.tokens.name()));
+    comment(out, annotated, "Percentages: whole (42%) | precise (42.3%)");
+    let _ = writeln!(out, "percent = {}", toml_string(cfg.format.percent.name()));
+    comment(out, annotated, "Money: precise ($1.23, cost.decimals places) | whole ($1)");
+    let _ = writeln!(out, "cost = {}", toml_string(cfg.format.cost.name()));
+    comment(
+        out,
+        annotated,
+        "Parenthesised details (api's share, lines' net, a `both` reset): plain | dim (the muted role)",
+    );
+    let _ = writeln!(out, "parens = {}", toml_string(cfg.format.parens.name()));
+    let _ = writeln!(out);
 }
 
 /// Render a config as TOML.
@@ -846,6 +874,17 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
     }
 }
 
+/// The modules carrying the per-module override of a `[format]` key, from
+/// the schemas, so the page cannot drift from the code.
+fn format_carriers(key: &str) -> String {
+    SCHEMAS
+        .iter()
+        .filter(|s| s.opt(key).is_some())
+        .map(|s| format!("`{}`", s.id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// The `hide` row's description: the states in the module's own terms
 /// (SPEC § 3), from the measure its schema declares.
 fn hide_doc(schema: &ModuleSchema) -> String {
@@ -934,6 +973,30 @@ pub fn config_page() -> String {
         "| `durations` | `compact` \\| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = \"ticker\"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \\| `compact` \\| `fixed`) to pin one module. |"
     );
 
+    let _ = writeln!(
+        o,
+        "\n## `[format]` — number styles\n\nOne style per kind of number, each defaulting to what garnish has always printed. Every module that prints a kind carries the same key with `inherit` as its default, to pin one module while the rest follow the table, the way `durations` works; a style on a module that prints no such number is an unknown key.\n"
+    );
+    let _ = writeln!(o, "| key | values | default | meaning |\n|---|---|---|---|");
+    let _ = writeln!(
+        o,
+        "| `tokens` | `compact` \\| `precise` \\| `whole` | `compact` | Token counts: `128k` and `1.0M`; `128,400`; `128400`. Printed by {}. |",
+        format_carriers("tokens")
+    );
+    let _ = writeln!(
+        o,
+        "| `percent` | `whole` \\| `precise` | `whole` | Percentages: `42%`; `42.3%`. Bands and thresholds compare the number printed, whichever style. Printed by {}. |",
+        format_carriers("percent")
+    );
+    let _ = writeln!(
+        o,
+        "| `cost` | `precise` \\| `whole` | `precise` | Money: `$1.23` (`cost.decimals` places, `$1.2k` from a thousand up); `$1`. Printed by {}. |",
+        format_carriers("cost")
+    );
+    let _ = writeln!(
+        o,
+        "| `parens` | `plain` \\| `dim` | `plain` | The parenthesised details (`api`'s share of the session, `lines`' net, the `both` reset form's time): in the colour of the value they follow, or in the muted role the way a `label` is drawn (Claude Code already dims every row, so the muted colour is what \"dim\" visibly means). |"
+    );
     let _ = writeln!(
         o,
         "\n## `[colors]` — theme roles\n\nEvery module color defaults to a role; override a role here to restyle every module at once.\n"

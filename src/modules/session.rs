@@ -10,8 +10,8 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{percent, rounded, tokens};
-use super::{Ctx, Module, Rendered, badge, glyph_prefix, lead, seg};
+use super::util::rounded;
+use super::{Ctx, Module, Rendered, badge, detail, glyph_prefix, lead, seg};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -92,6 +92,7 @@ impl Module for ApiModule {
                 )
                 .full(Value::Bool(true)),
                 super::durations_opt(),
+                super::format_opt(super::NumberKind::Percent),
             ],
             icons: vec![IconSpec {
                 key: "api",
@@ -118,7 +119,7 @@ impl Module for ApiModule {
         if cfg.bool("show_share")
             && let Some(share) = share
         {
-            segs.push(seg(cfg, format!(" ({})", percent(share)), "share"));
+            segs.extend(detail(ctx, cfg, "", &ctx.percent(cfg, share), "share"));
         }
         Rendered::fresh(segs).measured(share.map(|s| super::Measure::Percent(rounded(s))))
     }
@@ -158,6 +159,8 @@ impl Module for CacheModule {
                 )
                 .full(Value::Bool(true)),
                 super::durations_opt(),
+                super::format_opt(super::NumberKind::Tokens),
+                super::format_opt(super::NumberKind::Percent),
             ],
             icons: vec![
                 IconSpec {
@@ -198,7 +201,7 @@ impl Module for CacheModule {
                 .saturating_add(u.cache_creation_input_tokens.unwrap_or(0));
             (total > 0).then(|| crate::num::u64_to_f64(read) / crate::num::u64_to_f64(total))
         });
-        let text = ratio.map_or_else(|| "–".to_owned(), |r| percent(r * 100.0));
+        let text = ratio.map_or_else(|| "–".to_owned(), |r| ctx.percent(cfg, r * 100.0));
         segs.push(Segment::styled(text, Style::fg(cfg.color("percent")).bolded()));
         let measure = ratio.map(|r| super::Measure::Percent(rounded(r * 100.0)));
         let Some(pc) = pc else { return Rendered::fresh(segs).measured(measure) };
@@ -229,7 +232,7 @@ impl Module for CacheModule {
         if cfg.bool("show_writes")
             && let Some(w) = pc.cache_write_tokens
         {
-            segs.push(seg(cfg, format!(" {}w", tokens(w)), "detail"));
+            segs.push(seg(cfg, format!(" {}w", ctx.tokens(cfg, w)), "detail"));
         }
         Rendered::fresh(segs).measured(measure)
     }

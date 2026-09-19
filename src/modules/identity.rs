@@ -247,7 +247,7 @@ impl Module for LinesModule {
         if cfg.bool("show_net") {
             let net = i128::from(added).saturating_sub(i128::from(removed));
             let sign = if net >= 0 { "+" } else { "" };
-            segs.push(seg(cfg, format!(" ({sign}{net})"), "net"));
+            segs.extend(super::detail(ctx, cfg, "", &format!("{sign}{net}"), "net"));
         }
         Rendered::fresh(segs).measured(super::Measure::Count(added.saturating_add(removed)))
     }

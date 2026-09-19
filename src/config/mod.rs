@@ -12,9 +12,11 @@ use crate::icons::IconSet;
 use crate::theme::{PALETTES, Role, Theme, palette};
 use crate::time::DurationStyle;
 
+pub mod format;
 pub mod presets;
 pub mod schema;
 
+use format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
 use presets::TopPreset;
 use schema::{
     COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
@@ -553,6 +555,8 @@ pub struct Config {
     pub animate: Option<bool>,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
+    /// How numbers print (`[format]`, SPEC § 4).
+    pub format: FormatCfg,
     /// Frame.
     pub frame: FrameCfg,
     /// Rows, in order (SPEC § 4.3).
@@ -616,6 +620,7 @@ struct RawConfig {
     ticker_gap: Option<String>,
     animate: Option<bool>,
     durations: Option<DurationStyle>,
+    format: Option<RawFormat>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
     /// The rows as written, under whichever of the two array names the file
@@ -633,7 +638,7 @@ struct RawConfig {
 /// Every key the top level of the file accepts, in the order the "expected
 /// one of" message names them (`line` and `hide_empty_lines` are the
 /// aliases of SPEC § 4.3).
-pub const TOP_KEYS: [&str; 23] = [
+pub const TOP_KEYS: [&str; 24] = [
     "preset",
     "icons",
     "theme",
@@ -651,6 +656,7 @@ pub const TOP_KEYS: [&str; 23] = [
     "ticker_gap",
     "animate",
     "durations",
+    "format",
     "colors",
     "frame",
     "row",
@@ -710,6 +716,10 @@ impl RawConfig {
                 "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
                 "animate" => raw.animate = field(&key, value, errors),
                 "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
+                "format" => match value {
+                    toml::Value::Table(t) => raw.format = Some(RawFormat::from_table(t, errors)),
+                    _ => errors.push(problem("format", "expected a [format] table")),
+                },
                 "colors" => match value {
                     toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
                     _ => errors.push(problem("colors", "expected a table of role = color")),
@@ -906,6 +916,47 @@ impl RawFrame {
             }
         }
         f
+    }
+}
+
+/// The `[format]` table as written (SPEC § 4, Number formats), each key
+/// reported and defaulted on its own like the rest of the file.
+#[derive(Debug, Default)]
+struct RawFormat {
+    tokens: Option<TokenStyle>,
+    percent: Option<PercentStyle>,
+    cost: Option<CostStyle>,
+    parens: Option<ParensStyle>,
+}
+
+const FORMAT_KEYS: [&str; 4] = ["tokens", "percent", "cost", "parens"];
+
+impl RawFormat {
+    fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+        let mut f = Self::default();
+        for (key, value) in table {
+            let path = format!("format.{key}");
+            match key.as_str() {
+                "tokens" => f.tokens = enum_field(&path, value, TokenStyle::CHOICES, errors),
+                "percent" => f.percent = enum_field(&path, value, PercentStyle::CHOICES, errors),
+                "cost" => f.cost = enum_field(&path, value, CostStyle::CHOICES, errors),
+                "parens" => f.parens = enum_field(&path, value, ParensStyle::CHOICES, errors),
+                _ => errors.push(problem(
+                    &path,
+                    &format!("unknown key; expected one of {}", FORMAT_KEYS.join(", ")),
+                )),
+            }
+        }
+        f
+    }
+
+    fn resolve(&self) -> FormatCfg {
+        FormatCfg {
+            tokens: self.tokens.unwrap_or_default(),
+            percent: self.percent.unwrap_or_default(),
+            cost: self.cost.unwrap_or_default(),
+            parens: self.parens.unwrap_or_default(),
+        }
     }
 }
 
@@ -1936,6 +1987,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             Some(Overflow::Ticker) => DurationStyle::Fixed,
             _ => DurationStyle::Compact,
         }),
+        format: raw.format.as_ref().map_or_else(FormatCfg::default, RawFormat::resolve),
         frame,
         rows,
         boxes,
@@ -3729,6 +3781,67 @@ x = 1
                 opt.key
             );
         }
+    }
+
+    /// SPEC § 4 `[format]`: each key is reported and defaulted on its own,
+    /// the table's absence is the old rendering, and the per-module
+    /// override keys exist only on the modules that print that kind.
+    #[test]
+    fn format_table_parses_per_key_and_the_overrides_sit_on_the_right_modules() {
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse("", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.format, FormatCfg::default());
+        let (c, errs) = parse(
+            "[format]\ntokens = \"precise\"\npercent = \"precise\"\ncost = \"whole\"\nparens = \"dim\"\n",
+            all,
+        );
+        assert_eq!(errs, Vec::new());
+        assert_eq!(
+            c.format,
+            FormatCfg {
+                tokens: TokenStyle::Precise,
+                percent: PercentStyle::Precise,
+                cost: CostStyle::Whole,
+                parens: ParensStyle::Dim,
+            }
+        );
+        // One bad key falls back alone; an unknown key is named with the
+        // four expected; a non-table is refused whole.
+        let (c, errs) = parse("[format]\ntokens = \"loose\"\ncost = \"whole\"\nstyle = 1\n", all);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["format.tokens", "format.style"], "{errs:?}");
+        assert!(errs.iter().any(|e| e.message.contains("compact, precise, whole")), "{errs:?}");
+        assert!(errs.iter().any(|e| e.message.contains("tokens, percent, cost, parens")));
+        assert_eq!(c.format.tokens, TokenStyle::Compact);
+        assert_eq!(c.format.cost, CostStyle::Whole);
+        let (c, errs) = parse("format = \"precise\"\n", all);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "format");
+        assert_eq!(c.format, FormatCfg::default());
+        // The overrides: `tokens` on the modules that print tokens, `percent`
+        // on those that print a percentage, `cost` on `cost`, nowhere else.
+        let carriers = |key: &str| -> Vec<&str> {
+            all.iter().filter(|s| s.opt(key).is_some()).map(|s| s.id).collect()
+        };
+        assert_eq!(carriers("tokens"), ["context", "cache"]);
+        assert_eq!(carriers("percent"), ["context", "limit5h", "limit7d", "spend", "api", "cache"]);
+        assert_eq!(carriers("cost"), ["cost"]);
+        let (c, errs) = parse(
+            "[modules.context]\ntokens = \"whole\"\npercent = \"precise\"\n[modules.cost]\ncost = \"whole\"\n[modules.model]\ntokens = \"whole\"\n",
+            all,
+        );
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "modules.model.tokens");
+        assert_eq!(c.modules.get("context").map(|m| m.str("tokens")), Some("whole"));
+        assert_eq!(c.modules.get("cache").map(|m| m.str("tokens")), Some("inherit"));
+        assert_eq!(c.modules.get("cost").map(|m| m.str("cost")), Some("whole"));
+        // `config show` writes the table and it parses back.
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(shown.contains("[format]\ntokens = \"compact\""), "{shown}");
+        let (again, errs) = parse(&shown, all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(again.format, c.format);
     }
 
     /// SPEC § 3 `hide`: every state is checked against the schema's measure,

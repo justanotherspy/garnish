@@ -43,6 +43,7 @@ Time spent waiting for API responses.
 | `show_icon` | bool | `false` | `true` | `true` | Show the icon. |
 | `show_share` | bool | `false` | `false` | `true` | Append the share of the session. |
 | `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
+| `percent` | `inherit` \| `whole` \| `precise` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. |
 
 ## Icons
 

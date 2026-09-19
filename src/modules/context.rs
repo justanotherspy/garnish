@@ -8,7 +8,7 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{BAR_STYLES, bar, percent, rounded, tokens};
+use super::util::{BAR_STYLES, bar, rounded};
 use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
@@ -127,7 +127,7 @@ impl Module for ContextModule {
             ));
         }
         if cfg.bool("show_percent") {
-            let text = pct.map_or_else(|| "–".to_owned(), percent);
+            let text = pct.map_or_else(|| "–".to_owned(), |p| ctx.percent(cfg, p));
             let sp = if segs.is_empty() { "" } else { " " };
             segs.push(Segment::styled(format!("{sp}{text}"), Style::fg(fill_color).bolded()));
         }
@@ -138,10 +138,14 @@ impl Module for ContextModule {
             && usable.is_none()
             && let Some(m) = threshold
         {
-            segs.push(seg(cfg, format!(" {}{}", cfg.icon("compact"), percent(m)), "marker"));
+            segs.push(seg(
+                cfg,
+                format!(" {}{}", cfg.icon("compact"), ctx.percent(cfg, m)),
+                "marker",
+            ));
         }
         if cfg.bool("show_window") {
-            segs.push(seg(cfg, format!(" {}", tokens(window)), "window"));
+            segs.push(seg(cfg, format!(" {}", ctx.tokens(cfg, window)), "window"));
         }
         if cfg.bool("exceeds_200k") && ctx.payload.exceeds_200k_tokens == Some(true) {
             segs.extend(badge(cfg, "exceeds", "exceeds"));
@@ -231,6 +235,8 @@ fn opts() -> Vec<OptSpec> {
             "Extra warning badge at or above this percentage; 0 disables.",
             Value::Float(0.0),
         ),
+        super::format_opt(super::NumberKind::Tokens),
+        super::format_opt(super::NumberKind::Percent),
     ]
 }
 
