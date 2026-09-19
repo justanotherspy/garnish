@@ -32,15 +32,32 @@ pub enum Elem {
     Gap,
     /// The pad between a cap or edge and the content, and around a group.
     Pad,
-    /// One module's decorated render.
-    Module,
+    /// One module's decorated render, by its id (`text.<name>` for a text
+    /// module).
+    Module(String),
     /// The separator between two modules.
     Separator,
-    /// A run of modules the layout could not keep apart, because the group
-    /// was cut or scrolled and the boundary falls wherever the window does.
-    Group,
+    /// A run of modules cut or scrolled as one, with the cells each module
+    /// still owns, counted from the run's first cell: a module may own two
+    /// runs when it straddles the ticker's wrap, the module a cut lands in
+    /// owns the ellipsis cells, and a module wholly outside the window owns
+    /// none (SPEC § 14). Empty when a whole line was recut.
+    Group(Vec<(String, Range<usize>)>),
     /// A row's or a box's title.
     Title,
+}
+
+impl Elem {
+    /// The module ids that own cells of this piece, each with the cells it
+    /// owns counted from the piece's first cell.
+    #[must_use]
+    pub fn owners(&self, width: usize) -> Vec<(String, Range<usize>)> {
+        match self {
+            Self::Module(id) => vec![(id.clone(), 0..width)],
+            Self::Group(map) => map.clone(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 /// One piece of a line: what it is, and the segments that draw it.
@@ -95,11 +112,27 @@ impl Line {
             .collect()
     }
 
+    /// Every module that owns cells of this line, with the cells it owns:
+    /// the placement map of SPEC § 14, in line order.
+    #[must_use]
+    pub fn modules(&self) -> Vec<(String, Range<usize>)> {
+        self.spans()
+            .into_iter()
+            .flat_map(|(elem, range)| {
+                elem.owners(range.end.saturating_sub(range.start)).into_iter().map(
+                    move |(id, r)| {
+                        (id, range.start.saturating_add(r.start)..range.start.saturating_add(r.end))
+                    },
+                )
+            })
+            .collect()
+    }
+
     /// Replace the line's segments, keeping one piece per original piece is
     /// not possible after a cut, so the result is one piece.
     fn recut(&self, width: usize, ellipsis: &str) -> Self {
         let segs = truncate(&self.segments(), width, ellipsis);
-        Self { pieces: vec![Piece { elem: Elem::Group, segs }] }
+        Self { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs }] }
     }
 }
 
@@ -147,6 +180,11 @@ pub enum Content<'a> {
         left: &'a [Vec<Segment>],
         /// The right-anchored modules.
         right: &'a [Vec<Segment>],
+        /// The id behind each entry of `left`, for the placement map
+        /// (SPEC § 14); an entry with none is drawn as an unnamed module.
+        left_ids: &'a [String],
+        /// The id behind each entry of `right`.
+        right_ids: &'a [String],
     },
     /// `[[row.col.row]]`: the column is a stack of rows.
     Stack(Vec<Row<'a>>),
@@ -381,7 +419,7 @@ fn row_ends_in_content(row: &Row<'_>) -> bool {
 
 fn col_ends_in_content(col: &Col<'_>) -> bool {
     match &col.content {
-        Content::Groups { left, right } => {
+        Content::Groups { left, right, .. } => {
             !right.is_empty() || (col.justify == Justify::Right && !left.is_empty())
         }
         Content::Stack(rows) => rows.iter().any(row_ends_in_content),
@@ -621,7 +659,7 @@ impl Layout<'_> {
     /// still (SPEC § 4.3).
     fn auto_width(col: &Col<'_>, row: &Row<'_>) -> usize {
         match &col.content {
-            Content::Groups { left, right } => {
+            Content::Groups { left, right, .. } => {
                 let sep = display_width(row.separator);
                 let join = |g: &[Vec<Segment>]| {
                     let text: usize = g.iter().map(|m| segments_width(m)).sum();
@@ -703,8 +741,15 @@ impl Layout<'_> {
         fit: Fit,
     ) -> Vec<Vec<Draft>> {
         let content: Vec<Vec<Draft>> = match &col.content {
-            Content::Groups { left, right } => {
-                let group = Group { left, right, justify: col.justify, separator: row.separator };
+            Content::Groups { left, right, left_ids, right_ids } => {
+                let group = Group {
+                    left,
+                    right,
+                    left_ids,
+                    right_ids,
+                    justify: col.justify,
+                    separator: row.separator,
+                };
                 vec![self.compose_group(&group, width, fill, fit)]
             }
             Content::Stack(rows) => blocks(rows)
@@ -790,7 +835,7 @@ impl Layout<'_> {
 /// Composing one column's line from its groups.
 impl Layout<'_> {
     /// `n` cells of whatever fills empty space in this mode.
-    const fn filler(n: usize, fill: Fill, elem: Elem) -> Draft {
+    fn filler(n: usize, fill: Fill, elem: Elem) -> Draft {
         match fill {
             Fill::Rule => Draft::Rule(n),
             Fill::Spaces | Fill::Packed => Draft::Space(n, elem),
@@ -810,8 +855,11 @@ impl Layout<'_> {
     ///
     /// A module that rendered nothing is not a column of its own (SPEC § 4),
     /// so it takes no separator with it: the render has already left it out.
-    fn group_pieces(&self, group: &[Vec<Segment>], separator: &str) -> Vec<Piece> {
-        let modules = group.iter().map(|module| Piece { elem: Elem::Module, segs: module.clone() });
+    fn group_pieces(&self, group: &[Vec<Segment>], ids: &[String], separator: &str) -> Vec<Piece> {
+        let modules = group.iter().enumerate().map(|(i, module)| Piece {
+            elem: Elem::Module(ids.get(i).cloned().unwrap_or_default()),
+            segs: module.clone(),
+        });
         if separator.is_empty() {
             return modules.collect();
         }
@@ -833,16 +881,34 @@ impl Layout<'_> {
         if !cut || width <= budget {
             return pieces;
         }
+        // Where each module sits in the uncut run, so the placement map can
+        // say which cells of the window it still owns (SPEC § 14).
+        let mut owned: Vec<(String, Range<usize>)> = Vec::new();
+        let mut at = 0_usize;
+        for piece in &pieces {
+            let end = at.saturating_add(segments_width(&piece.segs));
+            if let Elem::Module(id) = &piece.elem {
+                owned.push((id.clone(), at..end));
+            }
+            at = end;
+        }
         let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
-        let segs = self.ticker.as_ref().filter(|_| scrolls).map_or_else(
-            || truncate(&segs, budget, self.ellipsis),
+        let (segs, map) = self.ticker.as_ref().filter(|_| scrolls).map_or_else(
+            || {
+                let ellipsis = display_width(crate::ansi::fit(self.ellipsis, budget));
+                let kept = budget.saturating_sub(ellipsis);
+                (truncate(&segs, budget, self.ellipsis), cut_map(&owned, kept, budget))
+            },
             |ticker| {
                 let period = segments_width(&segs).saturating_add(display_width(&ticker.gap));
                 let offset = crate::time::frame(ticker.now, ticker.step, period);
-                scroll(&segs, budget, offset, &ticker.gap, true)
+                (
+                    scroll(&segs, budget, offset, &ticker.gap, true),
+                    scrolled_map(&owned, offset, period, budget),
+                )
             },
         );
-        vec![Piece { elem: Elem::Group, segs }]
+        vec![Piece { elem: Elem::Group(map), segs }]
     }
 
     /// One column's line: the flex form when the column has a `right` group,
@@ -873,7 +939,7 @@ impl Layout<'_> {
 
     /// [`Self::compose_group`] inside the column's own cells.
     fn compose_cells(&self, group: &Group<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Draft> {
-        let Group { left, right, justify, separator } = *group;
+        let Group { left, right, left_ids, right_ids, justify, separator } = *group;
         let pad_w = display_width(&self.chars.pad);
         let cell = self.fill_cell(fill);
         // `truncate = false` lets the last column run past the box; every
@@ -884,7 +950,8 @@ impl Layout<'_> {
         // The right group is never *scrolled* (SPEC § 4.1), but it is cut
         // to its column like anything else: a group wider than the column
         // used to push the columns beside it off their shares.
-        let right_pieces = self.fit_group(self.group_pieces(right, separator), width, cut, false);
+        let right_pieces =
+            self.fit_group(self.group_pieces(right, right_ids, separator), width, cut, false);
         let right_w: usize = right_pieces.iter().map(|p| segments_width(&p.segs)).sum();
 
         if fill == Fill::Packed || exact {
@@ -895,7 +962,7 @@ impl Layout<'_> {
             // An `auto` column is its content, so it is only ever short of
             // room when the row clamped it; scrolling there would move a
             // column that is meant to hold still (SPEC § 4.3).
-            let pieces = self.group_pieces(left, separator);
+            let pieces = self.group_pieces(left, left_ids, separator);
             let mut pieces = self.fit_group(pieces, budget, cut, !exact);
             if right_w > 0 {
                 if !pieces.is_empty() && !separator.is_empty() {
@@ -928,7 +995,7 @@ impl Layout<'_> {
             // The flex form: left anchored left, right anchored right, the
             // rule between them, the left group cut first.
             let right_block = right_w.saturating_add(pad_w);
-            let left_pieces = self.group_pieces(left, separator);
+            let left_pieces = self.group_pieces(left, left_ids, separator);
             let has_left = !left_pieces.is_empty();
             let join = cell.saturating_add(if has_left { pad_w } else { 0 });
             let budget = width.saturating_sub(right_block).saturating_sub(join);
@@ -949,7 +1016,7 @@ impl Layout<'_> {
 
         // A lone group: the rule on one side, or both when it is centred.
         let sides = if justify == Justify::Center { 2 } else { 1 };
-        let pieces = self.group_pieces(left, separator);
+        let pieces = self.group_pieces(left, left_ids, separator);
         let budget = width.saturating_sub(cell.saturating_add(pad_w).saturating_mul(sides));
         let pieces = self.fit_group(pieces, budget, cut, true);
         let text_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
@@ -978,8 +1045,61 @@ impl Layout<'_> {
 struct Group<'a> {
     left: &'a [Vec<Segment>],
     right: &'a [Vec<Segment>],
+    left_ids: &'a [String],
+    right_ids: &'a [String],
     justify: Justify,
     separator: &'a str,
+}
+
+/// The cells each module keeps once a run is cut to `budget` cells with
+/// `kept` of text before the ellipsis (SPEC § 14): the module the cut lands
+/// in owns the ellipsis cells too, and a module wholly past the cut owns
+/// nothing.
+fn cut_map(
+    owned: &[(String, Range<usize>)],
+    kept: usize,
+    budget: usize,
+) -> Vec<(String, Range<usize>)> {
+    let mut out: Vec<(String, Range<usize>)> = Vec::new();
+    let mut ellipsis_owned = kept >= budget;
+    for (id, r) in owned {
+        let start = r.start.min(kept);
+        let mut end = r.end.min(kept);
+        if !ellipsis_owned && r.end > kept {
+            end = budget;
+            ellipsis_owned = true;
+        }
+        if end > start {
+            out.push((id.clone(), start..end));
+        }
+    }
+    out
+}
+
+/// The cells each module keeps in a `budget`-cell window `offset` cells into
+/// a run that repeats every `period` cells (SPEC § 14): a module straddling
+/// the wrap owns a run at each end of the window.
+fn scrolled_map(
+    owned: &[(String, Range<usize>)],
+    offset: usize,
+    period: usize,
+    budget: usize,
+) -> Vec<(String, Range<usize>)> {
+    let window_end = offset.saturating_add(budget);
+    let mut out: Vec<(String, Range<usize>)> = Vec::new();
+    // Two repetitions cover the window: the offset is below one period and
+    // the window is narrower than one.
+    for base in [0_usize, period] {
+        for (id, r) in owned {
+            let start = r.start.saturating_add(base).max(offset);
+            let end = r.end.saturating_add(base).min(window_end);
+            if end > start {
+                out.push((id.clone(), start.saturating_sub(offset)..end.saturating_sub(offset)));
+            }
+        }
+    }
+    out.sort_by_key(|(_, r)| r.start);
+    out
 }
 
 impl Group<'_> {
@@ -1450,7 +1570,11 @@ const fn split(spare: usize, justify: Justify) -> (usize, usize) {
 fn blank_line(line: Line) -> Line {
     let segs = line.segments();
     let kept = crate::render::keep_blank(segs.clone());
-    if kept == segs { line } else { Line { pieces: vec![Piece { elem: Elem::Group, segs: kept }] } }
+    if kept == segs {
+        line
+    } else {
+        Line { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs: kept }] }
+    }
 }
 
 #[cfg(test)]
@@ -1527,7 +1651,12 @@ mod tests {
                     justify: Justify::Left,
                     valign: VAlign::Top,
                     boxed: None,
-                    content: Content::Groups { left: &left, right: &right },
+                    content: Content::Groups {
+                        left: &left,
+                        right: &right,
+                        left_ids: &[],
+                        right_ids: &[],
+                    },
                 }],
                 gap: 1,
                 separator,
@@ -1709,7 +1838,7 @@ mod tests {
             justify: Justify::Left,
             valign: VAlign::Top,
             boxed: None,
-            content: Content::Groups { left, right: &[] },
+            content: Content::Groups { left, right: &[], left_ids: &[], right_ids: &[] },
         }
     }
 
@@ -2121,8 +2250,85 @@ mod tests {
             assert_eq!(at, line.width(), "the spans cover the line: {:?}", line.spans());
             assert_eq!(at, f.width);
         }
-        for want in [Elem::Cap, Elem::Pad, Elem::Module, Elem::Rule, Elem::Title, Elem::BoxEdge] {
+        for want in [Elem::Cap, Elem::Pad, Elem::Rule, Elem::Title, Elem::BoxEdge] {
             assert!(kinds.contains(&want), "{want:?} never drawn: {kinds:?}");
         }
+        assert!(kinds.iter().any(|k| matches!(k, Elem::Module(_))), "no module: {kinds:?}");
+    }
+
+    /// SPEC § 14: the placement map names the module behind every cell it
+    /// owns, in a cut run as well as a scrolled one. A cut module owns the
+    /// ellipsis, a module past the cut owns nothing, and a module straddling
+    /// the ticker's wrap owns a run at each end of the window.
+    #[test]
+    fn the_placement_map_names_modules_through_a_cut_and_a_scroll() {
+        let owned = |ids: &[&str]| -> Vec<(String, Range<usize>)> {
+            let mut at = 0_usize;
+            ids.iter()
+                .map(|id| {
+                    let r = at..at + 5;
+                    at += 6; // five cells of text, a one-cell separator
+                    ((*id).to_owned(), r)
+                })
+                .collect()
+        };
+        // 17 cells (`aaaaa bbbbb ccccc`) cut to 9: `aaaaa bb…`, so `a` keeps
+        // its five, `b` keeps two and the ellipsis, `c` nothing.
+        let cut = cut_map(&owned(&["a", "b", "c"]), 8, 9);
+        assert_eq!(cut, vec![("a".to_owned(), 0..5), ("b".to_owned(), 6..9)]);
+        // A cut landing on the separator gives the ellipsis to the module
+        // after it, whose text it stands for.
+        let cut = cut_map(&owned(&["a", "b"]), 5, 6);
+        assert_eq!(cut, vec![("a".to_owned(), 0..5), ("b".to_owned(), 5..6)]);
+        // Scrolled 14 cells into a 20-cell period (17 + a three-cell gap)
+        // with a 9-cell window: `b` has scrolled off, `c` shows its last
+        // three cells, the gap, then `a` wraps in with three cells.
+        let scrolled = scrolled_map(&owned(&["a", "b", "c"]), 14, 20, 9);
+        assert_eq!(scrolled, vec![("c".to_owned(), 0..3), ("a".to_owned(), 6..9)]);
+        // Through the layout: a ticker line's `Group` piece carries the map,
+        // and `Line::modules` offsets it to the line's own cells.
+        let left: Vec<Vec<Segment>> =
+            vec![vec![Segment::plain("aaaaa")], vec![Segment::plain("bbbbb")]];
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        let mut f = Fixture::new(FrameStyle::None, false, 8);
+        f.ticker = Some(Ticker {
+            step: 1.0,
+            gap: "   ".to_owned(),
+            now: jiff::Timestamp::from_second(3).unwrap(),
+        });
+        let l = f.layout();
+        let rows = vec![Row {
+            cols: vec![Col {
+                width: Width::Fr(1),
+                justify: Justify::Left,
+                valign: VAlign::Top,
+                boxed: None,
+                content: Content::Groups {
+                    left: &left,
+                    right: &[],
+                    left_ids: &ids,
+                    right_ids: &[],
+                },
+            }],
+            gap: 1,
+            separator: " ",
+            title: None,
+            boxed: None,
+            blank: false,
+        }];
+        let lines = l.lines(&rows);
+        let line = lines.first().and_then(|r| r.first()).unwrap();
+        assert_eq!(Painter::PLAIN.paint(&line.segments()), "aa bbbbb");
+        assert_eq!(line.modules(), vec![("a".to_owned(), 0..2), ("b".to_owned(), 3..8)]);
+        // And an uncut run names each module piece by piece.
+        let f = Fixture::new(FrameStyle::Rounded, true, 30);
+        let l = f.layout();
+        let lines = l.lines(&rows);
+        let line = lines.first().and_then(|r| r.first()).unwrap();
+        let map = line.modules();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[0].0, "a");
+        assert_eq!(map[0].1, 3..8, "{map:?}");
+        assert_eq!(map[1].1, 9..14, "{map:?}");
     }
 }

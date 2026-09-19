@@ -629,7 +629,10 @@ struct RawConfig {
     modules: BTreeMap<String, toml::Table>,
 }
 
-const TOP_KEYS: [&str; 23] = [
+/// Every key the top level of the file accepts, in the order the "expected
+/// one of" message names them (`line` and `hide_empty_lines` are the
+/// aliases of SPEC § 4.3).
+pub const TOP_KEYS: [&str; 23] = [
     "preset",
     "icons",
     "theme",
@@ -1339,17 +1342,37 @@ pub fn parse_with(
     overlay: &Overlay,
 ) -> (Config, Vec<ConfigError>) {
     let mut errors = Vec::new();
-    let mut raw = match toml::from_str::<toml::Table>(text) {
-        Ok(table) => RawConfig::from_table(table, &mut errors),
+    let table = match toml::from_str::<toml::Table>(text) {
+        Ok(table) => table,
         Err(e) => {
             // The whole file falls back to the defaults, under the same
             // command-line overrides as a good file would be: `preview
             // --color never` of a broken config must still be plain.
             let line = e.span().map(|s| line_of(text, s.start));
             errors.push(ConfigError { path: String::new(), message: e.message().to_owned(), line });
-            RawConfig::default()
+            toml::Table::new()
         }
     };
+    let (config, more) = resolve_table(table, schemas, overlay);
+    errors.extend(more);
+    (config, errors)
+}
+
+/// [`parse`] of a file already read as a TOML table: what `setup` renders
+/// its draft through on every edit (SPEC § 14), so an edit never round-trips
+/// through text.
+#[must_use]
+pub fn parse_table(table: toml::Table, schemas: &[ModuleSchema]) -> (Config, Vec<ConfigError>) {
+    resolve_table(table, schemas, &Overlay::default())
+}
+
+fn resolve_table(
+    table: toml::Table,
+    schemas: &[ModuleSchema],
+    overlay: &Overlay,
+) -> (Config, Vec<ConfigError>) {
+    let mut errors = Vec::new();
+    let mut raw = RawConfig::from_table(table, &mut errors);
     if overlay.preset.is_some() {
         // The preset's rows replace the file's, so their problems are moot.
         let key = format!("{}[", raw.rows_key());
@@ -3518,14 +3541,17 @@ x = 1
         // allocation or a loop on every tick; it is reported and defaulted.
         let big = "[modules.context]\nwidth = 99999999999\n[modules.text.a]\ntext = \"hi\"\nwidth = 1025\npad = 4000000000\n[modules.limit5h]\nbar_width = 1025\n";
         let (c, errs) = parse(big, &crate::modules::SCHEMAS);
+        // The modules come in schema order and a table's keys in the order
+        // the file wrote them (the table keeps its order, so `setup` can
+        // write it back as read).
         let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(
             paths,
             [
                 "modules.context.width",
                 "modules.limit5h.bar_width",
-                "modules.text.a.pad",
-                "modules.text.a.width"
+                "modules.text.a.width",
+                "modules.text.a.pad"
             ],
             "{errs:?}"
         );

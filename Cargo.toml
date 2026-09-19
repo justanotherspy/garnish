@@ -13,11 +13,16 @@ clap = { version = "4.6.6", features = ["derive"] }
 color-eyre = "0.6.5"
 itertools = "0.15.0"
 jiff = "0.2.35"
+# The `setup` screen (SPEC § 14); its crossterm backend is the one terminal
+# library, re-exported as `ratatui::crossterm`. No other backend, no macros.
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 # preserve_order: `garnish install` must not reorder the user's settings.json keys.
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
-toml = "1.1.5"
+# preserve_order: `setup` edits the file as a table and writes it back in the
+# order it was written (indexmap is already in the tree through serde_json).
+toml = { version = "1.1.5", features = ["preserve_order"] }
 unicode-width = "0.2.2"
 
 [dev-dependencies]

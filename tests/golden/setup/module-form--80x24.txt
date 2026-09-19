@@ -1,0 +1,24 @@
+p┌ [modules.path] ────────────────────────────────────────────────────────────┐
+▶│  enabled         true                        (true)                        │
+ │  preset          default                     (default)                     │
+r│  refresh         0                           (0)                           │
+r│  label                                       ("")                          │
+r│  prefix                                      ("")                          │
+ │  suffix                                      ("")                          │
+ │  hide_when_empty true                        (true)                        │
+ │  max_width       0                           (0)                           │
+ │  show_icon       true                        (true)                        │
+ │  depth           2                           (2)                           │
+ │  style           full                        ("full")                      │
+ │  show_subpath    true                        (true)                        │
+ │  show_added      false                       (false)                       │
+ │  icons.folder    ❒                           (❒)                           │
+ │  icons.added     +                           (+)                           │
+ │  colors.icon     #7dd3a0                     (accent)                      │
+ │  colors.base     #cdd6f4                     (text)                        │
+ │  colors.subpath  #6c7086                     (muted)                       │
+ │Render this module at all.                                                  │
+ │                                                                            │
+ │                                                                            │
+ │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
+↑└────────────────────────────────────────────────────────────────────────────┘f

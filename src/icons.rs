@@ -105,6 +105,42 @@ pub const fn glyph(
     Glyph { nerd, unicode, emoji, ascii }
 }
 
+/// Alternatives worth trying for an icon, by module id and icon key (SPEC § 14).
+///
+/// The `setup` glyph picker lists them after the four sets, and each module
+/// page lists them as *also try*. Every glyph here passes the width guard
+/// the built-in sets pass (one cell, no variation selector).
+#[must_use]
+pub fn suggestions(module: &str, key: &str) -> &'static [&'static str] {
+    match (module, key) {
+        ("model", "model") => &["", "", "", "❖", "✦", "✧"],
+        ("model", "fast") => &["⚡", "↯", "*"],
+        ("effort", "effort") => &["", "", "⚙", "✱"],
+        ("context", "context") => &["", "", "⊞", "⊟", "⊡"],
+        ("context" | "limit5h" | "limit7d" | "spend", "fill") => &["█", "━", "▓", "#", "="],
+        ("context" | "limit5h" | "limit7d" | "spend", "empty") => &["░", "─", "▒", ".", "-"],
+        ("branch", "branch") => &["", "", "", "⎇", "⌥", "⑂"],
+        ("branch", "dirty") => &["✱", "*", "+", "~"],
+        ("path", "folder") => &["", "", "", "❒", "❏"],
+        ("clock", "spinner") => &["⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "|/-\\", "▁▃▅▇█▇▅▃", "⣾⣽⣻⢿⡿⣟⣯⣷", "⠁⠂⠄⡀⢀⠠⠐⠈"],
+        ("session", "session") => &["", "", "⏱", "⌛"],
+        ("api", "api") => &["", "", "⇄", "⇵"],
+        ("cache", "cache") => &["", "", "⛁", "⛃"],
+        ("cost", "cost") => &["", "", "$", "¢"],
+        ("limit5h" | "limit7d" | "spend", "window") => &["", "", "⏳", "≣", "⌛"],
+        ("pr", "pr") => &["", "", "⇄", "⇋"],
+        ("session_name", "name") => &["", "", "❯", "›"],
+        ("agent", "agent") => &["", "", "", "⚙"],
+        ("lines", "lines") => &["", "", "Δ", "∆"],
+        ("vim", "vim") => &["", "", "V"],
+        ("style", "style") => &["", "", "✎", "✏"],
+        ("worktree", "worktree") => &["", "", "", "⌂"],
+        ("sync", "ahead") => &["⇡", "⇈", "^"],
+        ("sync", "behind") => &["⇣", "⇊", "v"],
+        _ => &[],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

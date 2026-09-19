@@ -113,9 +113,12 @@ fn golden_renders_match() {
             format!("{}--{preset}--{icons}.txt", f.file_stem().unwrap().to_str().unwrap())
         })
         .collect();
+    // `tests/golden/setup/` is the setup screen's (tests/setup.rs), with a
+    // guard of its own.
     let orphans: Vec<String> = std::fs::read_dir(&golden_dir)
         .unwrap()
         .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| !n.starts_with("config--") && !expected.contains(n))
         .collect();

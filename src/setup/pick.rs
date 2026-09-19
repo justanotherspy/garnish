@@ -1,0 +1,526 @@
+//! The overlay layers of `setup` (SPEC § 14).
+//!
+//! A list to choose from with a filter line, a one-line text input, a
+//! yes/no question and the help page. Each turns keys into [`Action`]s for
+//! the app to apply; none touches the draft itself.
+
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Clear, Paragraph};
+
+use super::app::{Action, Key};
+use super::ui::{Chrome, cells, centered, clip, hints, window};
+
+/// What a chosen value is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// Set a config key to the value.
+    Slot(super::form::Slot, super::form::SlotKind),
+    /// Add the module id at the builder's cursor.
+    AddModule,
+    /// Replace the draft with the named preset (the builder's `p`).
+    Preset,
+    /// Show the named fixture.
+    Fixture,
+    /// Wrap the row (or box the column) at the path in the named box.
+    BoxFor(super::draft::RowAt, bool),
+    /// Preview at the typed terminal width.
+    Columns,
+}
+
+/// One entry of a [`Choose`] list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choice {
+    /// What the list shows.
+    pub label: Line<'static>,
+    /// The text the filter matches and the value that is picked.
+    pub value: String,
+    /// Picking it opens an input for a typed value instead.
+    pub custom: bool,
+}
+
+impl Choice {
+    /// A plain entry whose label is its value.
+    #[must_use]
+    pub fn plain(value: &str) -> Self {
+        Self { label: Line::from(value.to_owned()), value: value.to_owned(), custom: false }
+    }
+
+    /// An entry shown as `value  note`.
+    #[must_use]
+    pub fn noted(value: &str, note: &str) -> Self {
+        Self {
+            label: Line::from(vec![
+                Span::raw(value.to_owned()),
+                Span::raw("  "),
+                Span::styled(note.to_owned(), Chrome::muted()),
+            ]),
+            value: value.to_owned(),
+            custom: false,
+        }
+    }
+
+    /// The `custom…` entry that opens an input line.
+    #[must_use]
+    pub fn custom(what: &str) -> Self {
+        Self {
+            label: Line::from(Span::styled(format!("{what}…"), Chrome::title())),
+            value: String::new(),
+            custom: true,
+        }
+    }
+}
+
+/// A list to pick one entry from, narrowed by what is typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choose {
+    /// The heading.
+    pub title: String,
+    /// Every entry, in the order given.
+    pub items: Vec<Choice>,
+    /// What is typed into the filter.
+    pub filter: String,
+    /// The cursor, as an index into the *matching* entries.
+    pub cursor: usize,
+    scroll: usize,
+    /// What the pick is for.
+    pub target: Target,
+    /// The input line's title when `custom` is picked.
+    pub custom_title: String,
+}
+
+impl Choose {
+    /// A list for `target`, headed `title`.
+    #[must_use]
+    pub fn new(title: &str, items: Vec<Choice>, target: Target) -> Self {
+        Self {
+            title: title.to_owned(),
+            items,
+            filter: String::new(),
+            cursor: 0,
+            scroll: 0,
+            target,
+            custom_title: title.to_owned(),
+        }
+    }
+
+    /// The entries that match the filter, best first.
+    #[must_use]
+    pub fn matching(&self) -> Vec<&Choice> {
+        if self.filter.is_empty() {
+            return self.items.iter().collect();
+        }
+        let ranked = super::fuzzy::rank(&self.filter, self.items.iter().map(|c| c.value.as_str()));
+        let mut out: Vec<&Choice> = ranked
+            .iter()
+            .filter_map(|v| self.items.iter().find(|c| c.value == *v && !c.custom))
+            .collect();
+        out.extend(self.items.iter().filter(|c| c.custom));
+        out
+    }
+
+    /// Handle a key: the outcome says what to do.
+    pub fn handle(&mut self, key: Key) -> Outcome {
+        let n = self.matching().len();
+        match key {
+            Key::Esc => Outcome::close(),
+            Key::Up => {
+                self.cursor = self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
+                Outcome::default()
+            }
+            Key::Down | Key::Tab => {
+                self.cursor = self.cursor.saturating_add(1).checked_rem(n.max(1)).unwrap_or(0);
+                Outcome::default()
+            }
+            Key::PageUp => {
+                self.cursor = self.cursor.saturating_sub(10);
+                Outcome::default()
+            }
+            Key::PageDown => {
+                self.cursor = self.cursor.saturating_add(10).min(n.saturating_sub(1));
+                Outcome::default()
+            }
+            Key::Home => {
+                self.cursor = 0;
+                Outcome::default()
+            }
+            Key::End => {
+                self.cursor = n.saturating_sub(1);
+                Outcome::default()
+            }
+            Key::Backspace => {
+                self.filter.pop();
+                self.cursor = 0;
+                Outcome::default()
+            }
+            Key::Char(c) if !c.is_control() => {
+                self.filter.push(c);
+                self.cursor = 0;
+                Outcome::default()
+            }
+            Key::Enter => {
+                let Some(choice) = self.matching().get(self.cursor).copied().cloned() else {
+                    return Outcome::default();
+                };
+                if choice.custom {
+                    return Outcome {
+                        close: true,
+                        push: Some(Layer::Input(InputBox::new(
+                            &self.custom_title,
+                            "",
+                            self.target.clone(),
+                        ))),
+                        actions: Vec::new(),
+                    };
+                }
+                Outcome {
+                    close: true,
+                    push: None,
+                    actions: vec![Action::Picked(self.target.clone(), choice.value)],
+                }
+            }
+            _ => Outcome::default(),
+        }
+    }
+
+    /// Draw the list as a dialog over `area`.
+    pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let matching: Vec<Choice> = self.matching().into_iter().cloned().collect();
+        let width = matching
+            .iter()
+            .map(|c| c.label.width())
+            .max()
+            .unwrap_or(20)
+            .max(self.title.len().saturating_add(4))
+            .saturating_add(6)
+            .clamp(30, 70);
+        let height = matching.len().saturating_add(5).clamp(7, usize::from(area.height));
+        let rect = centered(area, cells(width), cells(height));
+        frame.render_widget(Clear, rect);
+        let block =
+            Block::bordered().title(Span::styled(format!(" {} ", self.title), Chrome::title()));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        let list_height = usize::from(inner.height.saturating_sub(2));
+        self.scroll = window(self.cursor, matching.len(), list_height, self.scroll);
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for (i, c) in matching.iter().enumerate().skip(self.scroll).take(list_height) {
+            let mut line = c.label.clone();
+            if i == self.cursor {
+                line = line.style(Chrome::selected());
+            }
+            lines.push(line);
+        }
+        while lines.len() < list_height {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(vec![
+            Span::styled("type to filter: ", Chrome::muted()),
+            Span::raw(self.filter.clone()),
+            Span::styled("▏", Chrome::muted()),
+        ]));
+        lines.push(hints(&[("↑↓", "move"), ("enter", "pick"), ("esc", "back")]));
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+/// A one-line text input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputBox {
+    /// The heading.
+    pub title: String,
+    /// The text so far.
+    pub text: String,
+    /// What the text is for.
+    pub target: Target,
+}
+
+impl InputBox {
+    /// An input for `target`, starting with `text`.
+    #[must_use]
+    pub fn new(title: &str, text: &str, target: Target) -> Self {
+        Self { title: title.to_owned(), text: text.to_owned(), target }
+    }
+
+    /// Handle a key.
+    pub fn handle(&mut self, key: Key) -> Outcome {
+        match key {
+            Key::Esc => Outcome::close(),
+            Key::Enter => Outcome {
+                close: true,
+                push: None,
+                actions: vec![Action::Typed(self.target.clone(), self.text.clone())],
+            },
+            Key::Backspace => {
+                self.text.pop();
+                Outcome::default()
+            }
+            Key::Ctrl('u') => {
+                self.text.clear();
+                Outcome::default()
+            }
+            Key::Char(c) if !c.is_control() => {
+                self.text.push(c);
+                Outcome::default()
+            }
+            _ => Outcome::default(),
+        }
+    }
+
+    /// Draw the input as a small dialog over `area`.
+    pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let width = self.text.len().max(self.title.len()).saturating_add(8).clamp(34, 70);
+        let rect = centered(area, cells(width), 5);
+        frame.render_widget(Clear, rect);
+        let block =
+            Block::bordered().title(Span::styled(format!(" {} ", self.title), Chrome::title()));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        let shown = clip(&self.text, usize::from(inner.width).saturating_sub(2));
+        let lines = vec![
+            Line::from(vec![Span::raw(shown), Span::styled("▏", Chrome::muted())]),
+            Line::from(""),
+            hints(&[("enter", "apply"), ("esc", "cancel"), ("ctrl-u", "clear")]),
+        ];
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+/// What a yes/no question is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Question {
+    /// Quit with unsaved edits.
+    QuitUnsaved,
+    /// The file changed on disk since it was read: `true` overwrites,
+    /// `false` reloads.
+    OverwriteOrReload,
+    /// Drop the `[modules.text.<name>]` table whose last placement went.
+    DropText(String),
+    /// Apply the install plan.
+    Install,
+}
+
+/// A yes/no question.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Confirm {
+    /// The question, one or two lines.
+    pub text: Vec<String>,
+    /// The two answers, `yes` first.
+    pub answers: (String, String),
+    /// Which is highlighted.
+    pub yes: bool,
+    /// What a `yes` (or `no`) does.
+    pub question: Question,
+}
+
+impl Confirm {
+    /// A question with `yes`/`no` answers.
+    #[must_use]
+    pub fn new(question: Question, text: &[&str], yes: &str, no: &str) -> Self {
+        Self {
+            text: text.iter().map(|s| (*s).to_owned()).collect(),
+            answers: (yes.to_owned(), no.to_owned()),
+            yes: false,
+            question,
+        }
+    }
+
+    /// Handle a key.
+    pub fn handle(&mut self, key: Key) -> Outcome {
+        match key {
+            Key::Esc | Key::Char('n') => Outcome {
+                close: true,
+                push: None,
+                actions: vec![Action::Answered(self.question.clone(), false)],
+            },
+            Key::Char('y') => Outcome {
+                close: true,
+                push: None,
+                actions: vec![Action::Answered(self.question.clone(), true)],
+            },
+            Key::Left | Key::Right | Key::Tab | Key::Up | Key::Down => {
+                self.yes = !self.yes;
+                Outcome::default()
+            }
+            Key::Enter => Outcome {
+                close: true,
+                push: None,
+                actions: vec![Action::Answered(self.question.clone(), self.yes)],
+            },
+            _ => Outcome::default(),
+        }
+    }
+
+    /// Draw the question as a dialog over `area`.
+    pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let width =
+            self.text.iter().map(String::len).max().unwrap_or(0).saturating_add(6).clamp(36, 72);
+        let height = self.text.len().saturating_add(4);
+        let rect = centered(area, cells(width), cells(height));
+        frame.render_widget(Clear, rect);
+        let block = Block::bordered();
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        let mut lines: Vec<Line<'static>> =
+            self.text.iter().map(|t| Line::from(t.clone())).collect();
+        lines.push(Line::from(""));
+        let pick = |on: bool, text: &str| {
+            Span::styled(format!(" {text} "), if on { Chrome::selected() } else { Style::new() })
+        };
+        lines.push(Line::from(vec![
+            pick(self.yes, &self.answers.0),
+            Span::raw("   "),
+            pick(!self.yes, &self.answers.1),
+            Span::raw("     "),
+            Span::styled("y / n / enter", Chrome::muted()),
+        ]));
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+/// The help page: every key of the screen it was opened from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Help {
+    /// The heading.
+    pub title: String,
+    /// `key`, `meaning` pairs.
+    pub keys: Vec<(String, String)>,
+}
+
+impl Help {
+    /// Handle a key: any key closes the page.
+    #[must_use]
+    pub const fn handle(&self, _key: Key) -> Outcome {
+        Outcome::close()
+    }
+
+    /// Draw the page over `area`.
+    pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let width = self
+            .keys
+            .iter()
+            .map(|(k, w)| k.len().saturating_add(w.len()))
+            .max()
+            .unwrap_or(20)
+            .saturating_add(8)
+            .clamp(40, 80);
+        let height = self.keys.len().saturating_add(4);
+        let rect = centered(area, cells(width), cells(height));
+        frame.render_widget(Clear, rect);
+        let block =
+            Block::bordered().title(Span::styled(format!(" {} ", self.title), Chrome::title()));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        let mut lines: Vec<Line<'static>> = self
+            .keys
+            .iter()
+            .map(|(k, w)| {
+                Line::from(vec![
+                    Span::styled(format!("{k:<12}"), Chrome::key()),
+                    Span::raw(w.clone()),
+                ])
+            })
+            .collect();
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("any key closes this page", Chrome::muted())));
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+/// An overlay over a screen (SPEC § 14: `Esc` closes the innermost one).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Layer {
+    /// A form of fields.
+    Form(super::form::Form),
+    /// A list to pick from.
+    Choose(Choose),
+    /// A line of text.
+    Input(InputBox),
+    /// A yes/no question.
+    Confirm(Confirm),
+    /// The help page.
+    Help(Help),
+}
+
+/// What a layer asks the app to do after a key.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Outcome {
+    /// Close this layer.
+    pub close: bool,
+    /// Open this layer on top.
+    pub push: Option<Layer>,
+    /// Apply these, in order.
+    pub actions: Vec<Action>,
+}
+
+impl Outcome {
+    /// Close the layer and nothing else.
+    #[must_use]
+    pub const fn close() -> Self {
+        Self { close: true, push: None, actions: Vec::new() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_list_filters_wraps_and_picks_or_opens_the_custom_input() {
+        let items =
+            vec![Choice::plain("sync"), Choice::plain("session_name"), Choice::custom("custom")];
+        let mut c = Choose::new("Module", items, Target::AddModule);
+        assert_eq!(c.matching().len(), 3);
+        c.handle(Key::Up);
+        assert_eq!(c.cursor, 2, "wraps");
+        c.handle(Key::Down);
+        assert_eq!(c.cursor, 0);
+        for ch in "sn".chars() {
+            c.handle(Key::Char(ch));
+        }
+        let names: Vec<&str> = c.matching().iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["session_name", "sync", ""],
+            "the initialism outranks the subsequence; the custom entry stays last"
+        );
+        let out = c.handle(Key::Enter);
+        assert!(out.close);
+        assert_eq!(out.actions, vec![Action::Picked(Target::AddModule, "session_name".into())]);
+        c.handle(Key::Backspace);
+        c.handle(Key::Backspace);
+        c.handle(Key::End);
+        let out = c.handle(Key::Enter);
+        assert!(matches!(out.push, Some(Layer::Input(_))), "custom opens an input");
+        assert!(c.handle(Key::Esc).close);
+    }
+
+    #[test]
+    fn inputs_and_questions_report_what_was_typed_or_answered() {
+        let mut i = InputBox::new("Title", "ab", Target::Fixture);
+        i.handle(Key::Char('c'));
+        i.handle(Key::Backspace);
+        let out = i.handle(Key::Enter);
+        assert_eq!(out.actions, vec![Action::Typed(Target::Fixture, "ab".into())]);
+        i.handle(Key::Ctrl('u'));
+        assert_eq!(i.text, "");
+        let mut q = Confirm::new(Question::QuitUnsaved, &["Quit?"], "quit", "stay");
+        assert_eq!(
+            q.handle(Key::Char('y')).actions,
+            vec![Action::Answered(Question::QuitUnsaved, true)]
+        );
+        q.handle(Key::Tab);
+        assert_eq!(
+            q.handle(Key::Enter).actions,
+            vec![Action::Answered(Question::QuitUnsaved, true)]
+        );
+        assert_eq!(
+            q.handle(Key::Esc).actions,
+            vec![Action::Answered(Question::QuitUnsaved, false)]
+        );
+        let h = Help { title: "Keys".into(), keys: vec![("q".into(), "quit".into())] };
+        assert!(h.handle(Key::Char('x')).close);
+    }
+}

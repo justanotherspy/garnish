@@ -1,0 +1,40 @@
+preview  subscription-full: a Pro/Max session with every field set  ·  140 cols, box 136  ·  9 lines
+  ╔═ Repository ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+  ║  ~/projects/garnish │  #42                                                                                           garnish-dev ║
+  ║  Opus │  ▁▃▅▇█                                                                                                                     ║
+  ╚══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+  ╭─────────────────────────────────────────────────────────────── Usage ────────────────────────────────────────────────────────────────╮
+  │  ████████▍░░░░░░░░░░▏ 42% │  24%  2h13m │  41%  3d04h                                                                           │
+  │                                                                                                                            +156 −23 │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ──  1h12m │  8m20s │  91% 1h  47m00s ───────────────────────────────────────────────────────────────────────────────── ⠋ 16:00:00 ──
+boxed-panels  two titled boxes, one around the repo rows and one around usage  needs nerd-font  designed for 120 columns
+ default                  four lines, every module at its default
+ minimal                  one unframed line, the bare values
+ full                     four lines, everything each module knows
+ compact                  two lines
+ animated-dots            dots travelling along the rule, a pulsing separator and a cycling model icon
+ bars-and-limits          40-cell line-style context bar with window tag, mini bars on the limits
+ boxed-panels             two titled boxes, one around the repo rows and one around usage
+ compact-aligned          two rounded lines with stacked bars, Catppuccin Mocha
+ dashboard-panels         a full-height repo box, a centred column, and three stacked panels
+ dracula-256              Dracula with role and per-module colour overrides in 256-colour mode
+ emoji-overrides          emoji icons with per-module glyph overrides and name limits
+ full-aligned             every module at full verbosity, columns aligned, fixed timers
+ grid-six                 six equal columns, one module each, over a full-width flex row
+ grid-three               three columns side by side — repo, model, usage — reading left, centre, right
+ labels-and-placeholders  labels, brackets, dim – for absent modules, UTC clock with date
+ minimal-clean            one unframed line: path, context, limit, clock
+ motd-ticker              repo line plus a scrolling message of the day in a fixed 24-cell box
+ packed-heavy             custom heavy frame, left-packed rows, a separator per row
+ session-detail           session, api, cache and cost detail, plain stale style, 1 s git refresh
+ single-line-full         everything on one row, always scrolling as a ticker (200 columns is a comfortable window)
+ tall-eight-lines         one module per row, eight rows, square frame
+ three-lines-double       repo / model / timers in a double frame
+ two-lines-powerline      location and model only, powerline caps, no colour
+
+
+
+
+
+↑↓ preset  enter use it  e edit it  f payload  w width  esc back  ? help

@@ -402,7 +402,7 @@ fn cache_section(o: &mut String, cache: &Cache) {
 /// Every `GARNISH_*` test hook, named by the constant each reader uses so a
 /// new hook cannot be added without a row here (SPEC § 9 Test hooks; a unit
 /// test scans the source for a hook this list forgot).
-pub const TEST_HOOKS: [&str; 8] = [
+pub const TEST_HOOKS: [&str; 9] = [
     config::CONFIG_ENV,
     crate::cache::CACHE_DIR_ENV,
     crate::time::NOW_ENV,
@@ -411,6 +411,7 @@ pub const TEST_HOOKS: [&str; 8] = [
     crate::debug::DEBUG_ENV,
     crate::time::ANIMATE_ENV,
     crate::claude_settings::MANAGED_SETTINGS_ENV,
+    crate::cli::STDIN_TTY_ENV,
 ];
 
 fn environment_section(o: &mut String) {

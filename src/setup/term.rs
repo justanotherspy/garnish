@@ -1,0 +1,165 @@
+//! The terminal side of `setup` (SPEC § 14).
+//!
+//! Raw mode, the alternate screen and mouse capture on the way in, all
+//! three undone on the way out, on `Ctrl+C` and on a panic; crossterm
+//! events as the screen's own inputs.
+
+use std::io::Write as _;
+use std::time::Duration;
+
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEventKind,
+};
+use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+
+use super::app::{App, Input, Key, Mouse};
+
+/// The terminal put back the way it was found, whichever way `setup` ends.
+///
+/// The panic hook is chained ahead of the one already installed
+/// (color-eyre's), so a report prints on a restored terminal; it runs
+/// before the release profile's abort, since a hook runs before unwinding
+/// (or aborting) starts.
+struct Guard;
+
+impl Guard {
+    fn enter() -> std::io::Result<Self> {
+        enable_raw_mode()?;
+        let mut out = std::io::stdout();
+        execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore();
+            previous(info);
+        }));
+        Ok(Self)
+    }
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        restore();
+    }
+}
+
+/// Leave the alternate screen, drop mouse capture and raw mode. Safe to
+/// call twice: every step is idempotent, and a failure to undo one is not
+/// worth a report on the way out.
+fn restore() {
+    let mut out = std::io::stdout();
+    let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
+    let _ = disable_raw_mode();
+    let _ = out.flush();
+}
+
+/// The screen's input for a crossterm event, or `None` for one it ignores
+/// (a key release, focus, a mouse move).
+#[must_use]
+pub fn input(event: &Event) -> Option<Input> {
+    match *event {
+        Event::Key(k) if k.kind != KeyEventKind::Release => {
+            let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+            let key = match k.code {
+                KeyCode::Char('c') if ctrl => Key::CtrlC,
+                KeyCode::Char(c) if ctrl => Key::Ctrl(c),
+                KeyCode::Char(c) => Key::Char(c),
+                KeyCode::Enter => Key::Enter,
+                KeyCode::Esc => Key::Esc,
+                KeyCode::Tab => Key::Tab,
+                KeyCode::BackTab => Key::BackTab,
+                KeyCode::Up => Key::Up,
+                KeyCode::Down => Key::Down,
+                KeyCode::Left => Key::Left,
+                KeyCode::Right => Key::Right,
+                KeyCode::Backspace => Key::Backspace,
+                KeyCode::Delete => Key::Delete,
+                KeyCode::Home => Key::Home,
+                KeyCode::End => Key::End,
+                KeyCode::PageUp => Key::PageUp,
+                KeyCode::PageDown => Key::PageDown,
+                _ => return None,
+            };
+            Some(Input::Key(key))
+        }
+        Event::Mouse(m) => {
+            let kind = match m.kind {
+                MouseEventKind::Down(MouseButton::Left) => Mouse::Click,
+                MouseEventKind::ScrollUp => Mouse::Wheel(-1),
+                MouseEventKind::ScrollDown => Mouse::Wheel(1),
+                _ => return None,
+            };
+            Some(Input::Mouse { x: m.column, y: m.row, kind })
+        }
+        Event::Resize(w, h) => Some(Input::Resize(w, h)),
+        _ => None,
+    }
+}
+
+/// Run the screen until it asks to quit: draw, wait for an event (or a
+/// quarter second, so the clock-driven animations move), feed it in.
+///
+/// # Errors
+/// A terminal that cannot be put into raw mode or drawn to.
+pub fn run(app: &mut App) -> std::io::Result<()> {
+    let guard = Guard::enter()?;
+    let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+    let mut terminal = ratatui::Terminal::new(backend)?;
+    let size = terminal.size()?;
+    app.input(Input::Resize(size.width, size.height));
+    while !app.done() {
+        terminal.draw(|frame| app.draw(frame))?;
+        let next = if event::poll(Duration::from_millis(250))? {
+            input(&event::read()?)
+        } else {
+            Some(Input::Tick)
+        };
+        if let Some(i) = next {
+            app.input(i);
+        }
+    }
+    drop(guard);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::crossterm::event::{KeyEvent, MouseEvent};
+
+    #[test]
+    fn crossterm_events_become_inputs_and_releases_are_ignored() {
+        let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::NONE));
+        assert_eq!(input(&key(KeyCode::Char('q'))), Some(Input::Key(Key::Char('q'))));
+        assert_eq!(input(&key(KeyCode::BackTab)), Some(Input::Key(Key::BackTab)));
+        assert_eq!(
+            input(&Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))),
+            Some(Input::Key(Key::CtrlC))
+        );
+        assert_eq!(
+            input(&Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))),
+            Some(Input::Key(Key::Ctrl('s')))
+        );
+        let mut release = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        release.kind = KeyEventKind::Release;
+        assert_eq!(input(&Event::Key(release)), None);
+        assert_eq!(input(&key(KeyCode::F(1))), None);
+        let mouse = |kind| {
+            Event::Mouse(MouseEvent { kind, column: 3, row: 4, modifiers: KeyModifiers::NONE })
+        };
+        assert_eq!(
+            input(&mouse(MouseEventKind::Down(MouseButton::Left))),
+            Some(Input::Mouse { x: 3, y: 4, kind: Mouse::Click })
+        );
+        assert_eq!(
+            input(&mouse(MouseEventKind::ScrollDown)),
+            Some(Input::Mouse { x: 3, y: 4, kind: Mouse::Wheel(1) })
+        );
+        assert_eq!(input(&mouse(MouseEventKind::Moved)), None);
+        assert_eq!(input(&Event::Resize(80, 24)), Some(Input::Resize(80, 24)));
+        assert_eq!(input(&Event::FocusGained), None);
+    }
+}

@@ -821,6 +821,59 @@ mod tests {
         }
     }
 
+    /// SPEC § 14: the glyph picker's suggested alternatives pass the same
+    /// guard as the sets, one or two cells by every table (a spinner
+    /// suggestion is a string of one-cell frames), and every one names a
+    /// module and key that exist.
+    #[test]
+    fn suggested_glyphs_pass_the_same_guard_as_the_sets() {
+        let private_use = |g: &str| g.chars().all(|c| ('\u{e000}'..='\u{f8ff}').contains(&c));
+        let mut seen = 0_usize;
+        let mut offenders = Vec::new();
+        for schema in SCHEMAS.iter() {
+            for icon in &schema.icons {
+                for glyph in crate::icons::suggestions(schema.id, icon.key) {
+                    seen = seen.saturating_add(1);
+                    if private_use(glyph) {
+                        continue;
+                    }
+                    let frames: Vec<String> = if icon.key == "spinner" {
+                        glyph.chars().map(|c| c.to_string()).collect()
+                    } else {
+                        vec![(*glyph).to_owned()]
+                    };
+                    for frame in frames {
+                        let problem = glyph_problem(&frame).map(str::to_owned).or_else(|| {
+                            let cells = frame.width();
+                            let limit = if icon.key == "spinner" { 1 } else { 2 };
+                            (cells == 0 || cells > limit).then(|| format!("{cells} cells"))
+                        });
+                        if let Some(problem) = problem {
+                            offenders
+                                .push(format!("{}.{}: {frame:?} {problem}", schema.id, icon.key));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "suggestions terminals disagree on:\n{}",
+            offenders.join("\n")
+        );
+        assert!(seen >= 40, "{seen} suggestions");
+        let none: [&str; 0] = [];
+        assert_eq!(crate::icons::suggestions("nope", "model"), none);
+        assert_eq!(crate::icons::suggestions("model", "nope"), none);
+        // A suggestion for a key no schema declares would never be shown.
+        for (module, key) in [("model", "model"), ("sync", "ahead"), ("clock", "spinner")] {
+            assert!(
+                SCHEMAS.iter().any(|s| s.id == module && s.icon(key).is_some()),
+                "{module}.{key}"
+            );
+        }
+    }
+
     /// The `fill`/`empty`/`marker` vocabulary belongs to the bar: every
     /// schema that declares one of those keys declares a one-cell glyph in
     /// every icon set, which is what lets the config reject a wider

@@ -10,7 +10,7 @@ use garnish::modules::{Ctx, SCHEMAS};
 use garnish::payload::Payload;
 use garnish::render::{Clock, render_lines_at};
 
-const PAYLOAD: &str = include_str!("../tests/fixtures/payloads/subscription-full.json");
+const PAYLOAD: &str = garnish::fixtures::FIXTURES[0].text;
 
 fn parse_payload(c: &mut Criterion) {
     c.bench_function("parse_payload", |b| b.iter(|| Payload::parse(black_box(PAYLOAD))));

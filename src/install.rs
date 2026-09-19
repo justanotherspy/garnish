@@ -248,6 +248,299 @@ pub struct Outcome {
     pub changed: bool,
 }
 
+/// What `garnish install` was asked for: the flags of the command, which the
+/// `setup` install screen fills in with their defaults (SPEC § 14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Options {
+    /// `--settings`; the default user settings file when `None`.
+    pub settings: Option<PathBuf>,
+    /// `--refresh-interval` (seconds, at least 1).
+    pub refresh_interval: u64,
+    /// `--padding`.
+    pub padding: Option<u64>,
+    /// `--absolute`: write this binary's path instead of `garnish`.
+    pub absolute: bool,
+    /// Write the default config when none exists (`--no-config` clears it).
+    pub write_config: bool,
+    /// Write the bundled skills (`--no-skills` clears it).
+    pub write_skills: bool,
+    /// `--config` or `GARNISH_CONFIG`: where the config goes.
+    pub config_path: Option<PathBuf>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            settings: None,
+            refresh_interval: 1,
+            padding: None,
+            absolute: false,
+            write_config: true,
+            write_skills: true,
+            config_path: None,
+        }
+    }
+}
+
+/// Why a plan could not be made or applied (SPEC § 5): each is one line to
+/// a person, and the CLI turns them into its quiet exit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// No home directory and no flag saying where a file goes: `flag` names
+    /// the flag, `what` the file.
+    NoHome {
+        /// The flag to pass (`--settings <FILE>`).
+        flag: &'static str,
+        /// What the flag places (`settings.json is`).
+        what: &'static str,
+    },
+    /// A file that does not parse, which is never rewritten.
+    Unparsable {
+        /// The file.
+        path: PathBuf,
+        /// The problem, as `doctor` words it.
+        problem: String,
+    },
+    /// Anything the file system refused, naming the file.
+    Io(String),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoHome { flag, what } => {
+                write!(f, "HOME is not set; pass {flag} to say where {what}")
+            }
+            Self::Unparsable { path, problem } => write!(
+                f,
+                "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
+                path.display()
+            ),
+            Self::Io(e) => f.write_str(e),
+        }
+    }
+}
+
+impl std::error::Error for Refusal {}
+
+/// The config half of a plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigStep {
+    /// `--no-config`.
+    Skipped,
+    /// A config already exists there; `padding` is the value it would need
+    /// to match a `--padding` the user gave, which the report notes.
+    Exists {
+        /// The file.
+        path: PathBuf,
+        /// `2 × --padding`, when that flag was given.
+        padding: Option<u64>,
+    },
+    /// The annotated default file will be written there, seeded with
+    /// `padding` when `--padding` was given.
+    Write {
+        /// The file.
+        path: PathBuf,
+        /// `2 × --padding`, when that flag was given.
+        padding: Option<u64>,
+    },
+}
+
+/// Everything `install` decides before it writes anything.
+///
+/// The settings text merged, the config and skills paths, the refusals
+/// found. The CLI prints it (`--dry-run`) or applies it; the `setup` install
+/// screen shows the same plan and applies it through the same code
+/// (SPEC § 14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Steps {
+    /// The `statusLine` object and where it goes.
+    pub plan: Plan,
+    /// The settings text on disk, when the file exists.
+    pub existing: Option<String>,
+    /// The settings text to write.
+    pub merged: String,
+    /// The config half.
+    pub config: ConfigStep,
+    /// Where the skills go, unless `--no-skills`.
+    pub skills: Option<PathBuf>,
+    /// `garnish` is on `PATH` (or the plan writes an absolute path), so the
+    /// command written will be found.
+    pub found: bool,
+}
+
+/// What applying a plan did, one line per thing, plus the notes a person
+/// should read (the CLI prints those on stderr, the screen in its status bar).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Applied {
+    /// What was written, one line each.
+    pub lines: Vec<String>,
+    /// Advice that is not an error.
+    pub notes: Vec<String>,
+}
+
+impl Steps {
+    /// Decide everything `install` would do for `options`, writing nothing.
+    ///
+    /// # Errors
+    /// A missing home, an unreadable or unparsable settings file, or a
+    /// binary whose own path cannot be found (`--absolute`).
+    pub fn plan(options: &Options) -> Result<Self, Refusal> {
+        let command = if options.absolute {
+            std::env::current_exe()
+                .map_err(|e| Refusal::Io(format!("locating this binary: {e}")))?
+                .display()
+                .to_string()
+        } else {
+            "garnish".to_owned()
+        };
+        let Some(settings) = options.settings.clone().or_else(default_settings_path) else {
+            return Err(Refusal::NoHome { flag: "--settings <FILE>", what: "settings.json is" });
+        };
+        let plan = Plan {
+            settings,
+            command,
+            refresh_interval: options.refresh_interval.max(1),
+            padding: options.padding,
+        };
+        let found = options.absolute || on_path("garnish", std::env::var_os("PATH").as_deref());
+        let existing = read_existing(&plan.settings).map_err(Refusal::Io)?;
+        let merged = merge(existing.as_deref().unwrap_or(""), &plan)
+            .map_err(|problem| Refusal::Unparsable { path: plan.settings.clone(), problem })?;
+        // The harness pads both sides, so the config mirrors
+        // statusLine.padding doubled (SPEC § 2.1).
+        let padding = options.padding.map(|p| p.saturating_mul(2));
+        let config = if options.write_config {
+            let target = options
+                .config_path
+                .clone()
+                .or_else(|| crate::config::env_path(crate::config::CONFIG_ENV))
+                .or_else(crate::config::default_path);
+            let Some(path) = target else {
+                return Err(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" });
+            };
+            if path.exists() {
+                ConfigStep::Exists { path, padding }
+            } else {
+                ConfigStep::Write { path, padding }
+            }
+        } else {
+            ConfigStep::Skipped
+        };
+        let skills = options.write_skills.then(|| crate::skills::default_dir(&plan.settings));
+        Ok(Self { plan, existing, merged, config, skills, found })
+    }
+
+    /// Whether the settings file already carries exactly this plan.
+    #[must_use]
+    pub fn settings_up_to_date(&self) -> bool {
+        self.existing.as_deref() == Some(self.merged.as_str())
+    }
+
+    /// Whether the settings file already names a `statusLine.command`: what
+    /// the `setup` picker checks before offering the install screen.
+    #[must_use]
+    pub fn statusline_configured(&self) -> bool {
+        self.existing.as_deref().is_some_and(|text| {
+            serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(text))
+                .ok()
+                .and_then(|v| v.get("statusLine")?.get("command")?.as_str().map(str::to_owned))
+                .is_some_and(|c| !c.is_empty())
+        })
+    }
+
+    /// The `--dry-run` report: what would be written, the settings text
+    /// included.
+    #[must_use]
+    pub fn dry_run(&self) -> Vec<String> {
+        let mut lines = vec![format!("would write {}:", self.plan.settings.display())];
+        lines.push(self.merged.trim_end().to_owned());
+        match &self.config {
+            ConfigStep::Write { path, padding } => {
+                lines.push(format!(
+                    "would write a default config to {}{}",
+                    path.display(),
+                    seeded(*padding)
+                ));
+            }
+            ConfigStep::Exists { .. } | ConfigStep::Skipped => {}
+        }
+        if let Some(dir) = &self.skills {
+            lines.push(format!(
+                "would write {} skill(s) to {}",
+                crate::skills::SKILLS.len(),
+                dir.display()
+            ));
+        }
+        lines
+    }
+
+    /// The advice a plan carries whether it is applied or not: the PATH
+    /// warning, and the `padding` a config that already exists would need.
+    #[must_use]
+    pub fn notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        if !self.found {
+            notes.push(
+                "warning: `garnish` is not on PATH; run `make install` first or use --absolute"
+                    .to_owned(),
+            );
+        }
+        if let ConfigStep::Exists { path, padding: Some(p) } = &self.config {
+            notes.push(format!(
+                "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
+                path.display()
+            ));
+        }
+        notes
+    }
+
+    /// Write everything the plan decided: the settings (with `install`'s
+    /// backup), the default config when none exists, the skills last (the
+    /// optional part, so a problem with them never leaves the settings
+    /// updated and the config unwritten).
+    ///
+    /// # Errors
+    /// The first I/O failure, naming the file; whatever was written before
+    /// it stays.
+    pub fn apply(&self) -> Result<Applied, Refusal> {
+        let mut applied = Applied { lines: Vec::new(), notes: self.notes() };
+        let settings = self.plan.settings.display();
+        if self.settings_up_to_date() {
+            applied.lines.push(format!("{settings} already up to date"));
+        } else {
+            let backup = replace_file(&self.plan.settings, &self.merged, self.existing.is_some())
+                .map_err(Refusal::Io)?;
+            applied.lines.push(backup.map_or_else(
+                || format!("wrote {settings}"),
+                |b| format!("updated {settings} (backup: {})", b.display()),
+            ));
+        }
+        if let ConfigStep::Write { path, padding } = &self.config {
+            let seed = padding.map_or_else(String::new, |p| format!("padding = {p}\n"));
+            let (cfg, _) = crate::config::parse(&seed, &crate::modules::SCHEMAS);
+            replace_file(path, &crate::docs::config_toml(&cfg, true), false)
+                .map_err(Refusal::Io)?;
+            applied.lines.push(format!(
+                "wrote default config to {}{}",
+                path.display(),
+                seeded(*padding)
+            ));
+        }
+        if let Some(dir) = &self.skills {
+            let report = crate::skills::install(dir)
+                .map_err(|e| Refusal::Io(format!("writing skills to {}: {e}", dir.display())))?;
+            applied.lines.push(report.summary());
+        }
+        Ok(applied)
+    }
+}
+
+/// The ` (padding = N)` tail of a config line.
+fn seeded(padding: Option<u64>) -> String {
+    padding.map_or_else(String::new, |p| format!(" (padding = {p})"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

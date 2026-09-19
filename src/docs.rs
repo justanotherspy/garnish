@@ -544,18 +544,6 @@ fn toml_list(items: &[String]) -> String {
     format!("[{}]", items.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "))
 }
 
-/// Payload fixtures embedded for the documentation renders.
-const FIXTURES: [(&str, &str); 8] = [
-    ("subscription-full", include_str!("../tests/fixtures/payloads/subscription-full.json")),
-    ("output-style", include_str!("../tests/fixtures/payloads/output-style.json")),
-    ("api-key", include_str!("../tests/fixtures/payloads/api-key.json")),
-    ("worktree-session", include_str!("../tests/fixtures/payloads/worktree-session.json")),
-    ("pr-approved", include_str!("../tests/fixtures/payloads/pr-approved.json")),
-    ("spend-limit", include_str!("../tests/fixtures/payloads/spend-limit.json")),
-    ("vim", include_str!("../tests/fixtures/payloads/vim.json")),
-    ("agent", include_str!("../tests/fixtures/payloads/agent.json")),
-];
-
 /// The fixture that shows a module best.
 fn sample_fixture(id: &str) -> &'static str {
     match id {
@@ -571,11 +559,7 @@ fn sample_fixture(id: &str) -> &'static str {
 }
 
 fn fixture(name: &str) -> Payload {
-    FIXTURES
-        .iter()
-        .find(|(n, _)| *n == name)
-        .and_then(|(_, text)| Payload::parse(text).ok())
-        .unwrap_or_default()
+    crate::fixtures::payload(name)
 }
 
 /// Render one module alone with a preset and icon set, as plain text.

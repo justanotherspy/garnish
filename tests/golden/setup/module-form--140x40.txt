@@ -1,0 +1,40 @@
+preview  subscription-full: a Pro/Max session with every field set  ·  140 cols, box 136  ·  2 lines
+▶ ╭─ ❒ ~/projects/garnish ────────────────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+  ╰─ ❖ Opus │ ⊞ ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────────────────────────────────────────────────────────────────────╯
+rows  ~/garnish.toml
+row 1     path  branch  sync   │ clock
+row 2     model  context   │ cost
+                               ┌ [modules.path] ────────────────────────────────────────────────────────────┐
+                               │  enabled         true                        (true)                        │
+                               │  preset          default                     (default)                     │
+                               │  refresh         0                           (0)                           │
+                               │  label                                       ("")                          │
+                               │  prefix                                      ("")                          │
+                               │  suffix                                      ("")                          │
+                               │  hide_when_empty true                        (true)                        │
+                               │  max_width       0                           (0)                           │
+                               │  show_icon       true                        (true)                        │
+                               │  depth           2                           (2)                           │
+                               │  style           full                        ("full")                      │
+                               │  show_subpath    true                        (true)                        │
+                               │  show_added      false                       (false)                       │
+                               │  icons.folder    ❒                           (❒)                           │
+                               │  icons.added     +                           (+)                           │
+                               │  colors.icon     #7dd3a0                     (accent)                      │
+                               │  colors.base     #cdd6f4                     (text)                        │
+                               │  colors.subpath  #6c7086                     (muted)                       │
+                               │  colors.added    #6c7086                     (muted)                       │
+                               │                                                                            │
+                               │                                                                            │
+                               │Render this module at all.                                                  │
+                               │                                                                            │
+                               │                                                                            │
+                               │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
+                               └────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+↑↓←→ select  enter edit  m module  a row  C column  t title  b box  1 2 3 keys frame colours  s save  q quit  ? help

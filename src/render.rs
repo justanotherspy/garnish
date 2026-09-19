@@ -216,6 +216,21 @@ pub fn render_rows_at(
     columns: Option<usize>,
     clock: &Clock,
 ) -> Vec<Vec<crate::layout::Line>> {
+    render_tree_at(payload, config, columns, clock).into_iter().map(|(_, lines)| lines).collect()
+}
+
+/// [`render_rows_at`] with each entry tagged by the index of its `[[row]]`.
+///
+/// A row whose modules all rendered nothing is dropped, so the lines that
+/// remain would otherwise not say which configured row they belong to; the
+/// `setup` builder's row list needs to know (SPEC § 14).
+#[must_use]
+pub fn render_tree_at(
+    payload: &Payload,
+    config: &Config,
+    columns: Option<usize>,
+    clock: &Clock,
+) -> Vec<(usize, Vec<crate::layout::Line>)> {
     let width = config.width(columns);
     let cache =
         clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
@@ -271,9 +286,10 @@ pub fn render_rows_at(
     let mut tree: Vec<RowRender<'_>> = config
         .rows
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(index, row)| {
             let sep = config.separator_at(row, frame);
-            render_row(&ctx, config, row, sep, stale, &ellipsis)
+            RowRender { index, ..render_row(&ctx, config, row, sep, stale, &ellipsis) }
         })
         .collect();
     if config.align {
@@ -291,12 +307,15 @@ pub fn render_rows_at(
         tree.retain(|row| row.cfg.spacer || !row.is_empty());
     }
     let rows: Vec<crate::layout::Row<'_>> = tree.iter().map(RowRender::to_layout).collect();
-    layout.lines(&rows)
+    tree.iter().map(|r| r.index).zip(layout.lines(&rows)).collect()
 }
 
 /// One configured row with every module of it rendered, before any width is
 /// decided: alignment and `auto` columns both need the whole tree first.
 struct RowRender<'a> {
+    /// The row's index in `config.rows` (0 for an inner row, which is
+    /// addressed through its column).
+    index: usize,
     cfg: &'a config::RowCfg,
     separator: &'a str,
     cols: Vec<ColRender<'a>>,
@@ -310,6 +329,9 @@ struct ColRender<'a> {
     justify: config::Justify,
     left: Vec<Vec<Segment>>,
     right: Vec<Vec<Segment>>,
+    /// The id behind each entry of `left` and `right` (SPEC § 14).
+    left_ids: Vec<String>,
+    right_ids: Vec<String>,
     rows: Vec<RowRender<'a>>,
 }
 
@@ -341,7 +363,12 @@ impl<'a> ColRender<'a> {
         // than as an empty flex column (a rule): the two look different, and
         // the column's neighbours have not changed (SPEC § 4.3).
         let content = if self.cfg.rows.is_empty() {
-            crate::layout::Content::Groups { left: &self.left, right: &self.right }
+            crate::layout::Content::Groups {
+                left: &self.left,
+                right: &self.right,
+                left_ids: &self.left_ids,
+                right_ids: &self.right_ids,
+            }
         } else {
             crate::layout::Content::Stack(self.rows.iter().map(RowRender::to_layout).collect())
         };
@@ -386,16 +413,12 @@ fn render_row<'a>(
                     rendered
                 })
                 .collect();
-            ColRender {
-                cfg: col,
-                justify: col.justify,
-                left: render_group(ctx, config, &col.left, stale, ellipsis),
-                right: render_group(ctx, config, &col.right, stale, ellipsis),
-                rows,
-            }
+            let (left_ids, left) = render_group(ctx, config, &col.left, stale, ellipsis);
+            let (right_ids, right) = render_group(ctx, config, &col.right, stale, ellipsis);
+            ColRender { cfg: col, justify: col.justify, left, right, left_ids, right_ids, rows }
         })
         .collect();
-    RowRender { cfg: row, separator, cols }
+    RowRender { index: 0, cfg: row, separator, cols }
 }
 
 /// `align = true` (SPEC § 4.3): module *k* of a column is padded to the
@@ -572,14 +595,15 @@ fn align_columns(groups: &mut [Vec<Vec<Segment>>], from_right: bool, pad_left: b
 }
 
 /// Every module of a group rendered and decorated, each cut to its
-/// `max_width` (SPEC § 3); a module that rendered nothing is left out.
+/// `max_width` (SPEC § 3), with the ids behind them in step; a module that
+/// rendered nothing is left out of both.
 fn render_group(
     ctx: &Ctx<'_>,
     config: &Config,
     ids: &[String],
     stale: (&str, &str),
     ellipsis: &str,
-) -> Vec<Vec<Segment>> {
+) -> (Vec<String>, Vec<Vec<Segment>>) {
     ids.iter()
         .filter_map(|id| {
             // `text.<name>` comes from the config, not the fixed registry
@@ -587,7 +611,7 @@ fn render_group(
             if let Some(name) = id.strip_prefix(modules::text::PREFIX) {
                 let cfg = config.texts.get(name).filter(|c| c.enabled)?;
                 let rendered = modules::text::render(ctx, cfg);
-                return Some(decorate(rendered, cfg, &config.theme, stale));
+                return Some((id.clone(), decorate(rendered, cfg, &config.theme, stale)));
             }
             let entry = modules::entry(id)?;
             let cfg = config.modules.get(entry.schema.id)?;
@@ -603,11 +627,11 @@ fn render_group(
                 _ => rendered,
             };
             let module = decorate(rendered, cfg, &config.theme, stale);
-            Some(cap_width(module, cfg.max_width, ellipsis))
+            Some((id.clone(), cap_width(module, cfg.max_width, ellipsis)))
         })
         // A module that rendered nothing is not a column (SPEC § 4).
-        .filter(|module| !module.is_empty())
-        .collect()
+        .filter(|(_, module)| !module.is_empty())
+        .unzip()
 }
 
 /// `max_width` (SPEC § 3): the decorated module cut to `max` cells with the

@@ -1,0 +1,40 @@
+preview  subscription-full: a Pro/Max session with every field set  ·  140 cols, box 136  ·  2 lines
+▶ ╭─ ❒ ~/projects/garnish ────────────────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+  ╰─ ❖ Opus │ ⊞ ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────────────────────────────────────────────────────────────────────╯
+rows  ~/garnish.toml
+row 1     path  branch  sync   │ clock
+row 2     model  context   │ cost
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+↑↓←→ select  enter edit  m module  a row  C column  t title  b box  1 2 3 keys frame colours  s save  q quit  ? help
