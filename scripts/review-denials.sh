@@ -160,6 +160,26 @@ shapes="$(
   '
 )"
 
+# `$(…)`, a backtick and a redirect do not split on an operator, so a command
+# refused for carrying one looks single and innocent above. Name the construct
+# instead of the command.
+constructs="$(
+  printf '%s' "$result" | jq -r '
+    (.permission_denials // [])
+    | map(select(.tool_name == "Bash") | (.tool_input.command // ""))
+    | map(
+        [ (select(test("\\$\\(")) | "$( … )"),
+          (select(test("`")) | "` … `"),
+          (select(test("\\$\\{")) | "${ … }"),
+          (select(test("[0-9]?>>?[^|]")) | "redirect") ]
+      )
+    | flatten
+    | group_by(.)
+    | map("\(length)\t\(.[0])")
+    | .[]
+  '
+)"
+
 if [ -n "$shapes" ]; then
   echo
   echo "#### Refused as a whole line"
@@ -169,6 +189,18 @@ if [ -n "$shapes" ]; then
   echo
   echo '```'
   printf '%s\n' "$shapes"
+  echo '```'
+fi
+
+if [ -n "$constructs" ]; then
+  echo
+  echo "#### Shell constructs among the denials"
+  echo
+  echo "These do not split on an operator, so the commands carrying them look"
+  echo "single above. One command per call, with no substitution, is the rule."
+  echo
+  echo '```'
+  printf '%s\n' "$constructs"
   echo '```'
 fi
 

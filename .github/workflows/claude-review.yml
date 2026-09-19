@@ -126,6 +126,27 @@ jobs:
           ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head
           fetch-depth: 0
 
+      # The diff, handed to the review as a file rather than left for it to
+      # fetch. Five runs in a row died trying to get or slice it through
+      # `Bash`, the last one on `git diff … | wc -l` with *both* `Bash(git:*)`
+      # and `Bash(wc:*)` allowed (run 35453133607), which is the run that
+      # settled it: a compound command is refused here whatever its parts are
+      # allowed to do, so no allowlist can buy the review a pipeline. `Read`
+      # needs no allowlist entry at all, and this step is plain job shell with
+      # no permission system in front of it.
+      - name: Collect the diff for the review
+        id: diff
+        if: steps.gate.outputs.review == 'true'
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BASE_BRANCH"
+          base="$(git merge-base FETCH_HEAD HEAD)"
+          git diff --stat "$base" HEAD > "$RUNNER_TEMP/pr.diffstat"
+          git diff "$base" HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "Collected $(wc -l < "$RUNNER_TEMP/pr.diff") lines of diff against $BASE_BRANCH ($base)."
+
       - name: Review
         id: review
         if: steps.gate.outputs.review == 'true'
@@ -151,6 +172,18 @@ jobs:
 
             Review this pull request. The PR branch is already checked out in
             the working directory.
+
+            **The diff is already collected for you. Do not fetch it.**
+
+            - `${{ runner.temp }}/pr.diffstat` - the per-file summary. Read
+              this first; it is small and it tells you where to look.
+            - `${{ runner.temp }}/pr.diff` - the full diff against the merge
+              base. `Read` it in slices, or `Grep` it, rather than in one go.
+
+            `Read` and `Grep` need no permission and cannot be refused. Use
+            them for the diff and for the tree. `git` is available if you want
+            history a diff cannot show, but you should not need it to see what
+            changed.
 
             Read `CLAUDE.md` first, and `SPEC.md` when the change touches
             behaviour rather than only internals. They are the project's own
@@ -202,10 +235,15 @@ jobs:
             list, one line per finding, blocking ones first. A reviewer should
             be able to read the whole review in a minute.
 
-            You may fan the review out with subagents, one per dimension, and
-            on a large diff you should. Give each a narrow brief and have it
-            report findings back to you; you post them, since a subagent
-            cannot.
+            **Prefer to review it yourself.** Your context window holds a
+            diff this size several times over, and every run that has failed
+            here failed with subagents outstanding: the parent stopped while
+            they were still going and posted nothing. You may fan out, but
+            treat it as a cost, not a default, and never end your own run
+            while a subagent is unfinished - wait for it, or drop it and
+            write the summary from what you have. Give each a narrow brief,
+            tell it the tool rules below, and have it report back to you; you
+            post, since a subagent cannot.
 
             You have a turn budget, and every inline comment, every progress
             update and every subagent spends from it. The summary comment is
@@ -230,11 +268,12 @@ jobs:
             (`gh pr comment`, the inline-comment tool). Anything else is
             refused.
 
-            **A pipeline is refused unless every command in it is allowed**,
-            so `git diff | less` dies on `less` and takes the `git diff` with
-            it. Keep each call to one command; when you need less output, ask
-            for less of it (`--stat`, `-- <path>`, `head`) rather than piping
-            into a pager. Reach for `Read` and `Grep` first; if a call is
+            **A compound command is refused even when each part of it is
+            allowed.** `git diff … | wc -l` was refused with both `git` and
+            `wc` on this list. So no pipe, no `&&`, no `;`, no `$(…)` - one
+            command per call, always. When you want less output, ask for less
+            of it (`--stat`, `-- <path>`) rather than piping it through
+            something. Reach for `Read` and `Grep` first; if a call is
             denied, do not retry it and do not look for another way around it
             - use the tools you have, and say in the summary what you could
             not check. The same allowlist binds every subagent, so tell each

@@ -309,11 +309,23 @@ allowed whole. That widens less than it sounds: the job holds
 `contents: read` so no push can succeed, the only tree a write could reach
 is a checkout the runner throws away, and the action's own defaults already
 hand the review `git add`, `git commit`, `git rm` and its push script.
-**A pipeline is refused unless every command in it is allowed**, so
-`git diff | less` dies on `less` and takes the `git diff` with it; the
-prompt says so and `review-denials.sh` prints each denied command's verbs
-(`git → less`) beside the grouped keys, because grouping by verb alone
-hides exactly this case.
+**A compound command is refused even when every part of it is allowed.**
+The next run settled that (35453133607): `git diff … | wc -l` refused with
+both `Bash(git:*)` and `Bash(wc:*)` on the list. So no allowlist entry can
+buy the review a pipeline, and the rule is one command per call — no `|`,
+no `&&`, no `;`, no `$(…)`. `review-denials.sh` prints each denied
+command's verbs (`git → wc`) and, separately, the constructs found among
+them (`$( … )`, a backtick, a redirect), because those do not split on an
+operator and a command carrying one looks single and innocent when the
+denials are grouped by verb.
+
+**The fix that ended it was to stop needing `Bash` at all.** The review's
+job is to read a diff, and five runs died trying to obtain or slice one
+through a permission system that refuses compound commands. A step before
+the review now writes `$RUNNER_TEMP/pr.diff` and `pr.diffstat` with plain
+job shell, where no permission system stands, and the prompt points `Read`
+and `Grep` at them. Neither tool can be refused. Give the review what it
+needs as a file rather than teaching it to ask for it.
 
 Two things that were quietly broken the whole time and are worth not
 re-breaking: the checkout was `fetch-depth: 1`, so there was no merge base
