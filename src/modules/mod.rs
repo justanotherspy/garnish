@@ -15,6 +15,7 @@ use crate::icons::IconSet;
 use crate::payload::Payload;
 use crate::theme::Theme;
 
+pub mod badges;
 pub mod context;
 pub mod identity;
 pub mod model;
@@ -215,8 +216,14 @@ pub struct Ctx<'a> {
     /// launched in (not whatever subdirectory the session moved to) and the
     /// home; empty for a pinned render, which reads no settings file.
     pub settings_files: Vec<std::path::PathBuf>,
-    /// The keys of those files, read at most once per tick.
+    /// The keys of those files, read at most once per tick (a pinned
+    /// render may seed them, `Clock.settings_keys`).
     pub settings: std::cell::OnceCell<Vec<crate::claude_settings::FileKeys>>,
+    /// Whether a cached module may look its entry up and spawn a worker
+    /// (`Clock.workers`). Off for docs, goldens and the in-process matrices,
+    /// so a pinned render never touches a cache directory (SPEC § 9); a
+    /// cached module then renders as if its worker had not run yet.
+    pub workers: bool,
 }
 
 impl Ctx<'_> {
@@ -338,6 +345,11 @@ impl Ctx<'_> {
         scope: &Scope,
         valid: impl Fn(&crate::cache::Entry) -> bool,
     ) -> (Lookup, Freshness) {
+        if !self.workers {
+            // A pinned render: no entry, nothing overdue, no worker.
+            let lookup = Lookup { entry: None, fresh: true, in_progress: false };
+            return (lookup, Freshness::Fresh);
+        }
         let ttl_ms = cfg.refresh.saturating_mul(1000);
         let mut lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
         let mismatched = lookup.entry.as_ref().is_some_and(|e| !valid(e));
@@ -482,6 +494,9 @@ fn builtin() -> Vec<Box<dyn Module>> {
         Box::new(identity::AgentModule),
         Box::new(identity::LinesModule),
         Box::new(identity::VersionModule),
+        Box::new(badges::SandboxModule),
+        Box::new(badges::VoiceModule),
+        Box::new(badges::AccountModule),
     ]
 }
 
@@ -516,6 +531,23 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
 #[must_use]
 pub fn lead(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
     if cfg.bool("show_icon") { icon(cfg, icon_key, "icon") } else { Vec::new() }
+}
+
+/// The leading glyph as a module's whole value (`sandbox` and `voice`
+/// under `style = "glyph"`, SPEC § 3.8).
+///
+/// [`lead`] without the space that separates an icon from the value after
+/// it, so the badge is one cell and `align = true` counts it as one. The
+/// `show_icon` rule stays [`lead`]'s.
+#[must_use]
+pub fn lead_only(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
+    lead(cfg, icon_key)
+        .into_iter()
+        .map(|segment| {
+            let bare = segment.text().trim_end().to_owned();
+            segment.with_text(bare)
+        })
+        .collect()
 }
 
 /// A trailing badge: a space and the icon in its own colour, or nothing when
@@ -882,9 +914,10 @@ mod tests {
                     }
                 }
             }
-            // `lead(cfg, "icon")` carries the icon key and, implicitly, the
-            // `icon` colour every module's leading glyph takes.
-            for call in [" lead(", "(lead("] {
+            // `lead(cfg, "icon")` and `lead_only(cfg, "icon")` carry the
+            // icon key and, implicitly, the `icon` colour every module's
+            // leading glyph takes.
+            for call in [" lead(", "(lead(", " lead_only(", "(lead_only("] {
                 for (at, _) in src.match_indices(call) {
                     for key in literal_arguments(&src, at + call.len()).0 {
                         check(&key, at);
@@ -953,6 +986,7 @@ mod tests {
             dirs: std::cell::OnceCell::new(),
             settings_files: Vec::new(),
             settings: std::cell::OnceCell::new(),
+            workers: false,
         };
         let plain = detail(&ctx, cfg, " 8m20s", "12%", "share");
         assert_eq!(plain.len(), 1);

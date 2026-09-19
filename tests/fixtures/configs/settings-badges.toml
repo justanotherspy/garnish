@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# env: HOME=$ROOT/tests/fixtures/settings/badges
+# The user settings under that HOME switch `sandbox.enabled` and
+# `voice.enabled` on, so the two badges of SPEC § 3.8 show beside the
+# version: the glyph alone by default (`sandbox`), the glyph and the word
+# under the `full` preset (`voice`). `account` is left out: its worker
+# cannot run under a golden, so the row would only show that it is empty.
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["version", "sandbox", "voice"]
+
+[modules.voice]
+preset = "full"

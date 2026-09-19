@@ -1153,6 +1153,102 @@ icon = "accent2"
 # version — The version.
 version = "muted"
 
+# sandbox — A badge while Bash sandboxing is on.
+[modules.sandbox]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+# preset = "default"
+refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
+# label (string ≤ 4096 chars) — Dim text before the value.
+label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
+prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
+suffix = ""
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
+# show_icon (bool) — Show the icon. [minimal=true default=true full=true]
+# show_icon = true
+# style (`glyph` | `word`) — `glyph` shows the icon alone; `word` adds the module's name after it. [minimal="glyph" default="glyph" full="word"]
+# style = "glyph"
+[modules.sandbox.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
+# sandbox — Sandbox glyph.
+sandbox = ""
+[modules.sandbox.colors]
+# icon — Icon.
+icon = "accent2"
+# word — The word, under `style = "word"`.
+word = "text"
+
+# voice — A badge while voice dictation is on.
+[modules.voice]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+# preset = "default"
+refresh = 0
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
+# label (string ≤ 4096 chars) — Dim text before the value.
+label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
+prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
+suffix = ""
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
+# show_icon (bool) — Show the icon. [minimal=true default=true full=true]
+# show_icon = true
+# style (`glyph` | `word`) — `glyph` shows the icon alone; `word` adds the module's name after it. [minimal="glyph" default="glyph" full="word"]
+# style = "glyph"
+[modules.voice.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
+# voice — Voice glyph.
+voice = ""
+[modules.voice.colors]
+# icon — Icon.
+icon = "accent2"
+# word — The word, under `style = "word"`.
+word = "text"
+
+# account — The claude.ai account the session is signed in with.
+[modules.account]
+# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+enabled = true
+# preset = "default"
+refresh = 600
+# hide (list of empty) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine
+hide = []
+# label (string ≤ 4096 chars) — Dim text before the value.
+label = ""
+# prefix (string ≤ 4096 chars) — Text before the module.
+prefix = ""
+# suffix (string ≤ 4096 chars) — Text after the module.
+suffix = ""
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+hide_when_empty = true
+# max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
+max_width = 0
+# show_icon (bool) — Show the icon. [minimal=true default=true full=true]
+# show_icon = true
+# style (`email` | `user`) — `email` shows the whole address; `user` the part before `@`. [minimal="user" default="email" full="email"]
+# style = "email"
+[modules.account.icons]
+# Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
+# account — Account icon.
+account = ""
+[modules.account.colors]
+# icon — Icon.
+icon = "accent2"
+# name — The address or user.
+name = "text"
+
 # text.<name> — Static text in a box of fixed width; define any number as `[modules.text.<name>]`.
 # Place it on a line as "text.<name>"; any number may exist.
 # [modules.text.motd]

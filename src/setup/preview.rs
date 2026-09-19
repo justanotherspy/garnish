@@ -79,11 +79,18 @@ impl Preview {
         Self { payloads, fixture: 0, columns: None, clock, pinned }
     }
 
-    /// The live pane: the process clock, no git discovery, no settings and
-    /// no cache, exactly as `garnish preview` renders a fixture (SPEC § 14).
+    /// The live pane: the process clock, no git discovery, no settings, no
+    /// cache and no workers, exactly as `garnish preview` renders a fixture
+    /// (SPEC § 14).
     #[must_use]
     pub fn live() -> Self {
-        let clock = Clock { git: false, settings: false, managed: None, ..Clock::from_env() };
+        let clock = Clock {
+            git: false,
+            settings: false,
+            managed: None,
+            workers: false,
+            ..Clock::from_env()
+        };
         Self::new(clock, false)
     }
 

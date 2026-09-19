@@ -93,6 +93,9 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
 }
 
 /// The environment-dependent inputs of a render, so docs and tests can pin them.
+// Four independent switches (git, animate, settings, workers), each set on
+// its own over `..Clock::fixed()`; an enum per pair would name nothing.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct Clock {
     /// The current instant.
@@ -126,6 +129,16 @@ pub struct Clock {
     /// which otherwise read and wrote the developer's real one and forked a
     /// worker per miss) names its own here.
     pub cache: Option<std::path::PathBuf>,
+    /// Whether a cached module may look its entry up and spawn a worker.
+    /// Off under the pinned clock, so docs, goldens and the in-process
+    /// matrices never touch a cache directory (SPEC § 9); `git = false`
+    /// alone covers only the repo group.
+    pub workers: bool,
+    /// Keys standing in for the settings chain: a pinned render that must
+    /// show a settings-derived module on (the docs samples of `sandbox`
+    /// and `voice`, SPEC § 3.8) seeds them here and still reads no file.
+    /// `None` reads the chain, or nothing under `settings = false`.
+    pub settings_keys: Option<Vec<crate::claude_settings::FileKeys>>,
 }
 
 impl Clock {
@@ -143,13 +156,15 @@ impl Clock {
             settings: true,
             managed: crate::claude_settings::managed_settings_path(),
             cache: None,
+            workers: true,
+            settings_keys: None,
         }
     }
 
     /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev`, no
     /// auto-compaction overrides, no repository discovery, no settings
-    /// files and animations frozen at frame 0 — what the generated docs
-    /// use, so they come out identical on every machine.
+    /// files, no workers and animations frozen at frame 0 — what the
+    /// generated docs use, so they come out identical on every machine.
     #[must_use]
     pub fn fixed() -> Self {
         Self {
@@ -162,6 +177,8 @@ impl Clock {
             settings: false,
             managed: None,
             cache: None,
+            workers: false,
+            settings_keys: None,
         }
     }
 
@@ -251,7 +268,11 @@ pub fn render_tree_at(
         animate: false,
         dirs: std::cell::OnceCell::new(),
         settings_files: clock.settings_files(payload),
-        settings: std::cell::OnceCell::new(),
+        settings: clock
+            .settings_keys
+            .clone()
+            .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
+        workers: clock.workers,
     };
     // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
     // `animate` decides, else Claude Code's prefersReducedMotion freezes,

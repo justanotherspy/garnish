@@ -72,7 +72,9 @@ fn render_modules(c: &mut Criterion) {
         &SCHEMAS,
         &Overlay { preset: Some(config::presets::TopPreset::Full), ..Default::default() },
     );
-    let clock = Clock { git: true, ..Clock::fixed() };
+    // Git and workers on: the repo modules read the seeded cache, never the
+    // machine's.
+    let clock = Clock { git: true, workers: true, ..Clock::fixed() };
     let ctx = Ctx {
         payload: &payload,
         theme: &cfg.theme,
@@ -91,6 +93,7 @@ fn render_modules(c: &mut Criterion) {
         dirs: std::cell::OnceCell::new(),
         settings_files: Vec::new(),
         settings: std::cell::OnceCell::new(),
+        workers: clock.workers,
     };
     let mut group = c.benchmark_group("render_module");
     for entry in garnish::modules::REGISTRY.iter() {
@@ -105,10 +108,11 @@ fn render_modules(c: &mut Criterion) {
 fn tick_in_process(c: &mut Criterion) {
     let (payload, _seeded) = repo_payload_and_cache();
     let (cfg, _) = config::parse("", &SCHEMAS);
-    // Git on: the default preset carries the repo group, and reading `.git`
-    // plus a cache entry is where a warm tick actually spends its time. The
-    // cache is the seeded one, never the machine's.
-    let clock = Clock { git: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
+    // Git and workers on: the default preset carries the repo group, and
+    // reading `.git` plus a cache entry is where a warm tick actually spends
+    // its time. The cache is the seeded one, never the machine's.
+    let clock =
+        Clock { git: true, workers: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
     c.bench_function("tick_in_process_default", |b| {
         b.iter(|| render_lines_at(black_box(&payload), &cfg, Some(120), &clock));
     });
@@ -140,7 +144,8 @@ fn tick_in_process(c: &mut Criterion) {
 /// a shape is the cost of the cells it draws, not of anything new being read.
 fn tick_in_process_layout(c: &mut Criterion) {
     let (payload, _seeded) = repo_payload_and_cache();
-    let clock = Clock { git: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
+    let clock =
+        Clock { git: true, workers: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
     let cases = [
         (
             "columns",

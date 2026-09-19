@@ -632,6 +632,15 @@ for the contract and `docs/` for user docs.
   never` shows a row the screen drops. `blank = true` on a spacer puts a
   braille blank (U+2800, not whitespace to JavaScript's `trim`) in the row
   so the harness keeps it either way (SPEC § 4.1).
+- **`sandbox.enabled` and `voice.enabled` are the settings keys** the two
+  badges read (verified 2026-09-19: the settings reference lists
+  `sandbox.enabled`, "Any file"; the voice dictation page shows `/voice`
+  persisting `{"voice": {"enabled": true, "mode": "tap"}}` in the user
+  file, and says the harness's own `hold space to speak` hint is dropped
+  once a custom status line is configured). `~/.claude.json` is the file
+  the harness keeps for itself (`oauthAccount` is community-documented,
+  not in the reference), and `CLAUDE_CONFIG_DIR` moves every `~/.claude`
+  path, that file included (the claude-directory page).
 
 ## The repository is not the user's file
 

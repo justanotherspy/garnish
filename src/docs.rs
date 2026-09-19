@@ -612,6 +612,23 @@ fn fixture(name: &str) -> Payload {
     crate::fixtures::payload(name)
 }
 
+/// The pinned clock a module's sample renders with: the settings badges
+/// (SPEC § 3.8) are shown on, from keys seeded in-process so no file is
+/// read (§ 9); every other module takes the fixed clock as it is.
+fn sample_clock(id: &str) -> Clock {
+    match id {
+        "sandbox" | "voice" => Clock {
+            settings_keys: Some(vec![crate::claude_settings::FileKeys {
+                sandbox_enabled: Some(true),
+                voice_enabled: Some(true),
+                ..Default::default()
+            }]),
+            ..Clock::fixed()
+        },
+        _ => Clock::fixed(),
+    }
+}
+
 /// Render one module alone with a preset and icon set, as plain text.
 fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
     let text = format!(
@@ -621,13 +638,16 @@ fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
         toml_string(preset.name())
     );
     let (cfg, _) = config::parse(&text, &SCHEMAS);
-    let out = render_plain_at(&fixture(sample_fixture(id)), &cfg, Some(80), &Clock::fixed());
+    let out = render_plain_at(&fixture(sample_fixture(id)), &cfg, Some(80), &sample_clock(id));
     let line = out.lines().next().unwrap_or("").trim_end().to_owned();
     if !line.is_empty() {
         return line;
     }
     match id {
         "sync" => "(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)".to_owned(),
+        "account" => {
+            "(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)".to_owned()
+        }
         _ => "(nothing to show for this payload)".to_owned(),
     }
 }
@@ -1242,6 +1262,10 @@ fn environment_section(o: &mut String) {
     let _ = writeln!(
         o,
         "| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact; the last two turn compaction off, so the marker goes with it. |"
+    );
+    let _ = writeln!(
+        o,
+        "| `CLAUDE_CONFIG_DIR` | Where the `account` worker reads `.claude.json` when it is set and non-empty, instead of the home directory (Claude Code keeps every `~/.claude` file there); the settings chain does not follow it yet. |"
     );
 }
 
