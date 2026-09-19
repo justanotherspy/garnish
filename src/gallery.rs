@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 /// The embedded files, `(name, text)`, in alphabetical order (the unit test
 /// compares against the sorted directory listing).
-const FILES: [(&str, &str); 28] = [
+const FILES: [(&str, &str); 32] = [
     ("animated-dots", include_str!("../presets/animated-dots.toml")),
     ("ascii-only", include_str!("../presets/ascii-only.toml")),
     ("bars-and-limits", include_str!("../presets/bars-and-limits.toml")),
@@ -29,7 +29,11 @@ const FILES: [(&str, &str); 28] = [
     ("minimal-clean", include_str!("../presets/minimal-clean.toml")),
     ("motd-ticker", include_str!("../presets/motd-ticker.toml")),
     ("narrow-unicode", include_str!("../presets/narrow-unicode.toml")),
+    ("pace-and-eta", include_str!("../presets/pace-and-eta.toml")),
     ("packed-heavy", include_str!("../presets/packed-heavy.toml")),
+    ("precise-numbers", include_str!("../presets/precise-numbers.toml")),
+    ("quiet-when-idle", include_str!("../presets/quiet-when-idle.toml")),
+    ("session-badges", include_str!("../presets/session-badges.toml")),
     ("session-detail", include_str!("../presets/session-detail.toml")),
     ("sidebar-panels", include_str!("../presets/sidebar-panels.toml")),
     ("single-line-full", include_str!("../presets/single-line-full.toml")),

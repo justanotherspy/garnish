@@ -62,7 +62,7 @@ chain is read once per tick through `Ctx::settings()`
 - [x] `version`: the module in `identity.rs`, glyphs through the width guard, registered after `lines`
 - [x] `settings-badges`: `FileKeys.sandbox_enabled`/`voice_enabled`, `claude_settings::flag`, `badges.rs` with `sandbox` and `voice`, `Clock.settings_keys` seeding the docs samples, two doctor rows, the `settings-badges` golden over a settings fixture
 - [x] `account`: `claude_json_path` (`CLAUDE_CONFIG_DIR`), the cached module with its worker, `Clock.workers` gating `Ctx::cached` under the pinned clock, `worker_account_*` tests, `cargo bench --no-run`
-- [ ] `presets`: `pace-and-eta`, `precise-numbers`, `quiet-when-idle`, `session-badges`; `gallery::FILES` 28 → 32; `make docs`
+- [x] `presets`: `pace-and-eta`, `precise-numbers`, `quiet-when-idle`, `session-badges`; `gallery::FILES` 28 → 32; `make docs`
 - [ ] `records`: README, guide, `CLAUDE.md` (25 ids, the hand-parsed-key trace, the workers gate, the settings seed), the CHANGELOG body, WORKLOG; the adversarial review (three agents in worktrees, no git in the tree) and its fixes with tests; the fresh-nightly clippy; the done-table row
 
 ## Done

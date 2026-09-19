@@ -1,0 +1,52 @@
+# name: precise-numbers
+# summary: every number at full precision: token counts with thousands separators, percentages to a decimal, whole dollars, dimmed details
+# columns: 120
+
+# The `[format]` table of SPEC § 4 decides how every module prints a
+# number: `tokens = "precise"` writes 128,400 where `compact` writes 128k,
+# `percent = "precise"` keeps one decimal, `cost = "whole"` rounds to
+# dollars, and `parens = "dim"` mutes the parenthesised details (the api
+# share, the net lines, the cache writes) so the values in front of them
+# stand out. A module can pin its own style with `tokens`, `percent` or
+# `cost` under `[modules.<id>]`; here the context module keeps compact
+# tokens for its window tag.
+
+preset = "default"
+icons  = "unicode"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[format]
+tokens  = "precise"
+percent = "precise"
+cost    = "whole"
+parens  = "dim"
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["model", "effort", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["lines", "cost"]
+
+[modules.context]
+show_window = true
+tokens = "compact"          # the window tag stays 1M, the rest is precise
+
+[modules.api]
+show_share = true
+
+[modules.cache]
+show_writes = true
+
+[modules.lines]
+show_net = true
+
+[modules.cost]
+only_without_rate_limits = false
