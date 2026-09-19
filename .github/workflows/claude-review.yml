@@ -121,7 +121,7 @@ jobs:
 
       - name: Review
         if: steps.gate.outputs.review == 'true'
-        uses: anthropics/claude-code-action@3b8197d3d486006dd4af54613517f21ac6ac625e # v1.0.227
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1.0.231
         with:
           # These values are identifiers, not secrets. The federation rule is
           # what restricts which OIDC subject may exchange for a token.
