@@ -214,11 +214,16 @@ pull against each other; at 15 a review of a two-file diff died on
 truncated review wastes everything it already spent, so raise the cap
 before trimming the review.
 
-**The review fans out.** `Task` is in the allowlist and the prompt tells it
-to use one subagent per dimension on a large diff, which is the other half
-of why the cap is 100. A subagent cannot post, so it reports back and the
-parent posts; the prompt's standing rule is that a run never ends without
-its summary.
+**The review does not fan out, and `Task` is deliberately absent from the
+allowlist.** It used to, and every one of the six runs that posted nothing
+ended the same way: the parent stopped while a subagent was still working.
+Three prompt rules were written to stop that — never end without the
+summary, never end with a subagent unfinished, prefer to review the diff
+yourself — and all three were ignored. **An instruction the model does not
+follow is not a control**; removing the capability is. Without `Task`
+there is no delegate to abandon, and the diff is on disk for the review to
+read itself. The turn cap stays at 100 because a single-agent review of a
+large diff still spends freely.
 
 **Sonnet 5 at `--effort high` is what pays for that ceiling.** Sonnet is
 about 2.5x cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), so
