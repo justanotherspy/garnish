@@ -481,6 +481,7 @@ fn builtin() -> Vec<Box<dyn Module>> {
         Box::new(identity::VimModule),
         Box::new(identity::AgentModule),
         Box::new(identity::LinesModule),
+        Box::new(identity::VersionModule),
     ]
 }
 

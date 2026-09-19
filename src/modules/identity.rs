@@ -1,4 +1,5 @@
-//! `session_name`, `vim`, `agent`, `lines`: who and what this session is.
+//! `session_name`, `vim`, `agent`, `lines`, `version`: who and what this
+//! session is.
 
 use crate::ansi::{Segment, Style};
 use crate::config::schema::{
@@ -250,5 +251,78 @@ impl Module for LinesModule {
             segs.extend(super::detail(ctx, cfg, "", &format!("{sign}{net}"), "net"));
         }
         Rendered::fresh(segs).measured(super::Measure::Count(added.saturating_add(removed)))
+    }
+}
+
+/// `version`: the Claude Code version the payload reports (SPEC § 3.8).
+pub struct VersionModule;
+
+impl Module for VersionModule {
+    fn schema(&self) -> ModuleSchema {
+        ModuleSchema {
+            id: "version",
+            measure: None,
+            summary: "The Claude Code version.",
+            doc: "The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and what shows an upgrade. Nothing shows when the payload carries no version, so `hide_when_empty = false` prints `–` as it does for any absent field.",
+            sources: &["version"],
+            refresh: 0,
+            opts: vec![
+                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(false))
+                    .full(Value::Bool(true)),
+            ],
+            icons: vec![IconSpec {
+                key: "version",
+                doc: "Version icon.",
+                glyph: glyph("\u{f02c}", "⊛", "📦", ""),
+            }],
+            colors: vec![
+                ColorSpec { key: "icon", doc: "Icon.", default: "accent2" },
+                ColorSpec { key: "version", doc: "The version.", default: "muted" },
+            ],
+        }
+    }
+
+    fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
+        let Some(version) = ctx.payload.version.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        else {
+            return Rendered::empty();
+        };
+        let mut segs: Vec<Segment> = lead(cfg, "version");
+        // A payload that already says `v2.1.270` is not doubled to `vv`.
+        let bare = version.strip_prefix('v').unwrap_or(version);
+        segs.push(Segment::styled(format!("v{bare}"), Style::fg(cfg.color("version")).dimmed()));
+        Rendered::fresh(segs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ansi::strip_ansi;
+    use crate::render::{Clock, render_plain_at};
+
+    /// `version` alone on an unframed line, for a payload text.
+    fn version_row(payload: &str, extra: &str) -> String {
+        let payload = crate::payload::Payload::parse(payload).unwrap();
+        let text = format!(
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"version\"]\n[modules.version]\n{extra}"
+        );
+        let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+            .trim_end()
+            .to_owned()
+    }
+
+    /// SPEC § 3.8: the payload's version, one `v` in front whatever the
+    /// payload wrote, the icon only when asked, and nothing without the
+    /// field (a placeholder only when `hide_when_empty` is off).
+    #[test]
+    fn version_prints_the_payload_field_once_prefixed() {
+        let with = |v: &str| format!("{{\"session_id\": \"s\", \"version\": \"{v}\"}}");
+        assert_eq!(version_row(&with("2.1.270"), ""), "v2.1.270");
+        assert_eq!(version_row(&with("v2.1.270"), ""), "v2.1.270");
+        assert_eq!(version_row(&with(" 2.1.270 "), "show_icon = true\n"), "⊛ v2.1.270");
+        assert_eq!(version_row("{\"session_id\": \"s\"}", ""), "");
+        assert_eq!(version_row(&with(""), "hide_when_empty = false\n"), "–");
     }
 }
