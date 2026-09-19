@@ -670,3 +670,17 @@ was built, what the reviews found and what was decided, not how.
   allowlist did grow again (`TodoWrite`, the read-only git verbs, the usual
   text tools), but that part is still inference and is labelled as such in
   the workflow; the script is what replaces inference next time.
+
+  Next time was the same afternoon, and the inference was wrong. Run
+  35452476655 failed the new step — a red check, which is the point — and
+  named all twelve denials: every one a `git` call, five `Bash(git:*)`,
+  four `Bash(git diff:*)`, three `Bash(git fetch origin:*)`. None of the
+  guessed entries were ever reached. The four refused `git diff` calls with
+  `Bash(git diff:*)` already allowed are the finding: **an allowlist of git
+  subcommands cannot work**, because the list matches on a prefix and git's
+  flags precede the verb, so `git --no-pager diff` is not `git diff`. `git`
+  is allowed whole now (the job is `contents: read`, the checkout is
+  disposable, and the action already allowed `git add|commit|rm`), and the
+  script additionally prints each denied command's verbs, since a line
+  refused for its shape — `git diff | less` dies on `less` — is invisible
+  when the denials are grouped by verb.

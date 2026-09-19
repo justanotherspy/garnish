@@ -136,4 +136,40 @@ printf '%s' "$result" | jq -r '
 '
 echo '```'
 
+# A command can be refused for its shape rather than its verb: a pipe into
+# something the allowlist does not carry refuses the whole line, and so does a
+# flag before the subcommand, since the allowlist matches on a prefix and
+# `git --no-pager diff` does not start with `git diff`. Grouped by verb those
+# are invisible - run 35452476655 reported four refused `Bash(git diff:*)`
+# calls while `Bash(git diff:*)` was in the allowlist. So name every verb a
+# denied command ran. Verbs only, never arguments, same as above.
+shapes="$(
+  printf '%s' "$result" | jq -r '
+    (.permission_denials // [])
+    | map(select(.tool_name == "Bash") | (.tool_input.command // ""))
+    | map(
+        gsub("\\s+"; " ")
+        | [ splits("\\|\\||&&|[|;&]") ]
+        | map(ltrimstr(" ") | split(" ") | .[0] // "")
+        | map(select(. != ""))
+        | join(" → ")
+      )
+    | map(select(test(" → ")))
+    | unique
+    | .[]
+  '
+)"
+
+if [ -n "$shapes" ]; then
+  echo
+  echo "#### Refused as a whole line"
+  echo
+  echo "Every verb these denied commands ran. A verb that is already allowed"
+  echo "on its own means the line died on the company it kept, not on itself."
+  echo
+  echo '```'
+  printf '%s\n' "$shapes"
+  echo '```'
+fi
+
 exit 1
