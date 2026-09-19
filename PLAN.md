@@ -1,7 +1,8 @@
 # PLAN.md — the drift between SPEC and the code
 
 `SPEC.md` is the target design. This file is what the code still lacks of
-it (Phase 23, below), a compact table of what has landed, and the backlog.
+it (an open phase, when there is one), a compact table of what has
+landed, and the backlog.
 The dated log of how the project got here is `WORKLOG.md`; the rules for
 working here are `CLAUDE.md`. Host trouble does not belong in this file.
 
@@ -11,59 +12,19 @@ working here are `CLAUDE.md`. Host trouble does not belong in this file.
 the schema-driven config with presets, themes, icon sets and frames, the
 cache and worker model, aligned columns and fixed durations, per-key config
 fallback, the ticker, text modules and animations, the presets gallery and
-the three bundled skills. Phases 19–22 landed between 2026-09-13 and
+the three bundled skills. Phases 19–23 landed between 2026-09-13 and
 2026-09-19 (the table below). The release pipeline with the Homebrew tap
 waits for its first tag, which will be `v0.3.0`; `CHANGELOG.md`
 § Unreleased is its section.
 
-**The drift between `SPEC.md` and the code is Phase 23 below**, plus the
-short list under *When asked* in the backlog (a keyboard path to a
+**There is no open phase.** The drift between `SPEC.md` and the code is
+the short list under *When asked* in the backlog (a keyboard path to a
 separator or a cap, undo, a cargo feature); everything else in the spec
 is implemented, and where Phase 22 was built differently from its design,
-SPEC § 14 says so and why.
-
-## Phase 23 — usage views and formats (SPEC § 3, § 3.3, § 3.8, § 4)
-
-Decided 2026-09-19 with Daniel: the Tier A ideas of `FUTURE-SPEC.md`
-(PR #27) that Phases 19–20 left, plus four more module ids (`version`,
-`sandbox`, `voice`, `account`; that document's § 0 "module count" is
-decided for those four, the rest of its § 0 stays open). Payload-only or
-a settings read, no new crate, no process on the tick; every config on
-disk renders byte for byte as before, the golden suite being the
-regression test. One branch of small signed commits, one per layer, as
-Phases 19 and 20 landed (no `gh stack` in the session); the review
-workflow is untouched, so the pull request can be reviewed by it.
-
-Code map (2026-09-19, `1b8fe45`; navigate by symbol if the lines drift):
-`decorate` applies `hide_when_empty` (`src/modules/mod.rs:457`) and
-`render_group` calls it after the stale mapping (`src/render.rs:623-630`);
-`parse_overrides` hand-parses `enabled`, `preset` and `refresh` before
-the `COMMON_OPTS`/schema lookup (`src/config/mod.rs:2257-2295`) and
-`common_keys()` names the hand-parsed keys (`src/config/schema.rs:349`);
-`[frame]` is parsed by `RawFrame::from_table` (`src/config/mod.rs:860`)
-and resolved by `resolve_frame` (`:2141`), the model for `[format]`;
-`durations_opt()` and `Ctx::durations_for` (`src/modules/mod.rs:34`,
-`:145`) are the shape of a per-module override with `inherit`;
-separators are styled `Role::Muted` in `Layout::group_pieces`
-(`src/layout.rs:868`) and the packed join (`:973`); `Clock::fixed()`
-keeps pinned renders off the cache only through `git: false`
-(`src/render.rs:154`), which covers repo modules alone; the settings
-chain is read once per tick through `Ctx::settings()`
-(`src/modules/mod.rs:132`) and `parse_settings_json` is lenient per key
-(`src/claude_settings.rs:214`); `util::bar` already takes a marker
-(`src/modules/util.rs:19`); the pinned instant is 1738425600 and the
-`subscription-full` fixture's windows reset at 1738433620 (5 h) and
-1738699200 (7 d), so pace and eta goldens are arithmetic.
-
-- [x] `hide`: `MeasureKind` on `ModuleSchema`, `HideRule`, the hand-parsed `hide` key validated against the schema's measure (`common_keys()` names it), `Rendered.measure` set by one call, `modules::hidden_by` applied in `render_group` before `decorate`; measures on `cost`, `lines`, `sync`, `context`, the limits, `cache`, `api`; the reference row and the module form row; unit tests and the `hide-states` config golden
-- [x] `format`: `FormatCfg` parsed like `[frame]`, `format_opt(kind)` on the modules that print the kind, `Ctx::tokens/percent/dollars` with `inherit`, the `detail()` helper for parenthesised details (`api`, `lines`, the `both` reset) and its key-scan pattern, `[format]` in `config init`/`show`, the reference and the top-level form; `format-precise` (colour on) and `format-inherit` goldens
-- [x] `pace`: `Window::length_secs`, `pace()` and `pace_band()`, the five options with their icons and colours on `limit5h`/`limit7d` only, `reset = "elapsed"`, the marker on the bar; unit tests at two instants; `limits-pace` (two instants) and `limits-elapsed` goldens
-- [x] `separator-color`: `SeparatorColor` on `FrameCfg`, `Layout::separator_style` used by both separator sites, the reference row, the frame form row, a layout unit test and the `separator-inherit` golden (colour on)
-- [x] `version`: the module in `identity.rs`, glyphs through the width guard, registered after `lines`
-- [x] `settings-badges`: `FileKeys.sandbox_enabled`/`voice_enabled`, `claude_settings::flag`, `badges.rs` with `sandbox` and `voice`, `Clock.settings_keys` seeding the docs samples, two doctor rows, the `settings-badges` golden over a settings fixture
-- [x] `account`: `claude_json_path` (`CLAUDE_CONFIG_DIR`), the cached module with its worker, `Clock.workers` gating `Ctx::cached` under the pinned clock, `worker_account_*` tests, `cargo bench --no-run`
-- [x] `presets`: `pace-and-eta`, `precise-numbers`, `quiet-when-idle`, `session-badges`; `gallery::FILES` 28 → 32; `make docs`
-- [ ] `records`: README, guide, `CLAUDE.md` (25 ids, the hand-parsed-key trace, the workers gate, the settings seed), the CHANGELOG body, WORKLOG; the adversarial review (three agents in worktrees, no git in the tree) and its fixes with tests; the fresh-nightly clippy; the done-table row
+SPEC § 14 says so and why. Phase 23 (usage views and formats) is on the
+pull request from `claude/docs-workflow-consolidation-vepxgw`, waiting
+for Daniel's merge; its decisions are in `WORKLOG.md` (2026-09-19) and
+its design in SPEC § 3, § 3.3, § 3.8 and § 4.
 
 ## Done
 
@@ -95,6 +56,7 @@ chain is read once per tick through `Ctx::settings()`
 | 21 Layout | `[[row]]` with `[[line]]` as its alias, `[[row.col]]` (`width`, `gap`, `justify`, `valign`), `[[row.col.row]]` stacks, `title*`, `[box.<name>]` and `box = true`; `src/layout.rs` in place of `frame::compose_line`; four presets, seventeen config goldens, two adversarial reviews | 09-17 |
 | 22 Interactive setup | `garnish setup` (`src/setup/`): home menu, preset picker with a live preview at the real width, builder over the config file's own table with a placement map and click-to-edit preview, schema-generated editors, glyph and string pickers with suggestions, install screen over `install::Steps`; `setup --preset [--install]`; the bare `garnish` on a tty points at `setup`; `fixtures.rs`; snapshot goldens under `tests/golden/setup/`; ratatui + crossterm and toml `preserve_order` | 09-19 |
 | Consolidation | nine gallery presets showing the rest of the vocabulary (28 in all); the review workflow collecting the pull request in job shell with a short prompt and `Bash` whole; the skills shortened and pointed at `setup`; *also try* glyphs on the module pages; `WORKLOG.md` split from this file; `PLAN.md`, `SPEC.md`, `CLAUDE.md`, `README.md`, the guide and `CHANGELOG.md` brought to the code | 09-19 |
+| 23 Usage views and formats | `hide` lists derived from a module's measure (`MeasureKind`, `HideRule`, `Rendered.measure`, one check in `render_group`); the `[format]` table with per-module `tokens`/`percent`/`cost` overrides and `parens = "dim"` through one `detail()` helper; `pace`, `pace_colors`, `eta`, `reset = "elapsed"` and `elapsed_marker` on the two limit windows; `[frame] separator_color` with `inherit`; the `version`, `sandbox`, `voice` and `account` modules (25 ids; `account` is the first cached module outside the repo group, `Clock.workers` keeps pinned renders off the cache, `Clock.settings_keys` seeds the badges' docs samples); `doctor` rows for the two settings keys; four gallery presets (32 in all); seven config goldens; three adversarial reviews | 09-19 |
 
 ## Backlog
 

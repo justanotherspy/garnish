@@ -21,11 +21,13 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 - `[frame] separator_color = "inherit"` paints each separator in the
   colour of the module before it; a role or a literal colour fixes it.
 - Four modules: `version` (the Claude Code version, dim), `sandbox` and
-  `voice` (badges from the settings chain), `account` (the email from
-  `~/.claude.json`, read by a worker every ten minutes; `style = "user"`
-  for the part before `@`).
+  `voice` (badges while `sandbox.enabled` and `voice.enabled` are on in
+  the settings chain; `style = "word"` adds the word), `account` (the
+  email from `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`, read
+  by a worker every ten minutes; `style = "user"` for the part before
+  `@`). `garnish doctor` lists the two settings keys with the others.
 - Four gallery presets show them: `pace-and-eta`, `precise-numbers`,
-  `quiet-when-idle`, `session-badges`.
+  `quiet-when-idle`, `session-badges` (32 in all).
 
 **`garnish setup`** (PLAN Phase 22)
 

@@ -1421,7 +1421,7 @@ mod tests {
         let out = render_plain(&payload, &loaded(&all_on_one), Some(120));
         assert_eq!(out.lines().count(), 1, "{out}");
         assert_eq!(display_width(out.trim_end()), 116, "{out}");
-        assert!(out.contains('…'), "twenty-one modules do not fit in 116 cells: {out}");
+        assert!(out.contains('…'), "twenty-five modules do not fit in 116 cells: {out}");
     }
 
     #[test]

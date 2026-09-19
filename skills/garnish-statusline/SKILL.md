@@ -51,7 +51,7 @@ it" answer at any point is mapped onto the same keys.
 | Context bar: the window, or how close compaction is? | `context.scale = "usable"` | `window` |
 | A window's reset as a countdown or a clock time? | `reset = "countdown" \| "absolute" \| "both"` on `limit5h`, `limit7d`, `spend` | `countdown` |
 
-Start from the closest of the 28 gallery presets (`garnish presets`;
+Start from the closest of the 32 gallery presets (`garnish presets`;
 `titled-sections`, `sidebar-panels`, `grid-three`, `boxed-panels`,
 `links-and-shortcuts`, `compaction-watch`, `narrow-unicode` and
 `ascii-only` between them show every layout feature) rather than writing
