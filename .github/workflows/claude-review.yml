@@ -115,11 +115,19 @@ jobs:
       - name: Checkout repository
         if: steps.gate.outputs.review == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        #
+        # Full history, not a shallow head. At depth 1 there is no merge base
+        # with the base branch, so `git diff main...HEAD` and `git log
+        # main..HEAD` - the commands the allowlist and the prompt both point
+        # the review at - cannot resolve, and it is left with `gh pr diff`
+        # alone. This repository is 52 commits and under 5 MB, so the whole
+        # history costs nothing.
         with:
           ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Review
+        id: review
         if: steps.gate.outputs.review == 'true'
         uses: anthropics/claude-code-action@3b8197d3d486006dd4af54613517f21ac6ac625e # v1.0.227
         with:
@@ -214,16 +222,19 @@ jobs:
             several minutes for nothing.
 
             **Your tools are an allowlist, and a denied call still costs a
-            turn.** You have `Read`, `Grep`, `Glob` and `LS` for the tree, and
-            `Bash` only for the read-only commands the allowlist names
-            (`git diff|log|show`, `gh pr diff|view`, `rg`, `wc`, `head`,
-            `tail`, `ls`, `find`) plus the two that post (`gh pr comment`, the
-            inline-comment tool). Anything else is refused. Reach for `Read`
-            and `Grep` first; if a call is denied, do not retry it and do not
-            look for another way around it - use the tools you have, and say
-            in the summary what you could not check. The same allowlist binds
-            every subagent, so tell each one this too. A run that spends its
-            turns on refusals and posts nothing is the worst outcome there is.
+            turn.** You have `Read`, `Grep`, `Glob`, `LS` and `TodoWrite`, and
+            `Bash` only for the read-only commands the allowlist names:
+            `git diff|log|show|rev-parse|merge-base|status|branch`,
+            `gh pr diff|view`, `rg`, `grep`, `cat`, `sed`, `awk`, `sort`,
+            `uniq`, `cut`, `jq`, `wc`, `head`, `tail`, `ls`, `find` - plus the
+            two that post (`gh pr comment`, the inline-comment tool). The full
+            history is checked out, so `main...HEAD` resolves. Anything else
+            is refused. Reach for `Read` and `Grep` first; if a call is
+            denied, do not retry it and do not look for another way around it
+            - use the tools you have, and say in the summary what you could
+            not check. The same allowlist binds every subagent, so tell each
+            one this too. A run that spends its turns on refusals and posts
+            nothing is the worst outcome there is.
 
           # `claude_args` is a block scalar: every line is passed to the CLI
           # verbatim, so a `#` line here would become an argument, not a
@@ -259,6 +270,24 @@ jobs:
           # own push script. The prompt above tells the review the same thing,
           # because the allowlist alone only refuses; it does not explain.
           #
+          # The third silent run (run 35451305473) is why the list below grew
+          # again, and why the step after this one exists. The allowlist from
+          # the round before it *did* apply - the job log's "SDK options" shows
+          # `Task` and every read-only `Bash` entry present - and the review
+          # still ended `"subtype": "success"` after 10 turns and $0.95 with
+          # `permission_denials_count: 10`, no summary and no inline comments.
+          # Ten turns, ten refusals.
+          #
+          # These additions are inference, not evidence, because the action
+          # prints only the *count*: `TodoWrite` (Claude Code reaches for it
+          # unprompted on multi-step work, and a parent plus three subagents
+          # all doing so accounts for the count on its own), the read-only git
+          # verbs a review uses to orient (`rev-parse`, `merge-base`,
+          # `status`, `branch`), and the text tools it reaches for when `rg`
+          # is not the obvious fit. All are read-only. Guessing is what the
+          # "Report what the review was refused" step below ends: from now on
+          # a refused call is named in the job summary rather than inferred.
+          #
           # --model / --effort: Sonnet 5 at high effort. Sonnet is ~2.5x
           # cheaper per token than Opus 5 ($2/$10 vs $5/$25 per MTok), which
           # is what pays for the ceiling: 16 Opus turns cost $0.95, so even
@@ -267,4 +296,36 @@ jobs:
             --model claude-sonnet-5
             --effort high
             --max-turns 100
-            --allowedTools "Task,mcp__github_inline_comment__create_inline_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(rg:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(ls:*),Bash(find:*)"
+            --allowedTools "Task,TodoWrite,mcp__github_inline_comment__create_inline_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git status:*),Bash(git branch:*),Bash(rg:*),Bash(grep:*),Bash(cat:*),Bash(sed:*),Bash(awk:*),Bash(sort:*),Bash(uniq:*),Bash(cut:*),Bash(jq:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(ls:*),Bash(find:*)"
+
+      # The action's own conclusion is not a verdict on the review: it reports
+      # success whenever Claude returned a result, so three runs in a row went
+      # green having posted nothing at all. This reads the execution file the
+      # action writes - the full transcript, kept on disk whatever
+      # `show_full_output` says - and turns the two silent failures into a red
+      # check with the reason in the job summary: a refused call, named, and a
+      # run that never posted its summary.
+      #
+      # It runs the *base branch's* copy of the script, not the checkout's.
+      # The checkout is the pull request's head, which the action treats as
+      # untrusted for exactly this reason (it restores `CLAUDE.md`, `.claude`
+      # and the rest from the base before letting Claude near them), and this
+      # step holds the job's token. The gate above already limits the workflow
+      # to Daniel's own pull requests, so this is defence in depth rather than
+      # the only thing standing there.
+      - name: Report what the review was refused
+        if: always() && steps.gate.outputs.review == 'true'
+        env:
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/review-denials.sh"
+          git fetch --depth 1 origin "$BASE_BRANCH"
+          if ! git show "FETCH_HEAD:scripts/review-denials.sh" > "$script"; then
+            echo "No scripts/review-denials.sh on $BASE_BRANCH yet; nothing to report." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          chmod +x "$script"
+          "$script" "${EXECUTION_FILE:-}" | tee -a "$GITHUB_STEP_SUMMARY"
