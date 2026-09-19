@@ -717,3 +717,25 @@ was built, what the reviews found and what was decided, not how.
   one level up. If a run without subagents still posts nothing, the thing
   to question is whether this review is worth its cost, not which rule to
   write next.
+
+  It did not come to that. The seventh run (35459324425) is the first that
+  worked: 35 turns, $1.37, **zero denials**, and a full review of the
+  layout engine, the config model and the `frame.rs`/`render.rs`
+  integration, with all seven review-fix claims in the PR body traced back
+  to the tests that pin them, and no blocking findings. Seven runs and
+  roughly $10 to get there, across four fixes — the denial reporter, git
+  whole, the diff as a file, and `Task` removed — of which only the first
+  was reasoned about correctly at the time. Three of the four explanations
+  written down between the third run and the sixth were falsified by the
+  next run. The execution file is what made each round tractable; the
+  theories about it mostly were not.
+
+  One immediate sting: **that first working run still went red**, because
+  the check was wrong. The review writes its summary *into* the tracking
+  comment (`update_claude_comment`, which is what `track_progress` does),
+  and `review-denials.sh` counted only `gh pr comment` and inline
+  comments. A false negative is the worse failure of the two — it marks a
+  good review as failed and teaches you to stop reading the check. Fixed
+  by testing the last tracking-comment write for an unchecked box, since
+  every checklist tick is the same call and only a summary has no `- [ ]`
+  left in it.

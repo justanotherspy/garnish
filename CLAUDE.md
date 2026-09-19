@@ -332,6 +332,27 @@ job shell, where no permission system stands, and the prompt points `Read`
 and `Grep` at them. Neither tool can be refused. Give the review what it
 needs as a file rather than teaching it to ask for it.
 
+**The seventh run is the first that worked** (35459324425): 35 turns,
+$1.37, **zero denials**, and a full review posted — the layout engine, the
+config model, the `frame.rs`/`render.rs` integration, all seven of the
+PR's review-fix claims traced back to the tests that pin them. Removing
+`Task` was the last thing needed. What made each round tractable was the
+execution file, not the reasoning about it: of the four explanations
+written into this file between the third run and the sixth, the next run
+falsified three. Trust the report; distrust the theory.
+
+**And the first working run went red, because the check was wrong.** The
+review posts its summary by *editing the tracking comment*
+(`update_claude_comment`), which is what `track_progress` mode does, while
+`review-denials.sh` counted only `gh pr comment` and inline comments. A
+false negative here is worse than the silence it was built to catch: it
+marks a good review as a failure and teaches you to ignore the check.
+Every checklist tick is that same call, so the count says nothing; what
+separates a summary from a progress update is that **a summary has no
+unchecked box left in it**, and that is what the script now tests, on the
+last such call, against the serialised input so it does not depend on the
+field name.
+
 Two things that were quietly broken the whole time and are worth not
 re-breaking: the checkout was `fetch-depth: 1`, so there was no merge base
 and `git diff main...HEAD` — a command the allowlist and the prompt both
