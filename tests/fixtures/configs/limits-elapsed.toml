@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 100
+# icons: unicode
+# `reset = "elapsed"` (SPEC § 3.3): the time into the window over its
+# length, `2h46m/5h` and `3d20h/7d` at the pinned instant, in the module's
+# `durations` style (`fixed` here, so the five-hour form keeps its width
+# on a ticker line). `spend`, absent from this fixture, keeps the three
+# forms it always had: the parser refuses `elapsed` on it.
+
+durations = "fixed"
+
+[[line]]
+modules = ["limit5h", "limit7d", "spend"]
+right   = ["clock"]
+
+[modules.limit5h]
+reset = "elapsed"
+
+[modules.limit7d]
+reset = "elapsed"

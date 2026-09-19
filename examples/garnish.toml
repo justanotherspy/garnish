@@ -553,7 +553,7 @@ max_width = 0
 # show_icon = true
 # show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
-# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, no weekday or date, since this window resets within the day, so the width stays steady), or `both` (`2h13m (14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset (`countdown` | `absolute` | `both` | `elapsed`) — How the reset shows: `countdown` (`⏱2h13m`), `absolute` the local wall-clock time (`⏱14:30`, no weekday or date, since this window resets within the day, so the width stays steady), `both` (`2h13m (14:30)`), or `elapsed` the time into the window over its length (`⏱2h46m/5h`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
 # reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
@@ -567,6 +567,14 @@ max_width = 0
 # percent = "inherit"
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
+# pace (bool) — Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. [minimal=false default=false full=false]
+# pace = false
+# pace_colors (bool) — Colour the percentage by the pace band instead of `thresholds`: used ÷ elapsed at most 1 is nominal, at most 1.5 caution, above that critical; ignored under 20 % used, always critical above 80 %. [minimal=false default=false full=false]
+# pace_colors = false
+# eta (bool) — Print the time until the window reaches 100 % at the current rate (`⇥ 1h37m`), only when that lands before the reset. [minimal=false default=false full=false]
+# eta = false
+# elapsed_marker (bool) — Draw the `marker` glyph on the mini bar at the share of the window elapsed, so usage and time read together; needs `bar_width`. [minimal=false default=false full=false]
+# elapsed_marker = false
 [modules.limit5h.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
@@ -577,6 +585,14 @@ reset = ""
 fill = "█"
 # empty — Bar empty cell.
 empty = "░"
+# ahead — Ahead-of-pace glyph.
+ahead = "⇡"
+# behind — Behind-pace glyph.
+behind = "⇣"
+# eta — Eta glyph.
+eta = ""
+# marker — Elapsed marker on the bar.
+marker = "▏"
 [modules.limit5h.colors]
 # icon — Icon.
 icon = "accent2"
@@ -584,6 +600,20 @@ icon = "accent2"
 reset = "muted"
 # empty — Bar empty part.
 empty = "muted"
+# ahead — Pace delta, ahead.
+ahead = "hot"
+# behind — Pace delta, behind.
+behind = "ok"
+# eta — Eta.
+eta = "hot"
+# marker — Elapsed marker.
+marker = "muted"
+# pace_nominal — Percentage, nominal pace.
+pace_nominal = "ok"
+# pace_caution — Percentage, caution.
+pace_caution = "warn"
+# pace_critical — Percentage, critical.
+pace_critical = "danger"
 
 # limit7d — Seven-day rate limit usage and time until reset.
 [modules.limit7d]
@@ -607,7 +637,7 @@ max_width = 0
 # show_icon = true
 # show_reset (bool) — Show when the window resets, in the form `reset` picks. [minimal=false default=true full=true]
 # show_reset = true
-# reset (`countdown` | `absolute` | `both`) — How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday, since the reset is days away (`⏱Tue 14:30`), or `both` (`3d4h (Tue 14:30)`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
+# reset (`countdown` | `absolute` | `both` | `elapsed`) — How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday, since the reset is days away (`⏱Tue 14:30`), `both` (`3d4h (Tue 14:30)`), or `elapsed` the time into the window over its length (`⏱3d20h/7d`); `show_reset = false` hides every form. [minimal="countdown" default="countdown" full="countdown"]
 # reset = "countdown"
 # bar_width (integer ≤ 1024) — Mini bar width in cells; 0 hides it. [minimal=0 default=0 full=8]
 # bar_width = 0
@@ -621,6 +651,14 @@ max_width = 0
 # percent = "inherit"
 # band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
+# pace (bool) — Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. [minimal=false default=false full=false]
+# pace = false
+# pace_colors (bool) — Colour the percentage by the pace band instead of `thresholds`: used ÷ elapsed at most 1 is nominal, at most 1.5 caution, above that critical; ignored under 20 % used, always critical above 80 %. [minimal=false default=false full=false]
+# pace_colors = false
+# eta (bool) — Print the time until the window reaches 100 % at the current rate (`⇥ 1h37m`), only when that lands before the reset. [minimal=false default=false full=false]
+# eta = false
+# elapsed_marker (bool) — Draw the `marker` glyph on the mini bar at the share of the window elapsed, so usage and time read together; needs `bar_width`. [minimal=false default=false full=false]
+# elapsed_marker = false
 [modules.limit7d.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
@@ -631,6 +669,14 @@ reset = ""
 fill = "█"
 # empty — Bar empty cell.
 empty = "░"
+# ahead — Ahead-of-pace glyph.
+ahead = "⇡"
+# behind — Behind-pace glyph.
+behind = "⇣"
+# eta — Eta glyph.
+eta = ""
+# marker — Elapsed marker on the bar.
+marker = "▏"
 [modules.limit7d.colors]
 # icon — Icon.
 icon = "accent2"
@@ -638,6 +684,20 @@ icon = "accent2"
 reset = "muted"
 # empty — Bar empty part.
 empty = "muted"
+# ahead — Pace delta, ahead.
+ahead = "hot"
+# behind — Pace delta, behind.
+behind = "ok"
+# eta — Eta.
+eta = "hot"
+# marker — Elapsed marker.
+marker = "muted"
+# pace_nominal — Percentage, nominal pace.
+pace_nominal = "ok"
+# pace_caution — Percentage, caution.
+pace_caution = "warn"
+# pace_critical — Percentage, critical.
+pace_critical = "danger"
 
 # spend — Spend-limit usage behind a Claude apps gateway.
 [modules.spend]

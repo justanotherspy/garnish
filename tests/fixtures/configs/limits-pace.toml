@@ -1,0 +1,30 @@
+# fixture: subscription-full
+# columns: 130
+# now: 1738417420, 1738425600
+# icons: unicode
+# color: always
+# Pace, eta and the time cursor on the two windows of known length (SPEC
+# § 3.3). At the first instant the five-hour window is 10 % elapsed with
+# 23.5 % used: `⇡14%` ahead of pace, the percentage in the critical pace
+# colour (a ratio of 2.35), an eta of 1h37m that lands before the reset, and
+# the marker in the bar's first cell. At the second it is 55 % elapsed:
+# `⇣32%` behind, nominal, no eta (the window resets first). The seven-day
+# window is behind at both instants. `spend` has no known window and takes
+# none of the keys; colour on, so the pace band's colour is pinned.
+
+[[line]]
+modules = ["limit5h", "limit7d", "spend"]
+
+[modules.limit5h]
+preset = "full"
+pace = true
+pace_colors = true
+eta = true
+elapsed_marker = true
+
+[modules.limit7d]
+preset = "full"
+pace = true
+pace_colors = true
+eta = true
+elapsed_marker = true
