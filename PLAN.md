@@ -645,3 +645,28 @@ was built, what the reviews found and what was decided, not how.
   thing is one `cargo clippy` once the toolchains match. `clippy.toml`
   relaxes unwrap and indexing in tests, not `map_unwrap_or`, so a test is
   just as red as `src/`.
+- **2026-09-19 (the review failed a third time; stopped guessing)** — the
+  first review to run against the widened allowlist died the same way as
+  the two before it: `"subtype": "success"`, 10 turns, $0.95,
+  `permission_denials_count: 10`, no summary, no inline comments. The
+  difference was the diagnosis: the job log's `SDK options:` block showed
+  the whole allowlist had applied, `Task` and read-only `Bash` included, so
+  the previous fix was not the thing at fault and a fourth guess at the
+  allowlist would have been a guess about nothing. The action prints only
+  the denial *count*; it writes the full transcript to
+  `$RUNNER_TEMP/claude-execution-output.json` and exposes it as the
+  `execution_file` output, and the SDK's result message carries
+  `permission_denials` as `{tool_name, tool_use_id, tool_input}`. So:
+  `scripts/review-denials.sh` reads that file, prints each refused call as
+  the `--allowedTools` entry that would have allowed it (the verb only,
+  never arguments, so a public log cannot pick up a path or a token), and
+  exits non-zero on a refusal *or* on a run that posted no summary — the
+  first time either silent failure is a red check rather than a green one.
+  Two real defects fell out of reading the action's source: the checkout
+  was `fetch-depth: 1`, so the `git diff main...HEAD` the prompt points the
+  review at had no merge base and could never have worked, and the new step
+  had to run the base branch's copy of the script, since the checkout is
+  the untrusted pull-request head and that step holds the job's token. The
+  allowlist did grow again (`TodoWrite`, the read-only git verbs, the usual
+  text tools), but that part is still inference and is labelled as such in
+  the workflow; the script is what replaces inference next time.
