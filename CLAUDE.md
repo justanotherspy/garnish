@@ -297,6 +297,24 @@ a public job log cannot pick up a path or a token. Do not enable
 `show_full_output` to get the same thing: it dumps every tool result into a
 world-readable log.
 
+**What it reported, on the very next run, was that all four rounds of
+inference had been wrong.** Run 35452476655: twelve denials, every one of
+them a `git` call — `Bash(git:*)` ×5, `Bash(git diff:*)` ×4,
+`Bash(git fetch origin:*)` ×3. No `TodoWrite`, no text tools. **An
+allowlist of git subcommands cannot work**, because it matches on a prefix
+and git's flags come before the verb: `git --no-pager diff` and
+`git -C . diff` do not start with `git diff`, which is why four calls were
+refused while `Bash(git diff:*)` sat in the list. `git` is therefore
+allowed whole. That widens less than it sounds: the job holds
+`contents: read` so no push can succeed, the only tree a write could reach
+is a checkout the runner throws away, and the action's own defaults already
+hand the review `git add`, `git commit`, `git rm` and its push script.
+**A pipeline is refused unless every command in it is allowed**, so
+`git diff | less` dies on `less` and takes the `git diff` with it; the
+prompt says so and `review-denials.sh` prints each denied command's verbs
+(`git → less`) beside the grouped keys, because grouping by verb alone
+hides exactly this case.
+
 Two things that were quietly broken the whole time and are worth not
 re-breaking: the checkout was `fetch-depth: 1`, so there was no merge base
 and `git diff main...HEAD` — a command the allowlist and the prompt both
