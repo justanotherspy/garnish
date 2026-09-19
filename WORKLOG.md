@@ -788,4 +788,35 @@ was built, what the reviews found and what was decided, not how.
   to speak` hint under a custom status line), and `CLAUDE_CONFIG_DIR`
   moves `~/.claude.json` with every other `~/.claude` path. `itertools`
   left the dependency list with its last use. Four gallery presets (32
-  in all), seven config goldens, 284 → 305 tests.
+  in all), seven config goldens.
+
+  **Three adversarial reviews** of the phase (correctness, SPEC
+  conformance, a mutation pass of 64 mutants), each in its own worktree
+  with a no-git brief; every finding fixed with a test. The two readers
+  agreed on the first: under `percent = "precise"` the bands and the
+  `below`/`above` rules compared the whole-number rounding while the row
+  printed one decimal (`23.5%` coloured as over `thresholds = [23.7]`),
+  and `zero` on an amount read a fixed half cent rather than the printed
+  `$0.004` or `$0`; one `shown` rounding per style now feeds both the
+  text and the compared number, and a tie rounds the same way in both.
+  Also found: `pace`, `pace_colors` and the elapsed marker kept rendering
+  after a window's reset had passed (the payload keeps the old
+  `resets_at`, which read as 100 % elapsed); `garnish preview` rendered
+  with the tick's clock, so a config placing `account` forked a worker
+  per fixture and left lock files under the fixtures' session ids (a
+  preview never reads the cache or spawns now, `Request.workers`; whether
+  it should also skip git and the settings chain, as the setup pane does,
+  is in the backlog); `read_account` and, on the tick path,
+  `claude_settings::read_file` opened a FIFO and waited for a writer for
+  ever (`open_regular` refuses anything but a regular file); `account`'s
+  `minimal` preset kept the icon; `style = "user"` left a lone icon for
+  `@host`; a negative zero printed its sign; a hide state was not
+  trimmed; the SPEC's `⇥1h37m`, the `version` table row and the `$1.2k`
+  rule for `whole`, and five stale counts. The mutation pass killed 55 of
+  64; six survivors got their tests (a module hidden by its list never
+  prints `–`, the marker needs its own switch, a zero delta prints bare,
+  the ratio's floor, the blank clause of an inherited separator, the
+  parse error's suffix, two formatter edges), one was equivalent (the
+  remaining clamp) and one unreachable (the order of the hide check and
+  the stale mapping, now said in a comment); three single-pin kills got
+  a unit test beside their golden. 284 → 312 tests.

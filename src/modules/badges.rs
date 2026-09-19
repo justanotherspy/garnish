@@ -285,6 +285,17 @@ mod tests {
         assert_eq!(row("sandbox", "hide_when_empty = false\n", &seeded(Some(false), None)), "–");
         // A blank glyph override leaves no lone space behind.
         assert_eq!(row("sandbox", "[modules.sandbox.icons]\nsandbox = \"\"\n", &on), "");
+        // The lone glyph is its own segment with nothing after it: one
+        // cell, no trailing space for `align` to count.
+        let payload = crate::fixtures::payload("subscription-full");
+        let (config, errs) = crate::config::parse(
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"sandbox\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        let lines = crate::render::render_lines_at(&payload, &config, Some(80), &on);
+        let glyph = lines[0].iter().find(|s| s.text().contains('⊡')).unwrap();
+        assert_eq!(glyph.text(), "⊡");
     }
 
     /// SPEC § 3.8: the worker's read of `.claude.json`: the email when the

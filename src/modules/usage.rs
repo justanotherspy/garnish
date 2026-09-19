@@ -640,6 +640,9 @@ mod tests {
         // than the length is its start.
         assert_eq!(pace(50.0, at - 1, at, 18_000).elapsed_secs, 18_000);
         assert_eq!(pace(50.0, at + 30_000, at, 18_000).elapsed_secs, 0);
+        // At the window's start the ratio divides by one, never by nothing.
+        let start = pace(30.0, at + 18_000, at, 18_000);
+        assert!(start.ratio.is_finite() && (start.ratio - 30.0).abs() < 1e-9, "{start:?}");
         assert_eq!(pace(0.0, at + 9_000, at, 18_000).eta_secs, None, "nothing used: no rate");
         assert_eq!(pace(100.0, at + 9_000, at, 18_000).eta_secs, None, "already spent");
         // Spent exactly at the reset is not before it.
@@ -691,12 +694,59 @@ mod tests {
         // The precise style reaches the delta; a zero delta prints bare.
         let precise = "[format]\npercent = \"precise\"\n[modules.limit5h]\npace = true\n[modules.limit7d]\npace = true\n";
         assert!(render(precise, at, TimeZone::UTC).contains("23.5% ⇣31.9%"));
+        // 23.5 % of the five-hour window elapsed with 23.5 % used: a zero
+        // delta prints bare, in the `behind` colour, no arrow.
+        let even = 1_738_433_620 - 18_000 + 4_230;
+        let row = render("[modules.limit5h]\npace = true\n", even, TimeZone::UTC);
+        assert!(row.starts_with("⏳ 24% 0% ⏱ 3h49m"), "{row}");
         // `spend` takes none of the keys.
         for text in ["[modules.spend]\npace = true\n", "[modules.spend]\nreset = \"elapsed\"\n"] {
             let (_, errs) = crate::config::parse(text, &crate::modules::SCHEMAS);
             assert_eq!(errs.len(), 1, "{text}: {errs:?}");
             assert!(errs[0].path.starts_with("modules.spend."), "{errs:?}");
         }
+    }
+
+    /// SPEC § 3.3 `elapsed_marker`: the cursor is drawn only when its own
+    /// switch says so, even when another switch has computed the pace.
+    #[test]
+    fn the_elapsed_marker_needs_its_own_switch() {
+        let at = 1_738_425_600;
+        let unmarked = render("[modules.limit5h]\nbar_width = 8\npace = true\n", at, TimeZone::UTC);
+        assert!(unmarked.starts_with("⏳ █▉░░░░░░ 24% ⇣32%"), "{unmarked}");
+        let marked =
+            render("[modules.limit5h]\nbar_width = 8\nelapsed_marker = true\n", at, TimeZone::UTC);
+        assert!(marked.starts_with("⏳ █▉░░▏░░░ 24% ⏱"), "{marked}");
+    }
+
+    /// SPEC § 3.3: the pace arrow takes its own colour, `ahead` when ahead
+    /// of the window and `behind` when behind, whatever band the
+    /// percentage is in.
+    #[test]
+    fn pace_arrows_take_their_own_colours() {
+        let arrow = |now: i64| {
+            let text = "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"limit5h\"]\n[modules.limit5h]\npace = true\n";
+            let path =
+                format!("{}/tests/fixtures/payloads/spend-limit.json", env!("CARGO_MANIFEST_DIR"));
+            let payload =
+                crate::payload::Payload::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let (config, errs) = crate::config::parse(text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let clock = Clock { now: jiff::Timestamp::from_second(now).unwrap(), ..Clock::fixed() };
+            let row = crate::render::render_lines_at(&payload, &config, Some(80), &clock);
+            let segment = row
+                .first()
+                .and_then(|l| l.iter().find(|s| s.text().contains('⇡') || s.text().contains('⇣')))
+                .cloned()
+                .unwrap();
+            let cfg = config.modules.get("limit5h").cloned().unwrap();
+            (segment.text().to_owned(), segment.style.fg, cfg)
+        };
+        let at = 1_738_425_600;
+        let (text, fg, cfg) = arrow(at - 8_180);
+        assert!(text.contains("⇡14%") && fg == cfg.color("ahead"), "{text}");
+        let (text, fg, cfg) = arrow(at);
+        assert!(text.contains("⇣32%") && fg == cfg.color("behind"), "{text}");
     }
 
     /// SPEC § 3.3 `pace_colors`: the percentage takes the pace band's

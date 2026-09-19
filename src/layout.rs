@@ -1719,14 +1719,25 @@ mod tests {
         let separators = |f: &Fixture| -> Vec<Color> {
             let (red, green, blue) =
                 (Color::Rgb(255, 0, 0), Color::Rgb(0, 255, 0), Color::Rgb(0, 0, 255));
+            // Module 1: an icon and a value in two colours, so the first
+            // coloured segment is the one taken, not the last. Module 4: a
+            // coloured but blank segment (a `prefix = " "` in a role) before
+            // the value, which is skipped like the pad.
             let left = vec![
-                vec![Segment::styled("a", Style::fg(red))],
+                vec![
+                    Segment::styled("a", Style::fg(red)),
+                    Segment::styled(" a2", Style::fg(Color::Rgb(5, 5, 5))),
+                ],
                 vec![
                     Segment::styled("lbl ", Style::fg(Color::Rgb(9, 9, 9)).dimmed()),
                     Segment::plain("  "),
                     Segment::styled("b", Style::fg(green)),
                 ],
                 vec![Segment::plain("plain only")],
+                vec![
+                    Segment::styled("  ", Style::fg(Color::Rgb(7, 7, 7))),
+                    Segment::styled("d", Style::fg(Color::Rgb(9, 0, 9))),
+                ],
             ];
             let right = vec![vec![Segment::styled("r", Style::fg(blue))]];
             let row = Row {
@@ -1761,11 +1772,14 @@ mod tests {
         };
         let mut f = Fixture::new(FrameStyle::Rounded, false, 80);
         let muted = f.theme.role(Role::Muted);
-        assert_eq!(separators(&f), [muted, muted, muted], "the fixed default is muted");
+        assert_eq!(separators(&f), [muted; 4], "the fixed default is muted");
         f.separator_color = SeparatorColor::Inherit;
-        assert_eq!(separators(&f), [Color::Rgb(255, 0, 0), Color::Rgb(0, 255, 0), muted]);
+        assert_eq!(
+            separators(&f),
+            [Color::Rgb(255, 0, 0), Color::Rgb(0, 255, 0), muted, Color::Rgb(9, 0, 9)]
+        );
         f.separator_color = SeparatorColor::Fixed { spec: "x".into(), color: Color::Rgb(1, 2, 3) };
-        assert_eq!(separators(&f), [Color::Rgb(1, 2, 3); 3]);
+        assert_eq!(separators(&f), [Color::Rgb(1, 2, 3); 4]);
     }
 
     #[test]

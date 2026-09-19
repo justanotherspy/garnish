@@ -657,7 +657,10 @@ fn render_group(
                 _ => rendered,
             };
             // The `hide` list (SPEC § 3) reads the measure the module
-            // attached; a hidden module rendered nothing, never a `–`.
+            // attached; a hidden module rendered nothing, never a `–`. Its
+            // place after the stale mapping is not load-bearing: no cached
+            // module attaches a measure, so a stale or failed render never
+            // meets a rule.
             if modules::hidden_by(&rendered, &cfg.hide) {
                 return None;
             }
@@ -1127,6 +1130,24 @@ mod tests {
         assert!(frozen(&render(&cfg(base), &clock(true, true))), "the user file counts");
         std::fs::write(&project_settings, r#"{"prefersReducedMotion": false}"#).unwrap();
         assert!(moving(&render(&cfg(base), &clock(true, true))), "the project file wins");
+    }
+
+    /// SPEC § 3: a module its `hide` list takes off the row rendered
+    /// nothing, never the `–` an empty render gets under `hide_when_empty
+    /// = false`; a rule that does not fire leaves the module alone.
+    #[test]
+    fn a_module_hidden_by_its_list_never_prints_the_placeholder() {
+        let payload = fixture("api-key");
+        let base = "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nhide_when_empty = false\n";
+        let render = |rule: &str| {
+            let (config, errs) = config::parse(&format!("{base}hide = [\"{rule}\"]\n"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            render_lines_at(&payload, &config, Some(80), &Clock::fixed())
+        };
+        assert!(render("above:0").is_empty(), "hidden, yet a row was drawn");
+        let shown = render("below:0");
+        assert_eq!(shown.len(), 1);
+        assert!(shown[0].iter().any(|s| s.text().contains("42%")), "{shown:?}");
     }
 
     /// A spacer takes whatever cap its position calls for: first, last or,

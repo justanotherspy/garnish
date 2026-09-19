@@ -309,5 +309,8 @@ mod tests {
         assert_eq!(CostStyle::Whole.format(999.5, 2), "$1.0k");
         assert_eq!(CostStyle::Precise.format(999.999, 2), "$1.0k");
         assert_eq!(CostStyle::Precise.format(999.994, 2), "$999.99");
+        assert_eq!(CostStyle::Whole.format(1000.0, 2), "$1.0k");
+        assert_eq!(CostStyle::Whole.format(999.4, 2), "$999");
+        assert_eq!(PercentStyle::Precise.format(f64::NAN, false), "0.0%");
     }
 }

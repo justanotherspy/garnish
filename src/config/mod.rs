@@ -4008,6 +4008,15 @@ x = 1
             assert_eq!(errs.len(), 1, "{text}: {errs:?}");
             assert_eq!(errs[0].path, format!("{base}.hide"), "{text}");
             assert!(errs[0].message.contains(message), "{text}: {}", errs[0].message);
+            // A state the parser does not know is refused naming what the
+            // module accepts, as one the measure disallows is.
+            if message == "unknown hide state" {
+                assert!(
+                    errs[0].message.ends_with("; this module accepts empty, zero"),
+                    "{text}: {}",
+                    errs[0].message
+                );
+            }
             let id = base.trim_start_matches("modules.");
             let hide =
                 c.modules.get(id).map(|m| m.hide.clone()).or_else(|| {
