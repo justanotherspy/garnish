@@ -1,0 +1,53 @@
+# name: links-and-shortcuts
+# summary: clickable branch and pull request, a fish-style path, two link buttons in fixed boxes
+# columns: 110
+# needs: nerd-font
+
+# OSC 8 links, in a terminal that draws them (SPEC § 4.1): `branch.link`
+# opens the branch on the forge, the pull request number opens its page,
+# and a text module with `url` is a button. The buttons are boxes of a
+# fixed `width` with the text right-justified, so the row keeps its shape
+# whatever they say; the path is abbreviated the way the fish shell
+# prompts.
+
+preset = "compact"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch", "pr"]
+right   = ["text.docs", "text.issues", "clock"]
+
+[[row]]
+modules = ["model", "context", "limit5h"]
+right   = ["session", "cache"]
+
+[modules.path]
+style = "fish"            # ~/p/garnish
+depth = 3
+
+[modules.branch]
+link = true               # https://<host>/<owner>/<name>/tree/<branch>
+max_length = 24
+
+[modules.pr]
+link = true
+show_state_word = true
+
+[modules.text.docs]
+text    = "docs"
+width   = 6
+justify = "right"
+url     = "https://github.com/justanotherspy/garnish/blob/main/docs/guide.md"
+color   = "accent2"
+
+[modules.text.issues]
+text    = "issues"
+width   = 6
+justify = "right"
+url     = "https://github.com/justanotherspy/garnish/issues"
+color   = "accent2"

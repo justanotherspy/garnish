@@ -1,0 +1,44 @@
+# name: still-life
+# summary: nothing moves: animation off, no spinner or seconds, fixed-width timers, plain stale values
+# columns: 110
+# needs: nerd-font
+
+# For a recording, a screen reader, or a status line that should not draw
+# the eye: `animate = false` freezes every animation at frame 0 (SPEC
+# § 4.2), the clock shows neither spinner nor seconds so it changes once a
+# minute, timers keep their width, and an overdue cached value stays as it
+# was instead of dimming.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+animate = false
+durations = "fixed"
+stale_style = "plain"
+
+[frame]
+style = "double"
+
+[[row]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+modules = ["model", "effort", "context"]
+right   = ["session", "clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["cache"]
+
+[modules.clock]
+seconds = false
+spinner = false
+
+[modules.context]
+width = 20
+
+[modules.cache]
+show_countdown = false    # the warm countdown is the one value that ticks

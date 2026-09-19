@@ -1,0 +1,66 @@
+# name: sidebar-panels
+# summary: a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column
+# columns: 140
+# needs: nerd-font
+
+# Column widths in cells and in shares (SPEC § 4.3): the sidebar is exactly
+# 34 cells and boxed by name, with the box's own style, colour and a filled
+# rule inside; the middle column takes two shares of what is left and
+# stacks three titled rows; the last column sits at the bottom of the row.
+
+preset = "default"
+icons  = "nerd"
+theme  = "catppuccin-mocha"
+color  = "auto"
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[box.side]
+title = "Repo"
+title_justify = "center"
+style = "heavy"
+fill  = true
+color = "accent2"
+
+[[row]]
+gap = 3
+
+[[row.col]]
+width = 34
+box = "side"
+[[row.col.row]]
+modules = ["path"]
+[[row.col.row]]
+modules = ["branch", "pr"]
+[[row.col.row]]
+modules = ["sync", "worktree", "session_name"]
+
+[[row.col]]
+width = "2fr"
+[[row.col.row]]
+title = "Model"
+modules = ["model", "effort"]
+right   = ["vim"]
+[[row.col.row]]
+title = "Context"
+title_justify = "right"
+modules = ["context"]
+[[row.col.row]]
+title = "Usage"
+title_justify = "center"
+modules = ["limit5h", "limit7d"]
+right   = ["cost"]
+
+[[row.col]]
+width = "1fr"
+valign = "bottom"
+justify = "right"
+[[row.col.row]]
+modules = ["session", "api"]
+[[row.col.row]]
+modules = ["clock"]
+
+[modules.context]
+width = 16

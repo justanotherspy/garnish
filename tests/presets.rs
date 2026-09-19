@@ -166,7 +166,13 @@ fn every_preset_has_a_header_validates_and_renders() {
                     "{stem}: promises an animation but nothing moves between two ticks at {columns} columns"
                 ));
             }
-            if text.lines().any(|l| l.trim_start().starts_with("overflow")) {
+            // The slide check is for the line ticker alone: a text module's
+            // `overflow` scrolls its own box at its own `step`, and a row
+            // can change for other reasons (a spinner, a pulsing glyph).
+            let line_ticker = text
+                .lines()
+                .any(|l| l.trim_start().starts_with("overflow") && l.contains("\"ticker\""));
+            if line_ticker {
                 failures.extend(ticker_advance_failures(&stem, &text, &rows, &later));
             }
         }

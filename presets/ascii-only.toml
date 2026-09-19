@@ -1,0 +1,45 @@
+# name: ascii-only
+# summary: 7-bit ASCII throughout: ascii icons, a custom +-| frame, no colour codes at all
+# columns: 100
+
+# For a terminal or a log with no fonts and no colour: the ascii icon set,
+# `color = "never"`, and a custom frame drawn from `+`, `-` and `|`. Every
+# cut ends in `..` rather than `…`, so nothing outside ASCII ever reaches
+# the row.
+
+preset = "default"
+icons  = "ascii"
+theme  = "mono"
+color  = "never"
+align  = true
+durations = "fixed"
+
+[frame]
+style        = "custom"
+first        = "+-"
+middle       = "|-"
+last         = "+-"
+single       = "--"
+right_first  = "-+"
+right_middle = "-|"
+right_last   = "-+"
+right_single = "--"
+fill_char    = "-"
+pad          = " "
+separator    = " | "
+
+[[row]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+modules = ["model", "effort", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["session", "lines"]
+
+[modules.context]
+bar = "line"
+width = 16

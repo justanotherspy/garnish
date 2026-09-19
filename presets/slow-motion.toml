@@ -1,0 +1,43 @@
+# name: slow-motion
+# summary: half-speed motion: a rule pattern drifting left, a pulsing bar, an eight-dot spinner, a scrolling note
+# columns: 100
+# needs: nerd-font
+
+# The step keys (SPEC § 4.2) slow an animation down: 0.5 advances every
+# second tick. The rule pattern travels left, the separator alternates, the
+# context bar's filled cells pulse through two glyphs, the clock spins on
+# eight braille dots, and a note scrolls through its box at half speed and
+# restarts after the end.
+
+preset = "compact"
+icons  = "nerd"
+theme  = "dracula"
+
+[frame]
+style            = "rounded"
+fill_pattern     = "─ ─ ╌ "
+fill_direction   = "left"
+fill_step        = 0.5
+separator_frames = [" │ ", " ┆ "]
+separator_step   = 0.5
+
+[[row]]
+modules = ["path", "branch", "pr"]
+right   = ["text.note", "clock"]
+
+[[row]]
+modules = ["model", "context", "limit5h"]
+right   = ["cache"]
+
+[modules.context.icons]
+fill_frames = ["█", "▓"]
+
+[modules.clock.icons]
+spinner_frames = ["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]
+
+[modules.text.note]
+text     = "half speed: this note moves every second tick"
+width    = 22
+pad      = 1
+overflow = "scroll"
+step     = 0.5

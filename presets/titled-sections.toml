@@ -1,0 +1,54 @@
+# name: titled-sections
+# summary: a title in every rule, left, centred and right, a titled spacer and one boxed row, Nord
+# columns: 120
+# needs: nerd-font
+
+# A title is text set into a row's rule (SPEC § 4.3): after the left cap,
+# centred in the widest gap, or before the right cap, with `title_pad`
+# spaces each side and `title_color` for a role or a literal. A row with
+# only a title is a titled spacer, and `box = true` boxes one row alone
+# with its own `title*` keys on that box.
+
+preset = "default"
+icons  = "nerd"
+theme  = "nord"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+title = "Repository"
+title_color = "accent"
+modules = ["path", "branch", "sync", "pr"]
+right   = ["session_name"]
+
+[[row]]
+title = "Model"
+title_justify = "center"
+title_pad = 2
+modules = ["model", "effort", "context"]
+right   = ["vim"]
+
+[[row]]
+title = "Usage"
+title_justify = "right"
+title_color = "#88c0d0"
+modules = ["limit5h", "limit7d", "spend"]
+right   = ["lines"]
+
+[[row]]
+title = "· · ·"
+title_justify = "center"
+modules = []
+
+[[row]]
+box = true
+title = "Session"
+modules = ["session", "api", "cache"]
+right   = ["clock"]
+
+[modules.context]
+width = 16
