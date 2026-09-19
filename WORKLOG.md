@@ -698,3 +698,11 @@ was built, what the reviews found and what was decided, not how.
   preset conventions, `SPEC.md` lost its "target state" marks and records
   the Phase 22 deviations, `README.md` and the guide are written around
   `setup`, and `CHANGELOG.md` § Unreleased is the `v0.3.0` section.
+
+  The first push went red on CI for the reason `CLAUDE.md` § Toolchain
+  already named: the container's nightly was five days behind, and the
+  fresh one's `map_unwrap_or` catches `map(_).unwrap_or_default()` on an
+  Option at three sites in `src/setup/`, one of them in `#[cfg(test)]`.
+  Reproduced with a dated nightly installed beside the pinned one (so
+  the review agents' worktrees kept theirs), fixed with `map_or_default`,
+  green on both.

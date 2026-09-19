@@ -133,7 +133,12 @@ documents *first*, with the reason, then start coding.
   code CI rejected. When a check is red on a lint and the tree is green
   here, `rustup update nightly` *first*, then reproduce: one `cargo clippy
   --all-targets` finds every site at once, including the ones in
-  `#[cfg(test)]` that only the lib-test target compiles. When `make setup`
+  `#[cfg(test)]` that only the lib-test target compiles. While other
+  work (a review agent's worktree) is using the pinned `nightly`, install
+  a dated one beside it instead (`rustup toolchain install
+  nightly-YYYY-MM-DD --profile minimal --component clippy,rustfmt`) and
+  run `cargo +nightly-YYYY-MM-DD clippy --all-targets`; the pinned
+  toolchain is untouched. When `make setup`
   stops with a PATH note, rustup's `cargo`/`rustc` proxies are not on the
   shell's PATH (a package-manager rustup keeps them in its own bin
   directory; Homebrew's is keg-only): fix PATH on the host, never in the
