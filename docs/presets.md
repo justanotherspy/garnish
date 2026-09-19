@@ -25,7 +25,7 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | [`session-detail`](#session-detail) | session, api, cache and cost detail, plain stale style, 1 s git refresh | 130 | nerd-font |
 | [`sidebar-panels`](#sidebar-panels) | a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column | 140 | nerd-font |
 | [`single-line-full`](#single-line-full) | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
-| [`slow-motion`](#slow-motion) | half-speed motion: a rule pattern drifting left, a pulsing bar, an eight-dot spinner, a scrolling note | 100 | nerd-font |
+| [`slow-motion`](#slow-motion) | half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed | 100 | nerd-font |
 | [`still-life`](#still-life) | nothing moves: animation off, no spinner or seconds, fixed-width timers, plain stale values | 110 | nerd-font |
 | [`tall-eight-lines`](#tall-eight-lines) | one module per row, eight rows, square frame | 100 | nerd-font |
 | [`three-lines-double`](#three-lines-double) | repo / model / timers in a double frame | 130 | nerd-font |
@@ -1297,7 +1297,7 @@ right   = ["session_name", "agent", "vim", "lines", "clock"]
 
 ## `slow-motion`
 
-half-speed motion: a rule pattern drifting left, a pulsing bar, an eight-dot spinner, a scrolling note
+half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed
 
 At 100 columns, needs nerd-font:
 
@@ -1310,15 +1310,16 @@ At 100 columns, needs nerd-font:
 
 ```toml
 # name: slow-motion
-# summary: half-speed motion: a rule pattern drifting left, a pulsing bar, an eight-dot spinner, a scrolling note
+# summary: half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed
 # columns: 100
 # needs: nerd-font
 
 # The step keys (SPEC § 4.2) slow an animation down: 0.5 advances every
-# second tick. The rule pattern travels left, the separator alternates, the
-# context bar's filled cells pulse through two glyphs, the clock spins on
-# eight braille dots, and a note scrolls through its box at half speed and
-# restarts after the end.
+# second tick. The rule pattern travels left and the separator alternates
+# at half speed, and a note scrolls through its box at half speed and
+# restarts after the end. Icon frames take no step, so the context bar's
+# filled cells pulse through two glyphs and the clock spins on eight
+# braille dots once a tick.
 
 preset = "compact"
 icons  = "nerd"
@@ -1602,11 +1603,12 @@ At 120 columns, needs nerd-font:
 # columns: 120
 # needs: nerd-font
 
-# A title is text set into a row's rule (SPEC § 4.3): after the left cap,
-# centred in the widest gap, or before the right cap, with `title_pad`
-# spaces each side and `title_color` for a role or a literal. A row with
-# only a title is a titled spacer, and `box = true` boxes one row alone
-# with its own `title*` keys on that box.
+# A title is text set into a row's rule (SPEC § 4.3): in the first empty
+# run of the line (after the modules, or after the cap on a spacer), the
+# widest, or the last one before the right group, with `title_pad` spaces
+# each side and `title_color` for a role or a literal. A row with only a
+# title is a titled spacer, and `box = true` boxes one row alone with its
+# own `title*` keys on that box's top rule.
 
 preset = "default"
 icons  = "nerd"

@@ -192,7 +192,15 @@ impl SlotKind {
             }
             Self::Int { min, max } => {
                 let n: i64 = text.parse().map_err(|_| format!("{text:?} is not an integer"))?;
-                Value::Integer(n.max(*min).min(max.unwrap_or(i64::MAX)))
+                if n < *min {
+                    return Err(format!("{n} is below the minimum of {min}"));
+                }
+                if let Some(m) = max
+                    && n > *m
+                {
+                    return Err(format!("{n} is above the maximum of {m}"));
+                }
+                Value::Integer(n)
             }
             Self::Float => {
                 let f: f64 = text.parse().map_err(|_| format!("{text:?} is not a number"))?;
@@ -467,10 +475,12 @@ impl Form {
                     .filter(|_| field.set)
                     .and_then(Value::as_str)
                     .and_then(|n| names.iter().position(|x| *x == n));
+                let last = names.len().saturating_sub(1);
                 let next = match (at, up) {
                     (None, true) => Some(0),
-                    (None, false) => Some(2),
-                    (Some(2), true) | (Some(0), false) => None,
+                    (None, false) => Some(last),
+                    (Some(i), true) if i >= last => None,
+                    (Some(0), false) => None,
                     (Some(i), true) => Some(i.saturating_add(1)),
                     (Some(i), false) => Some(i.saturating_sub(1)),
                 };
@@ -556,7 +566,9 @@ impl Form {
             inner_w.saturating_sub(key_w).saturating_sub(6).checked_div(2).unwrap_or(10).max(6);
         let mut lines: Vec<Line<'static>> = Vec::new();
         for (i, f) in self.fields.iter().enumerate().skip(self.scroll).take(list_height) {
-            let mark = if f.set { Span::styled("● ", Chrome::set()) } else { Span::raw("  ") };
+            // A plain mark: the geometric dots draw two cells in some
+            // terminals (CLAUDE.md § Conventions).
+            let mark = if f.set { Span::styled("* ", Chrome::set()) } else { Span::raw("  ") };
             let key = Span::raw(format!("{:<key_w$} ", clip(&f.key, key_w)));
             let value = Span::styled(
                 format!("{:<value_w$} ", clip(&f.current, value_w)),
@@ -1429,8 +1441,12 @@ mod tests {
             matches!(form.handle(Key::Enter).push, Some(Layer::Choose(c)) if c.items.iter().any(|i| i.value == "accent"))
         );
         assert!(form.handle(Key::Esc).close);
-        // Typed text parses per kind, clamped to the bounds.
-        assert_eq!(SlotKind::Int { min: 0, max: Some(5) }.parse("9"), Ok(Some(Value::Integer(5))));
+        // Typed text parses per kind; an integer outside its bounds is
+        // refused with the bound named, never clamped in silence.
+        assert_eq!(SlotKind::Int { min: 0, max: Some(5) }.parse("5"), Ok(Some(Value::Integer(5))));
+        let over = SlotKind::Int { min: 0, max: Some(5) }.parse("9").unwrap_err();
+        assert!(over.contains("maximum of 5"), "{over}");
+        assert!(SlotKind::Int { min: 1, max: None }.parse("0").unwrap_err().contains("minimum"));
         assert!(SlotKind::Int { min: 0, max: None }.parse("x").is_err());
         assert_eq!(
             SlotKind::StrList.parse("a, b,").unwrap(),

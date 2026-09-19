@@ -108,6 +108,24 @@ pub fn clip(text: &str, width: usize) -> String {
     crate::ansi::Painter::PLAIN.paint(&crate::ansi::truncate(&segs, width, "…"))
 }
 
+/// Warnings as lines of their own, never clipped away.
+///
+/// On one line when they all fit in `width`, else one per line (each cut
+/// to the width). A warning appended to a long title vanished past the
+/// right edge on the narrow terminals it was written for.
+#[must_use]
+pub fn note_lines(notes: &[String], width: u16) -> Vec<Line<'static>> {
+    let width = usize::from(width);
+    let joined = notes.join("  ");
+    if notes.is_empty() {
+        Vec::new()
+    } else if crate::ansi::display_width(&joined) <= width {
+        vec![Line::from(Span::styled(joined, Chrome::warn()))]
+    } else {
+        notes.iter().map(|n| Line::from(Span::styled(clip(n, width), Chrome::warn()))).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

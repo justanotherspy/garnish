@@ -40,7 +40,7 @@ branch names (`branch.link = true`) and text boxes (`url`).
 garnish setup           # pick a preset or build a layout, previewed live, then hook it in
 ```
 
-`setup` is a full-screen screen in your terminal. *Pick a preset* lists
+`setup` takes over the terminal while it runs. *Pick a preset* lists
 the four built-ins and the gallery, each rendered at your terminal's real
 width as you move through them (with a warning when the terminal is
 narrower than a preset wants, or shorter than Claude Code's fullscreen

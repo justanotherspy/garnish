@@ -151,6 +151,21 @@ impl Draft {
         self.dirty
     }
 
+    /// Count the draft as edited: a preset adopted over a file differs from
+    /// it even though no key was typed.
+    pub const fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// The preset's rows written out on opening, so the list has lines to
+    /// edit, without counting as an edit: a file that only names a preset
+    /// gains its rows on its first save.
+    pub fn materialise_rows_as_read(&mut self) {
+        let dirty = self.dirty;
+        self.materialise_rows();
+        self.dirty = dirty;
+    }
+
     /// Why the file on disk cannot be saved over: its TOML syntax error, or
     /// a read error. `None` for a readable (or absent) file.
     #[must_use]
@@ -334,7 +349,9 @@ impl Draft {
             ));
         }
         let existed = path.exists();
-        let backup = crate::install::replace_file(&path, &self.text(), existed)?;
+        let text = toml::to_string_pretty(&self.table)
+            .map_err(|e| format!("the draft cannot be written as TOML: {e}"))?;
+        let backup = crate::install::replace_file(&path, &text, existed)?;
         self.stamp = Stamp::of(&path);
         self.dirty = false;
         Ok(backup)
@@ -358,7 +375,7 @@ fn remove_at(table: &mut Table, path: &[&str]) -> bool {
                 return false;
             };
             let removed = remove_at(child, rest);
-            if child.is_empty() {
+            if removed && child.is_empty() {
                 table.remove(*first);
             }
             removed

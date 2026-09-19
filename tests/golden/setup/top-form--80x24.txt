@@ -1,6 +1,6 @@
-p┌ top level ─────────────────────────────────────────────────────────────────┐
+p┌ top level ─────────────────────────────────────────────────────────────────┐i
 ▶│  preset          default                     (default)                     │
- │● icons           unicode                     (nerd)                        │
+ │* icons           unicode                     (nerd)                        │
 r│  theme           garnish                     (garnish)                     │
 r│  color           auto                        (auto)                        │
 r│  truncate        true                        (true)                        │

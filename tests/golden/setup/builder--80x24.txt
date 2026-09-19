@@ -1,4 +1,4 @@
-preview  subscription-full: a Pro/Max session with every field set  ·  80 cols,
+preview  80 cols, box 76  ·  2 lines  ·  subscription-full: a Pro/Max session wi
 ▶ ╭─ ❒ ~/projects/garnish ────────────────────────────────────── ⠋ 16:00:00 ─╮
   ╰─ ❖ Opus │ ⊞ ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────────╯
 rows  ~/garnish.toml

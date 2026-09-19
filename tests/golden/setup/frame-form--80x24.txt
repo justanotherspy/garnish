@@ -1,0 +1,24 @@
+p┌ [frame] ───────────────────────────────────────────────────────────────────┐i
+▶│  style            rounded                     (rounded)                    │
+ │  fill             true                        (true)                       │
+r│  separator         │                          (the style's)                │
+r│  pad              " "                         (the style's)                │
+r│  fill_char        ─                           (the style's)                │
+ │  first            ╭─                          (the style's)                │
+ │  middle           ├─                          (the style's)                │
+ │  last             ╰─                          (the style's)                │
+ │  single           ──                          (the style's)                │
+ │  right_first      ─╮                          (the style's)                │
+ │  right_middle     ─┤                          (the style's)                │
+ │  right_last       ─╯                          (the style's)                │
+ │  right_single     ──                          (the style's)                │
+ │  top_left         ╭                           (the style's)                │
+ │  top_right        ╮                           (the style's)                │
+ │  bottom_left      ╰                           (the style's)                │
+ │  bottom_right     ╯                           (the style's)                │
+ │  side             │                           (the style's)                │
+ │none | rounded | square | double | heavy | powerline | custom.              │
+ │                                                                            │
+ │                                                                            │
+a│↑↓ field  enter edit  ←→ step  d unset  esc back                            │
+↑└────────────────────────────────────────────────────────────────────────────┘f

@@ -16,9 +16,11 @@ the three bundled skills. Phases 19–22 landed between 2026-09-13 and
 waits for its first tag, which will be `v0.3.0`; `CHANGELOG.md`
 § Unreleased is its section.
 
-**There is no drift between `SPEC.md` and the code.** Every section of the
-spec is implemented; where Phase 22 was built differently from its design,
-SPEC § 14 says so and why. What is open is the backlog.
+**The drift between `SPEC.md` and the code is the short list under
+*Setup, when asked* in the backlog** (a keyboard path to a separator or a
+cap, undo, a cargo feature); everything else in the spec is implemented,
+and where Phase 22 was built differently from its design, SPEC § 14 says
+so and why.
 
 ## Done
 
@@ -97,7 +99,16 @@ Open items only; closed ones are in `WORKLOG.md`.
   the count answers the same question for a glyph the font draws wide
 - [ ] Keyboard selection of a separator, a cap or a rule in the preview
   (a click reaches them; keys reach modules, rows and columns); `2`
-  opens the frame form meanwhile
+  opens the frame form meanwhile. In the same vein, the placement map
+  names only the outer row of a line, so a click on a title or a box
+  edge inside a row of columns selects that row and points at the list;
+  carrying the inner `RowAt` and the column's box name in `Elem::Title`
+  and `Elem::BoxEdge` would let the click land on the inner row
+- [ ] The snapshot tests see symbols only, so nothing pins the inverse
+  video on the selected module or the highlighted line and field; a
+  `cell_modifiers` helper over `TestBackend` next to `snapshot` would
+- [ ] `tests/presets.rs` reads `ticker_step` as an integer for its slide
+  check, so a fractional step would be read as 1; no preset uses one
 - [ ] Undo in the builder (the backup and reload cover a bad save; a bad
   edit is re-edited)
 

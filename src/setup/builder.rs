@@ -92,6 +92,9 @@ pub struct Builder {
     /// The selected chip of that line, when one is.
     pub chip: Option<usize>,
     scroll: usize,
+    /// The cell range of every chip on every drawn line, recorded by
+    /// `draw` so a click is measured against what is on screen.
+    hits: Vec<Vec<(usize, usize)>>,
 }
 
 /// The string list under `key` of a table.
@@ -313,24 +316,12 @@ impl Builder {
             return false;
         }
         self.cursor = line;
-        self.chip = None;
-        let Some(item) = self.items.get(line) else { return true };
-        let mut at = item.label().chars().count().saturating_add(2);
         let x = x.saturating_sub(usize::from(area.x));
-        for (i, chip) in item.chips.iter().enumerate() {
-            let w = chip.id.chars().count().saturating_add(2);
-            if i > 0
-                && chip.side == Side::Right
-                && item.chips.get(i.saturating_sub(1)).is_some_and(|p| p.side == Side::Left)
-            {
-                at = at.saturating_add(4);
-            }
-            if x >= at && x < at.saturating_add(w) {
-                self.chip = Some(i);
-                break;
-            }
-            at = at.saturating_add(w).saturating_add(1);
-        }
+        let visible = y.saturating_sub(usize::from(area.y));
+        self.chip = self
+            .hits
+            .get(visible)
+            .and_then(|ranges| ranges.iter().position(|(start, end)| x >= *start && x < *end));
         true
     }
 
@@ -340,10 +331,15 @@ impl Builder {
         self.scroll = window(self.cursor, self.items.len(), height, self.scroll);
         let width = usize::from(area.width);
         let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut hits: Vec<Vec<(usize, usize)>> = Vec::new();
         for (i, item) in self.items.iter().enumerate().skip(self.scroll).take(height) {
             let selected = i == self.cursor;
+            let label = format!("{:<8}", item.label());
+            // The labels are ASCII, so a char is a cell.
+            let mut x = label.chars().count().saturating_add(2);
+            let mut ranges: Vec<(usize, usize)> = Vec::new();
             let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                format!("{:<8}", item.label()),
+                label,
                 if selected && self.chip.is_none() { Chrome::selected() } else { Chrome::title() },
             )];
             spans.push(Span::raw("  "));
@@ -353,15 +349,20 @@ impl Builder {
                     && item.chips.get(c.saturating_sub(1)).is_some_and(|p| p.side == Side::Left)
                 {
                     spans.push(Span::styled(" │ ", Chrome::muted()));
+                    x = x.saturating_add(3);
                 }
                 let on = selected && self.chip == Some(c);
-                let dot = if draft.module_has_overrides(&chip.id) { "●" } else { " " };
-                spans.push(Span::styled(
-                    format!("{}{dot}", chip.id),
-                    if on { Chrome::selected() } else { Style::new() },
-                ));
+                // A plain mark: the geometric dots draw two cells in some
+                // terminals (CLAUDE.md § Conventions).
+                let dot = if draft.module_has_overrides(&chip.id) { "*" } else { " " };
+                let text = format!("{}{dot}", chip.id);
+                let w = text.chars().count();
+                ranges.push((x, x.saturating_add(w)));
+                x = x.saturating_add(w).saturating_add(1);
+                spans.push(Span::styled(text, if on { Chrome::selected() } else { Style::new() }));
                 spans.push(Span::raw(" "));
             }
+            hits.push(ranges);
             if item.chips.is_empty() && item.kind != ItemKind::Col {
                 if item.note.contains("spacer") {
                     spans.push(Span::styled("(spacer)", Chrome::muted()));
@@ -379,6 +380,7 @@ impl Builder {
                 lines.push(Line::from(spans));
             }
         }
+        self.hits = hits;
         frame.render_widget(Paragraph::new(lines), Rect { height: cells(height), ..area });
     }
 }
@@ -447,6 +449,19 @@ impl Builder {
         };
         if index < siblings.len() {
             siblings.remove(index);
+        }
+        // An emptied list is dropped with its key, so the column is a
+        // plain column again (and the row a plain row) rather than a
+        // stack or a grid of nothing that refuses every edit.
+        if siblings.is_empty() {
+            let parent = match item.kind {
+                ItemKind::Inner => draft.row_mut(RowAt { inner: None, ..item.at }),
+                ItemKind::Col => draft.row_mut(RowAt::row(item.at.row)),
+                ItemKind::Row => None,
+            };
+            if let Some(table) = parent {
+                table.remove(if item.kind == ItemKind::Inner { "row" } else { "col" });
+            }
         }
         self.rebuild(draft);
         Ok(format!("deleted {}", item.label().trim()))
@@ -627,7 +642,11 @@ impl Builder {
             return Err("no such module".into());
         }
         let id = from.remove(chip.index);
-        from_table.insert(chip.side.key().to_owned(), string_list(&from));
+        if from.is_empty() && chip.side == Side::Right {
+            from_table.remove("right");
+        } else {
+            from_table.insert(chip.side.key().to_owned(), string_list(&from));
+        }
         let to_table = draft.row_mut(target_at).ok_or("no such column")?;
         let mut to = ids(to_table, "modules");
         to.push(id.clone());
@@ -704,7 +723,8 @@ impl Builder {
         }
     }
 
-    /// Make the selected row a spacer (`modules = []`), or a row again.
+    /// Make the selected row a spacer (`modules = []`); its modules go, and
+    /// `m` is the way back.
     ///
     /// # Errors
     /// Why nothing changed, for the status bar.
@@ -764,6 +784,56 @@ mod tests {
 
     fn ids_at(d: &Draft, at: RowAt, key: &str) -> Vec<String> {
         d.row(at).map_or_default(|t| ids(t, key))
+    }
+
+    /// The rules a mutation pass found no test for: where a row-selected
+    /// add lands, an emptied `right` going with its key, a spacer dropping
+    /// its right group, a move into a stack refused, the cursor after a
+    /// clone, and a shift up.
+    #[test]
+    fn edge_rules_of_the_edits_hold() {
+        let mut d = draft();
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        assert_eq!(b.add_module(&mut d, "clock").unwrap(), "added clock");
+        assert_eq!(ids_at(&d, RowAt::row(0), "modules"), vec!["path", "branch", "clock"]);
+        // Delete the lone right module: the key goes with it.
+        b.select_row(0);
+        b.chip = b.items[0].chips.iter().position(|c| c.side == Side::Right);
+        assert!(b.chip.is_some());
+        b.delete(&mut d).unwrap();
+        assert!(d.row(RowAt::row(0)).unwrap().get("right").is_none());
+        // A spacer drops its right group too.
+        let mut d = draft();
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.toggle_spacer(&mut d).unwrap();
+        let row = d.row(RowAt::row(0)).unwrap();
+        assert!(row.get("right").is_none());
+        assert_eq!(ids(row, "modules"), Vec::<String>::new());
+        // A move into a stacked column is refused.
+        let mut d = Draft::from_text(
+            "[[row]]\n[[row.col]]\nmodules = [\"path\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"clock\"]\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.move_line(true);
+        b.move_chip(true);
+        assert_eq!(b.selected_id(), Some("path"));
+        let err = b.switch_column(&mut d, true).unwrap_err();
+        assert!(err.contains("stack"), "{err}");
+        // A clone selects the copy; a shift up swaps with the line above.
+        let mut d = draft();
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.clone_line(&mut d).unwrap();
+        assert_eq!(b.cursor, 1);
+        b.move_line(true);
+        b.move_line(true);
+        assert_eq!(b.cursor, 2);
+        b.shift(&mut d, false).unwrap();
+        assert_eq!(b.cursor, 1);
+        assert_eq!(ids_at(&d, RowAt::row(1), "modules"), vec!["model"]);
     }
 
     #[test]

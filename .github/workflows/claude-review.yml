@@ -180,10 +180,10 @@ jobs:
           # so notes go here, not inside it. Sonnet 5 at high effort keeps a
           # 100-turn ceiling in the price range of a short Opus run. `Task` is
           # deliberately absent: a delegate the parent stops waiting for is how
-          # six reviews posted nothing, and no prompt rule prevented it.
-          # Everything else is allowed, `Bash` whole included: the job holds
-          # `contents: read`, the checkout is disposable, and an allowlist of
-          # verbs refused compound commands whatever it carried.
+          # six reviews posted nothing, and no prompt rule prevented it. The
+          # file tools, `Bash` whole and the GitHub MCP tools are allowed: the
+          # job holds `contents: read`, the checkout is disposable, and an
+          # allowlist of verbs refused compound commands whatever it carried.
           claude_args: |
             --model claude-sonnet-5
             --effort high

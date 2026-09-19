@@ -173,7 +173,7 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    /// Set garnish up on a full-screen screen: pick a preset, build a layout, install.
+    /// Set garnish up full-screen: pick a preset, build a layout, install.
     Setup {
         /// Write this preset (a built-in or a gallery name) without opening
         /// the screen, keeping a backup of the file it replaces.

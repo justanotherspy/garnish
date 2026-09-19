@@ -202,12 +202,13 @@ claim, which embeds the numeric owner and repository IDs
   (each naming the `CLAUDE.md` rule it comes from), how to post, how to
   write (terse, under 120 words a comment, a suggestion block over
   prose), and never to end without the summary.
-- **Everything but `Task` is allowed, `Bash` whole included.** The job
-  holds `contents: read`, the checkout is disposable, and an allowlist of
-  verbs cannot work: it matches on a prefix (`git --no-pager diff` is not
-  `git diff`), and **a compound command is refused even when every part
-  of it is allowed** (`git diff … | wc -l` with both on the list). `Task`
-  is absent on purpose: six runs ended with the parent stopping while a
+- **The file tools, `TodoWrite`, `Bash` whole and the GitHub MCP tools
+  are allowed; `Task` is deliberately absent.** The job holds `contents:
+  read`, the checkout is disposable, and an allowlist of verbs cannot
+  work: it matches on a prefix (`git --no-pager diff` is not `git diff`),
+  and **a compound command is refused even when every part of it is
+  allowed** (`git diff … | wc -l` with both on the list). `Task` is
+  absent on purpose: six runs ended with the parent stopping while a
   subagent was still working, and three prompt rules against it were
   ignored. **An instruction the model does not follow is not a control;
   removing the capability is.**

@@ -1,13 +1,14 @@
 # name: slow-motion
-# summary: half-speed motion: a rule pattern drifting left, a pulsing bar, an eight-dot spinner, a scrolling note
+# summary: half-speed rule, separator and note; a pulsing bar and an eight-dot spinner at full speed
 # columns: 100
 # needs: nerd-font
 
 # The step keys (SPEC § 4.2) slow an animation down: 0.5 advances every
-# second tick. The rule pattern travels left, the separator alternates, the
-# context bar's filled cells pulse through two glyphs, the clock spins on
-# eight braille dots, and a note scrolls through its box at half speed and
-# restarts after the end.
+# second tick. The rule pattern travels left and the separator alternates
+# at half speed, and a note scrolls through its box at half speed and
+# restarts after the end. Icon frames take no step, so the context bar's
+# filled cells pulse through two glyphs and the clock spins on eight
+# braille dots once a tick.
 
 preset = "compact"
 icons  = "nerd"

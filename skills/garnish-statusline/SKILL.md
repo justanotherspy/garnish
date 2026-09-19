@@ -40,7 +40,7 @@ it" answer at any point is mapped onto the same keys.
 | Nerd Font installed? | `icons = "nerd"`, else `"unicode"` (`"emoji"`, `"ascii"`) | `nerd` |
 | Usual terminal width? (`echo $COLUMNS` in their own terminal) | preset and row count: under 90 → `compact` or `minimal`; 90–130 → `compact` or `default`; wider → `default` or `full` | `compact` |
 | What matters: repo, model and context, usage limits, timers? | which modules go on which row; `preset = "full"` on the ones they care about | the preset's rows |
-| Rows across the width, or panels side by side? | one `[[row]]` per line, or `[[row.col]]` columns with `width` (`"1fr"` \| `"auto"` \| cells), `justify`, `gap`; `[[row.col.row]]` stacks rows in a column | rows |
+| Rows across the width, or panels side by side? | one `[[row]]` per line, or `[[row.col]]` columns with `width` (`"1fr"` \| `"auto"` \| cells) and `justify`, `gap` on the row; `[[row.col.row]]` stacks rows in a column | rows |
 | Anything to label or frame? | `title` (with `title_justify`) in a row's rule; `[box.<name>]` around adjacent rows or a whole column; `box = true` on one row | nothing |
 | Colours: a theme, or match the terminal? | `theme = garnish \| catppuccin-mocha \| nord \| dracula \| tokyonight \| mono`; `color = "256"` without truecolor | `garnish` |
 | Frame? | `[frame] style = rounded \| square \| double \| heavy \| powerline \| none \| custom` | `rounded` |
@@ -62,8 +62,8 @@ rows from nothing. `docs/config.md` and `garnish modules` list every key.
 Draft into a temp file, never over the real one:
 
 ```sh
-DRAFT=$(mktemp -t garnish.XXXXXX)
-garnish --config "$DRAFT" config init --preset <name> --force
+DRAFT=$(mktemp -d)/garnish.toml
+garnish --config "$DRAFT" config init --preset <name>
 # edit $DRAFT with the Edit tool
 garnish --config "$DRAFT" config check                                   # every problem with its TOML path
 garnish --config "$DRAFT" preview "$PAYLOAD" --width <columns> --color always

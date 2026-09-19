@@ -3,11 +3,12 @@
 # columns: 120
 # needs: nerd-font
 
-# A title is text set into a row's rule (SPEC § 4.3): after the left cap,
-# centred in the widest gap, or before the right cap, with `title_pad`
-# spaces each side and `title_color` for a role or a literal. A row with
-# only a title is a titled spacer, and `box = true` boxes one row alone
-# with its own `title*` keys on that box.
+# A title is text set into a row's rule (SPEC § 4.3): in the first empty
+# run of the line (after the modules, or after the cap on a spacer), the
+# widest, or the last one before the right group, with `title_pad` spaces
+# each side and `title_color` for a role or a literal. A row with only a
+# title is a titled spacer, and `box = true` boxes one row alone with its
+# own `title*` keys on that box's top rule.
 
 preset = "default"
 icons  = "nerd"

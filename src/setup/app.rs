@@ -267,6 +267,10 @@ impl App {
             comments_note_shown: false,
             no_color,
         };
+        if has_file {
+            // A file that only names a preset has no `[[row]]` to list.
+            app.draft.materialise_rows_as_read();
+        }
         app.builder.rebuild(&app.draft);
         if let Some(problem) = app.draft.unreadable() {
             app.say(
@@ -275,7 +279,10 @@ impl App {
             );
         } else if has_file && !app.problems.is_empty() {
             app.say(
-                format!("{}; a save writes the defaults for the bad keys", app.first_problem()),
+                format!(
+                    "{}; a save keeps the key as written (d in its form unsets it)",
+                    app.first_problem()
+                ),
                 Level::Warn,
             );
         }
@@ -314,7 +321,7 @@ impl App {
             .map_or_else(|| path.display().to_string(), |rest| format!("~/{}", rest.display()))
     }
 
-    /// Open the builder straight away (the `setup --edit` twin, tests).
+    /// Open the builder straight away (the picker's `e`, tests).
     pub fn open_builder(&mut self) {
         self.screen = Screen::Builder;
     }
@@ -330,13 +337,19 @@ impl App {
         })
     }
 
-    /// Re-resolve the draft after an edit and rebuild what depends on it.
-    fn refresh(&mut self) {
+    /// Re-resolve the draft after an edit and rebuild what depends on it,
+    /// naming the first problem the edit introduced, if any.
+    fn refresh(&mut self) -> Option<String> {
         let (config, problems) = self.draft.resolved();
+        let new = problems
+            .iter()
+            .find(|p| !self.problems.contains(p))
+            .map(|p| format!("{}: {}", p.path, p.message));
         self.config = config;
         self.problems = problems;
         self.builder.rebuild(&self.draft);
         self.refresh_form();
+        new
     }
 
     /// Rebuild an open form so its values show the edit just made.
@@ -403,6 +416,10 @@ impl App {
                 }
             }
             Action::Unset(slot) => {
+                if slot.get(&self.draft).is_none() {
+                    self.say(format!("{} is not set", slot.path()), Level::Info);
+                    return;
+                }
                 slot.unset(&mut self.draft);
                 self.refresh();
                 self.say(format!("{} unset", slot.path()), Level::Info);
@@ -425,7 +442,9 @@ impl App {
         slot.set(&mut trial, value.clone());
         let (_, problems) = trial.resolved();
         let path = slot.path();
-        if let Some(p) = problems.iter().find(|p| p.path == path && !self.problems.contains(p)) {
+        // A problem at the key's own path is about this value, whether or
+        // not the file already had one there.
+        if let Some(p) = problems.iter().find(|p| p.path == path) {
             return Err(format!("{}: {}", p.path, p.message));
         }
         slot.set(&mut self.draft, value);
@@ -436,30 +455,51 @@ impl App {
 
     fn chosen(&mut self, target: Target, value: &str) {
         match target {
-            Target::Slot(slot, kind) => match kind.parse(value) {
-                Ok(Some(v)) => self.apply(Action::Set(slot, v)),
-                Ok(None) => self.apply(Action::Unset(slot)),
-                Err(e) => self.say(e, Level::Error),
-            },
+            Target::Slot(slot, kind) => {
+                // A title emptied is a title removed, as its prompt says; a
+                // box name nobody defined yet gets its `[box.<name>]`, as
+                // the builder's `b` gives one, so the form's own entry is
+                // not refused for the table it could not have made.
+                let title = slot.path().rsplit_once('.').is_some_and(|(_, key)| key == "title");
+                if title && value.trim().is_empty() {
+                    self.apply(Action::Unset(slot));
+                    return;
+                }
+                if kind == SlotKind::BoxRef
+                    && !matches!(value, "" | "none" | "false" | "true")
+                    && !self.config.boxes.contains_key(value)
+                {
+                    if !is_bare_key(value) {
+                        self.say(
+                            "a box name is letters, digits, _ and - only".into(),
+                            Level::Error,
+                        );
+                        return;
+                    }
+                    self.draft.set(&["box", value, "title"], Value::String(value.to_owned()));
+                }
+                match kind.parse(value) {
+                    Ok(Some(v)) => self.apply(Action::Set(slot, v)),
+                    Ok(None) => self.apply(Action::Unset(slot)),
+                    Err(e) => self.say(e, Level::Error),
+                }
+            }
             Target::AddModule => {
                 let out = self.builder.add_module(&mut self.draft, value);
                 self.report(out);
             }
             Target::Preset => {
-                if let Some(mut draft) = Draft::from_preset(value) {
-                    draft.set_path(self.draft.path().map(std::path::Path::to_path_buf));
-                    draft.materialise_rows();
-                    self.draft = draft;
-                    self.refresh();
-                    self.say(format!("preset {value} loaded; s saves it"), Level::Info);
+                if self.draft.is_dirty() {
+                    let ask = format!("Replace them with the {value} preset?");
+                    self.layers.push(Layer::Confirm(Confirm::new(
+                        Question::ReplaceDraft(value.to_owned()),
+                        &["The draft has unsaved edits.", ask.as_str()],
+                        "replace",
+                        "keep",
+                    )));
+                } else {
+                    self.load_preset(value);
                 }
-            }
-            Target::Fixture => {
-                self.preview.show(value);
-                self.say(
-                    format!("showing {value}: {}", self.preview.fixture_summary()),
-                    Level::Info,
-                );
             }
             Target::Columns => match value.trim().parse::<usize>() {
                 Ok(0) | Err(_) if value.trim().is_empty() || value.trim() == "0" => {
@@ -472,7 +512,7 @@ impl App {
                 }
                 Err(_) => self.say(format!("{value:?} is not a width"), Level::Error),
             },
-            Target::BoxFor(_, _) => {
+            Target::BoxFor(_) => {
                 let name = if value == "true" {
                     ""
                 } else if value == "none" {
@@ -481,20 +521,23 @@ impl App {
                     value
                 };
                 if name == "-" {
-                    let out = match self.builder.item().map(|i| i.at) {
-                        Some(at) => {
-                            if let Some(t) = self.draft.row_mut(at) {
-                                t.remove("box");
-                            }
-                            Ok("unboxed".to_owned())
-                        }
-                        None => Err("nothing selected".to_owned()),
-                    };
+                    let out = self.edit(|builder, draft| {
+                        let at = builder.item().map(|i| i.at).ok_or("nothing selected")?;
+                        let table = draft.row_mut(at).ok_or("no such row")?;
+                        let was = table.remove("box").and_then(|v| v.as_str().map(str::to_owned));
+                        // The last member leaving takes an unused
+                        // `[box.<name>]` with it, which the parser would
+                        // otherwise report on every tick.
+                        let orphan = was.filter(|n| !box_in_use(draft, n));
+                        let Some(orphan) = orphan else { return Ok("unboxed".to_owned()) };
+                        draft.remove(&["box", orphan.as_str()]);
+                        Ok(format!("unboxed; [box.{orphan}] dropped, nothing used it"))
+                    });
                     self.report(out);
                 } else if !name.is_empty() && !is_bare_key(name) {
                     self.say("a box name is letters, digits, _ and - only".into(), Level::Error);
                 } else {
-                    let out = self.builder.set_box(&mut self.draft, name);
+                    let out = self.edit(|builder, draft| builder.set_box(draft, name));
                     self.report(out);
                 }
             }
@@ -503,16 +546,65 @@ impl App {
 
     fn report(&mut self, out: Result<String, String>) {
         match out {
-            Ok(s) => {
-                self.refresh();
-                self.say(s, Level::Info);
-            }
+            Ok(s) => match self.refresh() {
+                Some(problem) => self.say(format!("{s}; ⚠ {problem}"), Level::Warn),
+                None => self.say(s, Level::Info),
+            },
             Err(e) => self.say(e, Level::Warn),
         }
     }
 
+    /// A builder edit tried on the draft and kept only when the parser
+    /// reports nothing new about the result (SPEC § 14: every edit is
+    /// validated as `config check` would); otherwise the draft and the
+    /// list are put back and the parser's message is the error.
+    fn edit(
+        &mut self,
+        f: impl FnOnce(&mut Builder, &mut Draft) -> Result<String, String>,
+    ) -> Result<String, String> {
+        let before = (self.draft.clone(), self.builder.clone());
+        let result = f(&mut self.builder, &mut self.draft).and_then(|out| {
+            let (_, problems) = self.draft.resolved();
+            problems
+                .iter()
+                .find(|p| !self.problems.contains(p))
+                .map_or(Ok(out), |p| Err(format!("{}: {}", p.path, p.message)))
+        });
+        // A refused edit leaves nothing behind, whichever step refused it.
+        if result.is_err() {
+            (self.draft, self.builder) = before;
+        }
+        result
+    }
+
+    /// Replace the draft with a preset: the built-in name with its rows
+    /// written out, or the gallery file. Never over a file that does not
+    /// parse (SPEC § 5), and always as an edit, since the file differs.
+    fn load_preset(&mut self, name: &str) {
+        if let Some(problem) = self.draft.unreadable() {
+            self.say(
+                format!(
+                    "the config file does not parse ({problem}) and is never overwritten; fix or move it first"
+                ),
+                Level::Error,
+            );
+            return;
+        }
+        let Some(mut draft) = Draft::from_preset(name) else {
+            self.say(format!("no preset named {name}"), Level::Error);
+            return;
+        };
+        draft.set_path(self.draft.path().map(std::path::Path::to_path_buf));
+        draft.materialise_rows();
+        draft.mark_dirty();
+        self.draft = draft;
+        self.refresh();
+        self.say(format!("preset {name} loaded; s saves it"), Level::Info);
+    }
+
     /// `[modules.text.<name>]` with the schema's defaults (and the name as
-    /// its text, so it shows), placed at the cursor, then its editor.
+    /// its text, so it shows), placed at the cursor, then its editor; a
+    /// cursor that cannot take a module leaves nothing behind.
     fn new_text(&mut self, name: &str) {
         let name = name.trim();
         if !is_bare_key(name) {
@@ -524,10 +616,15 @@ impl App {
             self.say(format!("{id} already exists"), Level::Warn);
             return;
         }
-        self.draft.set(&["modules", "text", name, "text"], Value::String(name.to_owned()));
-        let out = self.builder.add_module(&mut self.draft, &id);
+        let out = self.edit(|builder, draft| {
+            draft.set(&["modules", "text", name, "text"], Value::String(name.to_owned()));
+            builder.add_module(draft, &id)
+        });
+        let placed = out.is_ok();
         self.report(out);
-        self.open_form(FormKind::Module(id));
+        if placed {
+            self.open_form(FormKind::Module(id));
+        }
     }
 
     fn answered(&mut self, question: Question, yes: bool) {
@@ -551,6 +648,11 @@ impl App {
                     self.draft.remove(&["modules", "text", &name]);
                     self.refresh();
                     self.say(format!("dropped [modules.text.{name}]"), Level::Info);
+                }
+            }
+            Question::ReplaceDraft(name) => {
+                if yes {
+                    self.load_preset(&name);
                 }
             }
             Question::Install => {
@@ -621,7 +723,7 @@ impl App {
                     ("w", "preview at another terminal width"),
                     ("s", "save"),
                     ("I", "install into Claude Code"),
-                    ("q", "quit"),
+                    ("q / esc", "quit (esc inside a form or picker closes it)"),
                 ],
             ),
             Screen::Install(_) => ("Install", vec![("enter", "apply"), ("esc", "back")]),
@@ -704,8 +806,12 @@ impl App {
         let Screen::Picker(picker) = &mut self.screen else { return };
         let Some((draft, ..)) = picker.shown() else { return };
         let mut draft = draft.clone();
+        // No unparsable-file guard here: the picker opens only when no file
+        // exists (`App::new` opens an existing one in the builder), and
+        // `Draft::save` refuses such a file anyway.
         draft.set_path(self.draft.path().map(std::path::Path::to_path_buf));
         draft.materialise_rows();
+        draft.mark_dirty();
         self.draft = draft;
         self.refresh();
         self.screen = Screen::Builder;
@@ -748,17 +854,17 @@ impl App {
     /// The builder's keys that change the draft; `false` for any other key.
     fn builder_edit_key(&mut self, key: Key) -> bool {
         let out = match key {
-            Key::Char('a') => self.builder.insert(&mut self.draft, true),
-            Key::Char('i') => self.builder.insert(&mut self.draft, false),
-            Key::Char('c') => self.builder.clone_line(&mut self.draft),
-            Key::Char('J') => self.builder.shift(&mut self.draft, true),
-            Key::Char('K') => self.builder.shift(&mut self.draft, false),
-            Key::Char('r') => self.builder.switch_side(&mut self.draft),
-            Key::Char('[') => self.builder.switch_column(&mut self.draft, false),
-            Key::Char(']') => self.builder.switch_column(&mut self.draft, true),
-            Key::Char('C') => self.builder.add_column(&mut self.draft),
-            Key::Char('S') => self.builder.stack(&mut self.draft),
-            Key::Char(' ') => self.builder.toggle_spacer(&mut self.draft),
+            Key::Char('a') => self.edit(|b, d| b.insert(d, true)),
+            Key::Char('i') => self.edit(|b, d| b.insert(d, false)),
+            Key::Char('c') => self.edit(Builder::clone_line),
+            Key::Char('J') => self.edit(|b, d| b.shift(d, true)),
+            Key::Char('K') => self.edit(|b, d| b.shift(d, false)),
+            Key::Char('r') => self.edit(Builder::switch_side),
+            Key::Char('[') => self.edit(|b, d| b.switch_column(d, false)),
+            Key::Char(']') => self.edit(|b, d| b.switch_column(d, true)),
+            Key::Char('C') => self.edit(Builder::add_column),
+            Key::Char('S') => self.edit(Builder::stack),
+            Key::Char(' ') => self.edit(Builder::toggle_spacer),
             _ => return false,
         };
         self.report(out);
@@ -812,12 +918,7 @@ impl App {
                     ];
                     items.extend(self.config.boxes.keys().map(|n| Choice::noted(n, "[box] table")));
                     items.push(Choice::custom("A new box named"));
-                    let column = at.col.is_some() && at.inner.is_none();
-                    self.layers.push(Layer::Choose(Choose::new(
-                        "Box",
-                        items,
-                        Target::BoxFor(at, column),
-                    )));
+                    self.layers.push(Layer::Choose(Choose::new("Box", items, Target::BoxFor(at))));
                 }
             }
             Key::Char('1') => self.open_form(FormKind::Top),
@@ -860,7 +961,15 @@ impl App {
     /// column's form.
     fn edit_selection(&mut self) {
         if let Some(id) = self.builder.selected_id().map(str::to_owned) {
-            self.open_form(FormKind::Module(id));
+            let known = crate::modules::SCHEMAS.iter().any(|s| s.id == id)
+                || id
+                    .strip_prefix(crate::modules::text::PREFIX)
+                    .is_some_and(|name| self.config.texts.contains_key(name));
+            if known {
+                self.open_form(FormKind::Module(id));
+            } else {
+                self.say(format!("{id} is not a module id; x removes it"), Level::Warn);
+            }
             return;
         }
         let Some(item) = self.builder.item().cloned() else {
@@ -1060,15 +1169,21 @@ impl App {
             Elem::Title | Elem::BoxEdge | Elem::Gap | Elem::Pad => {
                 self.builder.select_row(hit.row);
                 let at = RowAt::row(hit.row);
-                let named = self
-                    .config
-                    .rows
-                    .get(hit.row)
+                let row = self.config.rows.get(hit.row);
+                let named = row
                     .and_then(|r| r.boxed.as_ref())
                     .and_then(crate::config::BoxRef::name)
                     .map(str::to_owned);
+                // The map names the outer row only, so a title or a box
+                // edge inside a row of columns may belong to a column or
+                // an inner row; the list is the way to those.
+                let inside = row.is_some_and(|r| !r.cols.is_empty());
                 match (hit.elem, named) {
                     (Elem::BoxEdge, Some(name)) => self.open_form(FormKind::Box(name)),
+                    (Elem::Title | Elem::BoxEdge, _) if inside => self.say(
+                        "that may belong to a column or an inner row: select it in the list and press enter".into(),
+                        Level::Info,
+                    ),
                     (Elem::Title | Elem::BoxEdge, _) => self.open_form(FormKind::Row(at)),
                     _ => {}
                 }
@@ -1125,34 +1240,35 @@ impl App {
         let painter = self.painter(config);
         let count = rendered.lines.len();
         let budget = usize::from(self.size.1).checked_div(2).unwrap_or(0).saturating_sub(5);
-        let mut title = vec![
+        // The numbers first and the fixture's summary last, since the line
+        // is cut at the right edge; the warnings get lines of their own.
+        let title = vec![
             Span::styled("preview", Chrome::title()),
             Span::styled(
                 format!(
-                    "  {}: {}  ·  {} cols, box {}  ·  {} line{}",
-                    self.preview.fixture_name(),
-                    self.preview.fixture_summary(),
+                    "  {} cols, box {}  ·  {} line{}  ·  {}: {}",
                     rendered.columns,
                     rendered.width,
                     count,
-                    if count == 1 { "" } else { "s" }
+                    if count == 1 { "" } else { "s" },
+                    self.preview.fixture_name(),
+                    self.preview.fixture_summary(),
                 ),
                 Chrome::muted(),
             ),
         ];
+        let mut notes: Vec<String> = Vec::new();
         if count > budget {
-            title.push(Span::styled(
-                format!("  ⚠ fullscreen keeps {budget} of them whole at this height"),
-                Chrome::warn(),
+            notes.push(format!(
+                "⚠ fullscreen keeps {budget} of the {count} lines whole at this height"
             ));
         }
         if painter.mode == ColorMode::Never {
-            title.push(Span::styled(
-                "  colours off: edits are saved, not previewed",
-                Chrome::warn(),
-            ));
+            notes.push("⚠ colours off: edits are saved, not previewed".to_owned());
         }
         let mut lines: Vec<Line<'static>> = vec![Line::from(title)];
+        lines.extend(super::ui::note_lines(&notes, area.width));
+        let header = cells(lines.len());
         let selection = Style::new().add_modifier(Modifier::REVERSED);
         for placed in &rendered.lines {
             let marker = if Some(placed.row) == selected_row { "▶ " } else { "  " };
@@ -1166,11 +1282,14 @@ impl App {
             }
             lines.push(Line::from(spans));
         }
-        let height = cells(lines.len()).min(max_height).max(2);
+        let height = cells(lines.len()).min(max_height).max(header.saturating_add(1));
         let rect = Rect { height, ..area };
         frame.render_widget(Paragraph::new(lines), rect);
-        self.pane_area =
-            Rect { y: rect.y.saturating_add(1), height: rect.height.saturating_sub(1), ..rect };
+        self.pane_area = Rect {
+            y: rect.y.saturating_add(header),
+            height: rect.height.saturating_sub(header),
+            ..rect
+        };
         self.rendered = rendered;
         rect
     }
@@ -1267,10 +1386,12 @@ impl App {
             None,
             area.height.checked_div(2).unwrap_or(1),
         );
+        // The facts first and the summary last on the info line, which is
+        // cut at the right edge; the warnings get lines of their own.
         let mut info: Vec<Span<'static>> = Vec::new();
+        let mut notes: Vec<String> = Vec::new();
         if let Some(item) = &item {
             info.push(Span::styled(item.name.clone(), Chrome::title()));
-            info.push(Span::styled(format!("  {}", item.summary), Chrome::muted()));
             if let Some(needs) = &item.needs {
                 info.push(Span::styled(format!("  needs {needs}"), Chrome::muted()));
             }
@@ -1280,27 +1401,29 @@ impl App {
                     Chrome::muted(),
                 ));
                 if usize::from(self.size.0) < columns {
-                    info.push(Span::styled(
-                        format!(
-                            "  ⚠ this terminal is {} wide, so the cut shows as it would on screen",
-                            self.size.0
-                        ),
-                        Chrome::warn(),
+                    notes.push(format!(
+                        "⚠ this terminal is {} wide, so the cut shows as it would on screen",
+                        self.size.0
                     ));
                 }
             }
+            info.push(Span::styled(format!("  {}", item.summary), Chrome::muted()));
             if !problems.is_empty() {
-                info.push(Span::styled(
-                    format!("  ⚠ {} problem(s)", problems.len()),
-                    Chrome::warn(),
-                ));
+                notes.push(format!("⚠ {} problem(s)", problems.len()));
             }
         }
-        let info_rect = Rect { y: area.y.saturating_add(pane.height), height: 1, ..area };
-        frame.render_widget(Paragraph::new(Line::from(info)), info_rect);
+        let mut info_lines = vec![Line::from(info)];
+        info_lines.extend(super::ui::note_lines(&notes, area.width));
+        let info_rect =
+            Rect { y: area.y.saturating_add(pane.height), height: cells(info_lines.len()), ..area };
+        frame.render_widget(Paragraph::new(info_lines), info_rect);
         let list_rect = Rect {
-            y: info_rect.y.saturating_add(1),
-            height: area.height.saturating_sub(pane.height).saturating_sub(3),
+            y: info_rect.y.saturating_add(info_rect.height),
+            height: area
+                .height
+                .saturating_sub(pane.height)
+                .saturating_sub(info_rect.height)
+                .saturating_sub(2),
             ..area
         };
         let Screen::Picker(picker) = &mut self.screen else { return };
@@ -1462,6 +1585,23 @@ impl App {
 }
 
 /// A bare TOML key: what a box or text module may be called.
+/// Whether any row, column or inner row of the draft names the box.
+fn box_in_use(draft: &Draft, name: &str) -> bool {
+    let names = |t: &toml::Table| t.get("box").and_then(Value::as_str) == Some(name);
+    let tables = |v: &Value, key: &str| -> Vec<toml::Table> {
+        v.as_table()
+            .and_then(|t| t.get(key))
+            .and_then(Value::as_array)
+            .map_or_default(|a| a.iter().filter_map(Value::as_table).cloned().collect())
+    };
+    draft.rows().iter().any(|row| {
+        row.as_table().is_some_and(names)
+            || tables(row, "col").iter().any(|col| {
+                names(col) || tables(&Value::Table(col.clone()), "row").iter().any(names)
+            })
+    })
+}
+
 fn is_bare_key(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }

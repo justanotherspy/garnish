@@ -22,10 +22,8 @@ pub enum Target {
     AddModule,
     /// Replace the draft with the named preset (the builder's `p`).
     Preset,
-    /// Show the named fixture.
-    Fixture,
-    /// Wrap the row (or box the column) at the path in the named box.
-    BoxFor(super::draft::RowAt, bool),
+    /// Put the row, column or inner row at the path in the named box.
+    BoxFor(super::draft::RowAt),
     /// Preview at the typed terminal width.
     Columns,
 }
@@ -298,6 +296,8 @@ pub enum Question {
     OverwriteOrReload,
     /// Drop the `[modules.text.<name>]` table whose last placement went.
     DropText(String),
+    /// Replace a draft with unsaved edits by the named preset.
+    ReplaceDraft(String),
     /// Apply the install plan.
     Install,
 }
@@ -398,15 +398,20 @@ impl Help {
 
     /// Draw the page over `area`.
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        // The keys sit in a twelve-cell column, so the box is that plus the
+        // widest meaning, and the closing hint is dropped before a key is,
+        // on a terminal too short for the whole page.
+        let key_w = 12_usize;
         let width = self
             .keys
             .iter()
-            .map(|(k, w)| k.len().saturating_add(w.len()))
+            .map(|(k, w)| k.chars().count().max(key_w).saturating_add(w.chars().count()))
             .max()
             .unwrap_or(20)
-            .saturating_add(8)
-            .clamp(40, 80);
-        let height = self.keys.len().saturating_add(4);
+            .saturating_add(4)
+            .clamp(40, 100);
+        let hint = usize::from(area.height) >= self.keys.len().saturating_add(4);
+        let height = self.keys.len().saturating_add(if hint { 4 } else { 2 });
         let rect = centered(area, cells(width), cells(height));
         frame.render_widget(Clear, rect);
         let block =
@@ -418,13 +423,15 @@ impl Help {
             .iter()
             .map(|(k, w)| {
                 Line::from(vec![
-                    Span::styled(format!("{k:<12}"), Chrome::key()),
+                    Span::styled(format!("{k:<key_w$}"), Chrome::key()),
                     Span::raw(w.clone()),
                 ])
             })
             .collect();
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("any key closes this page", Chrome::muted())));
+        if hint {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("any key closes this page", Chrome::muted())));
+        }
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -499,11 +506,11 @@ mod tests {
 
     #[test]
     fn inputs_and_questions_report_what_was_typed_or_answered() {
-        let mut i = InputBox::new("Title", "ab", Target::Fixture);
+        let mut i = InputBox::new("Title", "ab", Target::Columns);
         i.handle(Key::Char('c'));
         i.handle(Key::Backspace);
         let out = i.handle(Key::Enter);
-        assert_eq!(out.actions, vec![Action::Typed(Target::Fixture, "ab".into())]);
+        assert_eq!(out.actions, vec![Action::Typed(Target::Columns, "ab".into())]);
         i.handle(Key::Ctrl('u'));
         assert_eq!(i.text, "");
         let mut q = Confirm::new(Question::QuitUnsaved, &["Quit?"], "quit", "stay");

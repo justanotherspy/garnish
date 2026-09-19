@@ -687,9 +687,10 @@ was built, what the reviews found and what was decided, not how.
 
   **The review workflow** collects the pull request in job shell
   (`pr.md`, `commits.md`, `diffstat.txt`, `files.txt`, `diff.patch`,
-  `checks.txt`) and hands the action a short prompt; everything but
-  `Task` is allowed, `Bash` whole included, since an allowlist of verbs
-  refused compound commands whatever it carried. The denial step stays.
+  `checks.txt`) and hands the action a short prompt; the file tools,
+  `Bash` whole and the GitHub MCP tools are allowed and `Task` is not,
+  since an allowlist of verbs refused compound commands whatever it
+  carried. The denial step stays.
   This pull request cannot be reviewed by it (the action refuses a
   modified workflow), which the backlog notes. **The skills** are shorter
   and point at `setup` first. **Documents**: `WORKLOG.md` holds this log,
@@ -706,3 +707,41 @@ was built, what the reviews found and what was decided, not how.
   Reproduced with a dated nightly installed beside the pinned one (so
   the review agents' worktrees kept theirs), fixed with `map_or_default`,
   green on both.
+
+  **Three adversarial reviews** (correctness, document conformance, a
+  mutation pass of 39 mutations over the new tests), each in its own
+  worktree with a no-git brief. What they found, all fixed with a test:
+  `p` and the picker's `e` replaced the draft over a file that does not
+  parse and `s` then overwrote it (the preset load refuses now, as the
+  picker's `Enter` did); a loaded preset counted as clean, so `q` quit
+  without asking and `p` replaced unsaved edits unasked (it is an edit,
+  and `p` over a dirty draft asks first); `try_set` let a bad value
+  through when the file already had a problem at that path; `b`, unbox
+  and every builder edit wrote straight into the draft, so a nested box
+  passed and an orphaned `[box.<name>]` was saved with nothing said
+  (every builder edit is tried and refused with the parser's message,
+  unbox drops an orphan, and a new problem an edit introduces is named
+  in the status bar); a file that only names a preset opened with an
+  empty row list; row-list clicks were measured against a model of the
+  line rather than the line drawn (the drawn chip ranges are recorded);
+  deleting the last inner row or column left `row = []` / `col = []`
+  that refused every edit; `t` with an empty input wrote `title = ""`;
+  a text module whose placement was refused still got its table and its
+  editor; the row form's "a new box name" entry was always refused; the
+  terminal guard never showed the cursor again and left raw mode on when
+  entering the alternate screen failed; the picker's width and height
+  warnings and the "colours off" note were appended to lines a narrow
+  terminal cuts (they have lines of their own now, facts first); the
+  status message promised that a save drops bad keys; the help page cut
+  its longest labels and its last rows at 80 × 24; an integer typed
+  above its `max` was clamped in silence (refused with the bound now);
+  the geometric dot marking an override could draw two cells. The
+  document review corrected a dozen § 14 wordings (the preview above the
+  list, `Esc`, the hand-written top-level forms, the suggestion sources,
+  the snapshot coverage, the `slow-motion` summary, the skill's `gap`
+  placement and `mktemp`). The mutation pass named 25 rules with no red
+  test; the tests added here cover the ones that matter (validation,
+  unset, the file path after `p`, `w`, list and preview clicks, the
+  second placement of a text module, the builder's edge rules, a
+  scrolled line's hit test), and PLAN's backlog carries the three that
+  need a helper or a spec decision. 275 → 284 tests.

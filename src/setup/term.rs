@@ -7,6 +7,7 @@
 use std::io::Write as _;
 use std::time::Duration;
 
+use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     MouseButton, MouseEventKind,
@@ -29,6 +30,9 @@ struct Guard;
 impl Guard {
     fn enter() -> std::io::Result<Self> {
         enable_raw_mode()?;
+        // The guard exists from here, so a failure of the next step still
+        // leaves raw mode the way it was found.
+        let guard = Self;
         let mut out = std::io::stdout();
         execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
         let previous = std::panic::take_hook();
@@ -36,7 +40,7 @@ impl Guard {
             restore();
             previous(info);
         }));
-        Ok(Self)
+        Ok(guard)
     }
 }
 
@@ -46,12 +50,14 @@ impl Drop for Guard {
     }
 }
 
-/// Leave the alternate screen, drop mouse capture and raw mode. Safe to
-/// call twice: every step is idempotent, and a failure to undo one is not
-/// worth a report on the way out.
+/// Leave the alternate screen, drop mouse capture and raw mode, and show
+/// the cursor again (`Terminal::draw` hides it, and the `Terminal` drop
+/// that would show it never runs under the release profile's abort on a
+/// panic). Safe to call twice: every step is idempotent, and a failure to
+/// undo one is not worth a report on the way out.
 fn restore() {
     let mut out = std::io::stdout();
-    let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
+    let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen, Show);
     let _ = disable_raw_mode();
     let _ = out.flush();
 }
