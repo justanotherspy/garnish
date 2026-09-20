@@ -1,0 +1,51 @@
+# name: quiet-when-idle
+# summary: modules that leave the row while there is nothing worth reading: zero counts, a near-empty context, an absent cost
+# columns: 110
+
+# The `hide` list of SPEC § 3 names the states in which a module leaves its
+# row: `zero` for a count or an amount, `below:N` / `above:N` for a
+# percentage, `empty` for nothing to show at all. Which states a module
+# accepts follows from what it measures (its page lists them). So the
+# lines module disappears until something changed, the context module
+# until a tenth of the window is used, the sync counts while the branch is
+# in step, and the cost while it is nil. `hide = ["empty"]` on `pr` is the
+# same as the default `hide_when_empty = true`: the two combine, and
+# neither switches the other off. The seven-day window prints how much of
+# it has elapsed instead of a countdown.
+
+preset = "default"
+icons  = "unicode"
+theme  = "garnish"
+color  = "auto"
+align  = true
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["clock"]
+
+[[row]]
+modules = ["context", "limit5h", "limit7d"]
+right   = ["lines", "cost"]
+
+[modules.sync]
+hide = ["zero"]
+
+[modules.pr]
+hide_when_empty = false     # would print `–` for no pull request…
+hide = ["empty"]            # …but `empty` in the list hides it all the same
+
+[modules.context]
+hide = ["below:10"]
+
+[modules.limit7d]
+reset = "elapsed"           # 3d20h/7d rather than a countdown
+
+[modules.lines]
+hide = ["zero"]
+
+[modules.cost]
+only_without_rate_limits = false
+hide = ["zero"]

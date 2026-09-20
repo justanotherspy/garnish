@@ -14,6 +14,7 @@ impl Module for ModelModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "model",
+            measure: None,
             summary: "Model name, with fast-mode and thinking indicators.",
             doc: "Shows `model.display_name`. A bolt appears when fast mode is on; the `full` preset adds the raw model id and a thinking glyph when extended thinking is enabled.",
             sources: &["model.display_name", "model.id", "fast_mode", "thinking.enabled"],
@@ -100,6 +101,7 @@ impl Module for EffortModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "effort",
+            measure: None,
             summary: "Reasoning effort level as a five-step scale and/or word.",
             doc: "Shows `effort.level` (`low`, `medium`, `high`, `xhigh`, `max`). Hidden when the model does not support effort. The scale lights one step per level.",
             sources: &["effort.level"],
@@ -170,6 +172,7 @@ impl Module for StyleModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "style",
+            measure: None,
             summary: "Output style name.",
             doc: "Shows `output_style.name`. By default the `default` style is hidden; the `full` preset always shows it.",
             sources: &["output_style.name"],

@@ -755,3 +755,68 @@ was built, what the reviews found and what was decided, not how.
   before fetching the script, and the script takes an empty argument as
   "no execution file"; neither is a review, and the fix reaches the
   step's own path only once it is on `main`.
+
+  **Phase 23, usage views and formats** (the same day, after PR #78
+  merged). Decided with Daniel: the Tier A ideas left in
+  `FUTURE-SPEC.md` (A4 hide lists, A6 number formats, N11 + A10 pace and
+  elapsed, A13 separator colour) and four more module ids (A12 `version`;
+  A9 `sandbox`, `voice`, `account`), the fixed set growing from 21 to 25;
+  everything payload-only or a settings read, no new crate, no process
+  on the tick, and every config on disk rendering byte for byte as before
+  (the golden suite is the regression test: no existing golden moved).
+  Documents first (SPEC § 3, § 3.3, the new § 3.8, § 4; the phase in
+  PLAN), then small signed commits on one branch, one per layer, no
+  `gh stack` in the container. Decisions: `hide` is a hand-parsed module
+  key whose vocabulary derives from the schema's `measure` (`empty`
+  everywhere, `zero` for a count or an amount, `below:N`/`above:N` for a
+  percentage, `N` at most 1000), applied once in `render_group` from the
+  `Measure` a module attaches with one call, in union with
+  `hide_when_empty`; `[format]` is one table with a same-named per-module
+  override taking `inherit`, and `parens = "dim"` goes through one
+  `detail()` helper so `plain` stays one segment and today's bytes; pace
+  is arithmetic over `resets_at` and the window length (5 h, 7 d; `spend`
+  has no window, so no pace keys), eta shown only when it lands before
+  the reset, the elapsed cursor reusing the `marker` icon key; `separator_color
+  = "inherit"` takes the first coloured, non-dim segment of the module
+  before the separator; `account` is the first cached module outside the
+  repo group, so `Clock.workers` now gates `Ctx::cached` (a pinned
+  render never touches a cache directory; `git: false` alone covered the
+  repo modules) and `Clock.settings_keys` seeds the settings badges'
+  docs samples in-process. `sandbox.enabled` and `voice.enabled` were
+  verified on the Claude Code docs (the settings reference; the voice
+  dictation page, which also says the harness drops its own `hold space
+  to speak` hint under a custom status line), and `CLAUDE_CONFIG_DIR`
+  moves `~/.claude.json` with every other `~/.claude` path. `itertools`
+  left the dependency list with its last use. Four gallery presets (32
+  in all), seven config goldens.
+
+  **Three adversarial reviews** of the phase (correctness, SPEC
+  conformance, a mutation pass of 64 mutants), each in its own worktree
+  with a no-git brief; every finding fixed with a test. The two readers
+  agreed on the first: under `percent = "precise"` the bands and the
+  `below`/`above` rules compared the whole-number rounding while the row
+  printed one decimal (`23.5%` coloured as over `thresholds = [23.7]`),
+  and `zero` on an amount read a fixed half cent rather than the printed
+  `$0.004` or `$0`; one `shown` rounding per style now feeds both the
+  text and the compared number, and a tie rounds the same way in both.
+  Also found: `pace`, `pace_colors` and the elapsed marker kept rendering
+  after a window's reset had passed (the payload keeps the old
+  `resets_at`, which read as 100 % elapsed); `garnish preview` rendered
+  with the tick's clock, so a config placing `account` forked a worker
+  per fixture and left lock files under the fixtures' session ids (a
+  preview never reads the cache or spawns now, `Request.workers`; whether
+  it should also skip git and the settings chain, as the setup pane does,
+  is in the backlog); `read_account` and, on the tick path,
+  `claude_settings::read_file` opened a FIFO and waited for a writer for
+  ever (`open_regular` refuses anything but a regular file); `account`'s
+  `minimal` preset kept the icon; `style = "user"` left a lone icon for
+  `@host`; a negative zero printed its sign; a hide state was not
+  trimmed; the SPEC's `⇥1h37m`, the `version` table row and the `$1.2k`
+  rule for `whole`, and five stale counts. The mutation pass killed 55 of
+  64; six survivors got their tests (a module hidden by its list never
+  prints `–`, the marker needs its own switch, a zero delta prints bare,
+  the ratio's floor, the blank clause of an inherited separator, the
+  parse error's suffix, two formatter edges), one was equivalent (the
+  remaining clamp) and one unreachable (the order of the hide check and
+  the stale mapping, now said in a comment); three single-pin kills got
+  a unit test beside their golden. 284 → 312 tests.

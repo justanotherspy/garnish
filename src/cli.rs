@@ -366,6 +366,7 @@ fn render_stdin(config_path: Option<&Path>) {
         columns: env_columns(),
         no_color: std::env::var_os("NO_COLOR").is_some(),
         dim: false,
+        workers: true,
     };
     let out = render::render(&req);
     let mut stdout = std::io::stdout().lock();
@@ -601,6 +602,8 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
             no_color: std::env::var_os("NO_COLOR").is_some(),
             // Drawn as the screen draws it: every row faint (SPEC § 2.1).
             dim: true,
+            // A preview is not a tick: no cache, no worker (SPEC § 14).
+            workers: false,
         };
         stdout.write_all(render::render(&req).as_bytes())?;
     }

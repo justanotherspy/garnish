@@ -192,8 +192,35 @@ pub fn settings_rows(
         });
     }
     rows.push(row("prefersReducedMotion", &text));
+    let sandbox = switch_row(chain, config, "sandbox", |k| k.sandbox_enabled);
+    rows.push(row("sandbox.enabled", &sandbox));
+    let voice = switch_row(chain, config, "voice", |k| k.voice_enabled);
+    rows.push(row("voice.enabled", &voice));
     rows.push(row("tui", &tui_row(chain)));
     rows
+}
+
+/// A `sandbox.enabled` or `voice.enabled` row: the value and the file it
+/// comes from, and what the badge module of that name (SPEC § 3.8) makes
+/// of it when the config places it.
+fn switch_row(
+    chain: &[ChainEntry],
+    config: &Config,
+    id: &str,
+    pick: impl Fn(&FileKeys) -> Option<bool>,
+) -> String {
+    let value = resolved(chain, pick);
+    let on = value.as_ref().is_some_and(|(on, _)| *on);
+    let mut text =
+        value.as_ref().map_or_else(|| "unset".to_owned(), |(on, from)| format!("{on} ({from})"));
+    if placed(config, id) {
+        let _ = if on {
+            write!(text, "; the {id} module shows it")
+        } else {
+            write!(text, "; nothing for the {id} module to show")
+        };
+    }
+    text
 }
 
 /// The `tui` row: which renderer the settings ask for, which decides what
@@ -425,6 +452,7 @@ fn environment_section(o: &mut String) {
         "DISABLE_COMPACT",
         "CLAUDE_CODE_NO_FLICKER",
         "CLAUDE_CODE_DECSTBM",
+        claude_settings::CONFIG_DIR_ENV,
     ]);
     for key in keys {
         if let Ok(v) = std::env::var(key) {
@@ -970,5 +998,63 @@ mod tests {
         ] {
             assert!(r.contains(needle), "{needle}\n{r}");
         }
+    }
+
+    /// SPEC § 7: the `sandbox.enabled` and `voice.enabled` rows resolve
+    /// as the other keys do (the first file that sets one wins) and say
+    /// what the badge module of that name makes of the value, once the
+    /// config places it.
+    #[test]
+    fn switch_rows_name_the_badge_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let proj = dir.path().join("proj");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        let user = home.join(".claude/settings.json");
+        std::fs::write(&user, r#"{"sandbox": {"enabled": true}, "voice": {"enabled": true}}"#)
+            .unwrap();
+        std::fs::write(proj.join(".claude/settings.json"), r#"{"voice": {"enabled": false}}"#)
+            .unwrap();
+        // No managed file: the test must not see the machine's.
+        let rows_for = |config: &str| {
+            let chain =
+                read_chain(&claude_settings::settings_chain(None, Some(&proj), Some(&home)));
+            let (cfg, errs) = config::parse(config, &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            settings_rows(&chain, Some(&proj), &cfg, true)
+        };
+        let find = |rows: &[String], key: &str| {
+            rows.iter()
+                .find(|r| r.starts_with(key))
+                .cloned()
+                .unwrap_or_else(|| panic!("no {key} row:\n{}", rows.join("\n")))
+        };
+        let rows = rows_for("[[line]]\nmodules = [\"model\"]\n");
+        assert!(find(&rows, "sandbox.enabled").ends_with("true (user)"), "{rows:?}");
+        assert!(find(&rows, "voice.enabled").ends_with("false (project)"), "{rows:?}");
+        let rows = rows_for("[[line]]\nmodules = [\"sandbox\", \"voice\"]\n");
+        assert!(
+            find(&rows, "sandbox.enabled").ends_with("true (user); the sandbox module shows it"),
+            "{rows:?}"
+        );
+        assert!(
+            find(&rows, "voice.enabled")
+                .ends_with("false (project); nothing for the voice module to show"),
+            "{rows:?}"
+        );
+        // A placed module whose key no file sets, and one the config turned off.
+        std::fs::remove_file(&user).unwrap();
+        let rows = rows_for(
+            "[[line]]\nmodules = [\"sandbox\", \"voice\"]\n[modules.voice]\nenabled = false\n",
+        );
+        assert!(
+            find(&rows, "sandbox.enabled")
+                .ends_with("unset; nothing for the sandbox module to show"),
+            "{rows:?}"
+        );
+        assert!(find(&rows, "voice.enabled").ends_with("false (project)"), "{rows:?}");
+        // The key column is one width, so the values line up.
+        assert!(rows.iter().skip(4).all(|r| r.get(23..24) == Some(" ")), "{rows:?}");
     }
 }

@@ -4,18 +4,18 @@ preview  80 cols, box 76  ·  2 lines  ·  subscription-full: a Pro/Max session 
 rows  ~/garnish.toml
 row 1     path  branch  sync   │ clock
 row 2     model  context   │ cost
-
           ┌ Add a module ────────────────────────────────────────────┐
           │session_name  Session name.                               │
           │sync  Commits ahead/behind the upstream branch.           │
+          │sandbox  A badge while Bash sandboxing is on.             │
           │spend  Spend-limit usage behind a Claude apps gateway.    │
           │session  Session duration.                                │
+          │version  The Claude Code version.                         │
           │New text module…                                          │
           │                                                          │
           │type to filter: sn▏                                       │
           │↑↓ move  enter pick  esc back                             │
           └──────────────────────────────────────────────────────────┘
-
 
 
 

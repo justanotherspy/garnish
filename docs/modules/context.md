@@ -34,6 +34,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
 | `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `hide` | list of `empty`, `below:N`, `above:N` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine; `below:N` and `above:N` compare the percentage the row prints. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
@@ -52,6 +53,8 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `show_window` | bool | `false` | `false` | `true` | Show the window size tag (`1M`, `200k`). |
 | `exceeds_200k` | bool | `false` | `false` | `true` | Show an indicator when the last response exceeded 200k tokens. |
 | `warn_at` | number | `0` | `0` | `0` | Extra warning badge at or above this percentage; 0 disables. |
+| `tokens` | `inherit` \| `compact` \| `precise` \| `whole` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's token counts print: `inherit` follows `[format] tokens`; `compact` (128k, 1.0M), `precise` (128,400) or `whole` (128400) pins this module. |
+| `percent` | `inherit` \| `whole` \| `precise` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. |
 
 ## Icons
 

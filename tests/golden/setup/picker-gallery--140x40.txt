@@ -23,7 +23,11 @@ bars-and-limits  needs nerd-font  designed for 130 columns  40-cell line-style c
  minimal-clean            one unframed line: path, context, limit, clock
  motd-ticker              repo line plus a scrolling message of the day in a fixed 24-cell box
  narrow-unicode           three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules
+ pace-and-eta             the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their b…
  packed-heavy             custom heavy frame, left-packed rows, a separator per row
+ precise-numbers          every number at full precision: token counts with thousands separators, percentages to a decimal, whole dollars, …
+ quiet-when-idle          modules that leave the row while there is nothing worth reading: zero counts, a near-empty context, an absent cost
+ session-badges           the harness itself beside the model: its version, a sandbox and a voice badge, the signed-in account, separators …
  session-detail           session, api, cache and cost detail, plain stale style, 1 s git refresh
  sidebar-panels           a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column
  single-line-full         everything on one row, always scrolling as a ticker (200 columns is a comfortable window)
@@ -32,9 +36,5 @@ bars-and-limits  needs nerd-font  designed for 130 columns  40-cell line-style c
  tall-eight-lines         one module per row, eight rows, square frame
  three-lines-double       repo / model / timers in a double frame
  ticker-two-step          a long first row scrolling two cells a tick behind a still clock, a second row that fits, 90 columns
- titled-sections          a title in every rule, left, centred and right, a titled spacer and one boxed row, Nord
- two-lines-powerline      location and model only, powerline caps, no colour
-
-
 
 ↑↓ preset  enter use it  e edit it  f payload  w width  esc back  ? help

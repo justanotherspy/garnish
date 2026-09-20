@@ -1,7 +1,8 @@
 # PLAN.md — the drift between SPEC and the code
 
 `SPEC.md` is the target design. This file is what the code still lacks of
-it (nothing, today), a compact table of what has landed, and the backlog.
+it (an open phase, when there is one), a compact table of what has
+landed, and the backlog.
 The dated log of how the project got here is `WORKLOG.md`; the rules for
 working here are `CLAUDE.md`. Host trouble does not belong in this file.
 
@@ -11,16 +12,19 @@ working here are `CLAUDE.md`. Host trouble does not belong in this file.
 the schema-driven config with presets, themes, icon sets and frames, the
 cache and worker model, aligned columns and fixed durations, per-key config
 fallback, the ticker, text modules and animations, the presets gallery and
-the three bundled skills. Phases 19–22 landed between 2026-09-13 and
+the three bundled skills. Phases 19–23 landed between 2026-09-13 and
 2026-09-19 (the table below). The release pipeline with the Homebrew tap
 waits for its first tag, which will be `v0.3.0`; `CHANGELOG.md`
 § Unreleased is its section.
 
-**The drift between `SPEC.md` and the code is the short list under
-*Setup, when asked* in the backlog** (a keyboard path to a separator or a
-cap, undo, a cargo feature); everything else in the spec is implemented,
-and where Phase 22 was built differently from its design, SPEC § 14 says
-so and why.
+**There is no open phase.** The drift between `SPEC.md` and the code is
+the short list under *When asked* in the backlog (a keyboard path to a
+separator or a cap, undo, a cargo feature); everything else in the spec
+is implemented, and where Phase 22 was built differently from its design,
+SPEC § 14 says so and why. Phase 23 (usage views and formats) is on the
+pull request from `claude/docs-workflow-consolidation-vepxgw`, waiting
+for Daniel's merge; its decisions are in `WORKLOG.md` (2026-09-19) and
+its design in SPEC § 3, § 3.3, § 3.8 and § 4.
 
 ## Done
 
@@ -52,6 +56,7 @@ so and why.
 | 21 Layout | `[[row]]` with `[[line]]` as its alias, `[[row.col]]` (`width`, `gap`, `justify`, `valign`), `[[row.col.row]]` stacks, `title*`, `[box.<name>]` and `box = true`; `src/layout.rs` in place of `frame::compose_line`; four presets, seventeen config goldens, two adversarial reviews | 09-17 |
 | 22 Interactive setup | `garnish setup` (`src/setup/`): home menu, preset picker with a live preview at the real width, builder over the config file's own table with a placement map and click-to-edit preview, schema-generated editors, glyph and string pickers with suggestions, install screen over `install::Steps`; `setup --preset [--install]`; the bare `garnish` on a tty points at `setup`; `fixtures.rs`; snapshot goldens under `tests/golden/setup/`; ratatui + crossterm and toml `preserve_order` | 09-19 |
 | Consolidation | nine gallery presets showing the rest of the vocabulary (28 in all); the review workflow collecting the pull request in job shell with a short prompt and `Bash` whole; the skills shortened and pointed at `setup`; *also try* glyphs on the module pages; `WORKLOG.md` split from this file; `PLAN.md`, `SPEC.md`, `CLAUDE.md`, `README.md`, the guide and `CHANGELOG.md` brought to the code | 09-19 |
+| 23 Usage views and formats | `hide` lists derived from a module's measure (`MeasureKind`, `HideRule`, `Rendered.measure`, one check in `render_group`); the `[format]` table with per-module `tokens`/`percent`/`cost` overrides and `parens = "dim"` through one `detail()` helper; `pace`, `pace_colors`, `eta`, `reset = "elapsed"` and `elapsed_marker` on the two limit windows; `[frame] separator_color` with `inherit`; the `version`, `sandbox`, `voice` and `account` modules (25 ids; `account` is the first cached module outside the repo group, `Clock.workers` keeps pinned renders off the cache, `Clock.settings_keys` seeds the badges' docs samples); `doctor` rows for the two settings keys; four gallery presets (32 in all); seven config goldens; three adversarial reviews | 09-19 |
 
 ## Backlog
 
@@ -64,11 +69,6 @@ Open items only; closed ones are in `WORKLOG.md`.
   `garnish.sts.yaml` in the tap; afterwards drop the "lands with the first
   release" note from the tap's README, and the "from the first tagged
   release" qualifier from README § Install and guide § 1
-- [ ] The review workflow changed in the same pull request as Phase 22, so
-  that pull request cannot be reviewed by it (the action refuses a branch
-  whose copy of the workflow differs from `main`'s; `CLAUDE.md` § Claude
-  review). Either merge and review the next one, or split the workflow
-  commit out first if a review of #78 itself is wanted
 - [ ] Watch a nine-line status line at 24 and 50 rows in Claude Code's
   fullscreen and classic renderers (`/tui`) to confirm the § 2.1
   arithmetic (`⌊LINES / 2⌋ − 5` rows whole with an empty prompt), then
@@ -88,8 +88,18 @@ Open items only; closed ones are in `WORKLOG.md`.
   rule (SPEC § 4.3 says spaces, "since a rule running past a box's side
   would look wrong", which is about boxes, not bare columns)
 
-**Setup, when asked** (small; none blocks anything)
+**When asked** (small; none blocks anything)
 
+- [ ] `garnish preview` discovers git and reads the settings chain as the
+  tick does; only the cache and the workers are off (SPEC § 14, Phase 23's
+  review). The setup pane skips git and settings too, since the bundled
+  fixtures name no real directory; whether the CLI preview should is
+  Daniel's call (a captured payload from a real repository would then
+  lose its repo group)
+- [ ] The Claude settings chain (SPEC § 2.3) ignores `CLAUDE_CONFIG_DIR`,
+  which moves the user file; only the `account` worker honours it for
+  `.claude.json` (SPEC § 3.8). Honouring it in the chain means one more
+  path rule in `claude_settings::settings_files` and a doctor line
 - [ ] A `setup` cargo feature, if the binary size ever matters: the
   release binary grew from 2.8 MB to 3.4 MB with ratatui and crossterm,
   the end-to-end cold tick did not move (about 2 ms either way, 200 runs
@@ -126,12 +136,11 @@ Open items only; closed ones are in `WORKLOG.md`.
 - [ ] Optional headroom: cache the resolved config keyed by mtime, cache the
   settings-chain reads for 30 s, but only if the tick budget is ever
   threatened
-- [ ] From `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12): the Tier A ideas
-  not taken into Phases 19–20 stay in that document until asked for:
-  `hide = [...]` lists (A4), `[format]` number styles and `dim = "parens"`
-  (A6), separator colour inheritance (A13), a `version` module (A12), the
-  settings-derived `sandbox`/`voice`/`account` modules (A9), pace and burn
-  on the limits (N11), theme rotation (§ 12.3), `config share`/`apply` and
-  `preview --html` (§ 12.2), gradients (A3) and Powerline segments (B1).
-  Everything Tier B/C (workers, hooks, network, transcript, the companion,
-  garlic) is a § 0 decision there, untouched
+- [ ] From `FUTURE-SPEC.md` (PR #27, reviewed 2026-09-12; Phase 23 took
+  A4, A6, A9, A10, A12, A13 and N11 on 2026-09-19): the Tier A ideas
+  still in that document, until asked for: theme rotation (§ 12.3),
+  `config share`/`apply`, `preview --config` and `preview --html`
+  (§ 12.2), gradients (A3), Powerline segments (B1), the `provider`
+  badge (§ 8.4) and the `remote` module (A9's fourth, a duplicate of the
+  harness's own indicator). Everything Tier B/C (workers, hooks, network,
+  transcript, the companion, garlic) is a § 0 decision there, untouched

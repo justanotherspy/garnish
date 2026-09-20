@@ -18,7 +18,7 @@
 ## Why
 
 Claude Code re-runs your status line command every second. garnish makes that
-free: it parses the session JSON, renders **21 small modules** (plus any
+free: it parses the session JSON, renders **25 small modules** (plus any
 number of your own fixed-width text boxes) from a TOML config, and keeps
 anything slow (git, worktrees) in a detached background
 worker so a tick never waits. Dozens of sessions on one machine, no
@@ -62,9 +62,10 @@ columns (this block is the one that may scroll on a narrow screen):
 ╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ✦ 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
-Beyond the four built-ins, the [presets gallery](docs/presets.md) has 28
+Beyond the four built-ins, the [presets gallery](docs/presets.md) has 32
 complete configs (titled sections, boxed panels, a sidebar, a grid, links,
-a compaction-aware bar, narrow and ASCII-only terminals, tickers and
+a compaction-aware bar, pace against the rate limits, precise numbers,
+modules that hide when idle, narrow and ASCII-only terminals, tickers and
 animation, …) rendered at their own widths; `garnish setup` previews each
 at yours, `garnish presets` lists them and `garnish config init --preset
 <name>` writes one.
@@ -170,6 +171,17 @@ the cap); `durations = "fixed"` prints timers as `9m00s` / `1h05m` instead of
 `hide_empty_lines` are permanent aliases of `[[row]]` and `hide_empty_rows`,
 so a config written before rows existed keeps working.)
 
+A module can also leave the row while there is nothing worth reading:
+`hide = ["zero"]` on `lines` or `sync`, `hide = ["below:10"]` on `context`
+(each module page lists the states it takes). `[format]` decides how every
+number prints (`tokens = "precise"` for `128,400`, `percent = "precise"`
+for `42.3%`, `cost = "whole"`, `parens = "dim"` for muted details), and a
+module that prints a number can pin its own style. The two rate-limit
+windows can show their pace against the clock (`pace = true` prints
+`⇡14%` ahead or `⇣32%` behind, `eta = true` the time until the window is
+spent, `reset = "elapsed"` how much of it has passed, `elapsed_marker` a
+cursor on the bar).
+
 ```text
 ╭─ ❖ Opus         │ ⊞ ████████▍░░░░░░░░░░▏ 42% ─────────────── ⠋ 16:00:00 ─╮
 ├─ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d04h ──────────────────────────── Δ +156 −23 ─┤
@@ -201,6 +213,7 @@ are working examples; [docs/config.md](docs/config.md#row-col) has the keys.
 | usage | `limit5h` `limit7d` `spend` `cost` |
 | session | `session` `api` `cache` `clock` |
 | identity | `session_name` `vim` `agent` `lines` |
+| harness | `version` `sandbox` `voice` `account` |
 
 Start with the [guide](docs/guide.md), then the
 [configuration reference](docs/config.md) and the per-module pages under

@@ -1,0 +1,9 @@
+{
+  "sandbox": {
+    "enabled": true
+  },
+  "voice": {
+    "enabled": true,
+    "mode": "tap"
+  }
+}

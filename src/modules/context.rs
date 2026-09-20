@@ -2,11 +2,13 @@
 
 use crate::ansi::{Segment, Style};
 use crate::claude_settings::{self, DEFAULT_COMPACT_BUFFER};
-use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+};
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{BAR_STYLES, bar, percent, rounded, tokens};
+use super::util::{BAR_STYLES, bar};
 use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
@@ -25,6 +27,7 @@ impl Module for ContextModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "context",
+            measure: Some(MeasureKind::Percent),
             summary: "Context window usage bar with color bands and the auto-compaction marker.",
             doc: "A smooth bar spanning the full context window (`context_window.context_window_size`, 1M when absent). The filled part takes the color of the current band; a marker shows where Claude Code will auto-compact (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` minus the summary buffer). No token counter: the bar and the percentage are the story.",
             sources: &[
@@ -106,7 +109,8 @@ impl Module for ContextModule {
         let pct = used
             .map(crate::num::clamp_percent)
             .map(|u| usable.map_or(u, |scale| crate::num::clamp_percent(u * 100.0 / scale)));
-        let fill_color = ctx.theme.band(rounded(pct.unwrap_or(0.0)), &thresholds, &bands);
+        let fill_color =
+            ctx.theme.band(ctx.percent_shown(cfg, pct.unwrap_or(0.0)), &thresholds, &bands);
 
         let marker =
             if usable.is_some() || !cfg.bool("compaction_marker") { None } else { threshold };
@@ -124,7 +128,7 @@ impl Module for ContextModule {
             ));
         }
         if cfg.bool("show_percent") {
-            let text = pct.map_or_else(|| "–".to_owned(), percent);
+            let text = pct.map_or_else(|| "–".to_owned(), |p| ctx.percent(cfg, p));
             let sp = if segs.is_empty() { "" } else { " " };
             segs.push(Segment::styled(format!("{sp}{text}"), Style::fg(fill_color).bolded()));
         }
@@ -135,10 +139,14 @@ impl Module for ContextModule {
             && usable.is_none()
             && let Some(m) = threshold
         {
-            segs.push(seg(cfg, format!(" {}{}", cfg.icon("compact"), percent(m)), "marker"));
+            segs.push(seg(
+                cfg,
+                format!(" {}{}", cfg.icon("compact"), ctx.percent(cfg, m)),
+                "marker",
+            ));
         }
         if cfg.bool("show_window") {
-            segs.push(seg(cfg, format!(" {}", tokens(window)), "window"));
+            segs.push(seg(cfg, format!(" {}", ctx.tokens(cfg, window)), "window"));
         }
         if cfg.bool("exceeds_200k") && ctx.payload.exceeds_200k_tokens == Some(true) {
             segs.extend(badge(cfg, "exceeds", "exceeds"));
@@ -148,6 +156,7 @@ impl Module for ContextModule {
             segs.extend(badge(cfg, "warn", "warn"));
         }
         Rendered::fresh(segs)
+            .measured(pct.map(|p| super::Measure::Percent(ctx.percent_shown(cfg, p))))
     }
 }
 
@@ -228,6 +237,8 @@ fn opts() -> Vec<OptSpec> {
             "Extra warning badge at or above this percentage; 0 disables.",
             Value::Float(0.0),
         ),
+        super::format_opt(super::NumberKind::Tokens),
+        super::format_opt(super::NumberKind::Percent),
     ]
 }
 

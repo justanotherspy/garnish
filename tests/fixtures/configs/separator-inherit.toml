@@ -1,0 +1,21 @@
+# fixture: subscription-full
+# columns: 100
+# icons: unicode
+# color: always
+# `[frame] separator_color = "inherit"` (SPEC § 4.1): each separator takes
+# the colour of the first coloured, undimmed segment of the module before
+# it (`model`'s icon, then `effort`'s icon rather than its muted label, then
+# the filled part of `context`'s bar), never a label or an align pad; the
+# packed join before the right group follows the last left module. Colour
+# on, so the golden pins the separators' colours.
+
+[frame]
+fill = false
+separator_color = "inherit"
+
+[[line]]
+modules = ["model", "effort", "context"]
+right   = ["clock"]
+
+[modules.effort]
+label = "effort"

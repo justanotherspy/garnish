@@ -1,0 +1,50 @@
+# name: pace-and-eta
+# summary: the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their bars
+# columns: 130
+# needs: nerd-font
+
+# Every pace key of SPEC § 3.3 on both windows: `pace` prints how far the
+# usage runs ahead of (⇡, hot) or behind (⇣, ok) the elapsed share of the
+# window, `pace_colors` colours the percentage by that band instead of
+# the thresholds, `eta` projects when 100 % lands (shown only while it
+# lands before the reset, so a window behind pace prints none, as in the
+# pinned sample), and `elapsed_marker` drops a cursor on the mini bar at
+# the elapsed share. `spend` has no known window, so it keeps the plain
+# countdown.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["spend", "cost"]
+
+[modules.limit5h]
+preset = "full"
+bar_width = 12
+pace = true
+pace_colors = true
+eta = true
+elapsed_marker = true
+
+[modules.limit7d]
+preset = "full"
+bar_width = 12
+pace = true
+pace_colors = true
+eta = true
+elapsed_marker = true
+
+[modules.spend]
+bar_width = 8

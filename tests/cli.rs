@@ -167,7 +167,12 @@ fn config_subcommands_and_doctor_work_end_to_end() {
 
     let (out, _, ok) = run(&["modules"], home, &[]);
     assert!(ok);
-    assert_eq!(out.lines().count(), 22, "21 modules plus the text family:\n{out}");
+    let built_in = garnish::modules::SCHEMAS.len();
+    assert_eq!(
+        out.lines().count(),
+        built_in + 1,
+        "{built_in} modules plus the text family:\n{out}"
+    );
     assert!(out.lines().any(|l| l.starts_with("context ")));
     assert!(out.lines().last().unwrap().starts_with("text.<name>  "), "{out}");
 
@@ -499,6 +504,25 @@ fn preview_of_a_directory_renders_every_fixture_in_order() {
     let headings: Vec<&str> = plain.lines().filter_map(|l| l.strip_prefix("── ")).collect();
     assert_eq!(headings, names, "{out}");
     assert!(!out.contains("⚠ garnish"), "{out}");
+}
+
+/// SPEC § 14: a preview is not a tick, so it never reads the cache or
+/// spawns a worker; a cached module shows its not-yet-refreshed state.
+/// `account` is session-scoped, so with it placed a preview used to log
+/// a spawn per fixture (and fork one for real outside the tests), leaving
+/// lock files under the fixtures' session ids.
+#[test]
+fn preview_never_touches_the_cache_or_spawns_a_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("garnish.toml");
+    std::fs::write(&cfg, "[[line]]\nmodules = [\"model\", \"account\", \"branch\", \"sync\"]\n")
+        .unwrap();
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads");
+    let args = ["--config", cfg.to_str().unwrap(), "preview", fixtures, "--width", "80"];
+    let (out, err, ok) = run(&args, dir.path(), &[]);
+    assert!(ok && out.contains("Opus"), "{out}{err}");
+    let cache = dir.path().join("cache");
+    assert!(!cache.exists(), "preview touched the cache under {}", cache.display());
 }
 
 #[test]

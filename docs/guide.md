@@ -182,11 +182,31 @@ own: `path.style = "fish"` abbreviates the directories above the last one
 clickable, `context.scale = "usable"` makes the bar say how close
 auto-compaction is, and `reset = "absolute"` (or `"both"`) on the limit
 modules prints the time a window resets at instead of, or after, the
-countdown. Each module page under [modules/](modules/) lists its keys.
+countdown. On `limit5h` and `limit7d`, `reset = "elapsed"` prints how much
+of the window has passed (`2h46m/5h`), `pace = true` how far the usage runs
+ahead of (`⇡14%`) or behind (`⇣32%`) that elapsed share, `eta = true` when
+100 % lands if it lands before the reset, `pace_colors = true` colours the
+percentage by that band instead of the thresholds, and `elapsed_marker =
+true` drops a cursor on the mini bar. Each module page under
+[modules/](modules/) lists its keys.
+
+Numbers print the way `[format]` says: `tokens = "precise"` writes
+`128,400` where `compact` writes `128k`, `percent = "precise"` keeps a
+decimal (`42.3%`), `cost = "whole"` rounds to dollars, and `parens = "dim"`
+mutes every parenthesised detail (the api share, the net lines, a `both`
+reset). A module that prints a number takes the same key
+(`[modules.context] tokens = "whole"`) to pin its own style; `inherit`,
+the default, follows the table.
 
 Modules that have nothing to show are skipped: `limit5h` only appears on a
 subscription, `cost` only with an API key, `pr` only while a pull request is
-open, `vim` only with vim mode on. A row whose modules all have nothing to
+open, `vim` only with vim mode on. A module can leave the row in more
+states than that: `hide = ["zero"]` on `lines`, `sync` or `cost` skips it
+while the count or the amount is nil, `hide = ["below:10"]` (or `above:N`)
+on a module that prints a percentage skips it under (or over) that value,
+and `hide = ["empty"]` is the same as `hide_when_empty = true`, which stays
+as the older spelling; the two combine. Each module page lists the states
+its measure allows. A row whose modules all have nothing to
 show is dropped too (outside a repository, a row of `branch sync pr` would
 otherwise be an empty framed row); set `hide_empty_rows = false` to keep
 such rows, or write `modules = []` for a spacer row that always stays.
@@ -317,6 +337,15 @@ so the two stay in step; an explicit `animate` wins over the setting, and
 - **`⟳` next to a value** → the cached value has not been refreshed for
   `stale_after` TTLs (default 5) and a worker is on it; `✗` means the last
   refresh failed. `garnish doctor` shows the error.
+- **`account` shows nothing** → a background worker reads the email from
+  `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`), so the first
+  tick of a session shows nothing, and an API-key session has no account
+  at all; `✗` means the file could not be read or parsed, and `garnish
+  doctor` says why.
+- **The `sandbox` or `voice` badge never appears** → they show only while
+  `sandbox.enabled` or `voice.enabled` is `true` in Claude Code's settings
+  files (`/voice` writes the second); `garnish doctor` prints both keys
+  with the file each comes from.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
 - **The line looks faint** → Claude Code draws every status line row dim
   and folds that into every coloured piece of it; nothing a status line

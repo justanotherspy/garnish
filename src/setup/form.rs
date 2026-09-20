@@ -824,6 +824,26 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
             ),
         );
     }
+    // The states come from the schema's measure (SPEC § 3), as the parser's
+    // check and the reference row do.
+    let states = schema.hide_states().join(", ");
+    fields.push(
+        Field::new(
+            "hide",
+            &format!(
+                "States that hide the module, comma-separated: {states}. `empty` is what hide_when_empty hides; the two combine."
+            ),
+            SlotKind::StrList,
+            slot("hide"),
+        )
+        .valued(
+            draft,
+            cfg.and_then(|c| c.common("hide"))
+                .map(to_toml)
+                .or_else(|| Some(Value::Array(Vec::new()))),
+            "[]",
+        ),
+    );
     for opt in COMMON_OPTS.iter().filter(|o| text.is_none() || o.key != "max_width") {
         let value = cfg.and_then(|c| c.common(opt.key)).map(to_toml);
         let kind = SlotKind::of(opt.kind, opt.max);
@@ -916,11 +936,49 @@ fn string(v: &str) -> Value {
     Value::String(v.to_owned())
 }
 
-/// The top-level keys: what the line looks like, then how it is laid out.
+/// The top-level keys: what the line looks like, how it is laid out, then
+/// the `[format]` table.
 fn top_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let mut fields = look_fields(draft, config);
     fields.extend(layout_fields(draft, config, hints));
+    fields.extend(format_fields(draft, config));
     fields
+}
+
+/// `[format]`: the number styles (SPEC § 4), each row keyed `format.<key>`.
+fn format_fields(draft: &Draft, config: &Config) -> Vec<Field> {
+    let s = |key: &str| Slot::table(&["format"], key);
+    let f = &config.format;
+    vec![
+        Field::new(
+            "format.tokens",
+            "Token counts: compact (128k, 1.0M) | precise (128,400) | whole (128400).",
+            names(&["compact", "precise", "whole"]),
+            s("tokens"),
+        )
+        .valued(draft, Some(string(f.tokens.name())), "compact"),
+        Field::new(
+            "format.percent",
+            "Percentages: whole (42%) | precise (42.3%).",
+            names(&["whole", "precise"]),
+            s("percent"),
+        )
+        .valued(draft, Some(string(f.percent.name())), "whole"),
+        Field::new(
+            "format.cost",
+            "Money: precise ($1.23, cost.decimals places) | whole ($1).",
+            names(&["precise", "whole"]),
+            s("cost"),
+        )
+        .valued(draft, Some(string(f.cost.name())), "precise"),
+        Field::new(
+            "format.parens",
+            "Parenthesised details (api's share, lines' net, a both reset): plain | dim (the muted role).",
+            names(&["plain", "dim"]),
+            s("parens"),
+        )
+        .valued(draft, Some(string(f.parens.name())), "plain"),
+    ]
 }
 
 /// The top-level keys that pick the preset, the glyphs and the colours.
@@ -1108,6 +1166,20 @@ fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Ve
                 .with_choices(hints.choices(key)),
         );
     }
+    // Right after `separator`: a role, a literal, or `inherit` (SPEC § 4.1).
+    let mut choices = vec![Choice::noted("inherit", "the module before it")];
+    choices.extend(Role::ALL.iter().map(|r| Choice::noted(r.name(), "role")));
+    fields.insert(
+        3,
+        Field::new(
+            "separator_color",
+            "Every separator's colour: muted | inherit (the module before it) | a role or literal.",
+            SlotKind::Str,
+            s("separator_color"),
+        )
+        .valued(draft, Some(string(config.frame.separator_color.spec())), "muted")
+        .with_choices(choices),
+    );
     fields
 }
 
@@ -1363,9 +1435,20 @@ mod tests {
         for key in config::TOP_KEYS {
             let table = matches!(
                 key,
-                "colors" | "frame" | "row" | "line" | "box" | "modules" | "hide_empty_lines"
+                "colors"
+                    | "frame"
+                    | "format"
+                    | "row"
+                    | "line"
+                    | "box"
+                    | "modules"
+                    | "hide_empty_lines"
             );
             assert!(table || keys.contains(&key), "{key} has no field");
+        }
+        // The `[format]` table's four keys sit on the same screen.
+        for key in ["format.tokens", "format.percent", "format.cost", "format.parens"] {
+            assert!(keys.contains(&key), "{key} has no field");
         }
         for schema in SCHEMAS.iter() {
             let (form, _) = built("", &FormKind::Module(schema.id.to_owned()));
@@ -1379,7 +1462,14 @@ mod tests {
             for color in &schema.colors {
                 assert!(keys.contains(&format!("colors.{}", color.key).as_str()), "{}", schema.id);
             }
-            assert!(keys.contains(&"preset") && keys.contains(&"max_width"));
+            assert!(
+                keys.contains(&"preset") && keys.contains(&"max_width") && keys.contains(&"hide")
+            );
+            let hide = form.fields.iter().find(|f| f.key == "hide").unwrap();
+            assert_eq!(hide.kind, SlotKind::StrList);
+            for state in schema.hide_states() {
+                assert!(hide.doc.contains(state), "{}: {}", schema.id, hide.doc);
+            }
         }
         let (text, _) =
             built("[modules.text.motd]\ntext = \"hi\"\n", &FormKind::Module("text.motd".into()));
@@ -1387,6 +1477,7 @@ mod tests {
         assert!(
             keys.contains(&"text")
                 && keys.contains(&"width")
+                && keys.contains(&"hide")
                 && !keys.contains(&"max_width")
                 && !keys.contains(&"preset")
         );

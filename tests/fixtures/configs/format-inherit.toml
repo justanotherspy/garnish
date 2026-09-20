@@ -1,0 +1,32 @@
+# fixture: subscription-full
+# columns: 120
+# icons: unicode
+# The per-module override of a `[format]` style (SPEC § 4): under a table
+# that prints tokens and percentages precisely and money whole, `context`
+# pins `percent = "whole"`, `cache` pins `tokens = "compact"` and `cost`
+# pins `cost = "precise"`, while `api` and `limit7d` inherit. `parens` stays
+# `plain`, so `api`'s share is one segment with its value.
+
+[format]
+tokens  = "precise"
+percent = "precise"
+cost    = "whole"
+
+[[line]]
+modules = ["context", "api", "cache", "limit7d"]
+right   = ["cost"]
+
+[modules.context]
+percent = "whole"
+show_window = true
+
+[modules.api]
+show_share = true
+
+[modules.cache]
+tokens = "compact"
+show_writes = true
+
+[modules.cost]
+only_without_rate_limits = false
+cost = "precise"

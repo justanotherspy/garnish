@@ -26,6 +26,11 @@ pub struct Request<'a> {
     /// Draw every row faint, as Claude Code draws the status line on screen
     /// (`preview`, SPEC § 2.1); the tick leaves that to the harness.
     pub dim: bool,
+    /// Whether a cached module may look its entry up and spawn a worker:
+    /// the tick does, `preview` never (SPEC § 14: a preview is not a
+    /// tick, so it neither reads the cache nor forks; a cached module
+    /// shows its not-yet-refreshed state).
+    pub workers: bool,
 }
 
 /// Render a full tick. Never fails and never prints nothing.
@@ -35,11 +40,11 @@ pub fn render(req: &Request<'_>) -> String {
         return "⚠ garnish: bad payload\n".to_owned();
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
-    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim)
+    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, req.workers)
 }
 
 /// Render with an already loaded config (used by tests, previews and
-/// benches). `dim` is [`Request::dim`].
+/// benches). `dim` is [`Request::dim`] and `workers` [`Request::workers`].
 #[must_use]
 pub fn render_loaded(
     payload: &Payload,
@@ -47,11 +52,13 @@ pub fn render_loaded(
     columns: Option<usize>,
     no_color: bool,
     dim: bool,
+    workers: bool,
 ) -> String {
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
     let painter = Painter { mode, links: mode != ColorMode::Never, dim };
-    let mut lines = render_lines(payload, config, columns);
+    let clock = Clock { workers, ..Clock::from_env() };
+    let mut lines = render_lines_at(payload, config, columns, &clock);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
     }
@@ -93,6 +100,9 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
 }
 
 /// The environment-dependent inputs of a render, so docs and tests can pin them.
+// Four independent switches (git, animate, settings, workers), each set on
+// its own over `..Clock::fixed()`; an enum per pair would name nothing.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct Clock {
     /// The current instant.
@@ -126,6 +136,16 @@ pub struct Clock {
     /// which otherwise read and wrote the developer's real one and forked a
     /// worker per miss) names its own here.
     pub cache: Option<std::path::PathBuf>,
+    /// Whether a cached module may look its entry up and spawn a worker.
+    /// Off under the pinned clock, so docs, goldens and the in-process
+    /// matrices never touch a cache directory (SPEC § 9); `git = false`
+    /// alone covers only the repo group.
+    pub workers: bool,
+    /// Keys standing in for the settings chain: a pinned render that must
+    /// show a settings-derived module on (the docs samples of `sandbox`
+    /// and `voice`, SPEC § 3.8) seeds them here and still reads no file.
+    /// `None` reads the chain, or nothing under `settings = false`.
+    pub settings_keys: Option<Vec<crate::claude_settings::FileKeys>>,
 }
 
 impl Clock {
@@ -143,13 +163,15 @@ impl Clock {
             settings: true,
             managed: crate::claude_settings::managed_settings_path(),
             cache: None,
+            workers: true,
+            settings_keys: None,
         }
     }
 
     /// A fixed clock: 2025-02-01T16:00:00Z, UTC, home `/home/dev`, no
     /// auto-compaction overrides, no repository discovery, no settings
-    /// files and animations frozen at frame 0 — what the generated docs
-    /// use, so they come out identical on every machine.
+    /// files, no workers and animations frozen at frame 0 — what the
+    /// generated docs use, so they come out identical on every machine.
     #[must_use]
     pub fn fixed() -> Self {
         Self {
@@ -162,6 +184,8 @@ impl Clock {
             settings: false,
             managed: None,
             cache: None,
+            workers: false,
+            settings_keys: None,
         }
     }
 
@@ -247,10 +271,15 @@ pub fn render_tree_at(
         git: clock.git,
         stale_after: config.stale_after,
         durations: config.durations,
+        format: config.format,
         animate: false,
         dirs: std::cell::OnceCell::new(),
         settings_files: clock.settings_files(payload),
-        settings: std::cell::OnceCell::new(),
+        settings: clock
+            .settings_keys
+            .clone()
+            .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
+        workers: clock.workers,
     };
     // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
     // `animate` decides, else Claude Code's prefersReducedMotion freezes,
@@ -266,6 +295,7 @@ pub fn render_tree_at(
         chars: &config.frame.chars,
         style: config.frame.style,
         theme: &config.theme,
+        separator_color: &config.frame.separator_color,
         fill: config.frame.fill,
         width,
         truncate: config.truncate,
@@ -623,9 +653,17 @@ fn render_group(
             let rendered = entry.module.render(ctx, &view);
             let rendered = match (config.stale_style, &rendered.freshness) {
                 (StaleStyle::Hide, Freshness::Stale | Freshness::Failed) => Rendered::empty(),
-                (StaleStyle::Plain, _) => Rendered::fresh(rendered.segments),
+                (StaleStyle::Plain, _) => Rendered { freshness: Freshness::Fresh, ..rendered },
                 _ => rendered,
             };
+            // The `hide` list (SPEC § 3) reads the measure the module
+            // attached; a hidden module rendered nothing, never a `–`. Its
+            // place after the stale mapping is not load-bearing: no cached
+            // module attaches a measure, so a stale or failed render never
+            // meets a rule.
+            if modules::hidden_by(&rendered, &cfg.hide) {
+                return None;
+            }
             let module = decorate(rendered, cfg, &config.theme, stale);
             Some((id.clone(), cap_width(module, cfg.max_width, ellipsis)))
         })
@@ -651,7 +689,7 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
 /// Plain-text render (no escapes), for tests and docs.
 #[must_use]
 pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
-    strip_ansi(&render_loaded(payload, loaded, columns, true, false))
+    strip_ansi(&render_loaded(payload, loaded, columns, true, false, true))
 }
 
 /// Plain-text render of the configured lines with a pinned clock (docs).
@@ -787,7 +825,7 @@ mod tests {
         assert!(!json.contains('\x1b'), "escaped on the wire");
         let payload = Payload::parse(&json).unwrap();
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
-        let out = render_loaded(&payload, &loaded, Some(160), false, false);
+        let out = render_loaded(&payload, &loaded, Some(160), false, false, true);
         let plain = render_plain(&payload, &loaded, Some(160));
         assert_eq!(plain.lines().count(), loaded.config.rows.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
@@ -1094,6 +1132,24 @@ mod tests {
         assert!(moving(&render(&cfg(base), &clock(true, true))), "the project file wins");
     }
 
+    /// SPEC § 3: a module its `hide` list takes off the row rendered
+    /// nothing, never the `–` an empty render gets under `hide_when_empty
+    /// = false`; a rule that does not fire leaves the module alone.
+    #[test]
+    fn a_module_hidden_by_its_list_never_prints_the_placeholder() {
+        let payload = fixture("api-key");
+        let base = "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nhide_when_empty = false\n";
+        let render = |rule: &str| {
+            let (config, errs) = config::parse(&format!("{base}hide = [\"{rule}\"]\n"), &SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            render_lines_at(&payload, &config, Some(80), &Clock::fixed())
+        };
+        assert!(render("above:0").is_empty(), "hidden, yet a row was drawn");
+        let shown = render("below:0");
+        assert_eq!(shown.len(), 1);
+        assert!(shown[0].iter().any(|s| s.text().contains("42%")), "{shown:?}");
+    }
+
     /// A spacer takes whatever cap its position calls for: first, last or,
     /// alone, the single-line caps.
     #[test]
@@ -1393,7 +1449,7 @@ mod tests {
         let out = render_plain(&payload, &loaded(&all_on_one), Some(120));
         assert_eq!(out.lines().count(), 1, "{out}");
         assert_eq!(display_width(out.trim_end()), 116, "{out}");
-        assert!(out.contains('…'), "twenty-one modules do not fit in 116 cells: {out}");
+        assert!(out.contains('…'), "twenty-five modules do not fit in 116 cells: {out}");
     }
 
     #[test]

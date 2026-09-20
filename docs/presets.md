@@ -21,7 +21,11 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | [`minimal-clean`](#minimal-clean) | one unframed line: path, context, limit, clock | 80 | nerd-font |
 | [`motd-ticker`](#motd-ticker) | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
 | [`narrow-unicode`](#narrow-unicode) | three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules | 72 | — |
+| [`pace-and-eta`](#pace-and-eta) | the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their bars | 130 | nerd-font |
 | [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed rows, a separator per row | 130 | nerd-font |
+| [`precise-numbers`](#precise-numbers) | every number at full precision: token counts with thousands separators, percentages to a decimal, whole dollars, dimmed details | 120 | — |
+| [`quiet-when-idle`](#quiet-when-idle) | modules that leave the row while there is nothing worth reading: zero counts, a near-empty context, an absent cost | 110 | — |
+| [`session-badges`](#session-badges) | the harness itself beside the model: its version, a sandbox and a voice badge, the signed-in account, separators in the colour of what precedes them | 100 | nerd-font |
 | [`session-detail`](#session-detail) | session, api, cache and cost detail, plain stale style, 1 s git refresh | 130 | nerd-font |
 | [`sidebar-panels`](#sidebar-panels) | a 34-cell boxed sidebar, a two-share stack of titled rows, and a bottom-aligned column | 140 | nerd-font |
 | [`single-line-full`](#single-line-full) | everything on one row, always scrolling as a ticker (200 columns is a comfortable window) | 200 | nerd-font |
@@ -1036,6 +1040,74 @@ preset = "minimal"
 
 </details>
 
+## `pace-and-eta`
+
+the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their bars
+
+At 130 columns, needs nerd-font:
+
+```text
+╭─  ~/projects/garnish            │  ████████▍░░░░░░░░░░▏ 42% ──────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─  ██▊░░░▏░░░░░ 24% ⇣32%  2h13m │  ████▉░▏░░░░░ 41% ⇣14%  3d04h ────────────────────────────────────────────────────────╯
+```
+
+<details><summary><code>presets/pace-and-eta.toml</code></summary>
+
+```toml
+# name: pace-and-eta
+# summary: the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their bars
+# columns: 130
+# needs: nerd-font
+
+# Every pace key of SPEC § 3.3 on both windows: `pace` prints how far the
+# usage runs ahead of (⇡, hot) or behind (⇣, ok) the elapsed share of the
+# window, `pace_colors` colours the percentage by that band instead of
+# the thresholds, `eta` projects when 100 % lands (shown only while it
+# lands before the reset, so a window behind pace prints none, as in the
+# pinned sample), and `elapsed_marker` drops a cursor on the mini bar at
+# the elapsed share. `spend` has no known window, so it keeps the plain
+# countdown.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]
+right   = ["spend", "cost"]
+
+[modules.limit5h]
+preset = "full"
+bar_width = 12
+pace = true
+pace_colors = true
+eta = true
+elapsed_marker = true
+
+[modules.limit7d]
+preset = "full"
+bar_width = 12
+pace = true
+pace_colors = true
+eta = true
+elapsed_marker = true
+
+[modules.spend]
+bar_width = 8
+```
+
+</details>
+
 ## `packed-heavy`
 
 custom heavy frame, left-packed rows, a separator per row
@@ -1095,6 +1167,207 @@ separator = " • "
 
 </details>
 
+## `precise-numbers`
+
+every number at full precision: token counts with thousands separators, percentages to a decimal, whole dollars, dimmed details
+
+At 120 columns:
+
+```text
+╭─ ❖ Opus  │ ⚙ ▁▃▅▇█         │ ⊞ ████████▍░░░░░░░░░░▏ 42.0% 1.0M ───────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─ ⏱ 1h12m │ ⇄ 8m20s (11.6%) │ ⛁ 91.0% 1h ✦ 47m00s 352,000w ────────────────────────────── Δ +156 −23 (+133) │ $1 ─╯
+```
+
+<details><summary><code>presets/precise-numbers.toml</code></summary>
+
+```toml
+# name: precise-numbers
+# summary: every number at full precision: token counts with thousands separators, percentages to a decimal, whole dollars, dimmed details
+# columns: 120
+
+# The `[format]` table of SPEC § 4 decides how every module prints a
+# number: `tokens = "precise"` writes 128,400 where `compact` writes 128k,
+# `percent = "precise"` keeps one decimal, `cost = "whole"` rounds to
+# dollars, and `parens = "dim"` mutes the parenthesised details (the api
+# share, the net lines, a `both` reset's time) so the values in front of
+# them stand out. A module can pin its own style with `tokens`, `percent` or
+# `cost` under `[modules.<id>]`; here the context module keeps compact
+# tokens for its window tag.
+
+preset = "default"
+icons  = "unicode"
+theme  = "garnish"
+color  = "auto"
+align  = true
+durations = "fixed"
+
+[format]
+tokens  = "precise"
+percent = "precise"
+cost    = "whole"
+parens  = "dim"
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["model", "effort", "context"]
+right   = ["clock"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["lines", "cost"]
+
+[modules.context]
+show_window = true
+tokens = "compact"          # the window tag stays 1M, the rest is precise
+
+[modules.api]
+show_share = true
+
+[modules.cache]
+show_writes = true
+
+[modules.lines]
+show_net = true
+
+[modules.cost]
+only_without_rate_limits = false
+```
+
+</details>
+
+## `quiet-when-idle`
+
+modules that leave the row while there is nothing worth reading: zero counts, a near-empty context, an absent cost
+
+At 110 columns:
+
+```text
+╭─ ❒ ~/projects/garnish       │ ⇄ #42 ❍ ──────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─ ⊞ ████████▍░░░░░░░░░░▏ 42% │ ⏳ 24% ⏱ 2h13m │ ≣ 41% ⏱ 3d20h/7d ────────────────── Δ +156 −23 │ $1.23 ─╯
+```
+
+<details><summary><code>presets/quiet-when-idle.toml</code></summary>
+
+```toml
+# name: quiet-when-idle
+# summary: modules that leave the row while there is nothing worth reading: zero counts, a near-empty context, an absent cost
+# columns: 110
+
+# The `hide` list of SPEC § 3 names the states in which a module leaves its
+# row: `zero` for a count or an amount, `below:N` / `above:N` for a
+# percentage, `empty` for nothing to show at all. Which states a module
+# accepts follows from what it measures (its page lists them). So the
+# lines module disappears until something changed, the context module
+# until a tenth of the window is used, the sync counts while the branch is
+# in step, and the cost while it is nil. `hide = ["empty"]` on `pr` is the
+# same as the default `hide_when_empty = true`: the two combine, and
+# neither switches the other off. The seven-day window prints how much of
+# it has elapsed instead of a countdown.
+
+preset = "default"
+icons  = "unicode"
+theme  = "garnish"
+color  = "auto"
+align  = true
+
+[frame]
+style = "rounded"
+
+[[row]]
+modules = ["path", "branch", "sync", "pr"]
+right   = ["clock"]
+
+[[row]]
+modules = ["context", "limit5h", "limit7d"]
+right   = ["lines", "cost"]
+
+[modules.sync]
+hide = ["zero"]
+
+[modules.pr]
+hide_when_empty = false     # would print `–` for no pull request…
+hide = ["empty"]            # …but `empty` in the list hides it all the same
+
+[modules.context]
+hide = ["below:10"]
+
+[modules.limit7d]
+reset = "elapsed"           # 3d20h/7d rather than a countdown
+
+[modules.lines]
+hide = ["zero"]
+
+[modules.cost]
+only_without_rate_limits = false
+hide = ["zero"]
+```
+
+</details>
+
+## `session-badges`
+
+the harness itself beside the model: its version, a sandbox and a voice badge, the signed-in account, separators in the colour of what precedes them
+
+At 100 columns, needs nerd-font:
+
+```text
+╭─  Opus               │  ▁▃▅▇█ │  v2.1.260 ─────────────────────────────────── ⠋ 16:00:00 ─╮
+╰─  ~/projects/garnish │  ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────  1h12m ─╯
+```
+
+<details><summary><code>presets/session-badges.toml</code></summary>
+
+```toml
+# name: session-badges
+# summary: the harness itself beside the model: its version, a sandbox and a voice badge, the signed-in account, separators in the colour of what precedes them
+# columns: 100
+# needs: nerd-font
+
+# The four modules of SPEC § 3.8 on the first row. `version` is the Claude
+# Code version from the payload; `sandbox` and `voice` show while
+# `sandbox.enabled` and `voice.enabled` are on in the settings chain (the
+# `full` preset adds the word to the glyph); `account` is the claude.ai
+# email a background worker reads from `~/.claude.json`, so the first
+# tick of a session shows nothing there. The row keeps its shape when a
+# badge is absent, which is how the pinned sample looks: no settings
+# file, no worker. `separator_color = "inherit"` paints each separator
+# with the first colour of the module before it.
+
+preset = "default"
+icons  = "nerd"
+theme  = "garnish"
+color  = "auto"
+align  = true
+
+[frame]
+style = "rounded"
+separator_color = "inherit"
+
+[[row]]
+modules = ["model", "effort", "version", "sandbox", "voice", "account"]
+right   = ["clock"]
+
+[[row]]
+modules = ["path", "branch", "context"]
+right   = ["session"]
+
+[modules.version]
+show_icon = true
+
+[modules.sandbox]
+preset = "full"
+
+[modules.voice]
+preset = "full"
+
+[modules.account]
+style = "user"              # the part before `@`
+```
+
+</details>
+
 ## `session-detail`
 
 session, api, cache and cost detail, plain stale style, 1 s git refresh
@@ -1103,7 +1376,7 @@ At 130 columns, needs nerd-font:
 
 ```text
 ╭─  ~/projects/garnish ─────────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00 ─╮
-╰─  1h12m since 14:48 │  8m20s (12%) │  91% 1h  47m00s 2 misses 352kw ──────────────────  $1.234 +156 −23 │  +156 −23 ─╯
+╰─  1h12m since 14:48 │  8m20s (12%) │  91% 1h  47m00s 2 misses 352kw ──────────────────  $1.235 +156 −23 │  +156 −23 ─╯
 ```
 
 <details><summary><code>presets/session-detail.toml</code></summary>

@@ -15,8 +15,8 @@ r│  truncate        true                        (true)                        
  │  ticker_gap      "   "                       ("   ")                       │
  │  animate         (unset)                     (unset)                       │
  │  durations       compact                     (compact)                     │
- │                                                                            │
- │                                                                            │
+ │  format.tokens   compact                     (compact)                     │
+ │  format.percent  whole                       (whole)                       │
  │Which rows exist and how much each module says: default | minimal | full |  │
  │compact.                                                                    │
  │                                                                            │

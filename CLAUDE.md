@@ -397,7 +397,7 @@ screen). Adding any new dependency needs the user's OK first.
 | serde + serde_json | JSON: the stdin payload, Claude settings files (`preserve_order`, so `install` keeps the user's key order) | `payload.rs`, `claude_settings.rs`, `install.rs` |
 | toml | the TOML config file (parse; `preserve_order`, so `setup` writes a table back in the order it read it); config *generation* is hand-written in `docs.rs` | `config/`, `setup/draft.rs` |
 | jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
-| itertools | iterator helpers (interspersing, joining, grouping) | rendering |
+| itertools | iterator helpers (interspersing, joining, grouping); the chosen crate for the job, but not a dependency since 2026-09-19, when its last use (interspersing separators) was replaced by a loop that colours each one; add it back when a job needs it | rendering |
 | std::process + `git::run_program` | every external command (status, rev-list, fetch, `--version`): kill-on-timeout, pipes drained on threads | `git.rs` |
 | rayon | data parallelism: `refresh --all`, `preview --all`, docs generation, the render matrices in tests; **never on the tick path** | `cli.rs`, `docs.rs`, tests |
 | unicode-width | terminal cell width of text | `ansi.rs` |
@@ -446,6 +446,12 @@ for the contract and `docs/` for user docs.
   with its arms in `ModuleCfg::resolve` and `ModuleCfg::common`. The
   tripwire `no_schema_redeclares_a_common_key_and_every_common_key_is_stored`
   writes every common key at a non-default value and requires it back.
+  `enabled`, `preset`, `refresh` and `hide` are the **hand-parsed** module
+  keys (their validation needs the schema: `refresh` its `refresh`, `hide`
+  its `measure`); a fifth means `HAND_PARSED` in `common_keys()`, an arm
+  in `parse_overrides`, an arm in `ModuleCfg::common` (so `config show`
+  writes it back), `docs::write_modules` and `module_reference`, and the
+  module form's row in `setup::form::module_fields`.
   The schema matrix test in `render.rs` renders every module × preset ×
   icon set × `max_width` against every fixture, so a new module or option
   gets the shared invariants checked for free; a behaviour of its own
@@ -486,7 +492,8 @@ for the contract and `docs/` for user docs.
   preview clicks through; `Elem::Group` carries the module ids with their
   cell ranges, through a cut and a scroll.
 - **A module never spells a shared rule itself.** The leading glyph is
-  `modules::lead`, a trailing one `modules::badge`, a glyph built into a
+  `modules::lead` (`modules::lead_only` when the glyph is the whole value,
+  as the settings badges are), a trailing one `modules::badge`, a glyph built into a
   longer string `modules::glyph_prefix`, a name cut `util::cut_name`, the
   mark a cut ends in `IconSet::ellipsis`, the overdue and failed marks
   `IconSet::stale_glyphs`. Each was written out per module once and
@@ -519,9 +526,18 @@ for the contract and `docs/` for user docs.
 - `docs/guide.md` is the only hand-written file under `docs/`; `garnish docs`
   never touches it. Keep it in step with `README.md` (install URL,
   requirements, troubleshooting).
-- The module set is fixed (21 ids listed in `SPEC.md`) plus the `text.<name>`
+- The module set is fixed (25 ids listed in `SPEC.md`) plus the `text.<name>`
   family (SPEC § 3.7: static text only, no commands, no files). No
   generic/plugin module that runs anything.
+- **A cached module outside the repo group** (`account`, SPEC § 3.8) goes
+  through `Ctx::cached`, which `Clock.workers` gates: `Clock::fixed()`
+  turns workers off as it turns git and the settings chain off, so a
+  pinned render (docs, goldens, the in-process matrices, the setup
+  preview) never touches a cache directory or spawns; `tests/docs_sync.rs`
+  asserts no cache directory appears. A module that reads the settings
+  chain gets its docs sample from `Clock.settings_keys`
+  (`docs::sample_clock` seeds `sandbox.enabled`/`voice.enabled` on),
+  never from a file on the machine generating the docs.
 - Every time read goes through `time::now()`. Every env hook has a
   `*_ENV` constant, is listed in `doctor::TEST_HOOKS` (which is what
   `doctor` prints) and is documented in `SPEC.md` § Test hooks; a unit test
@@ -632,6 +648,15 @@ for the contract and `docs/` for user docs.
   never` shows a row the screen drops. `blank = true` on a spacer puts a
   braille blank (U+2800, not whitespace to JavaScript's `trim`) in the row
   so the harness keeps it either way (SPEC § 4.1).
+- **`sandbox.enabled` and `voice.enabled` are the settings keys** the two
+  badges read (verified 2026-09-19: the settings reference lists
+  `sandbox.enabled`, "Any file"; the voice dictation page shows `/voice`
+  persisting `{"voice": {"enabled": true, "mode": "tap"}}` in the user
+  file, and says the harness's own `hold space to speak` hint is dropped
+  once a custom status line is configured). `~/.claude.json` is the file
+  the harness keeps for itself (`oauthAccount` is community-documented,
+  not in the reference), and `CLAUDE_CONFIG_DIR` moves every `~/.claude`
+  path, that file included (the claude-directory page).
 
 ## The repository is not the user's file
 

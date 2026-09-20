@@ -5,6 +5,30 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 ## Unreleased
 
+**Usage views and formats** (PLAN Phase 23)
+
+- `hide = ["zero", "below:10"]` on a module names the states in which it
+  leaves its row (`empty`, `zero`, `below:N`, `above:N`; each module page
+  lists the ones it takes); `hide_when_empty` stays as the alias of
+  `empty`.
+- `[format]` picks how numbers print (`tokens`, `percent`, `cost`), with
+  the same-named option on each module that prints that kind, and
+  `parens = "dim"` draws every parenthesised detail in the muted role.
+- `limit5h` and `limit7d` gain `pace` (`⇡14%` ahead of the window, `⇣32%`
+  behind), `pace_colors`, `eta` (`⇥ 1h37m` until the window is spent, only
+  when that comes before the reset), `reset = "elapsed"` (`⏱2h46m/5h`)
+  and `elapsed_marker` on the mini bar.
+- `[frame] separator_color = "inherit"` paints each separator in the
+  colour of the module before it; a role or a literal colour fixes it.
+- Four modules: `version` (the Claude Code version, dim), `sandbox` and
+  `voice` (badges while `sandbox.enabled` and `voice.enabled` are on in
+  the settings chain; `style = "word"` adds the word), `account` (the
+  email from `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`, read
+  by a worker every ten minutes; `style = "user"` for the part before
+  `@`). `garnish doctor` lists the two settings keys with the others.
+- Four gallery presets show them: `pace-and-eta`, `precise-numbers`,
+  `quiet-when-idle`, `session-badges` (32 in all).
+
 **`garnish setup`** (PLAN Phase 22)
 
 - A full-screen setup in the terminal. The **preset picker** shows the
@@ -85,7 +109,7 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 **Gallery and skills**
 
-- 28 presets, nine of them new: `titled-sections`, `links-and-shortcuts`,
+- Nine more presets (32 in all with the four above): `titled-sections`, `links-and-shortcuts`,
   `compaction-watch`, `sidebar-panels`, `narrow-unicode`, `ascii-only`,
   `slow-motion`, `ticker-two-step` and `still-life` show titles, links,
   the compaction scale, cell and share widths, a boxed column, narrow and

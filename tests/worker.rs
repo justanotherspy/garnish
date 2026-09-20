@@ -806,3 +806,100 @@ fn worker_repo_modules_render_in_every_preset_and_icon_set() {
         }
     }
 }
+
+const ACCOUNT_LINE: &str = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"account\"]\n";
+
+/// The `account` worker for the session of `payload`, run as the logged
+/// spawn would run it, and the entry it wrote.
+fn refresh_account(env: &Env, extra_env: &[(&str, &str)], lock_held: bool) -> String {
+    let w = env.work.to_str().unwrap().to_owned();
+    let mut args = vec!["refresh", "--module", "account", "--session", "sess-worker", "--cwd", &w];
+    if lock_held {
+        args.push("--lock-held");
+    }
+    let (_, err, ok) = garnish(env, &args, None, extra_env);
+    assert!(ok, "{err}");
+    std::fs::read_to_string(env.cache.join("sessions").join("sess-worker").join("account.cache"))
+        .expect("account.cache written")
+}
+
+/// One tick of the `account` line, plain.
+fn account_row(env: &Env) -> String {
+    let (out, _, ok) = garnish(env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok, "{out}");
+    out.trim_end().to_owned()
+}
+
+/// SPEC § 3.8: `account` is the cached module outside the repo group. The
+/// first tick shows nothing and spawns its worker; the worker reads
+/// `~/.claude.json` (a realistic 300 KB of the harness's own state around
+/// the field) into a session-scoped entry; the next tick shows the
+/// address, or its user part under `style = "user"`, and spawns nothing.
+#[test]
+fn worker_account_shows_the_email_once_its_worker_has_run() {
+    let env = setup();
+    let home = env.work.parent().unwrap().to_path_buf();
+    let pad = "x".repeat(300 * 1024);
+    std::fs::write(
+        home.join(".claude.json"),
+        format!(
+            r#"{{"numStartups": 9, "oauthAccount": {{"accountUuid": "u", "emailAddress": "dev@example.com"}}, "projects": {{"/p": {{"history": "{pad}"}}}}}}"#
+        ),
+    )
+    .unwrap();
+    config(&env, ACCOUNT_LINE);
+    assert_eq!(account_row(&env), "", "before the worker: nothing");
+    let s = spawns(&env);
+    assert_eq!(s.len(), 1, "{s:?}");
+    assert!(s[0].contains("--module account"), "{s:?}");
+    // Only Linux hands the lock to the worker; elsewhere the worker takes it.
+    let handover = cfg!(target_os = "linux");
+    assert!(s[0].ends_with("--lock-held") == handover, "{s:?}");
+    let entry = refresh_account(&env, &[], handover);
+    assert!(entry.starts_with("v1 ") && entry.contains(" 600000 ok\n"), "{entry:?}");
+    assert!(entry.ends_with("email=dev@example.com\n"), "{entry:?}");
+    assert_eq!(account_row(&env), "@ dev@example.com");
+    assert_eq!(spawns(&env).len(), 1, "a fresh entry spawns nothing");
+    config(
+        &env,
+        &format!("{ACCOUNT_LINE}[modules.account]\nstyle = \"user\"\nshow_icon = false\n"),
+    );
+    assert_eq!(account_row(&env), "dev");
+}
+
+/// SPEC § 3.8: no `~/.claude.json` is an `ok` entry with no address (an
+/// API-key session: nothing to show, never `✗`); `CLAUDE_CONFIG_DIR` moves
+/// the file when it is set and non-empty; a file that does not parse is a
+/// failed entry, and the tick marks the row.
+#[test]
+fn worker_account_follows_the_config_dir_and_marks_a_broken_file() {
+    let env = setup();
+    let home = env.work.parent().unwrap().to_path_buf();
+    config(&env, ACCOUNT_LINE);
+    let entry = refresh_account(&env, &[], false);
+    assert!(entry.contains(" ok\n") && !entry.contains("email="), "{entry:?}");
+    assert_eq!(account_row(&env), "");
+    let cfg_dir = home.join("cfg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(
+        cfg_dir.join(".claude.json"),
+        r#"{"oauthAccount": {"emailAddress": "moved@example.com"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        home.join(".claude.json"),
+        r#"{"oauthAccount": {"emailAddress": "home@example.com"}}"#,
+    )
+    .unwrap();
+    let moved = refresh_account(&env, &[("CLAUDE_CONFIG_DIR", cfg_dir.to_str().unwrap())], false);
+    assert!(moved.ends_with("email=moved@example.com\n"), "{moved:?}");
+    assert_eq!(account_row(&env), "@ moved@example.com");
+    let empty = refresh_account(&env, &[("CLAUDE_CONFIG_DIR", "")], false);
+    assert!(empty.ends_with("email=home@example.com\n"), "an empty variable is unset: {empty:?}");
+    assert_eq!(account_row(&env), "@ home@example.com");
+    std::fs::write(home.join(".claude.json"), "{ broken").unwrap();
+    let broken = refresh_account(&env, &[], false);
+    assert!(broken.contains(" err\n") && broken.contains("not valid JSON"), "{broken:?}");
+    assert_eq!(account_row(&env), "– ✗", "a broken file is never silent");
+    assert!(spawns(&env).is_empty(), "every tick found a fresh entry: {:?}", spawns(&env));
+}

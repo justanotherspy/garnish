@@ -18,12 +18,23 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 | `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |
 | `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |
 | `right_justify` | `end` \| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |
-| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = "hide"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |
+| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing or were hidden by `hide_when_empty` or a `hide` list (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = "hide"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |
 | `overflow` | `truncate` \| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |
 | `ticker_step` | number | `1` | Cells the ticker advances per tick (0.001–1000; `0.5` = every second tick). |
 | `ticker_gap` | string | `"   "` | Text between the end of a scrolled group and its wrapped-around start. |
 | `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |
 | `durations` | `compact` \| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = "ticker"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \| `compact` \| `fixed`) to pin one module. |
+
+## `[format]` — number styles
+
+One style per kind of number, each defaulting to what garnish has always printed. Every module that prints a kind carries the same key with `inherit` as its default, to pin one module while the rest follow the table, the way `durations` works; a style on a module that prints no such number is an unknown key.
+
+| key | values | default | meaning |
+|---|---|---|---|
+| `tokens` | `compact` \| `precise` \| `whole` | `compact` | Token counts: `128k` and `1.0M`; `128,400`; `128400`. Printed by `context`, `cache`. |
+| `percent` | `whole` \| `precise` | `whole` | Percentages: `42%`; `42.3%`. Bands and thresholds compare the number printed, whichever style. Printed by `context`, `limit5h`, `limit7d`, `spend`, `api`, `cache`. |
+| `cost` | `precise` \| `whole` | `precise` | Money: `$1.23` (`cost.decimals` places, `$1.2k` from a thousand up); `$1`. Printed by `cost`. |
+| `parens` | `plain` \| `dim` | `plain` | The parenthesised details (`api`'s share of the session, `lines`' net, the `both` reset form's time): in the colour of the value they follow, or in the muted role the way a `label` is drawn (Claude Code already dims every row, so the muted colour is what "dim" visibly means). |
 
 ## `[colors]` — theme roles
 
@@ -63,6 +74,7 @@ Every module color defaults to a role; override a role here to restyle every mod
 | `style` | `rounded` (`none` for the `minimal` preset) | `none` \| `rounded` \| `square` \| `double` \| `heavy` \| `powerline` \| `custom` |
 | `fill` | `true` | Extend the rule between the left and right groups to the full width and close with the right cap. With `false`, lines are left-packed. |
 | `separator` | style-dependent | Default separator between modules. |
+| `separator_color` | `muted` | Every separator's colour: a theme role or a literal, or `inherit`, which paints each separator in the colour of the first coloured, undimmed segment of the module before it (an icon or a value, never a `label` or an align pad), falling back to `muted`. |
 | `first` `middle` `last` `single` | style-dependent | Line prefixes (`single` when there is one line). |
 | `right_first` `right_middle` `right_last` `right_single` | style-dependent | Right caps. |
 | `fill_char` | style-dependent | The rule character (must be one cell wide). |
@@ -301,7 +313,7 @@ At 90 columns, unicode icons:
 
 ## `[modules.<id>]`
 
-Every module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).
+Every module accepts `enabled`, `preset`, `refresh`, `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).
 
 ## Environment
 
@@ -317,3 +329,4 @@ Every module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`
 | `GARNISH_DEBUG` | `1` appends a line per tick to `<cache>/debug.log`, rotated at 1 MiB; `garnish doctor` shows the tail. Nothing is written otherwise. |
 | `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's; empty means there is none. |
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact; the last two turn compaction off, so the marker goes with it. |
+| `CLAUDE_CONFIG_DIR` | Where the `account` worker reads `.claude.json` when it is set and non-empty, instead of the home directory (Claude Code keeps every `~/.claude` file there); the settings chain does not follow it yet. |

@@ -34,6 +34,7 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
 | `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `hide` | list of `empty`, `zero` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine; `zero` when the amount prints as zero (`$0.00`, or `$0` under `cost = "whole"`). |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
@@ -43,6 +44,7 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 | `decimals` | integer ≤ 8 | `2` | `2` | `2` | Decimal places. |
 | `only_without_rate_limits` | bool | `true` | `true` | `true` | Hide when the harness reports subscription rate limits. |
 | `show_lines` | bool | `false` | `false` | `true` | Append lines added/removed. |
+| `cost` | `inherit` \| `precise` \| `whole` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's amounts print: `inherit` follows `[format] cost`; `precise` ($1.23, `decimals` places) or `whole` ($1) pins this module. |
 
 ## Icons
 

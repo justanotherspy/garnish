@@ -93,33 +93,18 @@ pub fn percent(p: f64) -> String {
     format!("{}%", crate::num::round_to_u64(crate::num::clamp_percent(p)))
 }
 
-/// The percentage as the user sees it (rounded, 0..=100), so band colors
-/// agree with the printed number at the boundaries (89.6 prints `90%` and is
-/// colored as 90).
-#[must_use]
-pub fn rounded(p: f64) -> f64 {
-    crate::num::u64_to_f64(crate::num::round_to_u64(crate::num::clamp_percent(p)))
-}
-
 /// Format a percentage allowing values above 100 (spend limits).
 #[must_use]
 pub fn percent_unclamped(p: f64) -> String {
     if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
 }
 
-/// [`rounded`] for a percentage that may pass 100, so a band threshold above
-/// 100 can be reached (the twin of [`percent_unclamped`], SPEC § 3.3).
-#[must_use]
-pub fn rounded_unclamped(p: f64) -> f64 {
-    crate::num::u64_to_f64(crate::num::round_to_u64(p))
-}
-
 /// Format dollars: `$0.42`, `$12.35`, `$1.2k`.
 #[must_use]
 pub fn dollars(usd: f64, decimals: usize) -> String {
-    if usd.is_nan() || usd < 0.0 {
-        return "$0.00".into();
-    }
+    // NaN and anything at or below zero are nothing (a negative zero would
+    // print its sign).
+    let usd = if usd.is_nan() || usd <= 0.0 { 0.0 } else { usd };
     if usd >= 1000.0 {
         return format!("${:.1}k", usd / 1000.0);
     }
@@ -345,11 +330,11 @@ mod tests {
     fn formatting_helpers() {
         assert_eq!(percent(41.6), "42%");
         assert_eq!(percent(140.0), "100%");
-        assert_eq!(rounded(89.6), 90.0);
-        assert_eq!(rounded(f64::NAN), 0.0);
         assert_eq!(percent_unclamped(112.4), "112%");
         assert_eq!(dollars(1.2345, 2), "$1.23");
         assert_eq!(dollars(0.0, 2), "$0.00");
+        assert_eq!(dollars(-0.0, 2), "$0.00");
+        assert_eq!(dollars(0.0, 3), "$0.000");
         assert_eq!(dollars(1234.0, 2), "$1.2k");
         assert_eq!(dollars(-1.0, 2), "$0.00");
         assert_eq!(tokens(999), "999");

@@ -12,12 +12,15 @@ use crate::icons::IconSet;
 use crate::theme::{PALETTES, Role, Theme, palette};
 use crate::time::DurationStyle;
 
+pub mod format;
 pub mod presets;
 pub mod schema;
 
+use format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
 use presets::TopPreset;
 use schema::{
-    COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value, common_keys,
+    COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
+    common_keys,
 };
 
 /// Environment variable naming the config file.
@@ -430,6 +433,33 @@ impl FillDirection {
     }
 }
 
+/// `[frame] separator_color` (SPEC § 4.1): one colour for every separator,
+/// or the colour of the module before each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeparatorColor {
+    /// A role or a literal, as written, and what it resolves to.
+    Fixed {
+        /// The value as the file wrote it (`muted` when unset), for `config show`.
+        spec: String,
+        /// The resolved colour.
+        color: Color,
+    },
+    /// The first coloured, undimmed segment of the module before the
+    /// separator (an icon or a value, never a label or an align pad).
+    Inherit,
+}
+
+impl SeparatorColor {
+    /// The value as written in a config.
+    #[must_use]
+    pub fn spec(&self) -> &str {
+        match self {
+            Self::Fixed { spec, .. } => spec,
+            Self::Inherit => "inherit",
+        }
+    }
+}
+
 /// Frame configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameCfg {
@@ -439,6 +469,8 @@ pub struct FrameCfg {
     pub chars: FrameChars,
     /// Fill the rule to the full width.
     pub fill: bool,
+    /// The colour of every separator (SPEC § 4.1).
+    pub separator_color: SeparatorColor,
     /// One-cell glyphs repeated across the rule instead of `fill_char`;
     /// empty means the static rule (SPEC § 4.2).
     pub fill_pattern: Vec<String>,
@@ -552,6 +584,8 @@ pub struct Config {
     pub animate: Option<bool>,
     /// How elapsed times and countdowns print.
     pub durations: DurationStyle,
+    /// How numbers print (`[format]`, SPEC § 4).
+    pub format: FormatCfg,
     /// Frame.
     pub frame: FrameCfg,
     /// Rows, in order (SPEC § 4.3).
@@ -615,6 +649,7 @@ struct RawConfig {
     ticker_gap: Option<String>,
     animate: Option<bool>,
     durations: Option<DurationStyle>,
+    format: Option<RawFormat>,
     colors: BTreeMap<String, String>,
     frame: Option<RawFrame>,
     /// The rows as written, under whichever of the two array names the file
@@ -632,7 +667,7 @@ struct RawConfig {
 /// Every key the top level of the file accepts, in the order the "expected
 /// one of" message names them (`line` and `hide_empty_lines` are the
 /// aliases of SPEC § 4.3).
-pub const TOP_KEYS: [&str; 23] = [
+pub const TOP_KEYS: [&str; 24] = [
     "preset",
     "icons",
     "theme",
@@ -650,6 +685,7 @@ pub const TOP_KEYS: [&str; 23] = [
     "ticker_gap",
     "animate",
     "durations",
+    "format",
     "colors",
     "frame",
     "row",
@@ -709,6 +745,10 @@ impl RawConfig {
                 "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
                 "animate" => raw.animate = field(&key, value, errors),
                 "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
+                "format" => match value {
+                    toml::Value::Table(t) => raw.format = Some(RawFormat::from_table(t, errors)),
+                    _ => errors.push(problem("format", "expected a [format] table")),
+                },
                 "colors" => match value {
                     toml::Value::Table(t) => raw.colors = string_table("colors", t, errors),
                     _ => errors.push(problem("colors", "expected a table of role = color")),
@@ -818,6 +858,7 @@ struct RawFrame {
     right_single: Option<String>,
     pad: Option<String>,
     separator: Option<String>,
+    separator_color: Option<String>,
     fill_pattern: Option<String>,
     fill_step: Option<f64>,
     fill_direction: Option<FillDirection>,
@@ -830,7 +871,7 @@ struct RawFrame {
     side: Option<String>,
 }
 
-const FRAME_KEYS: [&str; 23] = [
+const FRAME_KEYS: [&str; 24] = [
     "style",
     "fill",
     "first",
@@ -844,6 +885,7 @@ const FRAME_KEYS: [&str; 23] = [
     "right_single",
     "pad",
     "separator",
+    "separator_color",
     "fill_pattern",
     "fill_step",
     "fill_direction",
@@ -892,6 +934,8 @@ impl RawFrame {
             match key.as_str() {
                 "style" => f.style = enum_field(&path, value, &styles, errors),
                 "fill" => f.fill = field(&path, value, errors),
+                // A colour spec, resolved against the theme in `resolve_frame`.
+                "separator_color" => f.separator_color = field(&path, value, errors),
                 "fill_step" => f.fill_step = field(&path, value, errors),
                 "fill_direction" => {
                     f.fill_direction = enum_field(&path, value, FILL_DIRECTIONS, errors);
@@ -905,6 +949,47 @@ impl RawFrame {
             }
         }
         f
+    }
+}
+
+/// The `[format]` table as written (SPEC § 4, Number formats), each key
+/// reported and defaulted on its own like the rest of the file.
+#[derive(Debug, Default)]
+struct RawFormat {
+    tokens: Option<TokenStyle>,
+    percent: Option<PercentStyle>,
+    cost: Option<CostStyle>,
+    parens: Option<ParensStyle>,
+}
+
+const FORMAT_KEYS: [&str; 4] = ["tokens", "percent", "cost", "parens"];
+
+impl RawFormat {
+    fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
+        let mut f = Self::default();
+        for (key, value) in table {
+            let path = format!("format.{key}");
+            match key.as_str() {
+                "tokens" => f.tokens = enum_field(&path, value, TokenStyle::CHOICES, errors),
+                "percent" => f.percent = enum_field(&path, value, PercentStyle::CHOICES, errors),
+                "cost" => f.cost = enum_field(&path, value, CostStyle::CHOICES, errors),
+                "parens" => f.parens = enum_field(&path, value, ParensStyle::CHOICES, errors),
+                _ => errors.push(problem(
+                    &path,
+                    &format!("unknown key; expected one of {}", FORMAT_KEYS.join(", ")),
+                )),
+            }
+        }
+        f
+    }
+
+    fn resolve(&self) -> FormatCfg {
+        FormatCfg {
+            tokens: self.tokens.unwrap_or_default(),
+            percent: self.percent.unwrap_or_default(),
+            cost: self.cost.unwrap_or_default(),
+            parens: self.parens.unwrap_or_default(),
+        }
     }
 }
 
@@ -1853,7 +1938,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let overrides = resolve_colors(&raw.colors, errors);
     let theme = Theme::from_palette(pal, &overrides);
 
-    let frame = resolve_frame(raw.frame.as_ref(), preset, errors);
+    let frame = resolve_frame(raw.frame.as_ref(), preset, &theme, errors);
     let boxes = resolve_boxes(&raw.boxes, &theme, errors);
     let mut rows: Vec<RowCfg> = if raw.row.is_empty() {
         preset.rows()
@@ -1935,6 +2020,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
             Some(Overflow::Ticker) => DurationStyle::Fixed,
             _ => DurationStyle::Compact,
         }),
+        format: raw.format.as_ref().map_or_else(FormatCfg::default, RawFormat::resolve),
         frame,
         rows,
         boxes,
@@ -2141,6 +2227,7 @@ fn resolve_stale_after(raw: Option<u32>, errors: &mut Vec<ConfigError>) -> u32 {
 fn resolve_frame(
     raw: Option<&RawFrame>,
     preset: TopPreset,
+    theme: &Theme,
     errors: &mut Vec<ConfigError>,
 ) -> FrameCfg {
     let fallback = if preset.framed() { FrameStyle::Rounded } else { FrameStyle::None };
@@ -2226,10 +2313,13 @@ fn resolve_frame(
                 .inspect_err(|msg| errors.push(problem("frame.separator_frames", msg)))
                 .unwrap_or_default()
         });
+    let separator_color =
+        resolve_separator_color(raw.and_then(|f| f.separator_color.as_deref()), theme, errors);
     FrameCfg {
         style,
         chars,
         fill,
+        separator_color,
         fill_pattern,
         fill_step: resolve_step("frame.fill_step", raw.and_then(|f| f.fill_step), errors),
         fill_direction: raw.and_then(|f| f.fill_direction).unwrap_or_default(),
@@ -2238,6 +2328,33 @@ fn resolve_frame(
             "frame.separator_step",
             raw.and_then(|f| f.separator_step),
             errors,
+        ),
+    }
+}
+
+/// SPEC § 4.1 `separator_color`: `inherit`, or a role or literal resolved
+/// now, the muted role standing in for a bad value as it does when unset.
+fn resolve_separator_color(
+    spec: Option<&str>,
+    theme: &Theme,
+    errors: &mut Vec<ConfigError>,
+) -> SeparatorColor {
+    let muted =
+        || SeparatorColor::Fixed { spec: "muted".to_owned(), color: theme.role(Role::Muted) };
+    match spec {
+        None => muted(),
+        Some("inherit") => SeparatorColor::Inherit,
+        Some(spec) => theme.resolve(spec).map_or_else(
+            || {
+                errors.push(problem(
+                    "frame.separator_color",
+                    &format!(
+                        "invalid color {spec:?}; use inherit, a role name, a color name, 0-255, or #rrggbb"
+                    ),
+                ));
+                muted()
+            },
+            |color| SeparatorColor::Fixed { spec: spec.to_owned(), color },
         ),
     }
 }
@@ -2269,6 +2386,12 @@ fn parse_overrides(
                 ),
                 Some(n) => ov.refresh = Some(n),
                 None => err(key, "expected a non-negative integer (seconds)".into()),
+            },
+            // Checked against the schema's measure (SPEC § 3), as `refresh`
+            // is against `schema.refresh`, so hand-parsed like it.
+            "hide" => match hide_rules(schema, value) {
+                Ok(rules) => ov.hide = Some(rules),
+                Err(msg) => err(key, msg),
             },
             "icons" => match value.as_table() {
                 Some(t) => parse_icons(schema, t, &mut ov, &mut err),
@@ -2312,6 +2435,26 @@ fn set_common(ov: &mut Overrides, key: &str, value: Value) -> bool {
         _ => return false,
     }
     true
+}
+
+/// A module's `hide` list (SPEC § 3): every entry a state the schema's
+/// measure allows, or the reason the key is refused whole (the per-key
+/// fallback of § 5: the default, no hiding, stands in for the list).
+fn hide_rules(schema: &ModuleSchema, value: &toml::Value) -> Result<Vec<HideRule>, String> {
+    let accepts = || format!("this module accepts {}", schema.hide_states().join(", "));
+    let items = value.as_array().ok_or_else(|| "expected a list of strings".to_owned())?;
+    items
+        .iter()
+        .map(|item| {
+            let text = item.as_str().ok_or_else(|| "expected a list of strings".to_owned())?;
+            let rule = HideRule::parse(text).map_err(|e| format!("{e}; {}", accepts()))?;
+            if rule.applies_to(schema.measure) {
+                Ok(rule)
+            } else {
+                Err(format!("{text:?} does not apply here; {}", accepts()))
+            }
+        })
+        .collect()
 }
 
 /// The size limit a module option must respect, from its schema
@@ -2533,6 +2676,7 @@ mod tests {
         vec![
             ModuleSchema {
                 id: "path",
+                measure: None,
                 summary: "",
                 doc: "",
                 sources: &[],
@@ -2543,6 +2687,7 @@ mod tests {
             },
             ModuleSchema {
                 id: "clock",
+                measure: None,
                 summary: "",
                 doc: "",
                 sources: &[],
@@ -3700,6 +3845,196 @@ x = 1
                 opt.key
             );
         }
+    }
+
+    /// SPEC § 4.1 `separator_color`: a role or a literal resolved at config
+    /// time, `inherit`, the muted role when unset or bad, and `config show`
+    /// writes the value as it was written.
+    #[test]
+    fn separator_color_resolves_inherits_or_falls_back_to_muted() {
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse("", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(
+            c.frame.separator_color,
+            SeparatorColor::Fixed { spec: "muted".into(), color: c.theme.role(Role::Muted) }
+        );
+        let (c, errs) = parse("[frame]\nseparator_color = \"inherit\"\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_color, SeparatorColor::Inherit);
+        let (c, errs) = parse("[frame]\nseparator_color = \"accent\"\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(
+            c.frame.separator_color,
+            SeparatorColor::Fixed { spec: "accent".into(), color: c.theme.role(Role::Accent) }
+        );
+        let (c, errs) = parse("[frame]\nseparator_color = \"#ff8800\"\n", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.frame.separator_color.spec(), "#ff8800");
+        let (c, errs) = parse("[frame]\nseparator_color = \"nope\"\n", all);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "frame.separator_color");
+        assert!(errs[0].message.contains("inherit"), "{}", errs[0].message);
+        assert_eq!(c.frame.separator_color.spec(), "muted");
+        let (_, errs) = parse("[frame]\nseparator_color = 3\n", all);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "frame.separator_color");
+        // `config show` writes the value as written and it parses back.
+        for spec in ["inherit", "accent", "#ff8800", "muted"] {
+            let (c, _) = parse(&format!("[frame]\nseparator_color = \"{spec}\"\n"), all);
+            let shown = crate::docs::config_toml(&c, false);
+            assert!(shown.contains(&format!("separator_color = \"{spec}\"")), "{shown}");
+            let (again, errs) = parse(&shown, all);
+            assert_eq!(errs, Vec::new());
+            assert_eq!(again.frame, c.frame);
+        }
+    }
+
+    /// SPEC § 4 `[format]`: each key is reported and defaulted on its own,
+    /// the table's absence is the old rendering, and the per-module
+    /// override keys exist only on the modules that print that kind.
+    #[test]
+    fn format_table_parses_per_key_and_the_overrides_sit_on_the_right_modules() {
+        let all = &crate::modules::SCHEMAS;
+        let (c, errs) = parse("", all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.format, FormatCfg::default());
+        let (c, errs) = parse(
+            "[format]\ntokens = \"precise\"\npercent = \"precise\"\ncost = \"whole\"\nparens = \"dim\"\n",
+            all,
+        );
+        assert_eq!(errs, Vec::new());
+        assert_eq!(
+            c.format,
+            FormatCfg {
+                tokens: TokenStyle::Precise,
+                percent: PercentStyle::Precise,
+                cost: CostStyle::Whole,
+                parens: ParensStyle::Dim,
+            }
+        );
+        // One bad key falls back alone; an unknown key is named with the
+        // four expected; a non-table is refused whole.
+        let (c, errs) = parse("[format]\ntokens = \"loose\"\ncost = \"whole\"\nstyle = 1\n", all);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["format.tokens", "format.style"], "{errs:?}");
+        assert!(errs.iter().any(|e| e.message.contains("compact, precise, whole")), "{errs:?}");
+        assert!(errs.iter().any(|e| e.message.contains("tokens, percent, cost, parens")));
+        assert_eq!(c.format.tokens, TokenStyle::Compact);
+        assert_eq!(c.format.cost, CostStyle::Whole);
+        let (c, errs) = parse("format = \"precise\"\n", all);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].path, "format");
+        assert_eq!(c.format, FormatCfg::default());
+        // The overrides: `tokens` on the modules that print tokens, `percent`
+        // on those that print a percentage, `cost` on `cost`, nowhere else.
+        let carriers = |key: &str| -> Vec<&str> {
+            all.iter().filter(|s| s.opt(key).is_some()).map(|s| s.id).collect()
+        };
+        assert_eq!(carriers("tokens"), ["context", "cache"]);
+        assert_eq!(carriers("percent"), ["context", "limit5h", "limit7d", "spend", "api", "cache"]);
+        assert_eq!(carriers("cost"), ["cost"]);
+        let (c, errs) = parse(
+            "[modules.context]\ntokens = \"whole\"\npercent = \"precise\"\n[modules.cost]\ncost = \"whole\"\n[modules.model]\ntokens = \"whole\"\n",
+            all,
+        );
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].path, "modules.model.tokens");
+        assert_eq!(c.modules.get("context").map(|m| m.str("tokens")), Some("whole"));
+        assert_eq!(c.modules.get("cache").map(|m| m.str("tokens")), Some("inherit"));
+        assert_eq!(c.modules.get("cost").map(|m| m.str("cost")), Some("whole"));
+        // `config show` writes the table and it parses back.
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(shown.contains("[format]\ntokens = \"compact\""), "{shown}");
+        let (again, errs) = parse(&shown, all);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(again.format, c.format);
+    }
+
+    /// SPEC § 3 `hide`: every state is checked against the schema's measure,
+    /// a bad list is refused whole (the default stands in), the list and
+    /// `hide_when_empty` are a union, and `config show` writes it back.
+    #[test]
+    fn hide_lists_follow_the_schemas_measure() {
+        let (c, errs) = parse(
+            "[modules.cost]\nhide = [\"zero\", \"empty\"]\n[modules.context]\nhide = [\"below:10\", \"above:90.5\"]\n[modules.text.note]\ntext = \"x\"\nhide = [\"empty\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new());
+        let cost = c.modules.get("cost").unwrap();
+        assert_eq!(cost.hide, vec![HideRule::Zero, HideRule::Empty]);
+        assert_eq!(
+            c.modules.get("context").unwrap().hide,
+            vec![HideRule::Below(10.0), HideRule::Above(90.5)]
+        );
+        assert_eq!(c.texts.get("note").unwrap().hide, vec![HideRule::Empty]);
+        assert!(cost.hides_empty());
+        // The union: `empty` in the list hides an empty render whatever
+        // `hide_when_empty` says, and the flag alone still works.
+        let (c, errs) = parse(
+            "[modules.pr]\nhide_when_empty = false\nhide = [\"empty\"]\n",
+            &crate::modules::SCHEMAS,
+        );
+        assert_eq!(errs, Vec::new());
+        assert!(c.modules.get("pr").unwrap().hides_empty());
+        let (c, _) = parse("[modules.pr]\nhide_when_empty = false\n", &crate::modules::SCHEMAS);
+        assert!(!c.modules.get("pr").unwrap().hides_empty());
+        // Refused lists, each naming what the module accepts; the default stands.
+        let refused = [
+            (
+                "[modules.context]\nhide = [\"zero\"]\n",
+                "modules.context",
+                "empty, below:N, above:N",
+            ),
+            ("[modules.cost]\nhide = [\"below:5\"]\n", "modules.cost", "accepts empty, zero"),
+            ("[modules.model]\nhide = [\"zero\"]\n", "modules.model", "accepts empty"),
+            (
+                "[modules.text.a]\ntext = \"x\"\nhide = [\"zero\"]\n",
+                "modules.text.a",
+                "accepts empty",
+            ),
+            (
+                "[modules.cost]\nhide = [\"empty\", \"nope\"]\n",
+                "modules.cost",
+                "unknown hide state",
+            ),
+            ("[modules.context]\nhide = [\"below:2000\"]\n", "modules.context", "0 to 1000"),
+            ("[modules.context]\nhide = [\"below:x\"]\n", "modules.context", "needs a number"),
+            ("[modules.cost]\nhide = \"zero\"\n", "modules.cost", "expected a list"),
+            ("[modules.cost]\nhide = [1]\n", "modules.cost", "expected a list"),
+        ];
+        for (text, base, message) in refused {
+            let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+            assert_eq!(errs.len(), 1, "{text}: {errs:?}");
+            assert_eq!(errs[0].path, format!("{base}.hide"), "{text}");
+            assert!(errs[0].message.contains(message), "{text}: {}", errs[0].message);
+            // A state the parser does not know is refused naming what the
+            // module accepts, as one the measure disallows is.
+            if message == "unknown hide state" {
+                assert!(
+                    errs[0].message.ends_with("; this module accepts empty, zero"),
+                    "{text}: {}",
+                    errs[0].message
+                );
+            }
+            let id = base.trim_start_matches("modules.");
+            let hide =
+                c.modules.get(id).map(|m| m.hide.clone()).or_else(|| {
+                    c.texts.get(id.trim_start_matches("text.")).map(|m| m.hide.clone())
+                });
+            assert_eq!(hide, Some(Vec::new()), "{text}");
+        }
+        // `config show` writes the list, and it parses back to the same rules.
+        let (c, _) = parse("[modules.context]\nhide = [\"below:10\"]\n", &crate::modules::SCHEMAS);
+        let shown = crate::docs::config_toml(&c, false);
+        assert!(shown.contains("hide = [\"below:10\"]"), "{shown}");
+        let (again, errs) = parse(&shown, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(again.modules.get("context").unwrap().hide, vec![HideRule::Below(10.0)]);
+        // Every module table round-trips (`show` pins `animate`, so the whole
+        // config is compared in the shorthand test, not here).
+        assert_eq!(again.modules, c.modules);
+        assert_eq!(again.texts, c.texts);
     }
 
     /// SPEC § 4.1: a bar glyph is repeated cell by cell, so an override

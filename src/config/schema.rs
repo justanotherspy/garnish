@@ -255,6 +255,86 @@ impl IconSpec {
 /// The icon keys that are drawn one per bar cell (see [`IconSpec::one_cell`]).
 pub const ONE_CELL_ICONS: [&str; 3] = ["fill", "empty", "marker"];
 
+/// The kind of number a module's output measures (SPEC § 3), which decides
+/// the `hide` states it accepts beyond `empty`: `zero` for a count or an
+/// amount, `below:N` and `above:N` for a percentage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasureKind {
+    /// A count (lines changed, commits ahead and behind).
+    Count,
+    /// An amount of money.
+    Amount,
+    /// A percentage, the one the row prints.
+    Percent,
+}
+
+/// One state of a module's `hide` list (SPEC § 3).
+#[derive(Debug, Clone, PartialEq)]
+pub enum HideRule {
+    /// Nothing to show: what `hide_when_empty` hides.
+    Empty,
+    /// The count or amount is zero.
+    Zero,
+    /// The percentage is below this value.
+    Below(f64),
+    /// The percentage is above this value.
+    Above(f64),
+}
+
+/// The largest `N` a `below:N` / `above:N` state takes (SPEC § 5).
+pub const MAX_HIDE_PERCENT: f64 = 1000.0;
+
+impl HideRule {
+    /// Parse one state as written in a config: `empty`, `zero`, `below:N`
+    /// or `above:N`, where `N` is a number from 0 to [`MAX_HIDE_PERCENT`].
+    ///
+    /// # Errors
+    /// With the reason when the text names no state.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
+        match text {
+            "empty" => return Ok(Self::Empty),
+            "zero" => return Ok(Self::Zero),
+            _ => {}
+        }
+        let unknown = || format!("unknown hide state {text:?}");
+        let (kind, number) = text.split_once(':').ok_or_else(unknown)?;
+        if !matches!(kind, "below" | "above") {
+            return Err(unknown());
+        }
+        let n: f64 = number
+            .trim()
+            .parse()
+            .map_err(|_| format!("{kind}:N needs a number, not {number:?}"))?;
+        if !n.is_finite() || n < 0.0 || n > MAX_HIDE_PERCENT {
+            return Err(format!("{kind}:N takes a number from 0 to {MAX_HIDE_PERCENT:.0}"));
+        }
+        Ok(if kind == "below" { Self::Below(n) } else { Self::Above(n) })
+    }
+
+    /// The state as written in a config.
+    #[must_use]
+    pub fn name(&self) -> String {
+        match self {
+            Self::Empty => "empty".to_owned(),
+            Self::Zero => "zero".to_owned(),
+            Self::Below(n) => format!("below:{}", format_float(*n)),
+            Self::Above(n) => format!("above:{}", format_float(*n)),
+        }
+    }
+
+    /// Whether a module with this measure can be in this state.
+    #[must_use]
+    pub const fn applies_to(&self, measure: Option<MeasureKind>) -> bool {
+        matches!(
+            (self, measure),
+            (Self::Empty, _)
+                | (Self::Zero, Some(MeasureKind::Count | MeasureKind::Amount))
+                | (Self::Below(_) | Self::Above(_), Some(MeasureKind::Percent))
+        )
+    }
+}
+
 /// One color the module uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorSpec {
@@ -304,6 +384,10 @@ impl Preset {
 pub struct ModuleSchema {
     /// Module id (`[modules.<id>]`, and the name used in `[[line]]`).
     pub id: &'static str,
+    /// The number the module's output measures, which decides its `hide`
+    /// states (SPEC § 3); `None` for a module with no count, amount or
+    /// percentage, for which `empty` is the only state.
+    pub measure: Option<MeasureKind>,
     /// One-line summary.
     pub summary: &'static str,
     /// Longer description (markdown).
@@ -338,16 +422,31 @@ impl ModuleSchema {
     pub fn color(&self, key: &str) -> Option<&ColorSpec> {
         self.colors.iter().find(|c| c.key == key)
     }
+
+    /// The `hide` states this module accepts (SPEC § 3), from its measure:
+    /// what the parser checks a list against, what the reference and the
+    /// `setup` form print.
+    #[must_use]
+    pub fn hide_states(&self) -> Vec<&'static str> {
+        let mut states = vec!["empty"];
+        match self.measure {
+            Some(MeasureKind::Count | MeasureKind::Amount) => states.push("zero"),
+            Some(MeasureKind::Percent) => states.extend(["below:N", "above:N"]),
+            None => {}
+        }
+        states
+    }
 }
 
 /// The keys every module accepts besides its own options, in the order the
 /// "expected one of" message names them.
 ///
 /// Derived from [`COMMON_OPTS`] rather than listed again, so adding a common
-/// option cannot leave it out of the message: only the three hand-parsed
-/// keys and the two tables are spelled here.
+/// option cannot leave it out of the message: only the four hand-parsed
+/// keys (`hide` is checked against the schema's measure, as `refresh` is
+/// against its `refresh`) and the two tables are spelled here.
 pub fn common_keys() -> impl Iterator<Item = &'static str> {
-    const HAND_PARSED: [&str; 3] = ["enabled", "preset", "refresh"];
+    const HAND_PARSED: [&str; 4] = ["enabled", "preset", "refresh", "hide"];
     HAND_PARSED.into_iter().chain(COMMON_OPTS.iter().map(|o| o.key)).chain(std::iter::once("icons"))
 }
 
@@ -400,6 +499,10 @@ pub struct ModuleCfg {
     pub suffix: String,
     /// Hide the module when it has nothing to say.
     pub hide_when_empty: bool,
+    /// The states in which the module leaves its row (SPEC § 3); the render
+    /// loop applies them from the measure the module attaches to its output,
+    /// and `empty` joins `hide_when_empty` ([`ModuleCfg::hides_empty`]).
+    pub hide: Vec<HideRule>,
     /// Cells the decorated module is cut to with the ellipsis; 0 = unlimited
     /// (SPEC § 3). Always 0 for a text module, which has `width` instead.
     pub max_width: usize,
@@ -484,6 +587,7 @@ impl ModuleCfg {
             prefix: overrides.prefix.clone().unwrap_or_default(),
             suffix: overrides.suffix.clone().unwrap_or_default(),
             hide_when_empty: overrides.hide_when_empty.unwrap_or(true),
+            hide: overrides.hide.clone().unwrap_or_default(),
             max_width: crate::num::u64_to_usize(overrides.max_width.unwrap_or(0)),
             opts,
             icons,
@@ -534,8 +638,8 @@ impl ModuleCfg {
         &self.schema
     }
 
-    /// The resolved value of a [`COMMON_OPTS`] key, for `config show` and
-    /// the docs (`None` for a key that is not a common option).
+    /// The resolved value of a [`COMMON_OPTS`] key or of `hide`, for
+    /// `config show` and the docs (`None` for any other key).
     #[must_use]
     pub fn common(&self, key: &str) -> Option<Value> {
         match key {
@@ -543,9 +647,17 @@ impl ModuleCfg {
             "prefix" => Some(Value::Str(self.prefix.clone())),
             "suffix" => Some(Value::Str(self.suffix.clone())),
             "hide_when_empty" => Some(Value::Bool(self.hide_when_empty)),
+            "hide" => Some(Value::StrList(self.hide.iter().map(HideRule::name).collect())),
             "max_width" => Some(Value::Int(i64::try_from(self.max_width).unwrap_or(i64::MAX))),
             _ => None,
         }
+    }
+
+    /// Whether an empty render hides the module: `hide_when_empty`, or
+    /// `empty` in the `hide` list (SPEC § 3: the two are a union).
+    #[must_use]
+    pub fn hides_empty(&self) -> bool {
+        self.hide_when_empty || self.hide.contains(&HideRule::Empty)
     }
 
     /// Raw option value.
@@ -664,6 +776,8 @@ pub struct Overrides {
     pub suffix: Option<String>,
     /// `hide_when_empty`.
     pub hide_when_empty: Option<bool>,
+    /// `hide`, every entry already checked against the schema's measure.
+    pub hide: Option<Vec<HideRule>>,
     /// `max_width` (cells; 0 = unlimited).
     pub max_width: Option<u64>,
     /// Module-specific options.
@@ -684,6 +798,7 @@ mod tests {
     fn schema() -> ModuleSchema {
         ModuleSchema {
             id: "demo",
+            measure: None,
             summary: "demo",
             doc: "",
             sources: &[],
@@ -741,6 +856,62 @@ mod tests {
         assert_eq!(cfg.size("width"), 7);
         assert_eq!(cfg.str("missing"), "");
         assert_eq!(cfg.float("width"), 7.0);
+    }
+
+    /// SPEC § 3: a hide state parses from and prints as its config spelling,
+    /// and which states a module takes follows from its measure alone.
+    #[test]
+    fn hide_rules_parse_print_and_apply_by_measure() {
+        assert_eq!(HideRule::parse("empty"), Ok(HideRule::Empty));
+        assert_eq!(HideRule::parse(" empty "), Ok(HideRule::Empty), "a state is trimmed");
+        assert_eq!(HideRule::parse("zero"), Ok(HideRule::Zero));
+        assert_eq!(HideRule::parse("below:10"), Ok(HideRule::Below(10.0)));
+        assert_eq!(HideRule::parse("above:12.5"), Ok(HideRule::Above(12.5)));
+        assert_eq!(HideRule::parse("above: 7 "), Ok(HideRule::Above(7.0)));
+        for bad in [
+            "",
+            "hidden",
+            "below",
+            "below:",
+            "below:x",
+            "below:-1",
+            "above:1001",
+            "under:5",
+            "below:inf",
+            "below:nan",
+            "Zero",
+        ] {
+            assert!(HideRule::parse(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(HideRule::Below(12.5).name(), "below:12.5");
+        assert_eq!(HideRule::Above(10.0).name(), "above:10");
+        assert_eq!(HideRule::Empty.name(), "empty");
+        for rule in [HideRule::Empty, HideRule::Zero, HideRule::Below(0.0), HideRule::Above(1000.0)]
+        {
+            assert_eq!(HideRule::parse(&rule.name()), Ok(rule));
+        }
+        assert!(HideRule::Empty.applies_to(None));
+        assert!(HideRule::Zero.applies_to(Some(MeasureKind::Count)));
+        assert!(HideRule::Zero.applies_to(Some(MeasureKind::Amount)));
+        assert!(!HideRule::Zero.applies_to(Some(MeasureKind::Percent)));
+        assert!(!HideRule::Zero.applies_to(None));
+        assert!(HideRule::Below(1.0).applies_to(Some(MeasureKind::Percent)));
+        assert!(!HideRule::Above(1.0).applies_to(Some(MeasureKind::Count)));
+        let mut s = schema();
+        assert_eq!(s.hide_states(), ["empty"]);
+        s.measure = Some(MeasureKind::Amount);
+        assert_eq!(s.hide_states(), ["empty", "zero"]);
+        s.measure = Some(MeasureKind::Percent);
+        assert_eq!(s.hide_states(), ["empty", "below:N", "above:N"]);
+        // The resolved config carries the list and `empty` joins the flag.
+        let theme = Theme::default();
+        let mut o = Overrides { hide_when_empty: Some(false), ..Default::default() };
+        o.hide = Some(vec![HideRule::Empty, HideRule::Zero]);
+        let cfg = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &o);
+        assert!(cfg.hides_empty());
+        assert_eq!(cfg.common("hide"), Some(Value::StrList(vec!["empty".into(), "zero".into()])));
+        let none = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &o);
+        assert_eq!(none.hide, vec![HideRule::Empty, HideRule::Zero]);
     }
 
     #[test]

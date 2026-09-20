@@ -8,6 +8,7 @@ row 2     model  context   │ cost
                                │  enabled         true                        (true)                        │
                                │  preset          default                     (default)                     │
                                │  refresh         0                           (0)                           │
+                               │  hide            []                          ([])                          │
                                │  label                                       ("")                          │
                                │  prefix                                      ("")                          │
                                │  suffix                                      ("")                          │
@@ -31,7 +32,6 @@ row 2     model  context   │ cost
                                │                                                                            │
                                │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
                                └────────────────────────────────────────────────────────────────────────────┘
-
 
 
 

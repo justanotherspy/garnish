@@ -123,6 +123,34 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     let prefix = if annotated { "# " } else { "" };
     let _ = writeln!(out, "{prefix}durations = {}", toml_string(cfg.durations.name()));
     let _ = writeln!(out);
+    write_format(out, cfg, annotated);
+}
+
+/// The `[format]` table (SPEC § 4, Number formats), after the top-level keys.
+fn write_format(out: &mut String, cfg: &Config, annotated: bool) {
+    comment(
+        out,
+        annotated,
+        "Number formats (docs/config.md § [format]): each module that prints a kind has the same key with `inherit`.",
+    );
+    let _ = writeln!(out, "[format]");
+    comment(
+        out,
+        annotated,
+        "Token counts: compact (128k, 1.0M) | precise (128,400) | whole (128400)",
+    );
+    let _ = writeln!(out, "tokens = {}", toml_string(cfg.format.tokens.name()));
+    comment(out, annotated, "Percentages: whole (42%) | precise (42.3%)");
+    let _ = writeln!(out, "percent = {}", toml_string(cfg.format.percent.name()));
+    comment(out, annotated, "Money: precise ($1.23, cost.decimals places) | whole ($1)");
+    let _ = writeln!(out, "cost = {}", toml_string(cfg.format.cost.name()));
+    comment(
+        out,
+        annotated,
+        "Parenthesised details (api's share, lines' net, a `both` reset): plain | dim (the muted role)",
+    );
+    let _ = writeln!(out, "parens = {}", toml_string(cfg.format.parens.name()));
+    let _ = writeln!(out);
 }
 
 /// Render a config as TOML.
@@ -186,6 +214,12 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
     } else {
         let _ = writeln!(out, "separator = {}", toml_string(&cfg.frame.chars.separator));
     }
+    comment(
+        out,
+        annotated,
+        "Every separator's colour: muted | inherit (the colour of the module before it) | a role or literal",
+    );
+    let _ = writeln!(out, "separator_color = {}", toml_string(cfg.frame.separator_color.spec()));
     if cfg.frame.style == FrameStyle::Custom || !annotated {
         let ch = &cfg.frame.chars;
         for (key, value) in [
@@ -417,6 +451,7 @@ fn write_texts(out: &mut String, cfg: &Config, annotated: bool) {
         }
         let _ = writeln!(out, "[modules.text.{name}]");
         let _ = writeln!(out, "enabled = {}", m.enabled);
+        write_hide(out, m, schema, annotated);
         write_common(out, m, annotated, text_common_opts());
         for opt in &schema.opts {
             if annotated {
@@ -463,6 +498,20 @@ fn write_common(out: &mut String, m: &ModuleCfg, annotated: bool, opts: &[OptSpe
     }
 }
 
+/// The `hide` line of a module table (SPEC § 3), with the states the
+/// module takes in the annotated form.
+fn write_hide(out: &mut String, m: &ModuleCfg, schema: &ModuleSchema, annotated: bool) {
+    if annotated {
+        let _ = writeln!(
+            out,
+            "# hide (list of {}) — states that hide the module; `empty` is what hide_when_empty hides, and the two combine",
+            schema.hide_states().join(" | ")
+        );
+    }
+    let value = m.common("hide").unwrap_or_else(|| Value::StrList(Vec::new()));
+    let _ = writeln!(out, "hide = {}", value.to_toml());
+}
+
 fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
     for schema in SCHEMAS.iter() {
         let Some(m) = cfg.modules.get(schema.id) else { continue };
@@ -482,6 +531,7 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
             let _ = writeln!(out, "preset = {}", toml_string(m.preset.name()));
         }
         let _ = writeln!(out, "refresh = {}", m.refresh);
+        write_hide(out, m, schema, annotated);
         write_common(out, m, annotated, &COMMON_OPTS);
         for opt in &schema.opts {
             if annotated {
@@ -562,6 +612,23 @@ fn fixture(name: &str) -> Payload {
     crate::fixtures::payload(name)
 }
 
+/// The pinned clock a module's sample renders with: the settings badges
+/// (SPEC § 3.8) are shown on, from keys seeded in-process so no file is
+/// read (§ 9); every other module takes the fixed clock as it is.
+fn sample_clock(id: &str) -> Clock {
+    match id {
+        "sandbox" | "voice" => Clock {
+            settings_keys: Some(vec![crate::claude_settings::FileKeys {
+                sandbox_enabled: Some(true),
+                voice_enabled: Some(true),
+                ..Default::default()
+            }]),
+            ..Clock::fixed()
+        },
+        _ => Clock::fixed(),
+    }
+}
+
 /// Render one module alone with a preset and icon set, as plain text.
 fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
     let text = format!(
@@ -571,13 +638,16 @@ fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
         toml_string(preset.name())
     );
     let (cfg, _) = config::parse(&text, &SCHEMAS);
-    let out = render_plain_at(&fixture(sample_fixture(id)), &cfg, Some(80), &Clock::fixed());
+    let out = render_plain_at(&fixture(sample_fixture(id)), &cfg, Some(80), &sample_clock(id));
     let line = out.lines().next().unwrap_or("").trim_end().to_owned();
     if !line.is_empty() {
         return line;
     }
     match id {
         "sync" => "(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)".to_owned(),
+        "account" => {
+            "(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)".to_owned()
+        }
         _ => "(nothing to show for this payload)".to_owned(),
     }
 }
@@ -684,6 +754,7 @@ pub fn text_page() -> String {
     let _ = writeln!(o, "## Options\n\n`[modules.text.<name>]`\n");
     let _ = writeln!(o, "| key | type | default | description |\n|---|---|---|---|");
     let _ = writeln!(o, "| `enabled` | bool | `true` | Render this module. |");
+    let _ = writeln!(o, "| `hide` | list of `empty` | `[]` | {} |", hide_doc(schema));
     for opt in text_common_opts() {
         let _ = writeln!(
             o,
@@ -746,6 +817,12 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
         o,
         "| `refresh` | integer | `{r}` | `{r}` | `{r}` | Seconds between background refreshes; 0 = every tick. |",
         r = schema.refresh
+    );
+    let _ = writeln!(
+        o,
+        "| `hide` | list of {} | `[]` | `[]` | `[]` | {} |",
+        schema.hide_states().iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", "),
+        hide_doc(schema)
     );
     for opt in &COMMON_OPTS {
         let value = opt.default.to_toml();
@@ -823,6 +900,39 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
     }
 }
 
+/// The modules carrying the per-module override of a `[format]` key, from
+/// the schemas, so the page cannot drift from the code.
+fn format_carriers(key: &str) -> String {
+    SCHEMAS
+        .iter()
+        .filter(|s| s.opt(key).is_some())
+        .map(|s| format!("`{}`", s.id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The `hide` row's description: the states in the module's own terms
+/// (SPEC § 3), from the measure its schema declares.
+fn hide_doc(schema: &ModuleSchema) -> String {
+    use crate::config::schema::MeasureKind;
+    let measure = match (schema.measure, schema.id) {
+        (Some(MeasureKind::Count), _) => "; `zero` when the count is zero",
+        (Some(MeasureKind::Amount), _) => {
+            "; `zero` when the amount prints as zero (`$0.00`, or `$0` under `cost = \"whole\"`)"
+        }
+        (Some(MeasureKind::Percent), "api") => {
+            "; `below:N` and `above:N` compare its share of the session, shown or not"
+        }
+        (Some(MeasureKind::Percent), _) => {
+            "; `below:N` and `above:N` compare the percentage the row prints"
+        }
+        (None, _) => "",
+    };
+    format!(
+        "States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine{measure}."
+    )
+}
+
 /// Nerd Font glyphs as `U+XXXX` so the page is readable without the font.
 fn code_points(s: &str) -> String {
     if s.chars().any(|c| matches!(u32::from(c), 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFD)) {
@@ -883,7 +993,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
+        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing or were hidden by `hide_when_empty` or a `hide` list (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
         steps = crate::config::STEP_BOUNDS
     );
     let _ = writeln!(
@@ -891,6 +1001,30 @@ pub fn config_page() -> String {
         "| `durations` | `compact` \\| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = \"ticker\"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \\| `compact` \\| `fixed`) to pin one module. |"
     );
 
+    let _ = writeln!(
+        o,
+        "\n## `[format]` — number styles\n\nOne style per kind of number, each defaulting to what garnish has always printed. Every module that prints a kind carries the same key with `inherit` as its default, to pin one module while the rest follow the table, the way `durations` works; a style on a module that prints no such number is an unknown key.\n"
+    );
+    let _ = writeln!(o, "| key | values | default | meaning |\n|---|---|---|---|");
+    let _ = writeln!(
+        o,
+        "| `tokens` | `compact` \\| `precise` \\| `whole` | `compact` | Token counts: `128k` and `1.0M`; `128,400`; `128400`. Printed by {}. |",
+        format_carriers("tokens")
+    );
+    let _ = writeln!(
+        o,
+        "| `percent` | `whole` \\| `precise` | `whole` | Percentages: `42%`; `42.3%`. Bands and thresholds compare the number printed, whichever style. Printed by {}. |",
+        format_carriers("percent")
+    );
+    let _ = writeln!(
+        o,
+        "| `cost` | `precise` \\| `whole` | `precise` | Money: `$1.23` (`cost.decimals` places, `$1.2k` from a thousand up); `$1`. Printed by {}. |",
+        format_carriers("cost")
+    );
+    let _ = writeln!(
+        o,
+        "| `parens` | `plain` \\| `dim` | `plain` | The parenthesised details (`api`'s share of the session, `lines`' net, the `both` reset form's time): in the colour of the value they follow, or in the muted role the way a `label` is drawn (Claude Code already dims every row, so the muted colour is what \"dim\" visibly means). |"
+    );
     let _ = writeln!(
         o,
         "\n## `[colors]` — theme roles\n\nEvery module color defaults to a role; override a role here to restyle every module at once.\n"
@@ -923,6 +1057,10 @@ fn frame_section(o: &mut String) {
         "| `fill` | `true` | Extend the rule between the left and right groups to the full width and close with the right cap. With `false`, lines are left-packed. |"
     );
     let _ = writeln!(o, "| `separator` | style-dependent | Default separator between modules. |");
+    let _ = writeln!(
+        o,
+        "| `separator_color` | `muted` | Every separator's colour: a theme role or a literal, or `inherit`, which paints each separator in the colour of the first coloured, undimmed segment of the module before it (an icon or a value, never a `label` or an align pad), falling back to `muted`. |"
+    );
     let _ = writeln!(
         o,
         "| `first` `middle` `last` `single` | style-dependent | Line prefixes (`single` when there is one line). |"
@@ -1087,7 +1225,7 @@ fn presets_section(o: &mut String) {
 
     let _ = writeln!(
         o,
-        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
+        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
     );
 }
 
@@ -1126,6 +1264,10 @@ fn environment_section(o: &mut String) {
     let _ = writeln!(
         o,
         "| `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact; the last two turn compaction off, so the marker goes with it. |"
+    );
+    let _ = writeln!(
+        o,
+        "| `CLAUDE_CONFIG_DIR` | Where the `account` worker reads `.claude.json` when it is set and non-empty, instead of the home directory (Claude Code keeps every `~/.claude` file there); the settings chain does not follow it yet. |"
     );
 }
 

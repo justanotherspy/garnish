@@ -9,11 +9,13 @@ use std::collections::BTreeMap;
 
 use crate::ansi::{Segment, Style};
 use crate::cache::{Cache, Entry as CacheEntry, LockOutcome, Lookup, Scope};
-use crate::config::schema::{Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
+use crate::config::schema::{HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::IconSet;
 use crate::payload::Payload;
 use crate::theme::Theme;
 
+pub mod badges;
 pub mod context;
 pub mod identity;
 pub mod model;
@@ -40,6 +42,52 @@ pub fn durations_opt() -> OptSpec {
     )
 }
 
+/// The kinds of number a module prints, each with a `[format]` style and a
+/// per-module override of the same name (SPEC § 4, Number formats).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumberKind {
+    /// Token counts (`tokens`).
+    Tokens,
+    /// Percentages (`percent`).
+    Percent,
+    /// Money (`cost`).
+    Cost,
+}
+
+/// Choices of the per-module `tokens` option; `inherit` follows `[format]`.
+pub const TOKEN_CHOICES: &[&str] = &["inherit", "compact", "precise", "whole"];
+/// Choices of the per-module `percent` option; `inherit` follows `[format]`.
+pub const PERCENT_CHOICES: &[&str] = &["inherit", "whole", "precise"];
+/// Choices of the per-module `cost` option; `inherit` follows `[format]`.
+pub const COST_CHOICES: &[&str] = &["inherit", "precise", "whole"];
+
+/// The per-module override of one `[format]` style, carried by every module
+/// that prints that kind of number, so one module can be pinned while the
+/// rest follow the table (the shape of [`durations_opt`]).
+#[must_use]
+pub fn format_opt(kind: NumberKind) -> OptSpec {
+    match kind {
+        NumberKind::Tokens => OptSpec::new(
+            "tokens",
+            Kind::Enum(TOKEN_CHOICES),
+            "How this module's token counts print: `inherit` follows `[format] tokens`; `compact` (128k, 1.0M), `precise` (128,400) or `whole` (128400) pins this module.",
+            Value::Str("inherit".into()),
+        ),
+        NumberKind::Percent => OptSpec::new(
+            "percent",
+            Kind::Enum(PERCENT_CHOICES),
+            "How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module.",
+            Value::Str("inherit".into()),
+        ),
+        NumberKind::Cost => OptSpec::new(
+            "cost",
+            Kind::Enum(COST_CHOICES),
+            "How this module's amounts print: `inherit` follows `[format] cost`; `precise` ($1.23, `decimals` places) or `whole` ($1) pins this module.",
+            Value::Str("inherit".into()),
+        ),
+    }
+}
+
 /// How fresh a module's data is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Freshness {
@@ -53,26 +101,54 @@ pub enum Freshness {
     Failed,
 }
 
+/// The number a module's output measures this tick (SPEC § 3).
+///
+/// Attached to the [`Rendered`] so the render loop can apply the module's
+/// `hide` list without the module spelling the rule: a count, an amount,
+/// or the percentage the row prints (rounded as printed, so `below:50`
+/// reads the same number the eye does).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Measure {
+    /// A count (lines changed, commits ahead and behind).
+    Count(u64),
+    /// An amount of money in dollars, rounded as the row prints it
+    /// ([`Ctx::dollars_shown`]), so `zero` is what reads as zero.
+    Amount(f64),
+    /// The percentage the row prints.
+    Percent(f64),
+}
+
 /// A module's output for one tick.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Rendered {
     /// Segments, in order. Empty means "nothing to show".
     pub segments: Vec<Segment>,
     /// Data freshness.
     pub freshness: Freshness,
+    /// What the output measures, for the `hide` list; `None` when the
+    /// module has no count, amount or percentage this tick.
+    pub measure: Option<Measure>,
 }
 
 impl Rendered {
     /// Nothing to show.
     #[must_use]
     pub const fn empty() -> Self {
-        Self { segments: Vec::new(), freshness: Freshness::Fresh }
+        Self { segments: Vec::new(), freshness: Freshness::Fresh, measure: None }
     }
 
     /// Fresh segments.
     #[must_use]
     pub const fn fresh(segments: Vec<Segment>) -> Self {
-        Self { segments, freshness: Freshness::Fresh }
+        Self { segments, freshness: Freshness::Fresh, measure: None }
+    }
+
+    /// The output with its measure attached (SPEC § 3), the one call a
+    /// module makes so its `hide` list can be applied by the render loop.
+    #[must_use]
+    pub fn measured(mut self, measure: impl Into<Option<Measure>>) -> Self {
+        self.measure = measure.into();
+        self
     }
 
     /// True when there is nothing to show.
@@ -80,6 +156,26 @@ impl Rendered {
     pub fn is_empty(&self) -> bool {
         self.segments.iter().all(|s| s.text().is_empty())
     }
+}
+
+/// Whether a module's `hide` list takes its output off the row this tick
+/// (SPEC § 3).
+///
+/// `zero` matches a count of none or an amount that prints as zero (the
+/// amount arrives rounded as printed: `$0.00` under two decimals, `$0`
+/// under `cost = "whole"`), `below:N` and `above:N` match the percentage
+/// the row prints. `empty` is [`decorate`]'s business, through
+/// [`ModuleCfg::hides_empty`], since it is about having nothing to print.
+#[must_use]
+pub fn hidden_by(rendered: &Rendered, rules: &[HideRule]) -> bool {
+    rules.iter().any(|rule| match (rule, rendered.measure) {
+        (HideRule::Zero, Some(Measure::Count(n))) => n == 0,
+        // Rounded as printed, so zero is exact and nothing prints below it.
+        (HideRule::Zero, Some(Measure::Amount(a))) => a <= 0.0,
+        (HideRule::Below(n), Some(Measure::Percent(p))) => p < *n,
+        (HideRule::Above(n), Some(Measure::Percent(p))) => p > *n,
+        _ => false,
+    })
 }
 
 /// Everything a module may look at while rendering.
@@ -111,6 +207,8 @@ pub struct Ctx<'a> {
     pub stale_after: u32,
     /// How elapsed times and countdowns print (`durations`).
     pub durations: crate::time::DurationStyle,
+    /// How numbers print (`[format]`, SPEC § 4).
+    pub format: FormatCfg,
     /// Whether animations advance with the clock (SPEC § 4.2); off, every
     /// [`Ctx::frame`] is 0.
     pub animate: bool,
@@ -121,8 +219,14 @@ pub struct Ctx<'a> {
     /// launched in (not whatever subdirectory the session moved to) and the
     /// home; empty for a pinned render, which reads no settings file.
     pub settings_files: Vec<std::path::PathBuf>,
-    /// The keys of those files, read at most once per tick.
+    /// The keys of those files, read at most once per tick (a pinned
+    /// render may seed them, `Clock.settings_keys`).
     pub settings: std::cell::OnceCell<Vec<crate::claude_settings::FileKeys>>,
+    /// Whether a cached module may look its entry up and spawn a worker
+    /// (`Clock.workers`). Off for docs, goldens and the in-process matrices,
+    /// so a pinned render never touches a cache directory (SPEC § 9); a
+    /// cached module then renders as if its worker had not run yet.
+    pub workers: bool,
 }
 
 impl Ctx<'_> {
@@ -154,6 +258,63 @@ impl Ctx<'_> {
     #[must_use]
     pub fn duration(&self, cfg: &ModuleCfg, total_secs: u64) -> String {
         self.durations_for(cfg).format(total_secs)
+    }
+
+    /// A token count in the module's style: its `tokens` option unless that
+    /// is `inherit`, then `[format] tokens` (SPEC § 4, Number formats).
+    #[must_use]
+    pub fn tokens(&self, cfg: &ModuleCfg, n: u64) -> String {
+        TokenStyle::parse(cfg.str("tokens")).unwrap_or(self.format.tokens).format(n)
+    }
+
+    /// A percentage held to `0..=100` in the module's style: its `percent`
+    /// option unless that is `inherit`, then `[format] percent`.
+    #[must_use]
+    pub fn percent(&self, cfg: &ModuleCfg, p: f64) -> String {
+        self.percent_style(cfg).format(p, true)
+    }
+
+    /// [`Ctx::percent`] for a number that may pass 100 (`spend`, SPEC § 3.3).
+    #[must_use]
+    pub fn percent_unclamped(&self, cfg: &ModuleCfg, p: f64) -> String {
+        self.percent_style(cfg).format(p, false)
+    }
+
+    /// The number [`Ctx::percent`] prints, as a number: what a band
+    /// threshold and a `below:N` / `above:N` rule compare, so they agree
+    /// with the printed value at the boundaries whatever the style (SPEC
+    /// § 3, § 4).
+    #[must_use]
+    pub fn percent_shown(&self, cfg: &ModuleCfg, p: f64) -> f64 {
+        self.percent_style(cfg).shown(p, true)
+    }
+
+    /// [`Ctx::percent_shown`] for a number that may pass 100 (`spend`).
+    #[must_use]
+    pub fn percent_shown_unclamped(&self, cfg: &ModuleCfg, p: f64) -> f64 {
+        self.percent_style(cfg).shown(p, false)
+    }
+
+    fn percent_style(&self, cfg: &ModuleCfg) -> PercentStyle {
+        PercentStyle::parse(cfg.str("percent")).unwrap_or(self.format.percent)
+    }
+
+    /// An amount in the module's style: its `cost` option unless that is
+    /// `inherit`, then `[format] cost`; `decimals` is read by `precise`.
+    #[must_use]
+    pub fn dollars(&self, cfg: &ModuleCfg, usd: f64, decimals: usize) -> String {
+        self.cost_style(cfg).format(usd, decimals)
+    }
+
+    /// The amount [`Ctx::dollars`] prints, as a number: what `zero` in a
+    /// `hide` list reads (SPEC § 3).
+    #[must_use]
+    pub fn dollars_shown(&self, cfg: &ModuleCfg, usd: f64, decimals: usize) -> f64 {
+        self.cost_style(cfg).shown(usd, decimals)
+    }
+
+    fn cost_style(&self, cfg: &ModuleCfg) -> CostStyle {
+        CostStyle::parse(cfg.str("cost")).unwrap_or(self.format.cost)
     }
 
     /// Countdown from this tick's clock to an epoch-seconds instant in the
@@ -213,6 +374,11 @@ impl Ctx<'_> {
         scope: &Scope,
         valid: impl Fn(&crate::cache::Entry) -> bool,
     ) -> (Lookup, Freshness) {
+        if !self.workers {
+            // A pinned render: no entry, nothing overdue, no worker.
+            let lookup = Lookup { entry: None, fresh: true, in_progress: false };
+            return (lookup, Freshness::Fresh);
+        }
         let ttl_ms = cfg.refresh.saturating_mul(1000);
         let mut lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
         let mismatched = lookup.entry.as_ref().is_some_and(|e| !valid(e));
@@ -356,6 +522,10 @@ fn builtin() -> Vec<Box<dyn Module>> {
         Box::new(identity::VimModule),
         Box::new(identity::AgentModule),
         Box::new(identity::LinesModule),
+        Box::new(identity::VersionModule),
+        Box::new(badges::SandboxModule),
+        Box::new(badges::VoiceModule),
+        Box::new(badges::AccountModule),
     ]
 }
 
@@ -390,6 +560,23 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
 #[must_use]
 pub fn lead(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
     if cfg.bool("show_icon") { icon(cfg, icon_key, "icon") } else { Vec::new() }
+}
+
+/// The leading glyph as a module's whole value (`sandbox` and `voice`
+/// under `style = "glyph"`, SPEC § 3.8).
+///
+/// [`lead`] without the space that separates an icon from the value after
+/// it, so the badge is one cell and `align = true` counts it as one. The
+/// `show_icon` rule stays [`lead`]'s.
+#[must_use]
+pub fn lead_only(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
+    lead(cfg, icon_key)
+        .into_iter()
+        .map(|segment| {
+            let bare = segment.text().trim_end().to_owned();
+            segment.with_text(bare)
+        })
+        .collect()
 }
 
 /// A trailing badge: a space and the icon in its own colour, or nothing when
@@ -431,6 +618,35 @@ pub fn muted(theme: &Theme, text: impl Into<String>) -> Segment {
     Segment::styled(text, Style::fg(theme.role(crate::theme::Role::Muted)).dimmed())
 }
 
+/// A parenthesised detail after a value (`api`'s share, `lines`' net, the
+/// `both` reset form's time), drawn as `[format] parens` says (SPEC § 4).
+///
+/// `plain` is one segment, `before (inner)` in the module's colour, so a
+/// config that leaves the default renders byte for byte as it always has;
+/// `dim` is `before` in that colour and ` (inner)` in the muted role, the
+/// way a `label` is drawn. `before` carries its own leading space, as the
+/// segment it replaces did, and may be empty.
+#[must_use]
+pub fn detail(
+    ctx: &Ctx<'_>,
+    cfg: &ModuleCfg,
+    before: &str,
+    inner: &str,
+    color_key: &str,
+) -> Vec<Segment> {
+    match ctx.format.parens {
+        ParensStyle::Plain => vec![seg(cfg, format!("{before} ({inner})"), color_key)],
+        ParensStyle::Dim => {
+            let mut out: Vec<Segment> = Vec::new();
+            if !before.is_empty() {
+                out.push(seg(cfg, before, color_key));
+            }
+            out.push(muted(ctx.theme, format!(" ({inner})")));
+            out
+        }
+    }
+}
+
 /// Apply `label`, `prefix`, `suffix`, and staleness styling to a render.
 ///
 /// A *failed* module keeps its `✗` (SPEC § 3.6) even when it had nothing to
@@ -454,7 +670,7 @@ pub fn decorate(
     // row. An *overdue* one still hides, because its last value really was
     // nothing (an in-sync `sync` renders no segments), and showing `– ⟳` for
     // it would flicker a row in every idle pause.
-    if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hide_when_empty {
+    if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hides_empty() {
         return Vec::new();
     }
     // The wrapping is the same for every state; only the middle differs.
@@ -552,13 +768,16 @@ mod tests {
         assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
         let text =
             |r: Rendered| crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, marks));
-        let empty = |f: Freshness| Rendered { segments: Vec::new(), freshness: f };
+        let empty = |f: Freshness| Rendered { segments: Vec::new(), freshness: f, measure: None };
         assert_eq!(text(Rendered::empty()), "", "a fresh empty module is hidden");
         assert_eq!(text(empty(Freshness::Stale)), "", "so is an overdue one with no value");
         assert_eq!(text(empty(Freshness::Failed)), "– ✗", "a broken one is never silent");
         // A module that did render keeps its value, dimmed, with the mark.
-        let value =
-            || Rendered { segments: vec![Segment::plain("⇡2")], freshness: Freshness::Stale };
+        let value = || Rendered {
+            segments: vec![Segment::plain("⇡2")],
+            freshness: Freshness::Stale,
+            measure: None,
+        };
         assert_eq!(text(value()), "⇡2 ⟳");
         assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
     }
@@ -694,12 +913,15 @@ mod tests {
                     check(key, at);
                 }
             }
-            // `seg(cfg, text, "color")`: the key is the last argument, when
-            // that is a literal (`seg(cfg, x, key)` passes a variable).
-            for (at, _) in src.match_indices("seg(") {
-                let (literals, last_is_literal) = literal_arguments(&src, at + "seg(".len());
-                if last_is_literal && let Some(key) = literals.last() {
-                    check(key, at);
+            // `seg(cfg, text, "color")` and `detail(ctx, cfg, before, inner,
+            // "color")`: the key is the last argument, when that is a
+            // literal (`seg(cfg, x, key)` passes a variable).
+            for call in ["seg(", " detail(", "(detail("] {
+                for (at, _) in src.match_indices(call) {
+                    let (literals, last_is_literal) = literal_arguments(&src, at + call.len());
+                    if last_is_literal && let Some(key) = literals.last() {
+                        check(key, at);
+                    }
                 }
             }
             // `icon(cfg, "icon", "color")` and `badge(cfg, "icon", "color")`:
@@ -721,9 +943,10 @@ mod tests {
                     }
                 }
             }
-            // `lead(cfg, "icon")` carries the icon key and, implicitly, the
-            // `icon` colour every module's leading glyph takes.
-            for call in [" lead(", "(lead("] {
+            // `lead(cfg, "icon")` and `lead_only(cfg, "icon")` carry the
+            // icon key and, implicitly, the `icon` colour every module's
+            // leading glyph takes.
+            for call in [" lead(", "(lead(", " lead_only(", "(lead_only("] {
                 for (at, _) in src.match_indices(call) {
                     for key in literal_arguments(&src, at + call.len()).0 {
                         check(&key, at);
@@ -736,6 +959,96 @@ mod tests {
         // A count well under what the sources hold today (≈ 200) means a
         // reader pattern went stale, not that the modules read less.
         assert!(seen > 180, "the scan found only {seen} reads; are the patterns stale?");
+    }
+
+    /// SPEC § 3: the `hide` list reads the measure a module attached; a
+    /// module without one is never hidden by `zero`, `below` or `above`,
+    /// and a count is never read as a percentage or the other way round.
+    #[test]
+    fn hide_rules_read_the_measure() {
+        use crate::config::schema::HideRule::{Above, Below, Empty, Zero};
+        let with = |m: Option<Measure>| Rendered::fresh(vec![Segment::plain("x")]).measured(m);
+        assert!(hidden_by(&with(Some(Measure::Count(0))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Count(1))), &[Zero]));
+        assert!(hidden_by(&with(Some(Measure::Amount(0.0))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Amount(0.01))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Amount(0.004))), &[Zero]), "rounded as printed");
+        assert!(hidden_by(&with(Some(Measure::Percent(9.0))), &[Below(10.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(10.0))), &[Below(10.0)]));
+        assert!(hidden_by(&with(Some(Measure::Percent(91.0))), &[Above(90.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(90.0))), &[Above(90.0)]));
+        assert!(hidden_by(&with(Some(Measure::Percent(50.0))), &[Below(10.0), Above(40.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(50.0))), &[Empty]));
+        assert!(!hidden_by(&with(None), &[Zero, Below(100.0), Above(0.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Count(0))), &[Below(100.0)]));
+        assert!(!hidden_by(&with(Some(Measure::Percent(0.0))), &[Zero]));
+        assert!(!hidden_by(&with(Some(Measure::Count(0))), &[]));
+        // `measured` takes the measure or an option of one.
+        assert_eq!(Rendered::empty().measured(Measure::Count(2)).measure, Some(Measure::Count(2)));
+        assert_eq!(Rendered::empty().measured(None).measure, None);
+    }
+
+    /// SPEC § 4 `parens`: a detail is one segment with its value under
+    /// `plain`, so today's renders keep their bytes, and its own muted
+    /// segment under `dim`; an empty `before` leaves only the detail.
+    #[test]
+    fn a_detail_is_one_segment_plain_and_two_dim() {
+        let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let theme = Theme::default();
+        let cache = Cache::at(std::env::temp_dir().join("garnish-detail-test"));
+        let (config, _) = crate::config::parse("", &SCHEMAS);
+        let cfg = config.modules.get("api").unwrap();
+        let mut ctx = Ctx {
+            payload: &payload,
+            theme: &theme,
+            icons: IconSet::Unicode,
+            now: Timestamp::from_second(1_738_425_600).unwrap(),
+            width: 80,
+            cache: &cache,
+            tz: jiff::tz::TimeZone::UTC,
+            home: None,
+            settings_env: crate::claude_settings::Env::default(),
+            git: false,
+            stale_after: 5,
+            durations: crate::time::DurationStyle::Compact,
+            format: FormatCfg::default(),
+            animate: false,
+            dirs: std::cell::OnceCell::new(),
+            settings_files: Vec::new(),
+            settings: std::cell::OnceCell::new(),
+            workers: false,
+        };
+        let plain = detail(&ctx, cfg, " 8m20s", "12%", "share");
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0].text(), " 8m20s (12%)");
+        assert_eq!(plain[0].style, Style::fg(cfg.color("share")));
+        let bare = detail(&ctx, cfg, "", "12%", "share");
+        assert_eq!(bare.len(), 1);
+        assert_eq!(bare[0].text(), " (12%)");
+        ctx.format.parens = ParensStyle::Dim;
+        let dim = detail(&ctx, cfg, " 8m20s", "12%", "share");
+        assert_eq!(dim.len(), 2);
+        assert_eq!((dim[0].text(), dim[1].text()), (" 8m20s", " (12%)"));
+        assert_eq!(dim[0].style, Style::fg(cfg.color("share")));
+        assert_eq!(dim[1], muted(&theme, " (12%)"));
+        let bare = detail(&ctx, cfg, "", "12%", "share");
+        assert_eq!(bare.len(), 1);
+        assert_eq!(bare[0], muted(&theme, " (12%)"));
+        // The number styles resolve `inherit` to the table and a module
+        // option pins its own.
+        ctx.format.tokens = TokenStyle::Precise;
+        assert_eq!(ctx.tokens(cfg, 128_400), "128,400");
+        let (config, _) = crate::config::parse(
+            "[modules.context]\ntokens = \"whole\"\npercent = \"precise\"\n[modules.cost]\ncost = \"whole\"\n",
+            &SCHEMAS,
+        );
+        let context = config.modules.get("context").unwrap();
+        assert_eq!(ctx.tokens(context, 128_400), "128400");
+        assert_eq!(ctx.percent(context, 42.34), "42.3%");
+        assert_eq!(ctx.percent(cfg, 42.34), "42%");
+        assert_eq!(ctx.percent_unclamped(cfg, 112.4), "112%");
+        assert_eq!(ctx.dollars(config.modules.get("cost").unwrap(), 1.2345, 2), "$1");
+        assert_eq!(ctx.dollars(cfg, 1.2345, 2), "$1.23");
     }
 
     #[test]

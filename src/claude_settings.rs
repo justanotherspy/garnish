@@ -1,8 +1,10 @@
 //! Reading the Claude Code settings garnish needs.
 //!
 //! Auto-compaction, reduced motion, the `statusLine` keys,
-//! `disableAllHooks` and the `tui` renderer choice, with the same
-//! precedence Claude Code uses: env > managed > local > project > user.
+//! `disableAllHooks`, the `sandbox` and `voice` switches and the `tui`
+//! renderer choice, with the same precedence Claude Code uses: env >
+//! managed > local > project > user. Also where `~/.claude.json`, the file
+//! Claude Code keeps for itself, lives (SPEC § 3.8).
 
 use std::path::{Path, PathBuf};
 
@@ -112,6 +114,28 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
 }
 
+/// Claude Code's variable for keeping its home-directory files elsewhere:
+/// every `~/.claude` path, `~/.claude.json` included, moves under it.
+pub const CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
+
+/// Where the file Claude Code keeps for itself lives (the sign-in, the MCP
+/// servers, per-project state).
+///
+/// `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set and
+/// non-empty (the SPEC § 5 rule for a path variable), else
+/// `~/.claude.json`; `None` without either. The `account` worker reads it
+/// (SPEC § 3.8); the settings chain keeps ignoring the variable.
+#[must_use]
+pub fn claude_json_path(home: Option<&Path>) -> Option<PathBuf> {
+    claude_json_in(crate::config::env_path(CONFIG_DIR_ENV).as_deref(), home)
+}
+
+/// [`claude_json_path`] for an explicit config directory.
+#[must_use]
+pub fn claude_json_in(config_dir: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    config_dir.or(home).map(|dir| dir.join(".claude.json"))
+}
+
 /// Settings files in precedence order (highest first) for a project
 /// directory, each with the name `doctor` labels it by.
 ///
@@ -201,6 +225,12 @@ pub struct FileKeys {
     pub hide_vim_mode: Option<bool>,
     /// `disableAllHooks`.
     pub disable_all_hooks: Option<bool>,
+    /// `sandbox.enabled`: Bash commands run isolated (the `sandbox` badge,
+    /// SPEC § 3.8).
+    pub sandbox_enabled: Option<bool>,
+    /// `voice.enabled`: voice dictation is on (the `voice` badge, SPEC
+    /// § 3.8).
+    pub voice_enabled: Option<bool>,
     /// `tui`, as written: which renderer draws the screen (SPEC § 2.1).
     pub tui: Option<Tui>,
 }
@@ -220,6 +250,15 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
         Ok(serde_json::Value::Object(v)) => {
             let status = v.get("statusLine").and_then(serde_json::Value::as_object);
             let status_key = |key: &str| status.and_then(|s| s.get(key));
+            // `sandbox` and `voice` are objects like `statusLine`; a switch
+            // that is not a boolean (or a table that is not an object) is
+            // unset, as for every other key.
+            let switch = |table: &str| {
+                v.get(table)
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|t| t.get("enabled"))
+                    .and_then(serde_json::Value::as_bool)
+            };
             Ok(FileKeys {
                 auto_compact_window: v.get("autoCompactWindow").and_then(serde_json::Value::as_u64),
                 auto_compact_enabled: v
@@ -233,6 +272,8 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                 hide_vim_mode: status_key("hideVimModeIndicator")
                     .and_then(serde_json::Value::as_bool),
                 disable_all_hooks: v.get("disableAllHooks").and_then(serde_json::Value::as_bool),
+                sandbox_enabled: switch("sandbox"),
+                voice_enabled: switch("voice"),
                 tui: v.get("tui").map(Tui::from_json),
             })
         }
@@ -254,13 +295,36 @@ pub enum FileState {
     Keys(FileKeys),
 }
 
+/// Open a file garnish reads on a timer, refusing anything that is not a
+/// regular file.
+///
+/// `open` on a FIFO waits for a writer for ever, and a repository nobody
+/// here built can put one at `.claude/settings.json` (CLAUDE.md, "The
+/// repository is not the user's file"). `Ok(None)` when there is nothing
+/// at `path`; a symlink is followed.
+///
+/// # Errors
+/// The metadata or open error, or one saying the path is not a regular
+/// file.
+pub fn open_regular(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+    let meta = match std::fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !meta.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file"));
+    }
+    std::fs::File::open(path).map(Some)
+}
+
 /// Read one settings file of the chain, at most [`MAX_SETTINGS_BYTES`] of it.
 #[must_use]
 pub fn read_file(path: &Path) -> FileState {
     use std::io::Read as _;
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileState::Absent,
+    let file = match open_regular(path) {
+        Ok(Some(file)) => file,
+        Ok(None) => return FileState::Absent,
         Err(e) => return FileState::Unreadable(e.to_string()),
     };
     // Bytes first, then UTF-8: reading straight into a `String` validates
@@ -305,12 +369,19 @@ pub fn keys_for(project: Option<&Path>, home: Option<&Path>) -> Vec<FileKeys> {
     read_keys(&settings_files(managed_settings_path().as_deref(), project, home))
 }
 
-/// `prefersReducedMotion` over a chain's keys: the first file that sets
-/// it wins, as for the auto-compaction keys, and no file setting it means
-/// `false` (SPEC § 4.2).
+/// A boolean key over a chain's keys: the first file that sets it wins,
+/// as for the auto-compaction keys, and no file setting it means `false`.
+/// `pick` names the key (`|k| k.sandbox_enabled`).
+#[must_use]
+pub fn flag(keys: &[FileKeys], pick: impl Fn(&FileKeys) -> Option<bool>) -> bool {
+    keys.iter().find_map(pick).unwrap_or(false)
+}
+
+/// `prefersReducedMotion` over a chain's keys (SPEC § 4.2): [`flag`] for
+/// the key every animation asks about.
 #[must_use]
 pub fn reduced_motion(keys: &[FileKeys]) -> bool {
-    keys.iter().find_map(|k| k.reduced_motion).unwrap_or(false)
+    flag(keys, |k| k.reduced_motion)
 }
 
 /// Resolve auto-compaction from the environment and a chain's keys.
@@ -329,13 +400,21 @@ pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The keys of a settings text, with an unparsable one contributing
     /// none — the shape `read_file` gives the chain.
     fn keys_of(text: &str) -> FileKeys {
         parse_settings_json(text).unwrap_or_default()
+    }
+
+    /// A FIFO at `path`, through the `mkfifo` binary (there is no
+    /// dependency for it): `None` where the binary is missing, so the
+    /// test that wants one skips rather than fails.
+    pub fn fifo(path: &Path) -> Option<PathBuf> {
+        let made = std::process::Command::new("mkfifo").arg(path).status().ok()?.success();
+        made.then(|| path.to_path_buf())
     }
 
     #[test]
@@ -386,6 +465,22 @@ mod tests {
             assert_eq!(keys.tui, Some(Tui::Other(value)), "{other}");
         }
         assert_eq!(keys_of("{}").tui, None);
+        // The two switches of SPEC § 3.8 sit in objects, like `statusLine`;
+        // a switch that is not a boolean, or a table that is not an object,
+        // is unset, never read as on.
+        let keys = keys_of(
+            r#"{"sandbox": {"enabled": true, "network": {}}, "voice": {"enabled": false, "mode": "tap"}}"#,
+        );
+        assert_eq!((keys.sandbox_enabled, keys.voice_enabled), (Some(true), Some(false)));
+        for unset in [
+            r#"{"sandbox": {"enabled": "true"}, "voice": {"enabled": 1}}"#,
+            r#"{"sandbox": true, "voice": "on"}"#,
+            r#"{"sandbox": {"mode": "strict"}, "voice": {}}"#,
+            r#"{"sandbox": null, "voice": [true]}"#,
+        ] {
+            let keys = keys_of(unset);
+            assert_eq!((keys.sandbox_enabled, keys.voice_enabled), (None, None), "{unset}");
+        }
         assert!(parse_settings_json("{ broken").unwrap_err().starts_with("not valid JSON: "));
         assert_eq!(parse_settings_json("[1]").unwrap_err(), "not a JSON object");
         // An empty file is what a fresh `touch` leaves and what `install`
@@ -395,6 +490,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_file(&dir.path().join("none.json")), FileState::Absent);
         assert!(matches!(read_file(dir.path()), FileState::Unreadable(_)));
+        // A FIFO where a settings file should be (a cloned repository can
+        // carry one): refused without opening, since `open` would wait for
+        // a writer for ever, on the tick.
+        if let Some(fifo) = fifo(&dir.path().join("fifo.json")) {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(read_file(&fifo));
+            });
+            let state = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("blocked");
+            assert!(
+                matches!(state, FileState::Unreadable(ref e) if e.contains("not a regular file")),
+                "{state:?}"
+            );
+        }
         std::fs::write(dir.path().join("bad.json"), "{").unwrap();
         assert!(matches!(read_file(&dir.path().join("bad.json")), FileState::Invalid(_)));
         std::fs::write(dir.path().join("ok.json"), "{}").unwrap();
@@ -482,6 +591,41 @@ mod tests {
             Some(&proj),
             Some(&home)
         ))));
+    }
+
+    /// SPEC § 3.8: the `sandbox` and `voice` switches resolve as
+    /// `prefersReducedMotion` does (the first file that sets one wins,
+    /// no file means off), through the one [`flag`] rule.
+    #[test]
+    fn flags_follow_the_settings_chain() {
+        let user = keys_of(r#"{"sandbox": {"enabled": true}, "voice": {"enabled": true}}"#);
+        let project = keys_of(r#"{"sandbox": {"enabled": false}}"#);
+        let other = keys_of(r#"{"theme": "dark"}"#);
+        assert!(!flag(&[], |k| k.sandbox_enabled), "no file: off");
+        assert!(flag(std::slice::from_ref(&user), |k| k.sandbox_enabled));
+        assert!(flag(&[other.clone(), user.clone()], |k| k.voice_enabled), "a file without it");
+        let chain = [other, project, user];
+        assert!(!flag(&chain, |k| k.sandbox_enabled), "the first file that sets it wins");
+        assert!(flag(&chain, |k| k.voice_enabled), "key by key");
+        assert_eq!(flag(&chain, |k| k.reduced_motion), reduced_motion(&chain));
+    }
+
+    /// SPEC § 3.8: `~/.claude.json` moves with `CLAUDE_CONFIG_DIR` when
+    /// that is set and non-empty, and there is none without a home.
+    #[test]
+    fn claude_json_follows_the_config_dir_then_the_home() {
+        let home = Path::new("/h");
+        let dir = Path::new("/cfg");
+        assert_eq!(claude_json_in(None, Some(home)), Some(PathBuf::from("/h/.claude.json")));
+        assert_eq!(claude_json_in(Some(dir), Some(home)), Some(PathBuf::from("/cfg/.claude.json")));
+        assert_eq!(claude_json_in(Some(dir), None), Some(PathBuf::from("/cfg/.claude.json")));
+        assert_eq!(claude_json_in(None, None), None);
+        // The process reader applies the empty-means-unset rule of
+        // `config::env_path`; with the variable unset it is the home's.
+        if std::env::var_os(CONFIG_DIR_ENV).is_none_or(|v| v.is_empty()) {
+            assert_eq!(claude_json_path(Some(home)), Some(PathBuf::from("/h/.claude.json")));
+            assert_eq!(claude_json_path(None), None);
+        }
     }
 
     #[test]

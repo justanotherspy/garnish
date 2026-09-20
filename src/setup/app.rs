@@ -668,7 +668,7 @@ impl App {
         self.layers.push(Layer::Form(form));
     }
 
-    /// The module picker (SPEC § 14): the 21 ids, the config's text modules,
+    /// The module picker (SPEC § 14): the 25 ids, the config's text modules,
     /// and a new text module.
     fn module_picker(&self) -> Choose {
         let mut items: Vec<Choice> =

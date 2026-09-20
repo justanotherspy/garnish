@@ -2,8 +2,9 @@ p┌ [frame] ──────────────────────�
 ▶│  style            rounded                     (rounded)                    │
  │  fill             true                        (true)                       │
 r│  separator         │                          (the style's)                │
+r│  separator_color  muted                       (muted)                      │
 r│  pad              " "                         (the style's)                │
-r│  fill_char        ─                           (the style's)                │
+ │  fill_char        ─                           (the style's)                │
  │  first            ╭─                          (the style's)                │
  │  middle           ├─                          (the style's)                │
  │  last             ╰─                          (the style's)                │
@@ -16,7 +17,6 @@ r│  fill_char        ─                           (the style's)              
  │  top_right        ╮                           (the style's)                │
  │  bottom_left      ╰                           (the style's)                │
  │  bottom_right     ╯                           (the style's)                │
- │  side             │                           (the style's)                │
  │none | rounded | square | double | heavy | powerline | custom.              │
  │                                                                            │
  │                                                                            │

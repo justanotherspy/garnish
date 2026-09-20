@@ -4,12 +4,13 @@
 use jiff::tz::TimeZone;
 
 use crate::ansi::{Segment, Style};
-use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
+use crate::config::schema::{
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+};
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{percent, tokens};
-use super::{Ctx, Module, Rendered, badge, glyph_prefix, lead, seg};
+use super::{Ctx, Module, Rendered, badge, detail, glyph_prefix, lead, seg};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -18,6 +19,7 @@ impl Module for SessionModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "session",
+            measure: None,
             summary: "Session duration.",
             doc: "Wall-clock time since the session started (`cost.total_duration_ms`; resets on `/clear`). The `full` preset adds the start time.",
             sources: &["cost.total_duration_ms"],
@@ -73,6 +75,7 @@ impl Module for ApiModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "api",
+            measure: Some(MeasureKind::Percent),
             summary: "Time spent waiting for API responses.",
             doc: "`cost.total_api_duration_ms`, a subset of the session duration. The `full` preset adds its share of the session.",
             sources: &["cost.total_api_duration_ms", "cost.total_duration_ms"],
@@ -88,6 +91,7 @@ impl Module for ApiModule {
                 )
                 .full(Value::Bool(true)),
                 super::durations_opt(),
+                super::format_opt(super::NumberKind::Percent),
             ],
             icons: vec![IconSpec {
                 key: "api",
@@ -107,12 +111,17 @@ impl Module for ApiModule {
         let Some(api_ms) = cost.total_api_duration_ms else { return Rendered::empty() };
         let mut segs: Vec<Segment> = lead(cfg, "api");
         segs.push(seg(cfg, ctx.duration(cfg, api_ms / 1000), "value"));
+        // The share is the module's measure whether or not it is printed
+        // (SPEC § 3: `below:N` reads the share of the session).
+        let share =
+            cost.total_duration_ms.filter(|t| *t > 0).map(|total| percent_of(api_ms, total));
         if cfg.bool("show_share")
-            && let Some(total) = cost.total_duration_ms.filter(|t| *t > 0)
+            && let Some(share) = share
         {
-            segs.push(seg(cfg, format!(" ({})", percent(percent_of(api_ms, total))), "share"));
+            segs.extend(detail(ctx, cfg, "", &ctx.percent(cfg, share), "share"));
         }
         Rendered::fresh(segs)
+            .measured(share.map(|s| super::Measure::Percent(ctx.percent_shown(cfg, s))))
     }
 }
 
@@ -123,6 +132,7 @@ impl Module for CacheModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "cache",
+            measure: Some(MeasureKind::Percent),
             summary: "Prompt cache hit ratio, TTL and warmth.",
             doc: "Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-read share), the cache lifetime badge (`5m` or `1h`), and a live countdown until the cached prefix goes cold. Shows `–` before the first API response.",
             sources: &["prompt_cache.*", "context_window.current_usage"],
@@ -149,6 +159,8 @@ impl Module for CacheModule {
                 )
                 .full(Value::Bool(true)),
                 super::durations_opt(),
+                super::format_opt(super::NumberKind::Tokens),
+                super::format_opt(super::NumberKind::Percent),
             ],
             icons: vec![
                 IconSpec {
@@ -189,9 +201,10 @@ impl Module for CacheModule {
                 .saturating_add(u.cache_creation_input_tokens.unwrap_or(0));
             (total > 0).then(|| crate::num::u64_to_f64(read) / crate::num::u64_to_f64(total))
         });
-        let text = ratio.map_or_else(|| "–".to_owned(), |r| percent(r * 100.0));
+        let text = ratio.map_or_else(|| "–".to_owned(), |r| ctx.percent(cfg, r * 100.0));
         segs.push(Segment::styled(text, Style::fg(cfg.color("percent")).bolded()));
-        let Some(pc) = pc else { return Rendered::fresh(segs) };
+        let measure = ratio.map(|r| super::Measure::Percent(ctx.percent_shown(cfg, r * 100.0)));
+        let Some(pc) = pc else { return Rendered::fresh(segs).measured(measure) };
         if cfg.bool("show_ttl")
             && let Some(ttl) = pc.ttl.as_deref()
         {
@@ -219,9 +232,9 @@ impl Module for CacheModule {
         if cfg.bool("show_writes")
             && let Some(w) = pc.cache_write_tokens
         {
-            segs.push(seg(cfg, format!(" {}w", tokens(w)), "detail"));
+            segs.push(seg(cfg, format!(" {}w", ctx.tokens(cfg, w)), "detail"));
         }
-        Rendered::fresh(segs)
+        Rendered::fresh(segs).measured(measure)
     }
 }
 
@@ -232,6 +245,7 @@ impl Module for ClockModule {
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "clock",
+            measure: None,
             summary: "Local wall-clock time with a spinner.",
             doc: "The local time (system zone, or `tz`), preceded by a spinner whose frame is derived from the current second so it advances on every one-second tick without keeping state.",
             sources: &["wall clock"],

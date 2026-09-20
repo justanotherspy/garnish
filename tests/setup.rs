@@ -151,10 +151,11 @@ fn home_picker_and_builder_screens_match_their_goldens() {
     assert!(shot.contains("[modules.path]") && shot.contains("style"), "{shot}");
     check("module-form", &mut app, 140, 40);
     // Enter on an icon key opens the glyph picker: the four sets, then the
-    // suggestions, then a custom entry.
+    // suggestions, then a custom entry. Fourteen rows down from `enabled`:
+    // `preset`, `refresh`, `hide`, the five common keys, path's four options.
     keys(
         &mut app,
-        "<down><down><down><down><down><down><down><down><down><down><down><down><down>",
+        "<down><down><down><down><down><down><down><down><down><down><down><down><down><down>",
     );
     keys(&mut app, "<enter>");
     let shot = check("glyph-picker", &mut app, 80, 24);
