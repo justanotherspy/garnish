@@ -355,6 +355,38 @@ impl Draft {
     pub fn reload(&mut self) {
         *self = Self::open(self.path.clone());
     }
+
+    /// Whether any row, column or inner row names the box.
+    #[must_use]
+    pub fn box_in_use(&self, name: &str) -> bool {
+        let names = |t: &Table| t.get("box").and_then(Value::as_str) == Some(name);
+        let tables = |t: &Table, key: &str| -> Vec<Table> {
+            t.get(key)
+                .and_then(Value::as_array)
+                .map_or_default(|a| a.iter().filter_map(Value::as_table).cloned().collect())
+        };
+        self.rows().iter().filter_map(Value::as_table).any(|row| {
+            names(row)
+                || tables(row, "col")
+                    .iter()
+                    .any(|col| names(col) || tables(col, "row").iter().any(names))
+        })
+    }
+
+    /// Drop every `[box.<name>]` nothing joins any more, which the parser
+    /// would otherwise report on every tick; the names dropped, in file
+    /// order.
+    pub fn prune_orphan_boxes(&mut self) -> Vec<String> {
+        let names: Vec<String> = self
+            .get(&["box"])
+            .and_then(Value::as_table)
+            .map_or_default(|t| t.keys().cloned().collect());
+        let orphans: Vec<String> = names.into_iter().filter(|n| !self.box_in_use(n)).collect();
+        for name in &orphans {
+            self.remove(&["box", name]);
+        }
+        orphans
+    }
 }
 
 /// Remove the key at `path` under `table`, pruning every table the removal
@@ -458,6 +490,18 @@ mod tests {
         assert!(f.is_dirty());
         f.replace_table(original);
         assert!(!f.is_dirty());
+        // A box is in use from a row, a column or an inner row alike; only
+        // the one nothing names is pruned.
+        let mut g = Draft::from_text(
+            "[box.r]\n[box.c]\n[box.i]\n[box.orphan]\n[[row]]\nmodules = [\"path\"]\nbox = \"r\"\n[[row]]\n[[row.col]]\nbox = \"c\"\nmodules = [\"model\"]\n[[row.col]]\n[[row.col.row]]\nbox = \"i\"\nmodules = [\"clock\"]\n",
+        );
+        for name in ["r", "c", "i"] {
+            assert!(g.box_in_use(name), "{name}");
+        }
+        assert!(!g.box_in_use("orphan"));
+        assert_eq!(g.prune_orphan_boxes(), vec!["orphan".to_owned()]);
+        assert!(g.get(&["box", "orphan"]).is_none() && g.get(&["box", "i"]).is_some());
+        assert_eq!(g.prune_orphan_boxes(), Vec::<String>::new());
     }
 
     #[test]

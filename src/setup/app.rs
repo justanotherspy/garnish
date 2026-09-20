@@ -507,6 +507,17 @@ impl App {
         self.draft.replace_table(target.table);
         self.builder.cursor = target.cursor;
         self.builder.chip = target.chip;
+        // A row's, a column's or a box's form is about a place in the file,
+        // which the table put back may have moved or removed; it closes
+        // rather than edit another table under the same path. A module's
+        // or a top-level form is about a name and is rebuilt in place.
+        let positional = matches!(
+            self.layers.first(),
+            Some(Layer::Form(f)) if matches!(f.kind, FormKind::Row(_) | FormKind::Col(_) | FormKind::Box(_))
+        );
+        if positional {
+            self.layers.clear();
+        }
         self.refresh();
         let what = if target.what.is_empty() { "the last edit".to_owned() } else { target.what };
         self.say(format!("{}: {what}", if redo { "redone" } else { "undone" }), Level::Info);
@@ -625,6 +636,9 @@ impl App {
             return None;
         }
         let name = value.as_str()?;
+        if name == self.config.preset.name() {
+            return None;
+        }
         let old = Draft::from_preset(self.config.preset.name())?;
         if old.rows() != self.draft.rows() {
             return Some("the rows below stay (p replaces them with a preset's)".to_owned());
@@ -636,21 +650,11 @@ impl App {
         Some(format!("rows replaced with the {name} preset's"))
     }
 
-    /// Drop every `[box.<name>]` nothing joins any more, which the parser
-    /// would otherwise report on every tick; says which, when any.
+    /// Drop every `[box.<name>]` nothing joins any more; says which, when
+    /// any.
     fn prune_orphan_boxes(&mut self) -> Option<String> {
-        let names: Vec<String> = self
-            .draft
-            .get(&["box"])
-            .and_then(Value::as_table)
-            .map_or_default(|t| t.keys().cloned().collect());
-        let orphans: Vec<String> =
-            names.into_iter().filter(|n| !box_in_use(&self.draft, n)).collect();
-        for name in &orphans {
-            self.draft.remove(&["box", name]);
-        }
-        (!orphans.is_empty())
-            .then(|| format!("[box.{}] dropped, nothing used it", orphans.join("], [box.")))
+        let orphans = self.draft.prune_orphan_boxes();
+        (!orphans.is_empty()).then(|| dropped_boxes(&orphans))
     }
 
     fn chosen(&mut self, target: Target, value: &str) {
@@ -729,14 +733,16 @@ impl App {
                     let out = self.edit(|builder, draft| {
                         let at = builder.item().map(|i| i.at).ok_or("nothing selected")?;
                         let table = draft.row_mut(at).ok_or("no such row")?;
-                        let was = table.remove("box").and_then(|v| v.as_str().map(str::to_owned));
+                        table.remove("box");
                         // The last member leaving takes an unused
                         // `[box.<name>]` with it, which the parser would
                         // otherwise report on every tick.
-                        let orphan = was.filter(|n| !box_in_use(draft, n));
-                        let Some(orphan) = orphan else { return Ok("unboxed".to_owned()) };
-                        draft.remove(&["box", orphan.as_str()]);
-                        Ok(format!("unboxed; [box.{orphan}] dropped, nothing used it"))
+                        let orphans = draft.prune_orphan_boxes();
+                        Ok(if orphans.is_empty() {
+                            "unboxed".to_owned()
+                        } else {
+                            format!("unboxed; {}", dropped_boxes(&orphans))
+                        })
                     });
                     self.report(out);
                 } else if !name.is_empty() && !is_bare_key(name) {
@@ -746,10 +752,16 @@ impl App {
                     self.report(out);
                 }
             }
-            Target::BoxWith(_) => {
+            Target::BoxWith(at) => {
                 let name = value.trim();
                 if !is_bare_key(name) {
                     self.say("a box name is letters, digits, _ and - only".into(), Level::Error);
+                    return;
+                }
+                // The name was asked for this row; the selection cannot move
+                // under an input line, but the box goes nowhere else.
+                if self.builder.item().map(|i| i.at) != Some(at) {
+                    self.say("the selection moved; press B again".into(), Level::Warn);
                     return;
                 }
                 let out = self.edit(|builder, draft| builder.box_with_above(draft, name));
@@ -1861,24 +1873,12 @@ impl App {
     }
 }
 
-/// A bare TOML key: what a box or text module may be called.
-/// Whether any row, column or inner row of the draft names the box.
-fn box_in_use(draft: &Draft, name: &str) -> bool {
-    let names = |t: &toml::Table| t.get("box").and_then(Value::as_str) == Some(name);
-    let tables = |v: &Value, key: &str| -> Vec<toml::Table> {
-        v.as_table()
-            .and_then(|t| t.get(key))
-            .and_then(Value::as_array)
-            .map_or_default(|a| a.iter().filter_map(Value::as_table).cloned().collect())
-    };
-    draft.rows().iter().any(|row| {
-        row.as_table().is_some_and(names)
-            || tables(row, "col").iter().any(|col| {
-                names(col) || tables(&Value::Table(col.clone()), "row").iter().any(names)
-            })
-    })
+/// The status line for `[box.<name>]` tables dropped as orphans.
+fn dropped_boxes(names: &[String]) -> String {
+    format!("[box.{}] dropped, nothing used it", names.join("], [box."))
 }
 
+/// A bare TOML key: what a box or text module may be called.
 fn is_bare_key(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
@@ -1909,5 +1909,31 @@ fn hint_key(label: &str) -> Option<Key> {
             "esc" => Some(Key::Esc),
             _ => label.strip_prefix("ctrl-").and_then(|c| c.chars().next()).map(Key::Ctrl),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hint_labels_and_titles_map_to_keys_and_box_names() {
+        assert_eq!(hint_key("u"), Some(Key::Char('u')));
+        assert_eq!(hint_key("?"), Some(Key::Char('?')));
+        assert_eq!(hint_key("enter"), Some(Key::Enter));
+        assert_eq!(hint_key("esc"), Some(Key::Esc));
+        assert_eq!(hint_key("ctrl-u"), Some(Key::Ctrl('u')));
+        for several in ["1 2 3", "x del", "↑↓", "↑↓←→", ""] {
+            assert_eq!(hint_key(several), None, "{several:?}");
+        }
+        assert_eq!(bare_key_of("Repo & CI"), "repo-ci");
+        assert_eq!(bare_key_of("  Usage  "), "usage");
+        assert_eq!(bare_key_of("· · ·"), "", "nothing bare in it: the caller falls back");
+        assert_eq!(bare_key_of("a_b-c"), "a_b-c");
+        assert!(is_bare_key("side-panel_2") && !is_bare_key("") && !is_bare_key("a b"));
+        assert_eq!(
+            dropped_boxes(&["a".to_owned(), "b".to_owned()]),
+            "[box.a], [box.b] dropped, nothing used it"
+        );
     }
 }

@@ -877,4 +877,113 @@ fn b_boxes_two_rows_and_the_preset_key_follows_its_own_rows() {
     assert!(app.status().unwrap().contains("rows below stay"), "{:?}", app.status());
     assert_eq!(app.draft().get(&["preset"]).and_then(toml::Value::as_str), Some("minimal"));
     assert_eq!(app.draft().rows().len(), 4);
+    // Picking the preset already in effect says nothing about rows.
+    keys(&mut app, "<enter><enter>");
+    assert_eq!(app.status(), Some("preset set"));
+}
+
+/// What the adversarial review of 2026-09-20 found: `B` failed on a titled
+/// row and on a row in another box (the parser refused, the edit
+/// reverted), a row form left open across an undo edited a phantom, and
+/// the history has a bound.
+#[test]
+fn b_joins_titled_and_boxed_rows_and_positional_forms_close_on_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[box.a]\ntitle = \"A\"\n[box.b]\ntitle = \"B\"\n[[row]]\nmodules = [\"path\"]\nbox = \"a\"\n[[row]]\nmodules = [\"model\"]\ntitle = \"T\"\ntitle_pad = 2\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<down>B");
+    let status = app.status().unwrap().to_owned();
+    assert!(status.starts_with("joined box a") && status.contains("title went"), "{status}");
+    let row = |app: &App, i: usize| app.draft().rows()[i].as_table().unwrap().clone();
+    assert!(row(&app, 1).get("title").is_none() && row(&app, 1).get("title_pad").is_none());
+    assert_eq!(row(&app, 1).get("box").and_then(toml::Value::as_str), Some("a"));
+    assert!(app.draft().resolved().1.is_empty(), "{:?}", app.draft().resolved().1);
+    keys(&mut app, "<down>B");
+    let status = app.status().unwrap().to_owned();
+    assert!(status.starts_with("joined box a") && status.contains("[box.b] dropped"), "{status}");
+    assert!(app.draft().get(&["box", "b"]).is_none());
+    assert!(app.draft().resolved().1.is_empty(), "{:?}", app.draft().resolved().1);
+    assert_eq!(
+        app.draft()
+            .resolved()
+            .0
+            .boxes
+            .get("a")
+            .and_then(|b| b.title.as_ref())
+            .map(|t| t.text.as_str()),
+        Some("A")
+    );
+    // Two undos put both the title and [box.b] back.
+    keys(&mut app, "uu");
+    assert!(app.draft().get(&["box", "b"]).is_some());
+    assert_eq!(row(&app, 1).get("title").and_then(toml::Value::as_str), Some("T"));
+    assert!(!app.draft().is_dirty());
+    // A row form open while ctrl-z takes the row back closes; so does a
+    // column's when the column goes. A module's form stays (rebuilt).
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "a<enter>");
+    assert!(app.form_keys().is_some_and(|k| k.contains(&"separator".to_owned())));
+    app.input(Input::Key(Key::Ctrl('z')));
+    assert!(app.form_keys().is_none(), "the form of a row that is gone closes");
+    assert_eq!(app.draft().rows().len(), 2);
+    keys(&mut app, "C<enter>");
+    assert!(app.form_keys().is_some_and(|k| k.contains(&"width".to_owned())));
+    app.input(Input::Key(Key::Ctrl('z')));
+    assert!(app.form_keys().is_none());
+    keys(&mut app, "<right><enter>");
+    let before = app.form_keys().unwrap();
+    // Seven down from `enabled` is `hide_when_empty`, a toggle.
+    keys(&mut app, "<down><down><down><down><down><down><down><enter>");
+    assert!(app.draft().get(&["modules", "path", "hide_when_empty"]).is_some());
+    app.input(Input::Key(Key::Ctrl('z')));
+    assert!(app.draft().get(&["modules", "path"]).is_none());
+    assert_eq!(app.form_keys(), Some(before), "a module's form is rebuilt, not closed");
+    keys(&mut app, "<esc>");
+    // `]` on a module of the right group splits the row and drops the
+    // emptied `right`; `[` from a stack's inner row at column 1 inserts a
+    // column before the stack.
+    keys(&mut app, "<right><right><right><right>");
+    assert_eq!(app.selected(), Some("clock"));
+    keys(&mut app, "]");
+    let (config, problems) = app.draft().resolved();
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(config.rows[0].cols.len(), 2);
+    assert_eq!(config.rows[0].cols[0].right, Vec::<String>::new());
+    assert_eq!(config.rows[0].cols[1].left, vec!["clock".to_owned()]);
+    let mut stacked = for_test(
+        "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"path\", \"model\"]\n[[row.col]]\nmodules = [\"clock\"]\n",
+        None,
+        Path::new("/home/dev"),
+    );
+    stacked.open_builder();
+    keys(&mut stacked, "<down><down><right>[");
+    assert!(stacked.status().unwrap().contains("new column 1"), "{:?}", stacked.status());
+    let (config, problems) = stacked.draft().resolved();
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(config.rows[0].cols.len(), 3);
+    assert_eq!(config.rows[0].cols[0].left, vec!["path".to_owned()]);
+    assert_eq!(config.rows[0].cols[1].rows.len(), 1, "the stack moved right");
+    // The history holds a hundred edits: the oldest of 101 is gone.
+    let mut many = for_test("", None, Path::new("/home/dev"));
+    many.open_builder();
+    keys(&mut many, "1<down><down><down><down>");
+    for _ in 0..101 {
+        keys(&mut many, "<enter>");
+    }
+    keys(&mut many, "<esc>");
+    assert_eq!(many.draft().get(&["truncate"]).and_then(toml::Value::as_bool), Some(false));
+    for _ in 0..100 {
+        keys(&mut many, "u");
+    }
+    assert!(many.status().unwrap().starts_with("undone"), "{:?}", many.status());
+    assert_eq!(many.draft().get(&["truncate"]).and_then(toml::Value::as_bool), Some(false));
+    keys(&mut many, "u");
+    assert_eq!(many.status(), Some("nothing to undo"));
 }

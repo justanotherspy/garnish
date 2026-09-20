@@ -1327,7 +1327,9 @@ fn color_fields(draft: &Draft, config: &Config) -> Vec<Field> {
 /// box (the box carries the title), each still listed while the file sets
 /// it, so `d` can unset one the parser reports.
 fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
-    let table = draft.row(at).cloned().unwrap_or_default();
+    // No table at the path (an undo took the row back under its open
+    // form): nothing to edit, and the app closes the form.
+    let Some(table) = draft.row(at).cloned() else { return Vec::new() };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::row(at, key);
     let ids = |key: &str| table.get(key).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
@@ -1430,7 +1432,7 @@ impl Field {
 }
 
 fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
-    let table = draft.row(at).cloned().unwrap_or_default();
+    let Some(table) = draft.row(at).cloned() else { return Vec::new() };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::row(at, key);
     vec![
@@ -1448,7 +1450,9 @@ fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
 
 fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let base = ["box", name];
-    let table = draft.get(&base).and_then(Value::as_table).cloned().unwrap_or_default();
+    let Some(table) = draft.get(&base).and_then(Value::as_table).cloned() else {
+        return Vec::new();
+    };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::table(&base, key);
     let mut fields = title_fields(&s, &raw, hints, config);

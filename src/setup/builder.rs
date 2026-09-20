@@ -416,7 +416,7 @@ impl Builder {
         // A row of columns and a stacked column hold no modules themselves:
         // the module goes to the last column, or the last inner row of the
         // stack, and the cursor follows it.
-        let where_ = if item.chips.is_empty() && holds_lists(draft, item.at) {
+        let landed = if item.chips.is_empty() && holds_lists(draft, item.at) {
             let target = self
                 .items
                 .iter()
@@ -449,7 +449,7 @@ impl Builder {
         {
             self.chip = Some(c);
         }
-        Ok(format!("added {id}{where_}"))
+        Ok(format!("added {id}{landed}"))
     }
 
     /// Remove the selected module, or the selected line when no chip is.
@@ -800,26 +800,26 @@ impl Builder {
         if name.is_empty() {
             return Err("a box needs a name".into());
         }
-        if draft.get(&["box", &name]).is_none() {
-            // The first title either row carries becomes the box's.
-            let title_keys = ["title", "title_justify", "title_pad", "title_color"];
-            let mut carried: Vec<(String, Value)> = Vec::new();
-            for at in [above_at, item.at] {
-                let Some(t) = draft.row_mut(at) else { continue };
-                if t.contains_key("title") {
-                    for key in title_keys {
-                        if let Some(v) = t.remove(key)
-                            && carried.iter().all(|(k, _)| k != key)
-                        {
-                            carried.push((key.to_owned(), v));
-                        }
-                    }
-                } else {
-                    for key in title_keys {
-                        t.remove(key);
-                    }
+        // A row in a named box has no title of its own (SPEC § 4.3): the
+        // first title either row carries becomes a new box's, and a title
+        // on a row joining a box that has one already goes.
+        let title_keys = ["title", "title_justify", "title_pad", "title_color"];
+        let mut carried: Vec<(String, Value)> = Vec::new();
+        let mut lost_title = false;
+        for at in [above_at, item.at] {
+            let Some(t) = draft.row_mut(at) else { continue };
+            let titled = t.contains_key("title");
+            for key in title_keys {
+                if let Some(v) = t.remove(key)
+                    && titled
+                    && carried.iter().all(|(k, _)| k != key)
+                {
+                    carried.push((key.to_owned(), v));
                 }
             }
+            lost_title |= titled && joined.is_some();
+        }
+        if draft.get(&["box", &name]).is_none() {
             if carried.is_empty() {
                 carried.push(("title".to_owned(), Value::String(name.clone())));
             }
@@ -831,14 +831,27 @@ impl Builder {
             let table = draft.row_mut(at).ok_or("no such row")?;
             table.insert("box".to_owned(), Value::String(name.clone()));
         }
+        // A row that left another box may have been its last member.
+        let orphans = draft.prune_orphan_boxes();
         self.rebuild(draft);
-        Ok(if joined.is_some() {
+        let mut out = if joined.is_some() {
             format!("joined box {name} with the row above")
         } else {
             format!(
                 "both rows in a new box {name}; enter on a row edits it, [box.{name}] holds the title"
             )
-        })
+        };
+        if lost_title {
+            out.push_str("; the row's title went ([box.");
+            out.push_str(&name);
+            out.push_str("] carries one)");
+        }
+        if !orphans.is_empty() {
+            out.push_str("; [box.");
+            out.push_str(&orphans.join("], [box."));
+            out.push_str("] dropped, nothing used it");
+        }
+        Ok(out)
     }
 
     /// Turn the selected column into a stack of rows (its modules become the

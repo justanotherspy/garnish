@@ -859,6 +859,32 @@ was built, what the reviews found and what was decided, not how.
   happened. The help page holds 22 entries, exactly what 24 rows show.
   Presets: every file passes `config check` and renders uncut at its
   declared width; a read of all 32 renders found nothing beyond the
-  `sidebar-panels` `valign` question already in the backlog. One
-  adversarial review in its own worktree (findings recorded below once
-  taken).
+  `sidebar-panels` `valign` question already in the backlog. CI's
+  nightly, a day newer than the container's, flagged two
+  `map(_).unwrap_or_default()` chains under `map_unwrap_or`; reproduced
+  and fixed with a dated nightly beside the pinned one (CLAUDE.md
+  § Toolchain).
+
+  **One adversarial review** in its own worktree (a no-git brief; the
+  permission classifier refused it a copy of the uncommitted tree, so it
+  read the checkout and mirrored the files into its scratchpad), against
+  the state after the hint-click bug was caught in the self-review (a
+  click on `u undo` ran the undo under `input()`'s snapshot, so the undo
+  itself was recorded as an edit and cleared the redo chain). Its four
+  findings, all taken with tests: `B` on a row carrying a title, joining
+  the named box above, was refused by the parser (a row in a named box
+  takes no title) and the whole edit reverted, so the "a run of rows a
+  key at a time" promise held only for bare rows (the title goes, the
+  status says so); `B` on a row leaving another box orphaned that box's
+  table, refused the same way (`Draft::prune_orphan_boxes`, one place,
+  also behind `b` and the forms); a row's, column's or box's form left
+  open across an undo edited a phantom at the same path (`row_fields`
+  and its kin return nothing for a missing table, the app closes such a
+  form on undo, a module's is rebuilt); picking the preset already in
+  effect claimed to replace the rows. Nits: `Target::BoxWith`'s payload
+  unused (now checked against the selection), a doc comment stacked on
+  the wrong function. Its missing-test list was taken in part (`]` from
+  a right group, `[` from a stack's inner row, `HISTORY_LIMIT`, box use
+  from a column or inner row, `hint_key`, `bare_key_of`); a two-cell
+  glyph under the input cursor and undo after a reload stay unpinned.
+  312 → 319 tests.
