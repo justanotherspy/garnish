@@ -19,9 +19,10 @@ waits for its first tag, which will be `v0.3.0`; `CHANGELOG.md`
 
 **There is no open phase.** The drift between `SPEC.md` and the code is
 the short list under *When asked* in the backlog (a keyboard path to a
-separator or a cap, undo, a cargo feature); everything else in the spec
+separator or a cap, a cargo feature); everything else in the spec
 is implemented, and where Phase 22 was built differently from its design,
-SPEC § 14 says so and why. Phase 23 (usage views and formats) is on the
+SPEC § 14 says so and why (its 2026-09-20 refinements, undo among them,
+are the paragraph after that). Phase 23 (usage views and formats) is on the
 pull request from `claude/docs-workflow-consolidation-vepxgw`, waiting
 for Daniel's merge; its decisions are in `WORKLOG.md` (2026-09-19) and
 its design in SPEC § 3, § 3.3, § 3.8 and § 4.
@@ -57,6 +58,7 @@ its design in SPEC § 3, § 3.3, § 3.8 and § 4.
 | 22 Interactive setup | `garnish setup` (`src/setup/`): home menu, preset picker with a live preview at the real width, builder over the config file's own table with a placement map and click-to-edit preview, schema-generated editors, glyph and string pickers with suggestions, install screen over `install::Steps`; `setup --preset [--install]`; the bare `garnish` on a tty points at `setup`; `fixtures.rs`; snapshot goldens under `tests/golden/setup/`; ratatui + crossterm and toml `preserve_order` | 09-19 |
 | Consolidation | nine gallery presets showing the rest of the vocabulary (28 in all); the review workflow collecting the pull request in job shell with a short prompt and `Bash` whole; the skills shortened and pointed at `setup`; *also try* glyphs on the module pages; `WORKLOG.md` split from this file; `PLAN.md`, `SPEC.md`, `CLAUDE.md`, `README.md`, the guide and `CHANGELOG.md` brought to the code | 09-19 |
 | 23 Usage views and formats | `hide` lists derived from a module's measure (`MeasureKind`, `HideRule`, `Rendered.measure`, one check in `render_group`); the `[format]` table with per-module `tokens`/`percent`/`cost` overrides and `parens = "dim"` through one `detail()` helper; `pace`, `pace_colors`, `eta`, `reset = "elapsed"` and `elapsed_marker` on the two limit windows; `[frame] separator_color` with `inherit`; the `version`, `sandbox`, `voice` and `account` modules (25 ids; `account` is the first cached module outside the repo group, `Clock.workers` keeps pinned renders off the cache, `Clock.settings_keys` seeds the badges' docs samples); `doctor` rows for the two settings keys; four gallery presets (32 in all); seven config goldens; three adversarial reviews | 09-19 |
+| Setup refinements | after Daniel's first use: undo/redo over a history of tables (`Draft.saved` makes dirty a comparison), the hint bar as clickable buttons, pickers opening on the value in effect with `custom…` starting from it, an input cursor; six form bugs found by a walk of every preset's forms (trimmed strings, `[colors]` roles, `blank` and title keys where illegal, orphaned `[box]` tables, silent breakage of another key); `C`/`]`/`[`/`m` growing columns from the cursor, `B` boxing a row with the one above, the module's name as its first `label` suggestion, `preset` swapping its own rows; one adversarial review | 09-20 |
 
 ## Backlog
 
@@ -119,8 +121,10 @@ Open items only; closed ones are in `WORKLOG.md`.
   `cell_modifiers` helper over `TestBackend` next to `snapshot` would
 - [ ] `tests/presets.rs` reads `ticker_step` as an integer for its slide
   check, so a fractional step would be read as 1; no preset uses one
-- [ ] Undo in the builder (the backup and reload cover a bad save; a bad
-  edit is re-edited)
+- [ ] The undo history holds the draft alone: a preview width (`w`) or a
+  fixture (`f`) is not an edit and is not undone, and the history is
+  dropped when a preset is applied from the picker (`Enter`), since that
+  writes the file rather than editing the draft
 
 **Parked designs** (decided, not to be reopened without a reason)
 

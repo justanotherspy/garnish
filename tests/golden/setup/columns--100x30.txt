@@ -27,4 +27,4 @@ row 2     model  context   │ cost
 
 
 row[0].col[1].row[0].title set
-↑↓←→ select  enter edit  m module  a row  C column  t title  b box  1 2 3 keys frame colours  s save
+enter edit  m module  a row  C column  b box  u undo  s save  q quit  ? help

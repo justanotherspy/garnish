@@ -35,6 +35,8 @@ fn keys(app: &mut App, script: &str) {
                 "backtab" => Key::BackTab,
                 "del" => Key::Delete,
                 "bs" => Key::Backspace,
+                "home" => Key::Home,
+                "end" => Key::End,
                 other => panic!("unknown key <{other}>"),
             };
             app.input(Input::Key(key));
@@ -480,8 +482,9 @@ fn edits_the_parser_would_report_are_refused_or_named() {
     keys(&mut app, "<up><enter>");
     keys(&mut app, "repo<enter>");
     assert!(app.draft().get(&["box", "repo"]).is_some());
+    // The pick opens on the box the row is in; `none` is the first entry.
     keys(&mut app, "b");
-    keys(&mut app, "<enter>");
+    keys(&mut app, "<home><enter>");
     assert!(app.status().unwrap().contains("dropped"), "{:?}", app.status());
     assert!(app.draft().get(&["box"]).is_none());
     let problems = app.draft().resolved().1;
@@ -541,8 +544,9 @@ fn row_list_clicks_land_on_the_drawn_chips() {
     click(&mut app, 1, y);
     assert_eq!(app.selected(), None);
     // An inner row's longer label shifts every chip; the ranges follow.
-    // `]` moves `path` into the new second column, `S` stacks that column.
-    keys(&mut app, "C<down><right>]S");
+    // `C` leaves the cursor on the new second column; `]` moves `path` from
+    // the first into it, `S` stacks that column.
+    keys(&mut app, "C<up><right>]S");
     let shot = snapshot(&mut app, 80, 24);
     let (y, line) = shot.lines().enumerate().find(|(_, l)| l.contains("row 2.1")).unwrap();
     let y = u16::try_from(y).unwrap();
@@ -558,7 +562,9 @@ fn deleting_the_last_inner_row_or_column_frees_the_line() {
     let file = home.join("garnish.toml");
     std::fs::write(&file, TWO_ROWS).unwrap();
     let mut app = for_test("", Some(file), home);
-    keys(&mut app, "C<down><down>S<down>x");
+    // `C` selects the new column, `S` stacks it, and the stack's one inner
+    // row is deleted.
+    keys(&mut app, "CS<down>x");
     assert!(app.status().unwrap().contains("deleted"), "{:?}", app.status());
     keys(&mut app, "<up>m");
     keys(&mut app, "clock<enter>");
@@ -585,14 +591,28 @@ fn an_empty_title_removes_the_key_and_a_refused_text_module_leaves_nothing() {
     keys(&mut app, "t");
     keys(&mut app, "<bs><bs><bs><bs><enter>");
     assert!(!app.draft().get(&["row"]).is_some_and(|r| r.to_string().contains("title")));
-    // A text module that cannot be placed (a row of columns is selected)
-    // is not created and no editor opens.
-    keys(&mut app, "C");
-    keys(&mut app, "m<up><enter>");
+    // A text module that cannot be placed (no row at all) is not created
+    // and no editor opens.
+    let mut empty = for_test("[[row]]\nmodules = [\"clock\"]\n", None, Path::new("/home/dev"));
+    empty.open_builder();
+    keys(&mut empty, "x");
+    keys(&mut empty, "m<up><enter>");
+    keys(&mut empty, "motd<enter>");
+    assert!(empty.status().unwrap().contains("no row"), "{:?}", empty.status());
+    assert!(empty.draft().get(&["modules", "text"]).is_none());
+    assert!(!snapshot(&mut empty, 80, 24).contains("[modules.text.motd]"));
+    // On a row of columns, `m` puts the module in the last column and says
+    // so; the cursor follows it there.
+    keys(&mut app, "C<up><up>m");
+    keys(&mut app, "<up><enter>");
     keys(&mut app, "motd<enter>");
-    assert!(app.status().unwrap().contains("columns"), "{:?}", app.status());
-    assert!(app.draft().get(&["modules", "text"]).is_none());
-    assert!(!snapshot(&mut app, 80, 24).contains("[modules.text.motd]"));
+    assert!(app.status().unwrap().contains("to col 2"), "{:?}", app.status());
+    assert!(snapshot(&mut app, 100, 30).contains("[modules.text.motd]"), "its editor opens");
+    keys(&mut app, "<esc>");
+    assert_eq!(app.selected(), Some("text.motd"));
+    let (config, problems) = app.draft().resolved();
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(config.rows[0].cols[1].left, vec!["text.motd".to_owned()]);
 }
 
 #[test]
@@ -662,8 +682,9 @@ fn columns_stacks_titles_and_boxes_are_built_from_the_keys() {
     std::fs::write(&file, TWO_ROWS).unwrap();
     let mut app = for_test("", Some(file.clone()), home);
     keys(&mut app, "C");
-    assert!(app.status().unwrap().contains("column"), "{:?}", app.status());
-    keys(&mut app, "<down><down>S");
+    assert!(app.status().unwrap().contains("column 2"), "{:?}", app.status());
+    // The cursor sits on the new column, so `S` stacks it at once.
+    keys(&mut app, "S");
     keys(&mut app, "<up>b");
     keys(&mut app, "<up><up><enter>");
     // A column takes no title (SPEC § 4.3): `t` on it is refused, and the
@@ -682,4 +703,178 @@ fn columns_stacks_titles_and_boxes_are_built_from_the_keys() {
     let saved = std::fs::read_to_string(&file).unwrap();
     assert!(saved.contains("[[row.col]]") && saved.contains("[[row.col.row]]"), "{saved}");
     assert!(saved.contains("title = \"Repo\""), "{saved}");
+}
+
+#[test]
+fn undo_takes_an_edit_back_and_redo_puts_it_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "u");
+    assert_eq!(app.status(), Some("nothing to undo"));
+    keys(&mut app, "<right>x");
+    assert!(app.draft().is_dirty());
+    assert_eq!(app.selected(), Some("branch"));
+    keys(&mut app, "u");
+    assert_eq!(app.status(), Some("undone: removed path"));
+    assert!(!app.draft().is_dirty(), "back at the file is not an edit");
+    assert_eq!(app.selected(), Some("path"), "the cursor comes back too");
+    keys(&mut app, "U");
+    assert_eq!(app.status(), Some("redone: removed path"));
+    assert!(app.draft().is_dirty());
+    keys(&mut app, "u");
+    // A new edit ends the redo chain; two undos take the module and then
+    // the row back.
+    keys(&mut app, "<down>am");
+    keys(&mut app, "clock<enter>");
+    assert_eq!(app.draft().rows().len(), 3);
+    keys(&mut app, "U");
+    assert_eq!(app.status(), Some("nothing to redo"));
+    keys(&mut app, "uu");
+    assert_eq!(app.draft().rows().len(), 2);
+    assert!(!app.draft().is_dirty());
+    // Inside a form, ctrl-z undoes and the form shows the value put back.
+    keys(&mut app, "1");
+    keys(&mut app, "<down><down><down><down><down><down><down><down><enter>");
+    assert_eq!(app.draft().get(&["align"]).and_then(toml::Value::as_bool), Some(true));
+    app.input(Input::Key(Key::Ctrl('z')));
+    assert!(app.draft().get(&["align"]).is_none());
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.contains("top level") && !shot.contains("* align"), "{shot}");
+    keys(&mut app, "<esc>");
+    // Typing `u` into a picker's filter is not an undo.
+    keys(&mut app, "<right>x");
+    let removed = app.draft().table().clone();
+    keys(&mut app, "mu<esc>");
+    assert_eq!(app.draft().table(), &removed);
+    // The hint bar is a row of buttons: a click on `u undo` undoes, and is
+    // an undo (not an edit: the redo chain survives it).
+    let shot = snapshot(&mut app, 80, 24);
+    let bar = shot.lines().nth(23).unwrap();
+    click(&mut app, col(bar, "u undo"), 23);
+    assert!(app.status().unwrap().starts_with("undone: removed"), "{:?}", app.status());
+    assert!(!app.draft().is_dirty());
+    keys(&mut app, "U");
+    assert!(app.status().unwrap().starts_with("redone: removed"), "{:?}", app.status());
+    assert_eq!(app.draft().table(), &removed);
+    keys(&mut app, "u");
+    // A text module's editor open while ctrl-z takes the module back
+    // closes with it.
+    keys(&mut app, "m<up><enter>");
+    keys(&mut app, "motd<enter>");
+    assert!(app.form_keys().is_some_and(|k| k.contains(&"text".to_owned())));
+    app.input(Input::Key(Key::Ctrl('z')));
+    assert!(app.form_keys().is_none(), "the editor of a module that is gone closes");
+    assert!(app.draft().get(&["modules", "text"]).is_none());
+    // A preset adopted from the picker is a fresh start with nothing to
+    // undo; the builder's own `p` is an edit.
+    let mut fresh = for_test("", None, Path::new("/home/dev"));
+    keys(&mut fresh, "<enter>e");
+    keys(&mut fresh, "u");
+    assert_eq!(fresh.status(), Some("nothing to undo"));
+    keys(&mut fresh, "p");
+    keys(&mut fresh, "compact<enter>y");
+    assert_eq!(fresh.draft().rows().len(), 2);
+    keys(&mut fresh, "u");
+    assert_eq!(fresh.draft().rows().len(), 4, "back to the default preset's rows");
+    // A save moves the baseline: undoing past it is dirty again, since the
+    // file now differs.
+    keys(&mut app, "<right>x");
+    keys(&mut app, "s");
+    assert!(!app.draft().is_dirty());
+    keys(&mut app, "u");
+    assert!(app.draft().is_dirty(), "the file lacks the module put back");
+}
+
+#[test]
+fn values_that_break_another_key_say_so_and_boxes_never_orphan_their_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    // `fill = false` under a `fill_pattern` is taken, and the status names
+    // the key it silences (a walk of every preset's forms found the edit
+    // accepted without a word, 2026-09-20).
+    std::fs::write(&file, "[frame]\nfill_pattern = \"·─\"\n[[row]]\nmodules = [\"clock\"]\n")
+        .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "2<down><enter>");
+    assert!(
+        app.status().unwrap().starts_with("frame.fill set; ⚠ frame.fill_pattern"),
+        "{:?}",
+        app.status()
+    );
+    keys(&mut app, "<esc>");
+    // A row inside a named box lists no title keys and no `blank`, and
+    // unsetting its `box` drops the table nothing joins any more.
+    std::fs::write(
+        &file,
+        "[box.repo]\ntitle = \"Repo\"\n[[row]]\nmodules = [\"clock\"]\nbox = \"repo\"\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "<enter>");
+    assert_eq!(app.form_keys().unwrap(), vec!["separator", "gap", "box"]);
+    keys(&mut app, "<down><down>d");
+    assert!(app.status().unwrap().contains("[box.repo] dropped"), "{:?}", app.status());
+    assert!(app.draft().get(&["box"]).is_none());
+    assert!(app.draft().resolved().1.is_empty(), "{:?}", app.draft().resolved().1);
+    keys(&mut app, "<esc>");
+    // A colour picked for a `[colors]` role is a literal the parser takes.
+    keys(&mut app, "3<enter><enter>");
+    assert!(app.status().unwrap().ends_with("colors.accent set"), "{:?}", app.status());
+    assert!(app.draft().resolved().1.is_empty(), "{:?}", app.draft().resolved().1);
+    keys(&mut app, "<esc>");
+    // A separator picked from the suggestions keeps its spaces.
+    keys(&mut app, "2<down><down><enter><enter>");
+    let sep = app.draft().get(&["frame", "separator"]).and_then(toml::Value::as_str).unwrap();
+    assert!(sep.trim() != sep, "{sep:?} lost its spaces");
+    keys(&mut app, "<esc>");
+}
+
+#[test]
+fn b_boxes_two_rows_and_the_preset_key_follows_its_own_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[[row]]\nmodules = [\"path\"]\ntitle = \"Repo\"\n[[row]]\nmodules = [\"model\"]\n[[row]]\nmodules = [\"clock\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "B");
+    assert!(app.status().unwrap().contains("no row above"), "{:?}", app.status());
+    keys(&mut app, "<down>B");
+    // The name asked for starts from the title above, as a bare key.
+    assert!(snapshot(&mut app, 80, 24).contains("repo▏"), "{}", snapshot(&mut app, 80, 24));
+    keys(&mut app, "<enter>");
+    assert!(app.status().unwrap().contains("new box repo"), "{:?}", app.status());
+    keys(&mut app, "<down>B");
+    assert!(app.status().unwrap().starts_with("joined box repo"), "{:?}", app.status());
+    let (config, problems) = app.draft().resolved();
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(
+        config.boxes.get("repo").and_then(|b| b.title.as_ref()).map(|t| t.text.as_str()),
+        Some("Repo")
+    );
+    assert!(config.rows.iter().all(|r| r.boxed.is_some()));
+    // `preset` in the top form: rows that are still the old preset's follow
+    // it; edited rows stay, and the status says which happened.
+    std::fs::write(&file, "preset = \"compact\"\n").unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert_eq!(app.draft().rows().len(), 2);
+    keys(&mut app, "1<enter><down><enter>");
+    assert!(
+        app.status().unwrap().contains("rows replaced with the default preset's"),
+        "{:?}",
+        app.status()
+    );
+    assert_eq!(app.draft().rows().len(), 4);
+    keys(&mut app, "<esc><right>x");
+    keys(&mut app, "1<enter><down><enter>");
+    assert!(app.status().unwrap().contains("rows below stay"), "{:?}", app.status());
+    assert_eq!(app.draft().get(&["preset"]).and_then(toml::Value::as_str), Some("minimal"));
+    assert_eq!(app.draft().rows().len(), 4);
 }

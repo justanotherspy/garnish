@@ -51,6 +51,26 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   reads stdin).
 - Each module page lists alternative glyphs under *also try*: the same
   list the glyph picker offers.
+- The builder has **undo**: `u` takes the last edit back and `U` puts it
+  again (up to a hundred; `Ctrl+Z`/`Ctrl+R` too, inside a form as well),
+  the key hints at the bottom of every screen are clickable buttons, and
+  a draft whose edits are all undone is not asked about on quit.
+- Columns and boxes from fewer keys: `C` leaves the cursor on the new
+  column so `m` fills it, `]` past the last column (or on a plain row)
+  makes a column for the module, `m` on a row of columns lands in its
+  last column, and `B` boxes a row together with the row above (a run of
+  rows becomes one titled box a key at a time).
+- Fixes from a walk of every preset's forms: a picked separator kept
+  only its glyph (its spaces were trimmed away, so `  ` became `""`);
+  the `[colors]` form offered role names the parser refuses; `blank` and
+  the title keys were offered on rows where no value is legal; unsetting
+  a row's `box` in its form left an orphaned `[box.<name>]` reporting on
+  every tick; a value that silenced another key (`fill = false` under a
+  `fill_pattern`) was accepted without a word; `custom…` started from an
+  empty line instead of the current value, and the input line had no
+  cursor. The `label` picker now starts with the module's own name, and
+  changing `preset` on the top-level form swaps in that preset's rows
+  when the rows were still the old preset's.
 
 **Layout: rows, columns, stacks, titles and boxes** (Phase 21)
 

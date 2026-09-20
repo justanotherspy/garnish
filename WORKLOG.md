@@ -820,3 +820,45 @@ was built, what the reviews found and what was decided, not how.
   remaining clamp) and one unreachable (the order of the hide check and
   the stale mapping, now said in a comment); three single-pin kills got
   a unit test beside their golden. 284 → 312 tests.
+- **2026-09-20** — Setup refinements after Daniel's first use ("some
+  settings don't work", a suggested label, undo, easier columns and
+  boxes), on `claude/tui-presets-settings-bugs-ajz0wh`. A throwaway
+  harness drove every preset (the four built-ins and the 32 gallery
+  files) into the builder and walked every form and every field with
+  `→`, `←` and `Enter`, logging each status line and every parser problem
+  the draft gained; it found six bugs the snapshot tests had missed:
+  `SlotKind::parse` trimmed every value, so a separator picked from the
+  suggestions arrived as its glyph alone and `  ` as `""` (refused as
+  "not one cell" for `fill_char`); the `[colors]` form offered role
+  names, which `resolve_colors` refuses (a role defined by a role has no
+  ground); `blank` was offered on plain rows and the title keys inside a
+  named box, where the parser refuses any value; unsetting a row's `box`
+  in its form (or with `d`) left an orphaned `[box.<name>]` reporting on
+  every tick, and a name made for a box the parser then refused stayed
+  behind the same way; `try_set` took a value that left another key
+  reported (`fill = false` under a `fill_pattern`) with a plain "set",
+  the problem hidden behind that status; `custom…` opened an empty line
+  rather than the value in effect. Each fixed and pinned by a unit or
+  snapshot test; the harness was not kept, its checks being the tests.
+  Built: undo and redo (`u`/`U`, `Ctrl+Z`/`Ctrl+R`, in a form too) over
+  a history of the draft's tables taken around every key and click that
+  changes one, with the list cursor and the status of the time;
+  `Draft.dirty` became a comparison with `saved` (the table as read or
+  last saved), so an edit undone is not an edit, which also replaced
+  `set_path`/`mark_dirty` with `replace_table`; the hint bar as buttons
+  (`ui::hint_cells` measures what `hints` draws; the builder's bar cut
+  to what 80 columns hold, `u undo` on it); an input cursor; pickers
+  opening on the value in effect; `C` inserting after the selected
+  column and selecting the new one, `]`/`[` past the edge making a column
+  for the module (a plain row splitting from it; a module alone in its
+  column stays), `m` on a row of columns landing in its last column; `B`
+  boxing a row with the row above (joining its named box, or a new one
+  named after the title either row carried); the module's name, bare and
+  capitalised, as the first `label` suggestion; the top-level `preset`
+  swapping the rows when they were still the old preset's, saying which
+  happened. The help page holds 22 entries, exactly what 24 rows show.
+  Presets: every file passes `config check` and renders uncut at its
+  declared width; a read of all 32 renders found nothing beyond the
+  `sidebar-panels` `valign` question already in the backlog. One
+  adversarial review in its own worktree (findings recorded below once
+  taken).

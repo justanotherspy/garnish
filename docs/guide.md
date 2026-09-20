@@ -47,14 +47,17 @@ narrower than a preset wants, or shorter than Claude Code's fullscreen
 renderer shows whole); `Enter` writes it, and the install step follows
 when Claude Code has no `statusLine` yet. *Build a custom layout* opens
 the builder: the preview at the top, your rows below it, and single keys
-to add a module (`m`, with search), a row (`a`), a column (`C`), a stack
-(`S`), a title (`t`) or a box (`b`), to edit the selected module or row
-(`Enter`; a click in the preview selects, a second click edits), and to
-open the top-level keys (`1`), the frame (`2`) and the colours (`3`).
-`f` cycles the sample payloads, `w` previews at another width, `s`
-saves (a backup of the previous file is kept), `I` installs, `?` lists
-every key. When a config already exists, `setup` opens straight into the
-builder on it.
+to add a module (`m`, with search), a row (`a`), a column (`C`, which
+leaves the cursor on the new column; `]` on a module past the last
+column makes one for it), a stack (`S`), a title (`t`) or a box (`b`;
+`B` boxes the row together with the row above), to edit the selected
+module or row (`Enter`; a click in the preview selects, a second click
+edits), and to open the top-level keys (`1`), the frame (`2`) and the
+colours (`3`). `u` undoes the last edit and `U` redoes it, `f` cycles
+the sample payloads, `w` previews at another width, `s` saves (a backup
+of the previous file is kept), `I` installs, `?` lists every key, and
+the key hints along the bottom are clickable. When a config already
+exists, `setup` opens straight into the builder on it.
 
 Without the screen:
 
