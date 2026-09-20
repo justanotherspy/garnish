@@ -470,10 +470,26 @@ for the contract and `docs/` for user docs.
   file's `toml::Table` (`setup::Draft`), never a resolved `Config`, so a
   save writes only what the file and the edits carry; `Draft::resolved`
   runs the real parser and `App::try_set` refuses a value the parser would
-  report, at the slot's own path. Snapshot goldens live under
+  report at the slot's own path and names one it reports elsewhere (a
+  key that silences another is still set). A form lists only keys the
+  parser would take for that table, plus any the file already sets, so
+  `d` can unset one it reports; a picker's entries must each be a value
+  the parser takes for that key (the `[colors]` form learned this: a
+  role name is not a literal). Undo needs no call at an edit site: every
+  key or click handled in the builder is bracketed by `App::input`, which
+  keeps the table it replaced when the table changed, so a new edit path
+  is undoable by construction; only the undo keys themselves and the
+  picker's preset adoption bypass it. `Draft::is_dirty` compares the
+  table with the file's, never a flag, so an edit undone is not an edit.
+  Snapshot goldens live under
   `tests/golden/setup/` and `tests/setup.rs` lists every one it writes;
   `setup::for_test` pins the clock, aims install at a temporary home and
   shows paths under it as `~/…`, so a temp path never reaches a golden.
+  The cheapest hunt for a form that cannot take a value is a harness that
+  loads every preset, walks every field with `→`, `←` and `Enter`, and
+  logs the status and the parser's problems after each (2026-09-20: six
+  bugs in a minute of runtime; keep the harness out of the tree, its
+  findings become tests).
 - **`frame.rs` owns the characters, `layout.rs` owns where they go.** A
   row is columns (SPEC § 4.3), so there is one composer for every shape:
   `Layout::lines` → blocks → `row_body` → `wrap_frame` or the box's

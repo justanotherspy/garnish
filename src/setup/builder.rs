@@ -300,6 +300,22 @@ impl Builder {
         found.is_some()
     }
 
+    /// The row above the selected one in its own list (a `[[row]]` above a
+    /// `[[row]]`, an inner row above an inner row), with the name of the
+    /// box it is in when that is a named one; `None` for a column or the
+    /// first row of its list.
+    #[must_use]
+    pub fn above(&self, draft: &Draft) -> Option<(RowAt, Option<String>)> {
+        let item = self.item()?;
+        let above = match item.kind {
+            ItemKind::Col => return None,
+            ItemKind::Row => RowAt::row(item.at.row.checked_sub(1)?),
+            ItemKind::Inner => RowAt { inner: Some(item.at.inner?.checked_sub(1)?), ..item.at },
+        };
+        let name = draft.row(above)?.get("box").and_then(Value::as_str).map(str::to_owned);
+        Some((above, name))
+    }
+
     /// Select the first line of row `row`.
     pub fn select_row(&mut self, row: usize) {
         if let Some(i) = self.items.iter().position(|item| item.at.row == row) {
@@ -394,14 +410,29 @@ impl Builder {
     /// # Errors
     /// Why nothing was added, for the status bar.
     pub fn add_module(&mut self, draft: &mut Draft, id: &str) -> Result<String, String> {
-        let Some(item) = self.item().cloned() else {
+        let Some(mut item) = self.item().cloned() else {
             return Err("no row selected; add one with a".into());
         };
-        if item.chips.is_empty()
-            && draft.row(item.at).is_some_and(|t| t.contains_key("col") || t.contains_key("row"))
-        {
-            return Err("this line holds columns; select a column or an inner row".into());
-        }
+        // A row of columns and a stacked column hold no modules themselves:
+        // the module goes to the last column, or the last inner row of the
+        // stack, and the cursor follows it.
+        let landed = if item.chips.is_empty() && holds_lists(draft, item.at) {
+            let target = self
+                .items
+                .iter()
+                .rposition(|it| {
+                    it.at.row == item.at.row
+                        && (item.at.col.is_none() || it.at.col == item.at.col)
+                        && !holds_lists(draft, it.at)
+                })
+                .ok_or("this line holds columns; select a column or an inner row")?;
+            self.cursor = target;
+            self.chip = None;
+            item = self.items.get(target).cloned().ok_or("no such line")?;
+            format!(" to {}", item.label().trim())
+        } else {
+            String::new()
+        };
         let (side, index) = self
             .selected_chip()
             .map_or((Side::Left, usize::MAX), |c| (c.side, c.index.saturating_add(1)));
@@ -418,7 +449,7 @@ impl Builder {
         {
             self.chip = Some(c);
         }
-        Ok(format!("added {id}"))
+        Ok(format!("added {id}{landed}"))
     }
 
     /// Remove the selected module, or the selected line when no chip is.
@@ -613,6 +644,10 @@ impl Builder {
     }
 
     /// Move the selected module to the previous or next column of its row.
+    /// Past the last (or first) column a new one is made for it, and a
+    /// plain row gets its columns on the way, so a column starts from the
+    /// module that goes in it; a module alone in its column is not moved
+    /// into a new one, since that would only leave an empty column behind.
     ///
     /// # Errors
     /// Why nothing moved, for the status bar.
@@ -621,13 +656,49 @@ impl Builder {
         let Some(chip) = self.selected_chip().cloned() else {
             return Err("select a module first".into());
         };
-        let Some(col) = item.at.col else {
-            return Err("this row has no columns; C adds them".into());
+        let row = RowAt::row(item.at.row);
+        let alone = item.chips.len() == 1;
+        // A plain row becomes one column holding its groups; the module's
+        // own table is then that column.
+        let mut from_at = if item.at.col.is_none() {
+            if alone {
+                return Err("the row's only module; m adds another first".into());
+            }
+            split_into_column(draft.row_mut(row).ok_or("no such row")?);
+            RowAt { row: item.at.row, col: Some(0), inner: None }
+        } else {
+            item.at
         };
-        let target = if next {
+        let col = from_at.col.unwrap_or(0);
+        let count =
+            draft.row(row).and_then(|t| t.get("col")).and_then(Value::as_array).map_or(0, Vec::len);
+        let at_edge = if next { col.saturating_add(1) >= count } else { col == 0 };
+        let mut made = false;
+        let target = if at_edge {
+            if alone {
+                return Err(format!(
+                    "already in the {} column, and alone in it",
+                    if next { "last" } else { "first" }
+                ));
+            }
+            // A new column beside this one; inserting before shifts this
+            // one right.
+            let insert_at = if next { col.saturating_add(1) } else { col };
+            let cols = draft
+                .row_mut(row)
+                .and_then(|t| t.get_mut("col"))
+                .and_then(Value::as_array_mut)
+                .ok_or("no columns")?;
+            cols.insert(insert_at.min(cols.len()), Value::Table(Table::new()));
+            made = true;
+            if !next {
+                from_at.col = Some(col.saturating_add(1));
+            }
+            insert_at
+        } else if next {
             col.saturating_add(1)
         } else {
-            col.checked_sub(1).ok_or("already in the first column")?
+            col.saturating_sub(1)
         };
         let target_at = RowAt { row: item.at.row, col: Some(target), inner: None };
         if draft.row(target_at).is_none() {
@@ -636,7 +707,7 @@ impl Builder {
         if draft.row(target_at).is_some_and(|t| t.contains_key("row")) {
             return Err("that column is a stack; select one of its rows".into());
         }
-        let from_table = draft.row_mut(item.at).ok_or("no such row")?;
+        let from_table = draft.row_mut(from_at).ok_or("no such row")?;
         let mut from = ids(from_table, chip.side.key());
         if chip.index >= from.len() {
             return Err("no such module".into());
@@ -658,12 +729,18 @@ impl Builder {
             self.cursor = i;
         }
         self.chip = self.item().and_then(|i| i.chips.iter().position(|c| c.id == id));
-        Ok(format!("{id} moved to column {}", target.saturating_add(1)))
+        let n = target.saturating_add(1);
+        Ok(if made {
+            format!("{id} moved to a new column {n}")
+        } else {
+            format!("{id} moved to column {n}")
+        })
     }
 
-    /// Give the selected row columns: its own groups become the first
-    /// column and an empty second one follows; on a row that has columns,
-    /// add one more.
+    /// Give the selected row a column: a plain row's own groups become the
+    /// first column and an empty one follows; on a row that has columns the
+    /// new one goes after the selected column (at the end from the row
+    /// line). The cursor lands on the new column, so `m` fills it.
     ///
     /// # Errors
     /// Why no column was added, for the status bar.
@@ -671,24 +748,110 @@ impl Builder {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
         let at = RowAt::row(item.at.row);
         let table = draft.row_mut(at).ok_or("no such row")?;
-        if let Some(cols) = table.get_mut("col").and_then(Value::as_array_mut) {
-            cols.push(Value::Table(Table::new()));
+        let index = if let Some(cols) = table.get_mut("col").and_then(Value::as_array_mut) {
+            let index = item.at.col.map_or(cols.len(), |c| c.saturating_add(1).min(cols.len()));
+            cols.insert(index, Value::Table(Table::new()));
+            index
         } else {
-            let mut first = Table::new();
-            if let Some(m) = table.remove("modules") {
-                first.insert("modules".to_owned(), m);
+            split_into_column(table);
+            if let Some(cols) = table.get_mut("col").and_then(Value::as_array_mut) {
+                cols.push(Value::Table(Table::new()));
             }
-            if let Some(r) = table.remove("right") {
-                first.insert("right".to_owned(), r);
-            }
-            table.insert(
-                "col".to_owned(),
-                Value::Array(vec![Value::Table(first), Value::Table(Table::new())]),
-            );
-        }
+            1
+        };
         self.rebuild(draft);
-        self.select_row(at.row);
-        Ok("added a column".into())
+        let target = RowAt { row: at.row, col: Some(index), inner: None };
+        if let Some(i) =
+            self.items.iter().position(|it| it.at == target && it.kind == ItemKind::Col)
+        {
+            self.cursor = i;
+        }
+        self.chip = None;
+        Ok(format!("added column {}; m adds a module to it", index.saturating_add(1)))
+    }
+
+    /// Box the selected row together with the row above it (`B`): the row
+    /// joins the named box the row above is in, or both go into a new
+    /// `[box.<name>]`, which takes the title either row carried (a row in
+    /// a named box has none of its own, SPEC § 4.3).
+    ///
+    /// # Errors
+    /// Why nothing was boxed, for the status bar.
+    pub fn box_with_above(&mut self, draft: &mut Draft, name: &str) -> Result<String, String> {
+        let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
+        if item.kind == ItemKind::Col {
+            return Err("a column is boxed on its own: b".into());
+        }
+        let index = match item.kind {
+            ItemKind::Row => item.at.row,
+            ItemKind::Col | ItemKind::Inner => item.at.inner.unwrap_or(0),
+        };
+        let above_index = index.checked_sub(1).ok_or("no row above this one")?;
+        let above_at = match item.kind {
+            ItemKind::Row => RowAt::row(above_index),
+            ItemKind::Col | ItemKind::Inner => RowAt { inner: Some(above_index), ..item.at },
+        };
+        let joined = draft
+            .row(above_at)
+            .and_then(|t| t.get("box"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let name = joined.clone().unwrap_or_else(|| name.to_owned());
+        if name.is_empty() {
+            return Err("a box needs a name".into());
+        }
+        // A row in a named box has no title of its own (SPEC § 4.3): the
+        // first title either row carries becomes a new box's, and a title
+        // on a row joining a box that has one already goes.
+        let title_keys = ["title", "title_justify", "title_pad", "title_color"];
+        let mut carried: Vec<(String, Value)> = Vec::new();
+        let mut lost_title = false;
+        for at in [above_at, item.at] {
+            let Some(t) = draft.row_mut(at) else { continue };
+            let titled = t.contains_key("title");
+            for key in title_keys {
+                if let Some(v) = t.remove(key)
+                    && titled
+                    && carried.iter().all(|(k, _)| k != key)
+                {
+                    carried.push((key.to_owned(), v));
+                }
+            }
+            lost_title |= titled && joined.is_some();
+        }
+        if draft.get(&["box", &name]).is_none() {
+            if carried.is_empty() {
+                carried.push(("title".to_owned(), Value::String(name.clone())));
+            }
+            for (key, v) in carried {
+                draft.set(&["box", &name, &key], v);
+            }
+        }
+        for at in [above_at, item.at] {
+            let table = draft.row_mut(at).ok_or("no such row")?;
+            table.insert("box".to_owned(), Value::String(name.clone()));
+        }
+        // A row that left another box may have been its last member.
+        let orphans = draft.prune_orphan_boxes();
+        self.rebuild(draft);
+        let mut out = if joined.is_some() {
+            format!("joined box {name} with the row above")
+        } else {
+            format!(
+                "both rows in a new box {name}; enter on a row edits it, [box.{name}] holds the title"
+            )
+        };
+        if lost_title {
+            out.push_str("; the row's title went ([box.");
+            out.push_str(&name);
+            out.push_str("] carries one)");
+        }
+        if !orphans.is_empty() {
+            out.push_str("; [box.");
+            out.push_str(&orphans.join("], [box."));
+            out.push_str("] dropped, nothing used it");
+        }
+        Ok(out)
     }
 
     /// Turn the selected column into a stack of rows (its modules become the
@@ -772,6 +935,24 @@ fn new_row() -> Table {
     t
 }
 
+/// Whether the table at `at` holds `[[row.col]]` or `[[row.col.row]]`
+/// tables rather than modules of its own.
+fn holds_lists(draft: &Draft, at: RowAt) -> bool {
+    draft.row(at).is_some_and(|t| t.contains_key("col") || t.contains_key("row"))
+}
+
+/// Turn a plain row's groups into its first (and only) `[[row.col]]`.
+fn split_into_column(table: &mut Table) {
+    let mut first = Table::new();
+    if let Some(m) = table.remove("modules") {
+        first.insert("modules".to_owned(), m);
+    }
+    if let Some(r) = table.remove("right") {
+        first.insert("right".to_owned(), r);
+    }
+    table.insert("col".to_owned(), Value::Array(vec![Value::Table(first)]));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,6 +1015,102 @@ mod tests {
         b.shift(&mut d, false).unwrap();
         assert_eq!(b.cursor, 1);
         assert_eq!(ids_at(&d, RowAt::row(1), "modules"), vec!["model"]);
+    }
+
+    /// Columns grow from where the cursor is (2026-09-20): `C` inserts after
+    /// the selected column and selects the new one, `]` and `[` past the
+    /// edge make a column for the module, a plain row splits from its
+    /// module, `m` on a row of columns lands in the last one, and `B` boxes
+    /// two rows together.
+    #[test]
+    fn columns_grow_from_the_selection_and_boxes_join_the_row_above() {
+        let col = |c: usize| RowAt { row: 0, col: Some(c), inner: None };
+        let mut d = draft();
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        let msg = b.add_column(&mut d).unwrap();
+        assert!(msg.starts_with("added column 2"), "{msg}");
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Col, col(1))));
+        assert_eq!(ids_at(&d, col(0), "modules"), vec!["path", "branch"]);
+        // `C` on column 1 inserts after it, not at the end.
+        b.move_line(false);
+        let msg = b.add_column(&mut d).unwrap();
+        assert!(msg.starts_with("added column 2"), "{msg}");
+        let cols = d.row(RowAt::row(0)).unwrap().get("col").unwrap().as_array().unwrap().len();
+        assert_eq!(cols, 3);
+        assert_eq!(b.item().map(|i| i.at), Some(col(1)));
+        // `m` on the row line goes to the last column, and says so.
+        b.select_row(0);
+        assert_eq!(b.add_module(&mut d, "model").unwrap(), "added model to col 3");
+        assert_eq!(ids_at(&d, col(2), "modules"), vec!["model"]);
+        assert_eq!(b.selected_id(), Some("model"));
+        // `]` past the last column makes a new one, unless the module is
+        // alone in its column.
+        let err = b.switch_column(&mut d, true).unwrap_err();
+        assert!(err.contains("alone"), "{err}");
+        assert!(b.select_module("branch", Some(0)));
+        assert_eq!(b.switch_column(&mut d, true).unwrap(), "branch moved to column 2");
+        assert_eq!(b.selected_id(), Some("branch"));
+        b.switch_column(&mut d, true).unwrap();
+        assert_eq!(ids_at(&d, col(2), "modules"), vec!["model", "branch"]);
+        assert_eq!(b.switch_column(&mut d, true).unwrap(), "branch moved to a new column 4");
+        assert_eq!(ids_at(&d, col(3), "modules"), vec!["branch"]);
+        // `[` at the first column makes one before it, shifting the rest.
+        assert!(b.select_module("path", Some(0)));
+        assert_eq!(b.switch_column(&mut d, false).unwrap(), "path moved to a new column 1");
+        assert_eq!(ids_at(&d, col(0), "modules"), vec!["path"]);
+        assert_eq!(ids_at(&d, col(1), "right"), vec!["clock"]);
+        assert_eq!(b.selected_id(), Some("path"));
+        let (_, errs) = d.resolved();
+        assert!(errs.is_empty(), "{errs:?}");
+        // A plain row splits into columns from its module; its only module
+        // is refused.
+        let mut d = draft();
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        assert!(b.select_module("branch", Some(0)));
+        assert_eq!(b.switch_column(&mut d, true).unwrap(), "branch moved to a new column 2");
+        assert_eq!(ids_at(&d, col(0), "modules"), vec!["path"]);
+        assert_eq!(ids_at(&d, col(1), "modules"), vec!["branch"]);
+        assert_eq!(d.resolved().1, Vec::new());
+        assert!(b.select_module("model", Some(1)));
+        assert!(b.switch_column(&mut d, true).unwrap_err().contains("only module"));
+        // `B`: a new box for two rows takes the title the row above carried;
+        // a third row joins it; the first row and a column have no above.
+        let mut d = Draft::from_text(
+            "[[row]]\nmodules = [\"path\"]\ntitle = \"Repo\"\ntitle_justify = \"center\"\n[[row]]\nmodules = [\"model\"]\n[[row]]\nmodules = [\"clock\"]\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        assert!(b.above(&d).is_none(), "the first row has none above");
+        assert!(b.box_with_above(&mut d, "x").is_err());
+        b.select_row(1);
+        assert_eq!(b.above(&d), Some((RowAt::row(0), None)));
+        let msg = b.box_with_above(&mut d, "repo").unwrap();
+        assert!(msg.contains("new box repo"), "{msg}");
+        assert_eq!(d.get(&["box", "repo", "title"]).and_then(Value::as_str), Some("Repo"));
+        assert_eq!(
+            d.get(&["box", "repo", "title_justify"]).and_then(Value::as_str),
+            Some("center")
+        );
+        assert!(d.row(RowAt::row(0)).unwrap().get("title").is_none(), "the title moved");
+        b.select_row(2);
+        assert_eq!(b.above(&d), Some((RowAt::row(1), Some("repo".into()))));
+        let msg = b.box_with_above(&mut d, "ignored").unwrap();
+        assert!(msg.starts_with("joined box repo"), "{msg}");
+        let (config, errs) = d.resolved();
+        assert!(errs.is_empty(), "{errs:?}");
+        assert!(config.rows.iter().all(|r| r.boxed.is_some()));
+        assert!(b.box_with_above(&mut d, "").is_ok(), "a joined box needs no name");
+        let mut d = Draft::from_text(
+            "[[row]]\n[[row.col]]\nmodules = [\"path\"]\n[[row.col]]\nmodules = [\"clock\"]\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.move_line(true);
+        b.move_line(true);
+        assert!(b.above(&d).is_none());
+        assert!(b.box_with_above(&mut d, "x").unwrap_err().contains("column"));
     }
 
     #[test]

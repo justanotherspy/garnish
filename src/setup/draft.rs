@@ -70,10 +70,12 @@ impl RowAt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Draft {
     table: Table,
+    /// The table as the file holds it (as read, or as last saved): the draft
+    /// is dirty while it differs, so an edit undone is not an edit.
+    saved: Table,
     path: Option<PathBuf>,
     stamp: Option<Stamp>,
     unreadable: Option<String>,
-    dirty: bool,
 }
 
 impl Draft {
@@ -115,7 +117,7 @@ impl Draft {
         {
             table.insert("hide_empty_rows".to_owned(), v);
         }
-        Self { table, path: None, stamp: None, unreadable: None, dirty: false }
+        Self { saved: table.clone(), table, path: None, stamp: None, unreadable: None }
     }
 
     /// A draft for a preset: a built-in name gives `preset = "<name>"` with
@@ -126,7 +128,7 @@ impl Draft {
         if let Some(top) = config::presets::TopPreset::parse(name) {
             let mut draft = Self::from_text(&format!("preset = {}\n", toml_str(top.name())));
             draft.materialise_rows();
-            draft.dirty = false;
+            draft.saved = draft.table.clone();
             return Some(draft);
         }
         crate::gallery::find(name).map(|p| Self::from_text(&crate::gallery::body(p.source)))
@@ -138,32 +140,28 @@ impl Draft {
         self.path.as_deref()
     }
 
-    /// Point the draft at a file (a preset picked for a config that did not
-    /// exist yet).
-    pub fn set_path(&mut self, path: Option<PathBuf>) {
-        self.stamp = path.as_deref().and_then(Stamp::of);
-        self.path = path;
-    }
-
-    /// Whether anything changed since the last open or save.
+    /// Whether the table differs from the file's (as read, or as last saved).
     #[must_use]
-    pub const fn is_dirty(&self) -> bool {
-        self.dirty
+    pub fn is_dirty(&self) -> bool {
+        self.table != self.saved
     }
 
-    /// Count the draft as edited: a preset adopted over a file differs from
-    /// it even though no key was typed.
-    pub const fn mark_dirty(&mut self) {
-        self.dirty = true;
+    /// Swap the draft's content for `table` (a preset adopted, an edit
+    /// undone), keeping the file it belongs to and what that file holds, so
+    /// the draft stays dirty exactly while it differs from the file.
+    pub fn replace_table(&mut self, table: Table) {
+        self.table = table;
     }
 
     /// The preset's rows written out on opening, so the list has lines to
     /// edit, without counting as an edit: a file that only names a preset
     /// gains its rows on its first save.
     pub fn materialise_rows_as_read(&mut self) {
-        let dirty = self.dirty;
+        let was_dirty = self.is_dirty();
         self.materialise_rows();
-        self.dirty = dirty;
+        if !was_dirty {
+            self.saved = self.table.clone();
+        }
     }
 
     /// Why the file on disk cannot be saved over: its TOML syntax error, or
@@ -217,16 +215,13 @@ impl Draft {
             table = next;
         }
         table.insert((*last).to_owned(), value);
-        self.dirty = true;
     }
 
     /// Remove the key at a path, and every table it leaves empty above it
     /// (an empty `[modules.context]` says nothing and would only clutter
     /// the file).
     pub fn remove(&mut self, path: &[&str]) {
-        if remove_at(&mut self.table, path) {
-            self.dirty = true;
-        }
+        remove_at(&mut self.table, path);
     }
 
     /// Whether a key is set in the file (as opposed to resolved from a
@@ -250,7 +245,6 @@ impl Draft {
     /// holds something that is not an array, which the parser reports.
     pub fn rows_mut(&mut self) -> Option<&mut Vec<Value>> {
         self.materialise_rows();
-        self.dirty = true;
         let slot = self.table.entry("row".to_owned()).or_insert_with(|| Value::Array(Vec::new()));
         if !slot.is_array() {
             *slot = Value::Array(Vec::new());
@@ -286,7 +280,6 @@ impl Draft {
             })
             .collect();
         self.table.insert("row".to_owned(), Value::Array(rows));
-        self.dirty = true;
     }
 
     /// The table at `at`, when it exists.
@@ -353,7 +346,7 @@ impl Draft {
             .map_err(|e| format!("the draft cannot be written as TOML: {e}"))?;
         let backup = crate::install::replace_file(&path, &text, existed)?;
         self.stamp = Stamp::of(&path);
-        self.dirty = false;
+        self.saved = self.table.clone();
         Ok(backup)
     }
 
@@ -361,6 +354,38 @@ impl Draft {
     /// the change check).
     pub fn reload(&mut self) {
         *self = Self::open(self.path.clone());
+    }
+
+    /// Whether any row, column or inner row names the box.
+    #[must_use]
+    pub fn box_in_use(&self, name: &str) -> bool {
+        let names = |t: &Table| t.get("box").and_then(Value::as_str) == Some(name);
+        let tables = |t: &Table, key: &str| -> Vec<Table> {
+            t.get(key)
+                .and_then(Value::as_array)
+                .map_or_default(|a| a.iter().filter_map(Value::as_table).cloned().collect())
+        };
+        self.rows().iter().filter_map(Value::as_table).any(|row| {
+            names(row)
+                || tables(row, "col")
+                    .iter()
+                    .any(|col| names(col) || tables(col, "row").iter().any(names))
+        })
+    }
+
+    /// Drop every `[box.<name>]` nothing joins any more, which the parser
+    /// would otherwise report on every tick; the names dropped, in file
+    /// order.
+    pub fn prune_orphan_boxes(&mut self) -> Vec<String> {
+        let names: Vec<String> = self
+            .get(&["box"])
+            .and_then(Value::as_table)
+            .map_or_default(|t| t.keys().cloned().collect());
+        let orphans: Vec<String> = names.into_iter().filter(|n| !self.box_in_use(n)).collect();
+        for name in &orphans {
+            self.remove(&["box", name]);
+        }
+        orphans
     }
 }
 
@@ -452,6 +477,31 @@ mod tests {
         assert!(e.is_dirty());
         let (config, _) = e.resolved();
         assert_eq!(config.modules.get("context").unwrap().int("width"), 30);
+        // Dirty is a comparison with the file, not a flag: an edit put back
+        // by hand (or by undo) leaves nothing to save, and a table swapped
+        // in keeps the file it is compared with.
+        let mut f = Draft::from_text("theme = \"nord\"\n");
+        let original = f.table().clone();
+        f.set(&["theme"], Value::String("mono".into()));
+        assert!(f.is_dirty());
+        f.set(&["theme"], Value::String("nord".into()));
+        assert!(!f.is_dirty(), "the same value as the file is not an edit");
+        f.replace_table(Table::new());
+        assert!(f.is_dirty());
+        f.replace_table(original);
+        assert!(!f.is_dirty());
+        // A box is in use from a row, a column or an inner row alike; only
+        // the one nothing names is pruned.
+        let mut g = Draft::from_text(
+            "[box.r]\n[box.c]\n[box.i]\n[box.orphan]\n[[row]]\nmodules = [\"path\"]\nbox = \"r\"\n[[row]]\n[[row.col]]\nbox = \"c\"\nmodules = [\"model\"]\n[[row.col]]\n[[row.col.row]]\nbox = \"i\"\nmodules = [\"clock\"]\n",
+        );
+        for name in ["r", "c", "i"] {
+            assert!(g.box_in_use(name), "{name}");
+        }
+        assert!(!g.box_in_use("orphan"));
+        assert_eq!(g.prune_orphan_boxes(), vec!["orphan".to_owned()]);
+        assert!(g.get(&["box", "orphan"]).is_none() && g.get(&["box", "i"]).is_some());
+        assert_eq!(g.prune_orphan_boxes(), Vec::<String>::new());
     }
 
     #[test]

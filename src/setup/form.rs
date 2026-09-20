@@ -175,6 +175,10 @@ impl SlotKind {
     /// # Errors
     /// Text that is not a value of the kind, in a line for the status bar.
     pub fn parse(&self, text: &str) -> Result<Option<Value>, String> {
+        // A string keeps its spaces: ` │ ` and `  ` are separators, a pad
+        // is a space, a blank glyph is one cell. Every other kind is read
+        // trimmed.
+        let raw = text;
         let text = text.trim();
         Ok(Some(match self {
             Self::Bool => Value::Boolean(matches!(text, "true" | "yes" | "on" | "1")),
@@ -183,7 +187,8 @@ impl SlotKind {
                 "true" | "yes" | "on" => Value::Boolean(true),
                 _ => Value::Boolean(false),
             },
-            Self::Enum(_) | Self::Str | Self::Color | Self::Icon => Value::String(text.to_owned()),
+            Self::Str | Self::Icon => Value::String(raw.to_owned()),
+            Self::Enum(_) | Self::Color => Value::String(text.to_owned()),
             Self::Preset => {
                 if text.is_empty() {
                     return Ok(None);
@@ -498,14 +503,22 @@ impl Form {
     }
 
     /// `Enter`: toggle, cycle, or open the picker or input the kind wants.
+    /// A picker opens on the value in effect and its `custom…` line starts
+    /// from it, so a label is edited rather than retyped.
     fn activate(field: &Field) -> Outcome {
         let target = Target::Slot(field.slot.clone(), field.kind.clone());
+        let typed = field.value.as_ref().map_or_else(String::new, |v| match v {
+            Value::Array(items) => items.iter().map(show).collect::<Vec<_>>().join(", "),
+            other => show(other),
+        });
         let open = |title: String, mut items: Vec<Choice>, custom: Option<&str>| {
             if let Some(what) = custom {
                 items.push(Choice::custom(what));
             }
             let mut choose = Choose::new(&title, items, target.clone());
             choose.custom_title = format!("{}: custom value", field.key);
+            choose.custom_start.clone_from(&typed);
+            choose.select(&typed);
             Outcome { close: false, push: Some(Layer::Choose(choose)), actions: Vec::new() }
         };
         let input = |title: String, text: String| Outcome {
@@ -513,10 +526,6 @@ impl Form {
             push: Some(Layer::Input(InputBox::new(&title, &text, target.clone()))),
             actions: Vec::new(),
         };
-        let typed = field.value.as_ref().map_or_else(String::new, |v| match v {
-            Value::Array(items) => items.iter().map(show).collect::<Vec<_>>().join(", "),
-            other => show(other),
-        });
         match &field.kind {
             SlotKind::Bool | SlotKind::Tri => Self::step(field, true),
             SlotKind::Enum(vals) => {
@@ -525,7 +534,15 @@ impl Form {
             SlotKind::Preset => {
                 let mut items = vec![Choice::noted("", "follow the top-level preset")];
                 items.extend(Preset::ALL.iter().map(|p| Choice::plain(p.name())));
-                open(field.key.clone(), items, None)
+                let mut out = open(field.key.clone(), items, None);
+                // Unset follows the top level: the first entry, whatever the
+                // module resolves to.
+                if !field.set
+                    && let Some(Layer::Choose(c)) = &mut out.push
+                {
+                    c.cursor = 0;
+                }
+                out
             }
             SlotKind::Int { .. }
             | SlotKind::Float
@@ -704,21 +721,30 @@ fn scan(table: &toml::Table, add: &mut impl FnMut(&str, &str)) {
     }
 }
 
-/// The colour picker's entries: every role, a swatch each, then the named
+/// The named terminal colours every colour picker ends with.
+const NAMED_COLORS: [&str; 9] =
+    ["default", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray"];
+
+/// Two cells in the colour, or blank for the terminal's default.
+fn swatch(c: crate::ansi::Color) -> Span<'static> {
+    super::paint::color(c).map_or_else(
+        || Span::raw("  "),
+        |fg| Span::styled("██", ratatui::style::Style::new().fg(fg)),
+    )
+}
+
+/// The colour picker's entries for a key that takes a role (a module's
+/// `colors.*`, a title, a box): every role with a swatch, then the named
 /// terminal colours.
 fn color_choices(config: &Config) -> Vec<Choice> {
     let mut items: Vec<Choice> = Role::ALL
         .iter()
         .map(|role| {
             let c = config.theme.role(*role);
-            let swatch = super::paint::color(c).map_or_else(
-                || Span::raw("  "),
-                |fg| Span::styled("██", ratatui::style::Style::new().fg(fg)),
-            );
             Choice {
                 label: Line::from(vec![
                     Span::raw(format!("{:<8} ", role.name())),
-                    swatch,
+                    swatch(c),
                     Span::styled(format!("  {}", c.to_spec()), Chrome::muted()),
                 ]),
                 value: role.name().to_owned(),
@@ -726,9 +752,51 @@ fn color_choices(config: &Config) -> Vec<Choice> {
             }
         })
         .collect();
-    for name in ["default", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray"] {
-        items.push(Choice::plain(name));
+    items.extend(NAMED_COLORS.iter().map(|name| Choice::plain(name)));
+    items
+}
+
+/// The colour picker's entries for a `[colors]` role, which takes a literal
+/// only (a role defined by another role would have no ground): the theme's
+/// own literals, each noted with the role it colours, then the named
+/// terminal colours.
+fn literal_color_choices(config: &Config) -> Vec<Choice> {
+    let mut items: Vec<Choice> = Vec::new();
+    for role in Role::ALL {
+        let c = config.theme.role(role);
+        let spec = c.to_spec();
+        if items.iter().any(|i| i.value == spec) {
+            continue;
+        }
+        items.push(Choice {
+            label: Line::from(vec![
+                Span::raw(format!("{spec:<8} ")),
+                swatch(c),
+                Span::styled(format!("  the theme's {}", role.name()), Chrome::muted()),
+            ]),
+            value: spec,
+            custom: false,
+        });
     }
+    items.extend(NAMED_COLORS.iter().map(|name| Choice::plain(name)));
+    items
+}
+
+/// What a module's `label` picker offers first: the module's own name, bare
+/// and capitalised, before the labels the gallery uses.
+fn label_choices(id: &str, hints: &Suggestions) -> Vec<Choice> {
+    let name = id.strip_prefix(crate::modules::text::PREFIX).unwrap_or(id);
+    let spaced = name.replace('_', " ");
+    let mut chars = spaced.chars();
+    let capitalised: String =
+        chars.next().map_or_default(|c| c.to_uppercase().chain(chars).collect());
+    let mut items = vec![
+        Choice::noted(name, "the module's name"),
+        Choice::noted(&capitalised, "the module's name"),
+    ];
+    items.extend(
+        hints.choices("label").into_iter().filter(|c| c.value != name && c.value != capitalised),
+    );
     items
 }
 
@@ -776,11 +844,14 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
     let text = id.strip_prefix(crate::modules::text::PREFIX);
     let (schema, cfg, base): (&ModuleSchema, Option<&crate::config::schema::ModuleCfg>, Vec<&str>) =
         match text {
-            Some(name) => (
-                &crate::modules::text::SCHEMA,
-                config.texts.get(name),
-                vec!["modules", "text", name],
-            ),
+            // A text module is its table: with none (an undo took it back
+            // under an open editor) there is nothing to edit.
+            Some(name) => match config.texts.get(name) {
+                Some(cfg) => {
+                    (&crate::modules::text::SCHEMA, Some(cfg), vec!["modules", "text", name])
+                }
+                None => return Vec::new(),
+            },
             None => match crate::modules::SCHEMAS.iter().find(|s| s.id == id) {
                 Some(s) => (s, config.modules.get(id), vec!["modules", id]),
                 None => return Vec::new(),
@@ -852,7 +923,9 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
             value.or_else(|| Some(to_toml(opt.default.clone()))),
             &opt.default.to_toml(),
         );
-        if opt.kind == Kind::Str {
+        if opt.key == "label" {
+            f = f.with_choices(label_choices(id, hints));
+        } else if opt.kind == Kind::Str {
             f = f.with_choices(hints.choices(opt.key));
         }
         fields.push(f);
@@ -1244,15 +1317,25 @@ fn color_fields(draft: &Draft, config: &Config) -> Vec<Field> {
                 Slot::table(&["colors"], role.name()),
             )
             .valued(draft, Some(Value::String(config.theme.role(*role).to_spec())), palette)
-            .with_choices(color_choices(config))
+            .with_choices(literal_color_choices(config))
         })
         .collect()
 }
 
+/// A row's form lists the keys the parser would take for it: `blank` only
+/// on a spacer or a row with columns, the title keys only outside a named
+/// box (the box carries the title), each still listed while the file sets
+/// it, so `d` can unset one the parser reports.
 fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
-    let table = draft.row(at).cloned().unwrap_or_default();
+    // No table at the path (an undo took the row back under its open
+    // form): nothing to edit, and the app closes the form.
+    let Some(table) = draft.row(at).cloned() else { return Vec::new() };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::row(at, key);
+    let ids = |key: &str| table.get(key).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+    let has_cols = table.contains_key("col");
+    let spacer = !has_cols && !ids("modules") && !ids("right");
+    let named_box = matches!(table.get("box"), Some(Value::String(_)));
     let mut fields = vec![
         Field::new(
             "separator",
@@ -1274,7 +1357,9 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
             .valued(draft, raw("gap"), "1"),
         );
     }
-    fields.extend(title_fields(&s, &raw, hints, config));
+    if !named_box || table.contains_key("title") {
+        fields.extend(title_fields(&s, &raw, hints, config));
+    }
     fields.push(
         Field::new(
             "box",
@@ -1285,15 +1370,17 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
         .valued(draft, raw("box"), "none")
         .with_choices(box_choices(config)),
     );
-    fields.push(
-        Field::new(
-            "blank",
-            "Keep a spacer on screen with one invisible cell when colour is off.",
-            SlotKind::Bool,
-            s("blank"),
-        )
-        .valued(draft, raw("blank"), "false"),
-    );
+    if spacer || has_cols || table.contains_key("blank") {
+        fields.push(
+            Field::new(
+                "blank",
+                "Keep a spacer (or a row of columns) on screen with one invisible cell when colour is off.",
+                SlotKind::Bool,
+                s("blank"),
+            )
+            .valued(draft, raw("blank"), "false"),
+        );
+    }
     fields
 }
 
@@ -1345,7 +1432,7 @@ impl Field {
 }
 
 fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
-    let table = draft.row(at).cloned().unwrap_or_default();
+    let Some(table) = draft.row(at).cloned() else { return Vec::new() };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::row(at, key);
     vec![
@@ -1363,7 +1450,9 @@ fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
 
 fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let base = ["box", name];
-    let table = draft.get(&base).and_then(Value::as_table).cloned().unwrap_or_default();
+    let Some(table) = draft.get(&base).and_then(Value::as_table).cloned() else {
+        return Vec::new();
+    };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::table(&base, key);
     let mut fields = title_fields(&s, &raw, hints, config);
@@ -1580,5 +1669,106 @@ mod tests {
             show(&Value::Array(vec![Value::String("a".into()), Value::Integer(2)])),
             "[a, 2]"
         );
+    }
+
+    /// What a walk of every preset's forms found (2026-09-20): a picked
+    /// separator lost its spaces, the `[colors]` picker offered roles the
+    /// parser refuses, `blank` and the title keys were offered where no
+    /// value is legal, and `custom…` started empty.
+    #[test]
+    fn strings_keep_spaces_colours_take_literals_and_rows_list_only_legal_keys() {
+        assert_eq!(SlotKind::Str.parse(" │ ").unwrap(), Some(Value::String(" │ ".into())));
+        assert_eq!(SlotKind::Str.parse("  ").unwrap(), Some(Value::String("  ".into())));
+        assert_eq!(SlotKind::Icon.parse(" ").unwrap(), Some(Value::String(" ".into())));
+        assert_eq!(
+            SlotKind::Enum(vec!["a".into()]).parse(" a ").unwrap(),
+            Some(Value::String("a".into()))
+        );
+        // `[colors]` takes literals: every entry its picker offers is one.
+        let (colors, _) = built("theme = \"nord\"\n", &FormKind::Colors);
+        for f in &colors.fields {
+            assert!(!f.choices.is_empty(), "{}", f.key);
+            for c in &f.choices {
+                assert!(
+                    crate::ansi::Color::parse(&c.value).is_some(),
+                    "{}: {:?} is not a literal colour",
+                    f.key,
+                    c.value
+                );
+            }
+        }
+        // A module colour still offers the roles, and its label picker
+        // starts with the module's own name.
+        let (m, _) = built("", &FormKind::Module("model".into()));
+        assert!(
+            m.fields
+                .iter()
+                .find(|f| f.key == "colors.icon")
+                .unwrap()
+                .choices
+                .iter()
+                .any(|c| c.value == "accent")
+        );
+        let label = |form: &Form| -> Vec<String> {
+            form.fields
+                .iter()
+                .find(|f| f.key == "label")
+                .unwrap()
+                .choices
+                .iter()
+                .take(2)
+                .map(|c| c.value.clone())
+                .collect()
+        };
+        assert_eq!(label(&m), vec!["model", "Model"]);
+        let (sn, _) = built("", &FormKind::Module("session_name".into()));
+        assert_eq!(label(&sn), vec!["session_name", "Session name"]);
+        let (t, _) =
+            built("[modules.text.motd]\ntext = \"hi\"\n", &FormKind::Module("text.motd".into()));
+        assert_eq!(label(&t), vec!["motd", "Motd"]);
+        // A plain row has no `blank`; a spacer and a row of columns do; a
+        // row inside a named box has no title keys. A key the file sets is
+        // listed whatever the rule, so `d` can unset it.
+        let keys = |text: &str| -> Vec<String> {
+            built(text, &FormKind::Row(RowAt::row(0)))
+                .0
+                .fields
+                .iter()
+                .map(|f| f.key.clone())
+                .collect()
+        };
+        let has = |keys: &[String], k: &str| keys.iter().any(|x| x == k);
+        let plain = keys("[[row]]\nmodules = [\"clock\"]\n");
+        assert!(!has(&plain, "blank") && has(&plain, "title"), "{plain:?}");
+        assert!(has(&keys("[[row]]\nmodules = []\n"), "blank"));
+        assert!(has(&keys("[[row]]\n[[row.col]]\nmodules = [\"clock\"]\n"), "blank"));
+        assert!(has(&keys("[[row]]\nmodules = [\"clock\"]\nblank = true\n"), "blank"));
+        let boxed = keys("[box.b]\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n");
+        assert!(
+            !has(&boxed, "title") && !has(&boxed, "title_pad") && has(&boxed, "box"),
+            "{boxed:?}"
+        );
+        assert!(has(
+            &keys("[box.b]\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\ntitle = \"T\"\n"),
+            "title"
+        ));
+        assert!(
+            has(&keys("[[row]]\nmodules = [\"clock\"]\nbox = true\n"), "title"),
+            "an unnamed box carries no title"
+        );
+        // A picker opens on the value in effect and its custom line starts
+        // from it.
+        let (mut form, _) =
+            built("[modules.path]\nlabel = \"in\"\n", &FormKind::Module("path".into()));
+        form.focus("label");
+        let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+        assert_eq!(c.custom_start, "in");
+        let (mut form, _) = built("", &FormKind::Top);
+        form.focus("theme");
+        let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+        assert_eq!(c.items.get(c.cursor).map(|i| i.value.as_str()), Some("garnish"));
+        form.focus("preset");
+        let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+        assert_eq!(c.items.get(c.cursor).map(|i| i.value.as_str()), Some("default"));
     }
 }

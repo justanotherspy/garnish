@@ -100,6 +100,26 @@ pub fn hints(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The cells each hint of [`hints`] occupies, as `(key, start, end)` from
+/// the line's first cell: what a click on the hint bar is measured against.
+#[must_use]
+pub fn hint_cells<'a>(pairs: &[(&'a str, &str)]) -> Vec<(&'a str, usize, usize)> {
+    let mut x = 0_usize;
+    let mut out = Vec::new();
+    for (i, (key, what)) in pairs.iter().enumerate() {
+        if i > 0 {
+            x = x.saturating_add(2);
+        }
+        let start = x;
+        x = x
+            .saturating_add(crate::ansi::display_width(key))
+            .saturating_add(1)
+            .saturating_add(crate::ansi::display_width(what));
+        out.push((*key, start, x));
+    }
+    out
+}
+
 /// `text` cut to `width` cells with an ellipsis, for a label that must fit
 /// its column.
 #[must_use]
@@ -144,5 +164,9 @@ mod tests {
         assert_eq!(cells(70_000), u16::MAX);
         assert_eq!(clip("hello world", 6), "hello…");
         assert_eq!(hints(&[("q", "quit")]).spans.len(), 3);
+        // The hint cells tile the line the same way `hints` draws it.
+        let pairs = [("enter", "edit"), ("u", "undo")];
+        assert_eq!(hint_cells(&pairs), vec![("enter", 0, 10), ("u", 12, 18)]);
+        assert_eq!(hints(&pairs).width(), 18);
     }
 }

@@ -37,4 +37,4 @@ row 2     model  context   │ cost
 
 
 
-↑↓←→ select  enter edit  m module  a row  C column  t title  b box  1 2 3 keys frame colours  s save  q quit  ? help
+enter edit  m module  a row  C column  b box  u undo  s save  q quit  ? help

@@ -115,9 +115,10 @@ garnish setup           # pick a preset or build a layout, previewed live, then 
 
 `setup` is a full-screen picker and builder: every preset rendered at
 your terminal's real width, rows, columns, titles and boxes from single
-keys, an editor for every option, a preview you can click, and an install
-step that merges the `statusLine` block into `~/.claude/settings.json`
-with a backup kept. Run it again any time to edit the config in place.
+keys, an editor for every option, a preview you can click, undo, and an
+install step that merges the `statusLine` block into
+`~/.claude/settings.json` with a backup kept. Run it again any time to
+edit the config in place.
 
 Without the screen, `garnish setup --preset compact --install` writes a
 preset and hooks it up, and `garnish install` alone does the settings

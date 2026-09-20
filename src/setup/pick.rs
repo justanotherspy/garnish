@@ -24,6 +24,9 @@ pub enum Target {
     Preset,
     /// Put the row, column or inner row at the path in the named box.
     BoxFor(super::draft::RowAt),
+    /// Put the row at the path and the row above it in a new box of the
+    /// typed name (the builder's `B`).
+    BoxWith(super::draft::RowAt),
     /// Preview at the typed terminal width.
     Columns,
 }
@@ -87,6 +90,9 @@ pub struct Choose {
     pub target: Target,
     /// The input line's title when `custom` is picked.
     pub custom_title: String,
+    /// What the input line starts with when `custom` is picked: the value
+    /// in effect, so a label is edited rather than retyped.
+    pub custom_start: String,
 }
 
 impl Choose {
@@ -101,6 +107,15 @@ impl Choose {
             scroll: 0,
             target,
             custom_title: title.to_owned(),
+            custom_start: String::new(),
+        }
+    }
+
+    /// Put the cursor on the entry whose value is `value`, when the list
+    /// has it, so the pick opens on what is in effect.
+    pub fn select(&mut self, value: &str) {
+        if let Some(i) = self.items.iter().position(|c| !c.custom && c.value == value) {
+            self.cursor = i;
         }
     }
 
@@ -167,7 +182,7 @@ impl Choose {
                         close: true,
                         push: Some(Layer::Input(InputBox::new(
                             &self.custom_title,
-                            "",
+                            &self.custom_start,
                             self.target.clone(),
                         ))),
                         actions: Vec::new(),
@@ -224,13 +239,16 @@ impl Choose {
     }
 }
 
-/// A one-line text input.
+/// A one-line text input with a cursor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputBox {
     /// The heading.
     pub title: String,
     /// The text so far.
     pub text: String,
+    /// The cursor, as a character index into `text` (at the end to start,
+    /// so typing appends to the value the box opened with).
+    pub cursor: usize,
     /// What the text is for.
     pub target: Target,
 }
@@ -239,11 +257,22 @@ impl InputBox {
     /// An input for `target`, starting with `text`.
     #[must_use]
     pub fn new(title: &str, text: &str, target: Target) -> Self {
-        Self { title: title.to_owned(), text: text.to_owned(), target }
+        Self {
+            title: title.to_owned(),
+            text: text.to_owned(),
+            cursor: text.chars().count(),
+            target,
+        }
+    }
+
+    /// The byte offset of the cursor.
+    fn at(&self) -> usize {
+        self.text.char_indices().nth(self.cursor).map_or(self.text.len(), |(b, _)| b)
     }
 
     /// Handle a key.
     pub fn handle(&mut self, key: Key) -> Outcome {
+        let len = self.text.chars().count();
         match key {
             Key::Esc => Outcome::close(),
             Key::Enter => Outcome {
@@ -252,38 +281,104 @@ impl InputBox {
                 actions: vec![Action::Typed(self.target.clone(), self.text.clone())],
             },
             Key::Backspace => {
-                self.text.pop();
+                if let Some(prev) = self.cursor.checked_sub(1) {
+                    self.cursor = prev;
+                    let at = self.at();
+                    self.text.remove(at);
+                }
+                Outcome::default()
+            }
+            Key::Delete => {
+                if self.cursor < len {
+                    let at = self.at();
+                    self.text.remove(at);
+                }
+                Outcome::default()
+            }
+            Key::Left => {
+                self.cursor = self.cursor.saturating_sub(1);
+                Outcome::default()
+            }
+            Key::Right => {
+                self.cursor = self.cursor.saturating_add(1).min(len);
+                Outcome::default()
+            }
+            Key::Home => {
+                self.cursor = 0;
+                Outcome::default()
+            }
+            Key::End => {
+                self.cursor = len;
                 Outcome::default()
             }
             Key::Ctrl('u') => {
                 self.text.clear();
+                self.cursor = 0;
                 Outcome::default()
             }
             Key::Char(c) if !c.is_control() => {
-                self.text.push(c);
+                let at = self.at();
+                self.text.insert(at, c);
+                self.cursor = self.cursor.saturating_add(1);
                 Outcome::default()
             }
             _ => Outcome::default(),
         }
     }
 
-    /// Draw the input as a small dialog over `area`.
+    /// Draw the input as a small dialog over `area`, the cursor drawn as a
+    /// thin bar where the next character goes.
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
-        let width = self.text.len().max(self.title.len()).saturating_add(8).clamp(34, 70);
+        let width = self
+            .text
+            .chars()
+            .count()
+            .max(self.title.chars().count())
+            .saturating_add(8)
+            .clamp(34, 70);
         let rect = centered(area, cells(width), 5);
         frame.render_widget(Clear, rect);
         let block =
             Block::bordered().title(Span::styled(format!(" {} ", self.title), Chrome::title()));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
-        let shown = clip(&self.text, usize::from(inner.width).saturating_sub(2));
+        let room = usize::from(inner.width).saturating_sub(2);
+        let at = self.at();
+        let (before, after) = self.text.split_at_checked(at).unwrap_or((&self.text, ""));
+        // The text before the cursor keeps its tail (that is where typing
+        // lands); what follows takes the rest of the room.
+        let before = tail(before, room);
+        let after = clip(after, room.saturating_sub(crate::ansi::display_width(&before)));
         let lines = vec![
-            Line::from(vec![Span::raw(shown), Span::styled("▏", Chrome::muted())]),
+            Line::from(vec![
+                Span::raw(before),
+                Span::styled("▏", Chrome::muted()),
+                Span::raw(after),
+            ]),
             Line::from(""),
-            hints(&[("enter", "apply"), ("esc", "cancel"), ("ctrl-u", "clear")]),
+            hints(&[("enter", "apply"), ("esc", "cancel"), ("←→", "move"), ("ctrl-u", "clear")]),
         ];
         frame.render_widget(Paragraph::new(lines), inner);
     }
+}
+
+/// The last `width` cells of `text`, with an ellipsis in front when it was
+/// cut.
+fn tail(text: &str, width: usize) -> String {
+    if crate::ansi::display_width(text) <= width {
+        return text.to_owned();
+    }
+    let mut kept: Vec<char> = Vec::new();
+    let mut used = 1_usize;
+    for c in text.chars().rev() {
+        let w = crate::ansi::display_width(&c.to_string());
+        if used.saturating_add(w) > width {
+            break;
+        }
+        used = used.saturating_add(w);
+        kept.push(c);
+    }
+    std::iter::once('…').chain(kept.into_iter().rev()).collect()
 }
 
 /// What a yes/no question is about.
@@ -511,8 +606,28 @@ mod tests {
         i.handle(Key::Backspace);
         let out = i.handle(Key::Enter);
         assert_eq!(out.actions, vec![Action::Typed(Target::Columns, "ab".into())]);
+        // The cursor moves: an insertion in the middle, a delete under it,
+        // a backspace before it, and home/end.
+        i.handle(Key::Left);
+        i.handle(Key::Char('x'));
+        assert_eq!((i.text.as_str(), i.cursor), ("axb", 2));
+        i.handle(Key::Delete);
+        assert_eq!(i.text, "ax");
+        i.handle(Key::Home);
+        i.handle(Key::Backspace);
+        assert_eq!((i.text.as_str(), i.cursor), ("ax", 0), "nothing before the start");
+        i.handle(Key::Delete);
+        assert_eq!(i.text, "x");
+        i.handle(Key::End);
+        i.handle(Key::Char('é'));
+        i.handle(Key::Left);
+        i.handle(Key::Left);
+        i.handle(Key::Char('-'));
+        assert_eq!(i.text, "-xé", "the cursor counts characters, not bytes");
         i.handle(Key::Ctrl('u'));
-        assert_eq!(i.text, "");
+        assert_eq!((i.text.as_str(), i.cursor), ("", 0));
+        assert_eq!(tail("hello world", 6), "…world");
+        assert_eq!(tail("hi", 6), "hi");
         let mut q = Confirm::new(Question::QuitUnsaved, &["Quit?"], "quit", "stay");
         assert_eq!(
             q.handle(Key::Char('y')).actions,

@@ -207,6 +207,27 @@ enum Level {
 /// The narrowest and shortest terminal the screen lays out for.
 pub const MIN_SIZE: (u16, u16) = (60, 12);
 
+/// How many edits `u` can take back.
+const HISTORY_LIMIT: usize = 100;
+
+/// The draft before an edit, with the list cursor of the time and the
+/// status line the edit produced (what `u` says it undid).
+#[derive(Debug, Clone, PartialEq)]
+struct Snapshot {
+    table: toml::Table,
+    cursor: usize,
+    chip: Option<usize>,
+    what: String,
+}
+
+/// The undo and redo stacks (SPEC § 14): every input that changed the
+/// draft's table pushes the table it replaced.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct History {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+}
+
 /// The screen.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -223,6 +244,11 @@ pub struct App {
     rendered: Rendered,
     pane_area: Rect,
     list_area: Rect,
+    /// The cells of each key hint on the bottom row, so a click on one is
+    /// that key (the hint bar is the screen's buttons).
+    hint_hits: Vec<(u16, u16, Key)>,
+    hint_row: u16,
+    history: History,
     suggestions: Suggestions,
     options: Options,
     home: Option<PathBuf>,
@@ -260,6 +286,9 @@ impl App {
             rendered: Rendered::default(),
             pane_area: Rect::default(),
             list_area: Rect::default(),
+            hint_hits: Vec::new(),
+            hint_row: 0,
+            history: History::default(),
             suggestions: Suggestions::gather(),
             options,
             home,
@@ -313,6 +342,16 @@ impl App {
         self.status.as_ref().map(|(s, _)| s.as_str())
     }
 
+    /// The keys of the open form's fields, when a form is the top layer
+    /// (tests).
+    #[must_use]
+    pub fn form_keys(&self) -> Option<Vec<String>> {
+        match self.layers.last()? {
+            Layer::Form(f) => Some(f.fields.iter().map(|f| f.key.clone()).collect()),
+            _ => None,
+        }
+    }
+
     /// A path as the screen shows it: under the home directory as `~/…`.
     fn shown(&self, path: &Path) -> String {
         self.home
@@ -352,24 +391,136 @@ impl App {
         new
     }
 
-    /// Rebuild an open form so its values show the edit just made.
+    /// Rebuild an open form so its values show the edit just made; a form
+    /// whose subject went (a text module's editor open while `Ctrl+Z` took
+    /// the module back) closes with the layers over it.
     fn refresh_form(&mut self) {
         let Some(Layer::Form(form)) = self.layers.first_mut() else { return };
         let mut rebuilt =
             Form::build(form.kind.clone(), &self.draft, &self.config, &self.suggestions);
+        if rebuilt.fields.is_empty() {
+            self.layers.clear();
+            return;
+        }
         rebuilt.cursor = form.cursor.min(rebuilt.fields.len().saturating_sub(1));
         *form = rebuilt;
     }
 
-    /// Feed one input in.
+    /// Feed one input in. A key or a click in the builder that changes the
+    /// draft's table leaves the table it replaced on the undo stack; a
+    /// click on a hint of the bottom bar is that hint's key.
     pub fn input(&mut self, input: Input) {
         match input {
             Input::Tick => self.preview.tick(),
             Input::Resize(w, h) => self.size = (w, h),
             Input::Key(Key::CtrlC) => self.quit = true,
-            Input::Key(key) => self.key(key),
-            Input::Mouse { x, y, kind } => self.mouse(x, y, kind),
+            Input::Key(key) => {
+                if self.is_undo_key(key) {
+                    self.undo_key(key);
+                    return;
+                }
+                let before = (self.screen == Screen::Builder).then(|| self.snapshot());
+                self.key(key);
+                if let Some(before) = before {
+                    self.remember(before);
+                }
+            }
+            Input::Mouse { x, y, kind } => {
+                if kind == Mouse::Click
+                    && self.layers.is_empty()
+                    && let Some(key) = self.hint_at(x, y)
+                {
+                    self.input(Input::Key(key));
+                    return;
+                }
+                let before = (self.screen == Screen::Builder).then(|| self.snapshot());
+                self.mouse(x, y, kind);
+                if let Some(before) = before {
+                    self.remember(before);
+                }
+            }
         }
+    }
+
+    /// The key of the hint under a cell of the bottom bar, when one is.
+    fn hint_at(&self, x: u16, y: u16) -> Option<Key> {
+        (y == self.hint_row)
+            .then(|| self.hint_hits.iter().find(|(start, end, _)| x >= *start && x < *end))
+            .flatten()
+            .map(|(_, _, key)| *key)
+    }
+
+    /// The draft and the list cursor as they stand, for the history.
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            table: self.draft.table().clone(),
+            cursor: self.builder.cursor,
+            chip: self.builder.chip,
+            what: String::new(),
+        }
+    }
+
+    /// Keep `before` when the input just handled changed the table; a new
+    /// edit ends the redo chain.
+    fn remember(&mut self, mut before: Snapshot) {
+        if self.draft.table() == &before.table {
+            return;
+        }
+        before.what = self.status.as_ref().map_or_default(|(s, _)| s.clone());
+        self.history.redo.clear();
+        self.history.undo.push(before);
+        if self.history.undo.len() > HISTORY_LIMIT {
+            self.history.undo.remove(0);
+        }
+    }
+
+    /// `u`/`U` in the builder, `Ctrl+Z`/`Ctrl+R` there or in a form: the
+    /// undo keys, which never count as edits themselves. Typing into a
+    /// picker's filter or an input line keeps every letter.
+    fn is_undo_key(&self, key: Key) -> bool {
+        let over_form = matches!(self.layers.last(), None | Some(Layer::Form(_)));
+        let builder = self.screen == Screen::Builder;
+        match key {
+            Key::Ctrl('z' | 'r') => builder && over_form,
+            Key::Char('u' | 'U') => builder && self.layers.is_empty(),
+            _ => false,
+        }
+    }
+
+    fn undo_key(&mut self, key: Key) {
+        let redo = matches!(key, Key::Char('U') | Key::Ctrl('r'));
+        let mut now = self.snapshot();
+        let (from, to) = if redo {
+            (&mut self.history.redo, &mut self.history.undo)
+        } else {
+            (&mut self.history.undo, &mut self.history.redo)
+        };
+        let Some(target) = from.pop() else {
+            self.say(
+                if redo { "nothing to redo".to_owned() } else { "nothing to undo".to_owned() },
+                Level::Info,
+            );
+            return;
+        };
+        now.what.clone_from(&target.what);
+        to.push(now);
+        self.draft.replace_table(target.table);
+        self.builder.cursor = target.cursor;
+        self.builder.chip = target.chip;
+        // A row's, a column's or a box's form is about a place in the file,
+        // which the table put back may have moved or removed; it closes
+        // rather than edit another table under the same path. A module's
+        // or a top-level form is about a name and is rebuilt in place.
+        let positional = matches!(
+            self.layers.first(),
+            Some(Layer::Form(f)) if matches!(f.kind, FormKind::Row(_) | FormKind::Col(_) | FormKind::Box(_))
+        );
+        if positional {
+            self.layers.clear();
+        }
+        self.refresh();
+        let what = if target.what.is_empty() { "the last edit".to_owned() } else { target.what };
+        self.say(format!("{}: {what}", if redo { "redone" } else { "undone" }), Level::Info);
     }
 
     fn key(&mut self, key: Key) {
@@ -421,8 +572,20 @@ impl App {
                     return;
                 }
                 slot.unset(&mut self.draft);
-                self.refresh();
-                self.say(format!("{} unset", slot.path()), Level::Info);
+                // The last member leaving a box takes an unused
+                // `[box.<name>]` with it, as the builder's `b` does.
+                let dropped = if slot.key == "box" { self.prune_orphan_boxes() } else { None };
+                let problem = self.refresh();
+                let path = slot.path();
+                match (dropped, problem) {
+                    (_, Some(problem)) => {
+                        self.say(format!("{path} unset; ⚠ {problem}"), Level::Warn);
+                    }
+                    (Some(dropped), None) => {
+                        self.say(format!("{path} unset; {dropped}"), Level::Info);
+                    }
+                    (None, None) => self.say(format!("{path} unset"), Level::Info),
+                }
             }
             // Only the picker's "new text module" entry types into this
             // target: the typed text is the new module's name.
@@ -436,7 +599,9 @@ impl App {
 
     /// Set a key, unless the parser would report it: the value is tried on
     /// a copy first and refused with the parser's own message (SPEC § 14:
-    /// validated as `config check` would).
+    /// validated as `config check` would). A value the parser takes but
+    /// that leaves another key reported (`fill = false` under a
+    /// `fill_pattern`) is set and the status bar names that key.
     fn try_set(&mut self, slot: &Slot, value: Value) -> Result<(), String> {
         let mut trial = self.draft.clone();
         slot.set(&mut trial, value.clone());
@@ -447,10 +612,49 @@ impl App {
         if let Some(p) = problems.iter().find(|p| p.path == path) {
             return Err(format!("{}: {}", p.path, p.message));
         }
+        let swapped = self.swap_preset_rows(slot, &value);
         slot.set(&mut self.draft, value);
-        self.refresh();
-        self.say(format!("{path} set"), Level::Info);
+        let dropped = if slot.key == "box" { self.prune_orphan_boxes() } else { None };
+        let note = [swapped, dropped].into_iter().flatten().fold(String::new(), |mut s, n| {
+            s.push_str("; ");
+            s.push_str(&n);
+            s
+        });
+        match self.refresh() {
+            Some(problem) => self.say(format!("{path} set{note}; ⚠ {problem}"), Level::Warn),
+            None => self.say(format!("{path} set{note}"), Level::Info),
+        }
         Ok(())
+    }
+
+    /// The rows follow a change of the top-level `preset` when they are
+    /// still exactly the rows the old preset wrote out (the builder writes
+    /// a preset's rows into the file so they can be edited, which would
+    /// otherwise pin them). Returns what happened, for the status bar.
+    fn swap_preset_rows(&mut self, slot: &Slot, value: &Value) -> Option<String> {
+        if slot.path() != "preset" {
+            return None;
+        }
+        let name = value.as_str()?;
+        if name == self.config.preset.name() {
+            return None;
+        }
+        let old = Draft::from_preset(self.config.preset.name())?;
+        if old.rows() != self.draft.rows() {
+            return Some("the rows below stay (p replaces them with a preset's)".to_owned());
+        }
+        let mut fresh = Draft::from_preset(name)?;
+        fresh.materialise_rows();
+        let rows = fresh.get(&["row"])?.clone();
+        self.draft.set(&["row"], rows);
+        Some(format!("rows replaced with the {name} preset's"))
+    }
+
+    /// Drop every `[box.<name>]` nothing joins any more; says which, when
+    /// any.
+    fn prune_orphan_boxes(&mut self) -> Option<String> {
+        let orphans = self.draft.prune_orphan_boxes();
+        (!orphans.is_empty()).then(|| dropped_boxes(&orphans))
     }
 
     fn chosen(&mut self, target: Target, value: &str) {
@@ -465,10 +669,10 @@ impl App {
                     self.apply(Action::Unset(slot));
                     return;
                 }
-                if kind == SlotKind::BoxRef
+                let new_box = kind == SlotKind::BoxRef
                     && !matches!(value, "" | "none" | "false" | "true")
-                    && !self.config.boxes.contains_key(value)
-                {
+                    && !self.config.boxes.contains_key(value);
+                if new_box {
                     if !is_bare_key(value) {
                         self.say(
                             "a box name is letters, digits, _ and - only".into(),
@@ -482,6 +686,11 @@ impl App {
                     Ok(Some(v)) => self.apply(Action::Set(slot, v)),
                     Ok(None) => self.apply(Action::Unset(slot)),
                     Err(e) => self.say(e, Level::Error),
+                }
+                // A table made for a value the parser then refused (a box
+                // that would nest) must not stay behind as an orphan.
+                if new_box && self.prune_orphan_boxes().is_some() {
+                    self.refresh();
                 }
             }
             Target::AddModule => {
@@ -524,14 +733,16 @@ impl App {
                     let out = self.edit(|builder, draft| {
                         let at = builder.item().map(|i| i.at).ok_or("nothing selected")?;
                         let table = draft.row_mut(at).ok_or("no such row")?;
-                        let was = table.remove("box").and_then(|v| v.as_str().map(str::to_owned));
+                        table.remove("box");
                         // The last member leaving takes an unused
                         // `[box.<name>]` with it, which the parser would
                         // otherwise report on every tick.
-                        let orphan = was.filter(|n| !box_in_use(draft, n));
-                        let Some(orphan) = orphan else { return Ok("unboxed".to_owned()) };
-                        draft.remove(&["box", orphan.as_str()]);
-                        Ok(format!("unboxed; [box.{orphan}] dropped, nothing used it"))
+                        let orphans = draft.prune_orphan_boxes();
+                        Ok(if orphans.is_empty() {
+                            "unboxed".to_owned()
+                        } else {
+                            format!("unboxed; {}", dropped_boxes(&orphans))
+                        })
                     });
                     self.report(out);
                 } else if !name.is_empty() && !is_bare_key(name) {
@@ -540,6 +751,62 @@ impl App {
                     let out = self.edit(|builder, draft| builder.set_box(draft, name));
                     self.report(out);
                 }
+            }
+            Target::BoxWith(at) => {
+                let name = value.trim();
+                if !is_bare_key(name) {
+                    self.say("a box name is letters, digits, _ and - only".into(), Level::Error);
+                    return;
+                }
+                // The name was asked for this row; the selection cannot move
+                // under an input line, but the box goes nowhere else.
+                if self.builder.item().map(|i| i.at) != Some(at) {
+                    self.say("the selection moved; press B again".into(), Level::Warn);
+                    return;
+                }
+                let out = self.edit(|builder, draft| builder.box_with_above(draft, name));
+                self.report(out);
+            }
+        }
+    }
+
+    /// `B`: the row joins the named box of the row above without asking;
+    /// with no such box, a name is asked for and both rows go in it.
+    fn box_with_above(&mut self) {
+        let Some(item) = self.builder.item().cloned() else {
+            self.say("no rows yet; a adds one".into(), Level::Info);
+            return;
+        };
+        match self.builder.above(&self.draft) {
+            None => self.say(
+                if item.kind == super::builder::ItemKind::Col {
+                    "a column is boxed on its own: b".to_owned()
+                } else {
+                    "no row above this one; b boxes a row alone".to_owned()
+                },
+                Level::Warn,
+            ),
+            Some((_, Some(name))) => {
+                let out = self.edit(|builder, draft| builder.box_with_above(draft, &name));
+                self.report(out);
+            }
+            Some((above, None)) => {
+                // A title either row carries names the box; `panel` otherwise.
+                let title = |at: RowAt| {
+                    self.draft
+                        .row(at)
+                        .and_then(|t| t.get("title"))
+                        .and_then(Value::as_str)
+                        .map(bare_key_of)
+                        .filter(|s| !s.is_empty())
+                };
+                let start =
+                    title(above).or_else(|| title(item.at)).unwrap_or_else(|| "panel".to_owned());
+                self.layers.push(Layer::Input(InputBox::new(
+                    "Name for the box holding this row and the one above",
+                    &start,
+                    Target::BoxWith(item.at),
+                )));
             }
         }
     }
@@ -590,14 +857,14 @@ impl App {
             );
             return;
         }
-        let Some(mut draft) = Draft::from_preset(name) else {
+        let Some(mut preset) = Draft::from_preset(name) else {
             self.say(format!("no preset named {name}"), Level::Error);
             return;
         };
-        draft.set_path(self.draft.path().map(std::path::Path::to_path_buf));
-        draft.materialise_rows();
-        draft.mark_dirty();
-        self.draft = draft;
+        preset.materialise_rows();
+        // The table alone is adopted: the draft keeps the file it belongs
+        // to and stays dirty exactly while it differs from that file.
+        self.draft.replace_table(preset.table().clone());
         self.refresh();
         self.say(format!("preset {name} loaded; s saves it"), Level::Info);
     }
@@ -707,16 +974,16 @@ impl App {
                     ("enter", "edit the selection"),
                     ("m", "add a module after the selection"),
                     ("x del", "remove the module or line"),
-                    ("a / i", "add a row after / before"),
-                    ("c", "clone the line"),
+                    ("a / i / c", "add a row after / before, clone the line"),
                     ("J / K", "move the line or module down / up"),
                     ("r", "move the module to the other side"),
-                    ("[ / ]", "move the module a column left / right"),
-                    ("C", "add a column"),
+                    ("[ / ]", "move the module a column left / right (past the edge: a new one)"),
+                    ("C", "add a column after the selection"),
                     ("S", "stack the column (or add an inner row)"),
                     ("t", "title the row"),
-                    ("b", "box the row or column"),
+                    ("b / B", "box the row or column / box it with the row above"),
                     ("space", "make the row a spacer"),
+                    ("u / U", "undo / redo the last edit (also ctrl-z / ctrl-r)"),
                     ("1 2 3", "top-level keys / frame / colours"),
                     ("p", "start from a preset"),
                     ("f / F", "next / previous sample payload"),
@@ -804,15 +1071,15 @@ impl App {
     /// `e`: the highlighted preset opens in the builder, unsaved.
     fn picker_edit(&mut self) {
         let Screen::Picker(picker) = &mut self.screen else { return };
-        let Some((draft, ..)) = picker.shown() else { return };
-        let mut draft = draft.clone();
+        let Some((preset, ..)) = picker.shown() else { return };
+        let mut preset = preset.clone();
         // No unparsable-file guard here: the picker opens only when no file
         // exists (`App::new` opens an existing one in the builder), and
         // `Draft::save` refuses such a file anyway.
-        draft.set_path(self.draft.path().map(std::path::Path::to_path_buf));
-        draft.materialise_rows();
-        draft.mark_dirty();
-        self.draft = draft;
+        preset.materialise_rows();
+        self.draft.replace_table(preset.table().clone());
+        // A preset adopted from the picker is a fresh start, not an edit.
+        self.history = History::default();
         self.refresh();
         self.screen = Screen::Builder;
         self.say("editing the preset; s saves it to the config file".into(), Level::Info);
@@ -823,21 +1090,23 @@ impl App {
     /// settings file has no status line yet.
     fn picker_apply(&mut self) {
         let Screen::Picker(picker) = &mut self.screen else { return };
-        let Some((draft, ..)) = picker.shown() else { return };
-        let mut draft = draft.clone();
-        draft.set_path(self.draft.path().map(std::path::Path::to_path_buf));
+        let Some((preset, ..)) = picker.shown() else { return };
+        let mut preset = preset.clone();
         let unreadable = self.draft.unreadable().map(str::to_owned);
         if let Some(problem) = unreadable {
             self.say(format!("the config file does not parse ({problem}) and is never overwritten; fix or move it first"), Level::Error);
             return;
         }
-        draft.materialise_rows();
+        preset.materialise_rows();
+        let mut draft = self.draft.clone();
+        draft.replace_table(preset.table().clone());
         match draft.save() {
             Ok(backup) => {
                 let path = draft.path().map_or_else(String::new, |p| self.shown(p));
                 let note =
                     backup.map_or_else(String::new, |b| format!(" (backup: {})", self.shown(&b)));
                 self.draft = draft;
+                self.history = History::default();
                 self.refresh();
                 self.say(format!("wrote {path}{note}"), Level::Info);
                 let installed = Steps::plan(&self.options).is_ok_and(|s| s.statusline_configured());
@@ -918,9 +1187,17 @@ impl App {
                     ];
                     items.extend(self.config.boxes.keys().map(|n| Choice::noted(n, "[box] table")));
                     items.push(Choice::custom("A new box named"));
-                    self.layers.push(Layer::Choose(Choose::new("Box", items, Target::BoxFor(at))));
+                    let mut choose = Choose::new("Box", items, Target::BoxFor(at));
+                    // The pick opens on the box the row is in.
+                    let current = self.draft.row(at).and_then(|t| t.get("box")).map_or_else(
+                        || "none".to_owned(),
+                        |v| v.as_str().map_or_else(|| v.to_string(), str::to_owned),
+                    );
+                    choose.select(&current);
+                    self.layers.push(Layer::Choose(choose));
                 }
             }
+            Key::Char('B') => self.box_with_above(),
             Key::Char('1') => self.open_form(FormKind::Top),
             Key::Char('2') => self.open_form(FormKind::Frame),
             Key::Char('3') => self.open_form(FormKind::Colors),
@@ -1294,7 +1571,9 @@ impl App {
         rect
     }
 
-    fn draw_status(&self, frame: &mut Frame<'_>, area: Rect, keys: &[(&str, &str)]) {
+    /// The status line and, under it, the key hints, each hint recorded
+    /// with its cells so a click on it presses the key.
+    fn draw_status(&mut self, frame: &mut Frame<'_>, area: Rect, keys: &[(&str, &str)]) {
         let status = self.status.clone().or_else(|| {
             (!self.problems.is_empty())
                 .then(|| (format!("⚠ {}", self.first_problem()), Level::Warn))
@@ -1312,10 +1591,20 @@ impl App {
         );
         let y = area.bottom().saturating_sub(2);
         frame.render_widget(Paragraph::new(line), Rect { y, height: 1, ..area });
+        self.hint_row = y.saturating_add(1);
         frame.render_widget(
             Paragraph::new(hints(keys)),
-            Rect { y: y.saturating_add(1), height: 1, ..area },
+            Rect { y: self.hint_row, height: 1, ..area },
         );
+        self.hint_hits = super::ui::hint_cells(keys)
+            .into_iter()
+            .filter_map(|(label, start, end)| {
+                let key = hint_key(label)?;
+                let start = area.x.saturating_add(cells(start));
+                let end = area.x.saturating_add(cells(end)).min(area.right());
+                Some((start, end, key))
+            })
+            .collect();
     }
 
     fn draw_home(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -1485,18 +1774,18 @@ impl App {
         let draft = self.draft.clone();
         self.builder.draw(frame, list_rect, &draft);
         self.list_area = list_rect;
+        // Every hint is a button too, so the row keeps to what fits 80
+        // columns; the rest of the keys are on the help page.
         self.draw_status(
             frame,
             area,
             &[
-                ("↑↓←→", "select"),
                 ("enter", "edit"),
                 ("m", "module"),
                 ("a", "row"),
                 ("C", "column"),
-                ("t", "title"),
                 ("b", "box"),
-                ("1 2 3", "keys frame colours"),
+                ("u", "undo"),
                 ("s", "save"),
                 ("q", "quit"),
                 ("?", "help"),
@@ -1504,7 +1793,7 @@ impl App {
         );
     }
 
-    fn draw_install(&self, frame: &mut Frame<'_>, area: Rect, screen: &InstallScreen) {
+    fn draw_install(&mut self, frame: &mut Frame<'_>, area: Rect, screen: &InstallScreen) {
         let mut lines: Vec<Line<'static>> = vec![
             Line::from(Span::styled("Install into Claude Code", Chrome::title())),
             Line::from(""),
@@ -1584,24 +1873,67 @@ impl App {
     }
 }
 
-/// A bare TOML key: what a box or text module may be called.
-/// Whether any row, column or inner row of the draft names the box.
-fn box_in_use(draft: &Draft, name: &str) -> bool {
-    let names = |t: &toml::Table| t.get("box").and_then(Value::as_str) == Some(name);
-    let tables = |v: &Value, key: &str| -> Vec<toml::Table> {
-        v.as_table()
-            .and_then(|t| t.get(key))
-            .and_then(Value::as_array)
-            .map_or_default(|a| a.iter().filter_map(Value::as_table).cloned().collect())
-    };
-    draft.rows().iter().any(|row| {
-        row.as_table().is_some_and(names)
-            || tables(row, "col").iter().any(|col| {
-                names(col) || tables(&Value::Table(col.clone()), "row").iter().any(names)
-            })
-    })
+/// The status line for `[box.<name>]` tables dropped as orphans.
+fn dropped_boxes(names: &[String]) -> String {
+    format!("[box.{}] dropped, nothing used it", names.join("], [box."))
 }
 
+/// A bare TOML key: what a box or text module may be called.
 fn is_bare_key(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// A title as a box name: lower case, runs of anything else as one `-`
+/// (`"Repo & CI"` → `repo-ci`).
+fn bare_key_of(title: &str) -> String {
+    let mut out = String::new();
+    for c in title.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.extend(c.to_lowercase());
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-').to_owned()
+}
+
+/// The key a hint's label stands for, when a click on it can press one: a
+/// single character, `enter`, `esc` or `ctrl-<c>`; a label naming several
+/// keys (`↑↓`, `1 2 3`) presses none.
+fn hint_key(label: &str) -> Option<Key> {
+    let mut chars = label.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => Some(Key::Char(c)),
+        _ => match label {
+            "enter" => Some(Key::Enter),
+            "esc" => Some(Key::Esc),
+            _ => label.strip_prefix("ctrl-").and_then(|c| c.chars().next()).map(Key::Ctrl),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hint_labels_and_titles_map_to_keys_and_box_names() {
+        assert_eq!(hint_key("u"), Some(Key::Char('u')));
+        assert_eq!(hint_key("?"), Some(Key::Char('?')));
+        assert_eq!(hint_key("enter"), Some(Key::Enter));
+        assert_eq!(hint_key("esc"), Some(Key::Esc));
+        assert_eq!(hint_key("ctrl-u"), Some(Key::Ctrl('u')));
+        for several in ["1 2 3", "x del", "↑↓", "↑↓←→", ""] {
+            assert_eq!(hint_key(several), None, "{several:?}");
+        }
+        assert_eq!(bare_key_of("Repo & CI"), "repo-ci");
+        assert_eq!(bare_key_of("  Usage  "), "usage");
+        assert_eq!(bare_key_of("· · ·"), "", "nothing bare in it: the caller falls back");
+        assert_eq!(bare_key_of("a_b-c"), "a_b-c");
+        assert!(is_bare_key("side-panel_2") && !is_bare_key("") && !is_bare_key("a b"));
+        assert_eq!(
+            dropped_boxes(&["a".to_owned(), "b".to_owned()]),
+            "[box.a], [box.b] dropped, nothing used it"
+        );
+    }
 }

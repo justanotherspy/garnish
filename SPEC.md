@@ -1701,6 +1701,47 @@ The terminal minimum is 60 × 12. A `setup` cargo feature was not added:
 the release binary grew from 2.8 MB to 3.4 MB and the end-to-end cold
 tick did not move.
 
+**Refined on 2026-09-20, after Daniel's first use and a walk of every
+preset's forms.** *Undo*: every key or click that changes the draft
+leaves the table it replaced on a history of a hundred; `u` (or
+`Ctrl+Z`) puts it back with the list cursor of the time, `U` (or
+`Ctrl+R`) redoes, a new edit ends the redo chain, and the status line
+names what was undone. The draft is dirty exactly while its table
+differs from the file's (as read, or as last saved), so an edit undone
+leaves nothing to save and `q` does not ask. *Buttons*: the hint bar at
+the foot of every screen is a row of them, a click on a hint pressing
+its key, which is how undo has a button. *Editing*: a picker opens on
+the value in effect and its `custom…` line starts from it, so a label is
+edited rather than retyped, and the input line has a cursor (`←`/`→`,
+`Home`/`End`, `Delete`); a string keeps its spaces (a picked `  `
+separator had arrived as `""`); the `[colors]` form offers literals only
+(the theme's own, each noted with its role, then the named colours),
+since a role there has no ground, while a module's `colors.*`, a title
+and a box still take roles; a row's form lists only the keys the parser
+would take for it (`blank` on a spacer or a row of columns, the title
+keys outside a named box) plus any key the file already sets, so `d` can
+unset one the parser reports; a value the parser takes but that leaves
+another key reported (`fill = false` under a `fill_pattern`) is set and
+the status names that key; a `box` unset or changed, from the form or
+with `d`, drops a `[box.<name>]` nothing joins any more, as the
+builder's `b` does; a module's `label` picker starts with the module's
+own name, bare and capitalised; changing the top-level `preset` swaps
+the rows for the new preset's when they were still exactly the old
+preset's (the builder writes a preset's rows into the file so they can
+be edited, which would otherwise pin them) and says which happened.
+*Columns grow from the cursor*: `C` inserts a column after the selected
+one (a plain row's groups become the first column) and selects the new
+one, so `m` fills it; `]` and `[` past the last or first column make a
+column for the module, a plain row splitting into columns from the
+module that leaves it (a module alone in its column stays, since a new
+column would only leave an empty one behind); `m` on a row of columns
+lands in the last column, or the last inner row of a stack, and says so.
+*Boxes*: `B` boxes the selected row together with the row above, joining
+the named box that row is in, or asking for a name (the title either row
+carried, as a bare key) and putting both rows in a new `[box.<name>]`
+that takes that title; a third `B` joins them, so a run of rows becomes
+one titled box a key at a time.
+
 **Two ways in, one file out.** The home screen offers *Pick a preset* and
 *Build a custom layout*, plus *Install* and *Quit*; when a config already
 exists it opens on that config in the builder, previewed, so `setup` is
@@ -1727,9 +1768,11 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   shows its columns as chips (§ 4.3; a plain row is one column) and its
   height in lines; keys add, insert, delete, clone and move rows, add a
   column and set its `width` and `justify`, turn a column into a stack,
-  move a module within a column or into the next one, mark a row as a
-  spacer, give it a title, wrap a selected run of rows in a titled box
-  and box a whole column. Adding a module opens a **picker**
+  move a module within a column or into the next one (a new one past the
+  edge), mark a row as a spacer, give it a title, box a row, box it
+  together with the row above (`B`, a run of rows becoming one titled
+  box a key at a time) and box a whole column; `u` takes any of it back.
+  Adding a module opens a **picker**
   with fuzzy and initialism search over the 25 ids, the config's existing
   `text.<name>` tables and *New text module…* (`sy` finds `sync`, `sn`
   finds `session_name`), each with its one-line summary from
