@@ -789,7 +789,7 @@ fn label_choices(id: &str, hints: &Suggestions) -> Vec<Choice> {
     let spaced = name.replace('_', " ");
     let mut chars = spaced.chars();
     let capitalised: String =
-        chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
+        chars.next().map_or_default(|c| c.to_uppercase().chain(chars).collect());
     let mut items = vec![
         Choice::noted(name, "the module's name"),
         Choice::noted(&capitalised, "the module's name"),

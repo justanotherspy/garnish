@@ -466,7 +466,7 @@ impl App {
         if self.draft.table() == &before.table {
             return;
         }
-        before.what = self.status.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
+        before.what = self.status.as_ref().map_or_default(|(s, _)| s.clone());
         self.history.redo.clear();
         self.history.undo.push(before);
         if self.history.undo.len() > HISTORY_LIMIT {
