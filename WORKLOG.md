@@ -888,3 +888,13 @@ was built, what the reviews found and what was decided, not how.
   from a column or inner row, `hint_key`, `bare_key_of`); a two-cell
   glyph under the input cursor and undo after a reload stay unpinned.
   312 → 319 tests.
+- **2026-09-23** — Dependency sweep, no code change. `renovate.json` now
+  extends the shared `local>justanotherspy/renovate` preset in place of
+  `config:best-practices` (which the preset carries), so this repository
+  gets the same grouping, automerge and crate release-age rules as the
+  others. `cargo update` refreshed eleven transitive crates (the pending
+  lock file maintenance plus `instability`, `lru` and `thiserror`); every
+  direct dependency already resolved to its newest release, and none has
+  a newer major. `anthropics/claude-code-action` 1.0.231 → 1.0.233 (no
+  input changes); every other action pin is the latest release. `make
+  check` and `scripts/ci.sh` green on the 2026-09-22 nightly.
