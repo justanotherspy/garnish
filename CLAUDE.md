@@ -13,6 +13,7 @@ where things stand.
 | `CLAUDE.md` | how Claude builds this project: protocol, toolchain, style, invariants |
 | `SPEC.md` | what the tool does: the target design and the Claude Code contract; changes here first, with the reason |
 | `PLAN.md` | the drift between `SPEC.md` and the code (open phases), a compact table of what is done, the backlog |
+| `GARLIC-INTEGRATION.md` | a proposal (not spec) for garnish as garlic's per-second sensor and a status line module for garlic's day; moves into `SPEC.md` if adopted |
 | `WORKLOG.md` | the dated log about the codebase: what was built, what reviews found, what was decided |
 | `CHANGELOG.md` | user-visible changes per release; a release's section is its tag message |
 | `SPRITE.md` | working notes for a Sprite VM; loaded into context only when the session runs on one |
