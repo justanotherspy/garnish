@@ -13,6 +13,7 @@ where things stand.
 | `CLAUDE.md` | how Claude builds this project: protocol, toolchain, style, invariants |
 | `SPEC.md` | what the tool does: the target design and the Claude Code contract; changes here first, with the reason |
 | `PLAN.md` | the drift between `SPEC.md` and the code (open phases), a compact table of what is done, the backlog |
+| `FUTURE-SPEC.md` | proposals not yet in the target design (mined from ccstatusline, ccsidekick, codachi, ccstatusline-editor and garlic, validated against the official docs, the binary and the wider ecosystem); the verified Claude Code contract beyond `SPEC.md`; the garlic integration; tiered by cost with evidence grades, each proposal moves into `SPEC.md` when a phase adopts it |
 | `WORKLOG.md` | the dated log about the codebase: what was built, what reviews found, what was decided |
 | `CHANGELOG.md` | user-visible changes per release; a release's section is its tag message |
 | `SPRITE.md` | working notes for a Sprite VM; loaded into context only when the session runs on one |
