@@ -1725,22 +1725,99 @@ mod tests {
         (Form::build(kind.clone(), &draft, &config, &Suggestions::default()), draft)
     }
 
+    /// frm-10: the forms listed by hand have every key the parser takes in
+    /// their table (the builder's groups and lists aside), read from the
+    /// parser's own list: the one it names when a key is unknown.
+    #[test]
+    fn every_key_the_parser_takes_has_a_row_in_its_hand_listed_form() {
+        let inner = RowAt { row: 0, col: Some(0), inner: Some(0) };
+        let col = RowAt { row: 0, col: Some(0), inner: None };
+        for (text, kind, path, prefix) in [
+            ("[frame]\nzz = 1\n", FormKind::Frame, "frame.zz", ""),
+            ("[format]\nzz = 1\n", FormKind::Top, "format.zz", "format."),
+            // A spacer outside a named box: every row key is legal there.
+            ("[[row]]\nmodules = []\nzz = 1\n", FormKind::Row(RowAt::row(0)), "row[0].zz", ""),
+            (
+                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = []\nzz = 1\n",
+                FormKind::Row(inner),
+                "row[0].col[0].row[0].zz",
+                "",
+            ),
+            (
+                "[[row]]\n[[row.col]]\nmodules = [\"clock\"]\nzz = 1\n",
+                FormKind::Col(col),
+                "row[0].col[0].zz",
+                "",
+            ),
+            (
+                "[box.b]\nzz = 1\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+                FormKind::Box("b".into()),
+                "box.b.zz",
+                "",
+            ),
+        ] {
+            let (form, draft) = built(text, &kind);
+            let problems = draft.resolved().1;
+            let message = &problems.iter().find(|p| p.path == path).expect(path).message;
+            let (_, keys) = message.split_once("expected one of ").expect(message);
+            let fields: Vec<&str> = form.fields.iter().map(|f| f.key.as_str()).collect();
+            for key in keys.split(',').map(|k| k.trim().trim_end_matches('.')) {
+                if ["modules", "right", "col", "row"].contains(&key) {
+                    continue;
+                }
+                let key = format!("{prefix}{key}");
+                assert!(fields.contains(&key.as_str()), "{path}: no row for {key} in {fields:?}");
+            }
+        }
+    }
+
+    /// frm-10: every entry a picker offers is a value the parser takes for
+    /// that key (CLAUDE.md: the `[colors]` form learned this the hard way).
+    #[test]
+    fn every_picker_entry_is_a_value_the_parser_takes() {
+        let hints = Suggestions::gather();
+        let text = "[box.b]\n[[row]]\nmodules = [\"clock\"]\n[[row]]\n[[row.col]]\nmodules = [\"path\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"model\"]\n[[row]]\nbox = \"b\"\nmodules = [\"cost\"]\n[modules.text.m]\ntext = \"hi\"\n";
+        let draft = Draft::from_text(text);
+        let (config, problems) = draft.resolved();
+        assert_eq!(problems, Vec::new());
+        let mut kinds = vec![
+            FormKind::Top,
+            FormKind::Frame,
+            FormKind::Colors,
+            FormKind::Row(RowAt::row(0)),
+            FormKind::Col(RowAt { row: 1, col: Some(0), inner: None }),
+            FormKind::Row(RowAt { row: 1, col: Some(1), inner: Some(0) }),
+            FormKind::Box("b".into()),
+            FormKind::Module("text.m".into()),
+        ];
+        kinds.extend(SCHEMAS.iter().map(|s| FormKind::Module(s.id.to_owned())));
+        let mut offenders: Vec<String> = Vec::new();
+        let mut tried = 0_usize;
+        for kind in kinds {
+            let form = Form::build(kind.clone(), &draft, &config, &hints);
+            for field in &form.fields {
+                for choice in field.choices.iter().filter(|c| !c.custom) {
+                    let Ok(Some(value)) = field.kind.parse(&choice.value) else { continue };
+                    tried += 1;
+                    let mut trial = draft.clone();
+                    field.slot.set(&mut trial, value);
+                    let path = field.slot.path();
+                    if let Some(p) = trial.resolved().1.iter().find(|p| p.path == path) {
+                        offenders
+                            .push(format!("{kind:?} {path} = {:?}: {}", choice.value, p.message));
+                    }
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "entries the parser refuses:\n{}", offenders.join("\n"));
+        assert!(tried > 1000, "{tried} entries tried");
+    }
+
     /// SPEC § 14: every `OptSpec` kind and every top-level key has a form
-    /// row, so an option added to a schema appears in `setup` the next build.
+    /// row, so an option added to a schema appears in `setup` the next build
+    /// (a `Kind` added to the parser is a compile error in `SlotKind::of`).
     #[test]
     fn every_option_kind_and_top_level_key_has_a_field() {
-        for kind in [
-            Kind::Bool,
-            Kind::Int,
-            Kind::Float,
-            Kind::Str,
-            Kind::Enum(&["a"]),
-            Kind::StrList,
-            Kind::NumList,
-            Kind::ColorList,
-        ] {
-            let _ = SlotKind::of(kind, None);
-        }
         let (top, _) = built("", &FormKind::Top);
         let keys: Vec<&str> = top.fields.iter().map(|f| f.key.as_str()).collect();
         for key in config::TOP_KEYS {

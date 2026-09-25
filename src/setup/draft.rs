@@ -640,6 +640,18 @@ mod tests {
         assert_eq!(g.prune_orphan_boxes(), Vec::<String>::new());
     }
 
+    /// frm-10: removing a key keeps the others in the order they were read
+    /// (`toml`'s `preserve_order` map shifts rather than swaps), which the
+    /// "written back in the order it was read" promise rests on.
+    #[test]
+    fn removing_a_key_keeps_the_order_of_the_rest() {
+        let mut d = Draft::from_text("a = 1\nb = 2\nc = 3\nd = 4\n");
+        d.remove(&["b"]);
+        let keys: Vec<&str> = d.table().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["a", "c", "d"]);
+        assert_eq!(d.text(), "a = 1\nc = 3\nd = 4\n");
+    }
+
     /// app-18: a NaN equals a NaN for the draft's comparisons, and nothing
     /// else changes: order does not count, a value or a key does.
     #[test]

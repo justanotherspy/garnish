@@ -1704,7 +1704,10 @@ may belong to (the same backlog item). `Esc` closes the innermost layer
 and, at the base of the builder or the picker, leaves it as `q` does. A
 module's editor is generated from `ModuleSchema`; the top-level, frame,
 row, column and box forms list their keys by hand, since those are not
-schema options, and the unit test walks both. The snapshot tests pin the
+schema options, and the unit tests walk both: the hand-listed forms
+against the key list the parser names for an unknown key, and every
+entry of every picker through the parser (both since the 2026-09-25
+review). The snapshot tests pin the
 clock in-process (`Clock::fixed()`) and need no `GARNISH_NOW` or `TZ`.
 The terminal minimum is 60 × 12. A `setup` cargo feature was not added:
 the release binary grew from 2.8 MB to 3.4 MB and the end-to-end cold
