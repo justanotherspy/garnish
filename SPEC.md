@@ -971,7 +971,7 @@ separator_step   = 1
 spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]  # already a spinner; same rule
 
 [modules.branch.icons]
-branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
+branch_frames = ["⎇", "⑂"]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
 ```
 
 - **Animated rule.** `fill_pattern` is a string of one-cell glyphs repeated

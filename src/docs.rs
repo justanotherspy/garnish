@@ -1418,15 +1418,15 @@ pub fn presets_page() -> String {
             p.name,
             p.summary,
             p.columns,
-            p.needs.as_deref().unwrap_or("—")
+            p.needs.unwrap_or("—")
         );
     }
     let payload = fixture("subscription-full");
     for p in crate::gallery::PRESETS.iter() {
         let (cfg, _) = config::parse(&crate::gallery::body(p.source), &SCHEMAS);
         let sample = render_plain_at(&payload, &cfg, Some(p.columns), &Clock::fixed());
-        let needs = p.needs.as_deref().map_or(String::new(), |n| format!(", needs {n}"));
-        let author = p.author.as_deref().map_or(String::new(), |a| format!(" · by @{a}"));
+        let needs = p.needs.map_or(String::new(), |n| format!(", needs {n}"));
+        let author = p.author.map_or(String::new(), |a| format!(" · by @{a}"));
         let _ = writeln!(
             o,
             "\n## `{}`\n\n{}\n\nAt {} columns{needs}{author}:\n\n```text\n{}\n```\n\n<details><summary><code>presets/{}.toml</code></summary>\n\n```toml\n{}```\n\n</details>",

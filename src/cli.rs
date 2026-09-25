@@ -405,7 +405,7 @@ fn run_command() -> Result<()> {
         Command::Presets => {
             let mut stdout = std::io::stdout().lock();
             for p in crate::gallery::PRESETS.iter() {
-                let needs = p.needs.as_deref().map_or(String::new(), |n| format!(" [{n}]"));
+                let needs = p.needs.map_or(String::new(), |n| format!(" [{n}]"));
                 writeln!(stdout, "{:<24} {} ({} cols){needs}", p.name, p.summary, p.columns)?;
             }
             Ok(())

@@ -49,9 +49,9 @@ impl Picker {
             .collect();
         items.extend(crate::gallery::PRESETS.iter().map(|p| PickItem {
             name: p.name.to_owned(),
-            summary: p.summary.clone(),
+            summary: p.summary.to_owned(),
             columns: Some(p.columns),
-            needs: p.needs.clone(),
+            needs: p.needs.map(str::to_owned),
         }));
         Self { items, cursor: 0, scroll: 0, shown: None }
     }
