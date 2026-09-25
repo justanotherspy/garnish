@@ -302,6 +302,21 @@ from the schema's measure.
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
 
+`sync` treats a **gone** upstream as no upstream (decided 2026-09-25 with
+Daniel): when the config names one but its remote-tracking ref no longer
+exists (the branch merged and deleted on the forge, then pruned), the
+worker records an `ok` entry marked `gone` without counting, and the row
+shows the `no_upstream` glyph, no `✗` and no new icon. (It used to run
+`rev-list` against the missing ref, fail, and show `✗` for good, with a
+failing worker every TTL, in the most ordinary state after a pull request.)
+The fetch-age hint counts from the last fetch that *worked*: a
+`FETCH_HEAD` with something in it, or the worker's own record of its last
+good fetch (`fetch_ok_at`), whichever is newer, across the worktree's and
+the common git dir's `FETCH_HEAD` (the tracking refs are shared). git
+truncates `FETCH_HEAD` before it contacts the remote, so a failing fetch
+used to read as one that had just happened and the hint never appeared; a
+stamp from the future counts as no age at all.
+
 Two payload-only additions (PLAN Phase 20; from FUTURE-SPEC § 7.5, A7 and
 A8):
 
@@ -1385,8 +1400,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   live, rendering the last value unchanged; older than `stale_after` TTLs
   (or computed for another head/upstream) → dim `⟳`; `err` → dim `✗`. A failed entry is fresh for its TTL like any
   other (a broken git is retried once per TTL, never once per tick). Entries
-  record what they were computed for (`head`, `upstream`); a render whose
-  situation differs treats the entry as stale.
+  record what they were computed for (`branch`'s `head`, `sync`'s `branch`
+  and `upstream`: branches that share an upstream must not share counts);
+  a render whose situation differs treats the entry as stale.
 - Lock = file `pid epoch_ms`, created by `hard_link` from a pre-written temp
   file and re-stamped by `rename` (never truncated in place). Live when
   younger than 2 s (hand-over window), else while the pid exists (Linux,
@@ -1470,7 +1486,14 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   stops ssh reading `/dev/tty`). `core.sshCommand`, `core.gitProxy`, an
   `ext::` URL, hooks and credential helpers stay a backlog decision (PLAN).
   A failed fetch is recorded in the entry (`fetch_error`, `fetch_attempt`)
-  without hiding the local counts and is not retried within `fetch_interval`.
+  without hiding the local counts and is not retried within `fetch_interval`;
+  a fetch that works records `fetch_ok_at`. Between attempts all three are
+  carried from the previous entry, so the error lasts until a fetch works
+  (it used to vanish at the next refresh), and `doctor` lists every entry
+  carrying one as `FETCH FAILED`. A fetch is due when both the entry's
+  `fetch_attempt` and `FETCH_HEAD`'s mtime (the newest of the two
+  worktree files) are at least `fetch_interval` old, a stamp from the
+  future counting as due.
 
 ## 7. CLI
 

@@ -520,17 +520,70 @@ fn config_value(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<
     }
 }
 
-/// Seconds between the last fetch (`FETCH_HEAD` mtime) and `now_epoch_secs`,
-/// if a fetch ever happened. `FETCH_HEAD` is per worktree, so the linked
-/// worktree's own git dir is checked first.
+/// What `FETCH_HEAD` says about fetching, in epoch seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FetchStamps {
+    /// When a fetch was last *tried*: git truncates `FETCH_HEAD` before it
+    /// contacts the remote, so a fetch that fails still moves this.
+    pub attempt: Option<i64>,
+    /// When a fetch last *worked*: a successful fetch writes a line per
+    /// ref, so only a `FETCH_HEAD` with something in it counts.
+    pub success: Option<i64>,
+}
+
+/// [`FetchStamps`] from the `FETCH_HEAD` of the worktree's git dir and of
+/// the common dir, the newest of each (a `stat` apiece, never a read).
+///
+/// `FETCH_HEAD` is written per worktree but the remote-tracking refs the
+/// counts use are shared, so a fetch from any worktree freshens them; the
+/// first file found used to win, and a linked worktree with an old
+/// `FETCH_HEAD` of its own went on reporting that age.
 #[must_use]
-pub fn fetch_age(dirs: &Dirs, now_epoch_secs: i64) -> Option<u64> {
-    let modified = [&dirs.git_dir, &dirs.common_dir]
+pub fn fetch_stamps(dirs: &Dirs) -> FetchStamps {
+    let stamps: Vec<(i64, bool)> = [&dirs.git_dir, &dirs.common_dir]
         .into_iter()
-        .find_map(|d| std::fs::metadata(d.join("FETCH_HEAD")).ok()?.modified().ok())?;
-    let secs = modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-    let now = u64::try_from(now_epoch_secs).ok()?;
-    Some(now.saturating_sub(secs))
+        .filter_map(|d| {
+            let meta = std::fs::metadata(d.join("FETCH_HEAD")).ok()?;
+            let at = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+            Some((i64::try_from(at.as_secs()).ok()?, meta.len() > 0))
+        })
+        .collect();
+    FetchStamps {
+        attempt: stamps.iter().map(|(at, _)| *at).max(),
+        success: stamps.iter().filter(|(_, ok)| *ok).map(|(at, _)| *at).max(),
+    }
+}
+
+/// Seconds from `at` to `now` (both epoch seconds), or `None` when `at`
+/// is ahead of `now`.
+///
+/// A stamp from the future is a clock that moved (a resumed VM, NTP
+/// correcting a bad RTC), never a very recent event, and reading it as
+/// age 0 froze auto-fetch until the wall clock caught up.
+#[must_use]
+pub fn age(at: i64, now: i64) -> Option<u64> {
+    u64::try_from(now.checked_sub(at)?).ok()
+}
+
+/// Whether the full ref `refname` exists: a file read, or in a reftable
+/// repository (whose refs are not files) `git show-ref --verify`, which
+/// takes a ref name and nothing else (no revision syntax).
+///
+/// # Errors
+/// Propagates git failures (reftable only).
+pub fn ref_exists(dirs: &Dirs, refname: &str, timeout: Duration) -> Result<bool, String> {
+    if !dirs.uses_reftable() {
+        return Ok(resolve_ref(dirs, refname).is_some());
+    }
+    if !refname.starts_with("refs/") {
+        return Ok(false);
+    }
+    let args = ["show-ref", "--verify", "--quiet", refname];
+    match git_answer(&dirs.toplevel, &args, timeout)? {
+        Answer::No => Ok(true),
+        Answer::Yes => Ok(false),
+        Answer::Failed(e) => Err(e),
+    }
 }
 
 /// Config keys cleared on every git call because git would run their value
@@ -1077,7 +1130,8 @@ mod tests {
         assert!(ahead_behind(&work, "refs/remotes/origin/ghost", t).is_err());
         assert!(run_git(&work, &["sleep-forever-not-a-command"], t).is_err());
         assert!(fetch(&work, "origin", t).is_ok());
-        assert!(fetch_age(&discover(&work).unwrap(), crate::time::now_secs()).is_some());
+        let stamps = fetch_stamps(&discover(&work).unwrap());
+        assert!(stamps.success.is_some() && stamps.attempt == stamps.success, "{stamps:?}");
     }
 
     /// SPEC § 9: behind and diverged, against a commit pushed from a second
@@ -1531,17 +1585,63 @@ mod tests {
         assert_eq!(resolve_ref(&dirs, "refs/heads/mai"), None);
     }
 
+    /// `FETCH_HEAD` is per worktree but the tracking refs are shared, so
+    /// the newest of the two files counts: a linked worktree with an old
+    /// `FETCH_HEAD` of its own used to report that age after the main
+    /// worktree had fetched.
     #[test]
-    fn fetch_age_is_per_worktree() {
+    fn fetch_stamps_take_the_newest_fetch_of_any_worktree() {
         let (d, work) = repo();
         let wt = d.path().join("wt");
         git(&work, &["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()]);
         git(&wt, &["fetch", "-q", "origin"]);
         let linked = discover(&wt).unwrap();
-        assert!(linked.git_dir.join("FETCH_HEAD").exists());
+        let own = linked.git_dir.join("FETCH_HEAD");
+        assert!(own.exists());
         let now = crate::time::now_secs();
-        assert!(fetch_age(&linked, now).is_some());
-        assert!(fetch_age(&linked, now).unwrap() < 60);
+        let age_of = |s: Option<i64>| s.and_then(|t| age(t, now));
+        assert!(age_of(fetch_stamps(&linked).success).is_some_and(|a| a < 60));
+        let three_days = std::time::SystemTime::now() - Duration::from_hours(72);
+        std::fs::File::options().write(true).open(&own).unwrap().set_modified(three_days).unwrap();
+        assert!(age_of(fetch_stamps(&linked).success).is_some_and(|a| a > 86_400));
+        git(&work, &["fetch", "-q", "origin"]);
+        assert!(age_of(fetch_stamps(&linked).success).is_some_and(|a| a < 60), "the main one's");
+    }
+
+    /// git truncates `FETCH_HEAD` before it contacts the remote, so a fetch
+    /// that fails moves the attempt clock and leaves the file empty: it is
+    /// no successful fetch, and the hint must not read it as one.
+    #[test]
+    fn a_failed_fetch_moves_the_attempt_clock_only() {
+        let (_d, work) = repo();
+        let dirs = discover(&work).unwrap();
+        git(&work, &["fetch", "-q", "origin"]);
+        let old = std::time::SystemTime::now() - Duration::from_hours(24);
+        let head = work.join(".git/FETCH_HEAD");
+        std::fs::File::options().write(true).open(&head).unwrap().set_modified(old).unwrap();
+        let before = fetch_stamps(&dirs);
+        git(&work, &["remote", "set-url", "origin", "/nonexistent/origin.git"]);
+        assert!(fetch(&work, "origin", Duration::from_secs(5)).is_err());
+        assert_eq!(std::fs::metadata(&head).unwrap().len(), 0, "git truncates it first");
+        let after = fetch_stamps(&dirs);
+        assert!(after.attempt > before.attempt, "{before:?} → {after:?}");
+        assert_eq!(after.success, None, "an empty FETCH_HEAD is no success");
+    }
+
+    /// A stamp from the future is a clock that moved, not age 0: read as
+    /// 0 it kept auto-fetch "not due" until the wall clock caught up.
+    #[test]
+    fn a_future_fetch_head_has_no_age() {
+        assert_eq!(age(100, 160), Some(60));
+        assert_eq!(age(100, 100), Some(0));
+        assert_eq!(age(160, 100), None);
+        let (_d, work) = repo();
+        git(&work, &["fetch", "-q", "origin"]);
+        let ahead = std::time::SystemTime::now() + Duration::from_secs(3_600);
+        let head = work.join(".git/FETCH_HEAD");
+        std::fs::File::options().write(true).open(&head).unwrap().set_modified(ahead).unwrap();
+        let stamps = fetch_stamps(&discover(&work).unwrap());
+        assert_eq!(stamps.attempt.and_then(|t| age(t, crate::time::now_secs())), None);
     }
 
     /// Output past the pipe buffer never deadlocks the worker, and output

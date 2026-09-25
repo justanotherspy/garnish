@@ -638,16 +638,21 @@ impl Module for SyncModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let Some(dirs) = ctx.git_dirs() else { return Rendered::empty() };
         let Some(Head::Branch(branch)) = ctx.git_head() else { return Rendered::empty() };
-        let mut segs: Vec<Segment> = Vec::new();
         let Some((_remote, tracking)) = git::upstream(dirs, branch) else {
-            if !cfg.icon("no_upstream").is_empty() {
-                segs.push(seg(cfg, cfg.icon("no_upstream"), "upstream"));
-            }
-            return Rendered::fresh(segs);
+            return Rendered::fresh(no_upstream(cfg));
         };
         let scope = Scope::Repo(dirs.cache_key());
-        let (lookup, freshness) =
-            ctx.cached(cfg, &scope, |e| e.get("upstream").is_none_or(|u| u == tracking));
+        // Branches that share an upstream (`switch -c feat --track
+        // origin/main`) must not share counts: the branch is half the key.
+        let (lookup, freshness) = ctx.cached(cfg, &scope, |e| {
+            e.get("upstream").is_none_or(|u| u == tracking)
+                && e.get("branch").is_none_or(|b| b == branch)
+        });
+        let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
+        if lookup.entry.as_ref().and_then(|e| e.get("gone")) == Some("1") {
+            return Rendered { segments: no_upstream(cfg), freshness, measure: None };
+        }
+        let mut segs: Vec<Segment> = Vec::new();
         let counts = lookup.entry.as_ref().and_then(|e| {
             Some((e.get("ahead")?.parse::<u64>().ok()?, e.get("behind")?.parse::<u64>().ok()?))
         });
@@ -660,14 +665,13 @@ impl Module for SyncModule {
             segs.push(seg(cfg, format!("{sp}{}", upstream_label(&tracking)), "upstream"));
         }
         if cfg.bool("fetch_age")
-            && let Some(age) = git::fetch_age(dirs, ctx.now.as_second())
+            && let Some(age) = fetched_age(dirs, lookup.entry.as_ref(), ctx.now.as_second())
             && age >= cfg.int("fetch_stale_minutes").saturating_mul(60)
             && !cfg.icon("stale").is_empty()
         {
             let hint = fetch_age_hint(cfg.icon("stale"), &ctx.duration(cfg, age), !segs.is_empty());
             segs.push(seg(cfg, hint, "stale"));
         }
-        let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
         Rendered { segments: segs, freshness, measure }
     }
 
@@ -682,46 +686,100 @@ impl Module for SyncModule {
         };
         let (remote, tracking) =
             git::upstream(&dirs, &branch).ok_or_else(|| "no upstream".to_owned())?;
-        let mut values = BTreeMap::new();
-        let interval = ctx.cfg.int("fetch_interval");
-        if interval > 0 && remote != "." {
-            // A failed fetch (offline, bad remote) must neither hide the local
-            // ahead/behind counts nor be retried on every refresh: the attempt
-            // time is remembered in the entry and the interval applies to it.
-            let scope = Scope::Repo(dirs.cache_key());
-            let last_attempt = ctx
-                .cache
-                .read(&scope, ctx.cfg.id)
-                .and_then(|e| e.get("fetch_attempt")?.parse::<i64>().ok());
-            let now = crate::time::now_secs();
-            let attempt_age = last_attempt.map(|t| now.saturating_sub(t));
-            // A stamp *ahead* of the clock is a clock that stepped backwards
-            // (a resumed VM, NTP correcting a bad RTC), not an attempt from
-            // the future: its negative age would otherwise never reach the
-            // interval and auto-fetch would stay frozen, silently, until the
-            // wall clock caught up. Same rule as `Entry::is_fresh`.
-            let window = 0..i64::try_from(interval).unwrap_or(i64::MAX);
-            let due = attempt_age.is_none_or(|age| !window.contains(&age))
-                && git::fetch_age(&dirs, now).is_none_or(|age| age >= interval);
-            if due {
-                values.insert("fetch_attempt".to_owned(), now.to_string());
-                if let Err(e) = git::fetch(&dirs.toplevel, &remote, FETCH_TIMEOUT) {
-                    // The same reduction `Entry::err` gives a failed entry:
-                    // this one rides in an `ok` entry the tick parses every
-                    // render, and a fetch talks to a server that can say
-                    // anything.
-                    values.insert("fetch_error".to_owned(), crate::cache::bounded_text(&e));
-                }
-            } else if let Some(t) = last_attempt {
-                values.insert("fetch_attempt".to_owned(), t.to_string());
-            }
+        let mut values = if ctx.cfg.int("fetch_interval") > 0 && remote != "." {
+            fetch_if_due(ctx, &dirs, &remote)
+        } else {
+            BTreeMap::new()
+        };
+        values.insert("branch".to_owned(), branch);
+        // The branch deleted on the forge and pruned here (`fetch --prune`
+        // after a merge): the config still names the upstream, but there
+        // is nothing to count against. That is no upstream, rendered as
+        // one, not a failed `rev-list` shown as `✗` and retried every TTL.
+        let gone = !git::ref_exists(&dirs, &tracking, GIT_TIMEOUT)?;
+        if gone {
+            values.insert("gone".to_owned(), "1".to_owned());
+        } else {
+            let (ahead, behind) = git::ahead_behind(&dirs.toplevel, &tracking, GIT_TIMEOUT)?;
+            values.insert("ahead".to_owned(), ahead.to_string());
+            values.insert("behind".to_owned(), behind.to_string());
         }
-        let (ahead, behind) = git::ahead_behind(&dirs.toplevel, &tracking, GIT_TIMEOUT)?;
-        values.insert("ahead".to_owned(), ahead.to_string());
-        values.insert("behind".to_owned(), behind.to_string());
         values.insert("upstream".to_owned(), tracking);
         Ok(values)
     }
+}
+
+/// `sync` with no upstream to count against: the `no_upstream` glyph, or
+/// nothing when it is set to `""`.
+fn no_upstream(cfg: &ModuleCfg) -> Vec<Segment> {
+    let glyph = cfg.icon("no_upstream");
+    if glyph.is_empty() { Vec::new() } else { vec![seg(cfg, glyph, "upstream")] }
+}
+
+/// Seconds since the remote-tracking refs were last fetched: the newest of
+/// a `FETCH_HEAD` that holds something and the worker's own record of its
+/// last good fetch (`fetch_ok_at`). git truncates `FETCH_HEAD` before it
+/// contacts the remote, so a failing fetch looks like a fetch that just
+/// happened; the record outlives that. `None` when nothing says, and for a
+/// stamp from the future.
+fn fetched_age(dirs: &git::Dirs, entry: Option<&crate::cache::Entry>, now: i64) -> Option<u64> {
+    let recorded = entry.and_then(|e| e.get("fetch_ok_at")?.parse::<i64>().ok());
+    let last = git::fetch_stamps(dirs).success.into_iter().chain(recorded).max()?;
+    git::age(last, now)
+}
+
+/// Run the opt-in fetch when it is due, and return what the entry records
+/// of it: `fetch_attempt` (when it was last tried), `fetch_ok_at` (when it
+/// last worked) and `fetch_error` (why the last try failed).
+///
+/// A failed fetch (offline, a revoked token) must neither hide the local
+/// counts nor be retried on every refresh, so the attempt time is
+/// remembered and the interval applies to it. Between attempts the three
+/// are carried over from the previous entry, so a fetch that has been
+/// failing for weeks stays visible (`doctor` lists it) instead of lasting
+/// one TTL; only a fetch that works clears the error.
+fn fetch_if_due(ctx: &RefreshCtx<'_>, dirs: &git::Dirs, remote: &str) -> BTreeMap<String, String> {
+    let interval = ctx.cfg.int("fetch_interval");
+    let previous = ctx.cache.read(&Scope::Repo(dirs.cache_key()), ctx.cfg.id);
+    let kept = |key: &str| previous.as_ref().and_then(|e| e.get(key)).map(str::to_owned);
+    let now = crate::time::now_secs();
+    // A stamp *ahead* of the clock (the entry's or `FETCH_HEAD`'s) is a
+    // clock that stepped backwards, not an attempt from the future: its age
+    // would never reach the interval and auto-fetch would stay frozen,
+    // silently, until the wall clock caught up. Same rule as
+    // `Entry::is_fresh`.
+    let window = 0..i64::try_from(interval).unwrap_or(i64::MAX);
+    let tried = kept("fetch_attempt").and_then(|t| t.parse::<i64>().ok());
+    let due = tried.map(|t| now.saturating_sub(t)).is_none_or(|age| !window.contains(&age))
+        && git::fetch_stamps(dirs)
+            .attempt
+            .and_then(|t| git::age(t, now))
+            .is_none_or(|age| age >= interval);
+    let mut values = BTreeMap::new();
+    if !due {
+        for key in ["fetch_attempt", "fetch_ok_at", "fetch_error"] {
+            if let Some(v) = kept(key) {
+                values.insert(key.to_owned(), v);
+            }
+        }
+        return values;
+    }
+    values.insert("fetch_attempt".to_owned(), now.to_string());
+    match git::fetch(&dirs.toplevel, remote, FETCH_TIMEOUT) {
+        Ok(()) => {
+            values.insert("fetch_ok_at".to_owned(), now.to_string());
+        }
+        Err(e) => {
+            // The same reduction `Entry::err` gives a failed entry: this one
+            // rides in an `ok` entry the tick parses every render, and a
+            // fetch talks to a server that can say anything.
+            values.insert("fetch_error".to_owned(), crate::cache::bounded_text(&e));
+            if let Some(ok) = kept("fetch_ok_at") {
+                values.insert("fetch_ok_at".to_owned(), ok);
+            }
+        }
+    }
+    values
 }
 
 /// Whether the forge is GitLab, whose tree URLs carry `/-/` (SPEC § 3.1):
@@ -782,8 +840,7 @@ fn authority(host: &str) -> Option<&str> {
 /// name make a valid, printable-ASCII link. A `.` or `..` segment has its
 /// dots encoded, so a payload-supplied owner or name cannot walk the URL
 /// up to a different page when a browser normalises the path.
-#[must_use]
-pub fn percent_encode(s: &str) -> String {
+fn percent_encode(s: &str) -> String {
     s.split('/').map(encode_segment).collect::<Vec<_>>().join("/")
 }
 

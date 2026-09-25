@@ -396,20 +396,32 @@ fn cache_section(o: &mut String, cache: &Cache) {
     let repos = count_dirs(&root.join("repos"));
     let _ = writeln!(o, "         {sessions} session dir(s), {repos} repo dir(s)");
     let failures = failed_entries(root);
-    if failures.is_empty() {
+    let fetches = fetch_failures(root);
+    if failures.is_empty() && fetches.is_empty() {
         let _ = writeln!(o, "         no failed refreshes");
-    } else {
-        // The text came from a command run in a repository nobody here
-        // built, and this goes to a terminal: plain text, one line's worth.
-        for (path, entry) in failures {
-            let _ = writeln!(
-                o,
-                "         FAILED {} ({}s ago): {}",
-                path,
-                entry.age_ms() / 1000,
-                line_of(&crate::ansi::plain_text(&entry.error))
-            );
-        }
+    }
+    // The text came from a command run in a repository nobody here built,
+    // and this goes to a terminal: plain text, one line's worth.
+    for (path, entry) in failures {
+        let _ = writeln!(
+            o,
+            "         FAILED {} ({}s ago): {}",
+            path,
+            entry.age_ms() / 1000,
+            line_of(&crate::ansi::plain_text(&entry.error))
+        );
+    }
+    // A fetch that fails keeps the counts (they come from the refs on
+    // disk), so its entry is `ok` and this is the only place it shows.
+    for (path, entry) in fetches {
+        let tried = entry.get("fetch_attempt").and_then(|t| t.parse::<i64>().ok());
+        let ago = tried.map_or(0, |t| crate::time::now_secs().saturating_sub(t).max(0));
+        let error = entry.get("fetch_error").unwrap_or_default();
+        let _ = writeln!(
+            o,
+            "         FETCH FAILED {path} ({ago}s ago): {}",
+            line_of(&crate::ansi::plain_text(error))
+        );
     }
     let log = claude_settings::read_regular(&root.join("debug.log"), MAX_DEBUG_LOG_BYTES);
     if let Ok(Some(bytes)) = log {
@@ -601,6 +613,18 @@ fn count_dirs(dir: &Path) -> usize {
 /// Every `err` cache entry under the root, as `(scope/module, entry)`.
 #[must_use]
 pub fn failed_entries(root: &Path) -> Vec<(String, Entry)> {
+    entries_where(root, |e| e.status == Status::Err)
+}
+
+/// Every `ok` entry carrying a failed opt-in fetch (`fetch_error`), as
+/// `(scope/module, entry)`.
+#[must_use]
+pub fn fetch_failures(root: &Path) -> Vec<(String, Entry)> {
+    entries_where(root, |e| e.status == Status::Ok && e.get("fetch_error").is_some())
+}
+
+/// Every cache entry under the root that `keep` accepts, sorted by name.
+fn entries_where(root: &Path, keep: impl Fn(&Entry) -> bool) -> Vec<(String, Entry)> {
     let mut out = Vec::new();
     for kind in ["sessions", "repos"] {
         let Ok(dirs) = std::fs::read_dir(root.join(kind)) else { continue };
@@ -612,7 +636,7 @@ pub fn failed_entries(root: &Path) -> Vec<(String, Entry)> {
                     continue;
                 }
                 if let Some(entry) = crate::cache::read_entry(&p)
-                    && entry.status == Status::Err
+                    && keep(&entry)
                 {
                     let name = format!(
                         "{kind}/{}/{}",
@@ -713,6 +737,36 @@ mod tests {
         assert!(!o.contains('\u{1b}') && !o.contains('\u{7}'), "{o:?}");
         assert!(o.contains("FAILED repos/0123456789abcdef/sync") && o.contains("clear bell title"));
         assert!(o.contains("odd red"), "{o}");
+    }
+
+    /// A fetch that fails keeps the counts, so its entry is `ok` and the
+    /// failure rode in `fetch_error` where nothing read it: `doctor` said
+    /// "no failed refreshes" while an expired token failed every fetch.
+    #[test]
+    fn a_failed_fetch_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::at(dir.path().to_path_buf());
+        let values: BTreeMap<String, String> = [
+            ("ahead", "1"),
+            ("fetch_attempt", "1"),
+            ("fetch_error", "fatal: Authentication failed"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let scope = Scope::Repo("0123456789abcdef".into());
+        cache.write(&scope, "sync", &Entry::ok(1, values)).unwrap();
+        cache.write(&scope, "branch", &Entry::ok(1, BTreeMap::new())).unwrap();
+        let mut o = String::new();
+        cache_section(&mut o, &cache);
+        assert!(!o.contains("no failed refreshes"), "{o}");
+        assert!(
+            o.contains("FETCH FAILED repos/0123456789abcdef/sync (")
+                && o.contains("s ago): fatal: Authentication failed"),
+            "{o}"
+        );
+        assert_eq!(fetch_failures(dir.path()).len(), 1);
+        assert_eq!(failed_entries(dir.path()).len(), 0);
     }
 
     /// A cache on a filesystem without hard links (exFAT, some SMB mounts)

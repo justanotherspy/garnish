@@ -563,6 +563,116 @@ fn worker_fetch_interval_fetches_once_per_interval() {
     let entry = sync_entry(&env);
     assert!(entry.contains(&format!("fetch_attempt={later}")), "the future stamp stays: {entry}");
     assert!(entry.contains("behind=3"), "the fetch must not be frozen: {entry}");
+
+    // The same rule for `FETCH_HEAD`'s own mtime, the other half of `due`:
+    // an hour ahead of the worker's clock read as age 0, "not due", and
+    // froze auto-fetch just the same.
+    push_from_a_second_clone(&env, "fourth");
+    let later2 = (wall + 800).to_string();
+    let ahead = std::time::UNIX_EPOCH + Duration::from_secs(wall + 800 + 3_600);
+    std::fs::File::options()
+        .write(true)
+        .open(env.work.join(".git").join("FETCH_HEAD"))
+        .unwrap()
+        .set_modified(ahead)
+        .unwrap();
+    let (_, err, ok) = garnish(&env, refresh, None, &[("GARNISH_NOW", later2.as_str())]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains("behind=4"), "a future FETCH_HEAD must not freeze the fetch: {entry}");
+}
+
+/// git truncates `FETCH_HEAD` before it contacts the remote, so every
+/// failing fetch looked like one that had just happened: with the remote
+/// unreachable the fetch-age hint never appeared while the counts aged. The
+/// worker now records its last good fetch, and the hint counts from that.
+#[test]
+fn worker_a_failing_fetch_is_not_a_recent_one() {
+    let env = setup();
+    config(
+        &env,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\npreset = \"full\"\nfetch_interval = 300\n",
+    );
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    assert!(sync_entry(&env).contains(&format!("fetch_ok_at={NOW}\n")), "{}", sync_entry(&env));
+    git(&env.work, &["remote", "set-url", "origin", "/nonexistent/origin.git"]);
+    let wall =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let later = (wall + 400).to_string();
+    let at_later = [("GARNISH_NOW", later.as_str())];
+    let (_, err, ok) = garnish(&env, refresh, None, &at_later);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains("fetch_error=") && entry.contains(&format!("fetch_ok_at={NOW}\n")));
+    assert_eq!(std::fs::metadata(env.work.join(".git").join("FETCH_HEAD")).unwrap().len(), 0);
+    // The last good fetch was a year and more before `later`: the hint
+    // shows, where the truncated FETCH_HEAD said "400 s ago".
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &at_later);
+    assert!(out.contains('\u{f017}'), "{out}");
+}
+
+/// A pruned upstream (the branch merged and deleted on the forge, then
+/// `fetch --prune`) is the ordinary state after a pull request. The config
+/// still names it, the tracking ref is gone, and `rev-list` failed: `sync`
+/// showed `✗` for good and a failing worker ran every TTL. It is no
+/// upstream now, and says so with that glyph.
+#[test]
+fn worker_a_gone_upstream_is_no_upstream() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    git(&env.work, &["update-ref", "-d", "refs/remotes/origin/main"]);
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(
+        entry.lines().next().unwrap().ends_with(" ok") && entry.contains("gone=1\n"),
+        "{entry}"
+    );
+    let sync_spawns =
+        |env: &Env| spawns(env).iter().filter(|l| l.contains("--module sync")).count();
+    let before = sync_spawns(&env);
+    for _ in 0..2 {
+        let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert!(out.contains('\u{f127}') && !out.contains('✗') && !out.contains('⇡'), "{out}");
+    }
+    assert_eq!(sync_spawns(&env), before, "a fresh entry spawns nothing");
+}
+
+/// Branches that share an upstream (`checkout -b feat --track
+/// origin/main`, common for short-lived work) shared `sync`'s entry: the
+/// previous branch's counts showed as fresh after a switch. The branch is
+/// half the key now, so the switch is a miss.
+#[test]
+fn worker_branches_sharing_an_upstream_do_not_share_counts() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1") && !out.contains('⟳'), "{out}");
+    git(&env.work, &["checkout", "-q", "-b", "feat", "--track", "origin/main"]);
+    let sync_spawns =
+        |env: &Env| spawns(env).iter().filter(|l| l.contains("--module sync")).count();
+    let before = sync_spawns(&env);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("feat") && out.contains('⟳'), "{out}");
+    assert_eq!(sync_spawns(&env), before + 1, "{:?}", spawns(&env));
+    // Run as the logged spawn would: on Linux the tick handed its lock over.
+    let mut handed = refresh.to_vec();
+    if cfg!(target_os = "linux") {
+        handed.push("--lock-held");
+    }
+    let (_, err, ok) = garnish(&env, &handed, None, &[]);
+    assert!(ok, "{err}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(!out.contains('⇡') && !out.contains('⟳'), "{out}");
 }
 
 /// The first executable `git` on `PATH`.
@@ -750,10 +860,14 @@ fn worker_fetch_failure_keeps_counts_and_is_not_retried_within_the_interval() {
         .flatten()
         .find_map(|d| std::fs::read_to_string(d.path().join("sync.cache")).ok())
         .unwrap();
+    // Inside the interval nothing is fetched, and the failure is carried
+    // over: it used to last one TTL, until the next refresh rewrote the
+    // entry without it.
     assert!(
-        again.contains("fetch_attempt=1738425600") && !again.contains("fetch_error="),
+        again.contains("fetch_attempt=1738425600") && again.contains("fetch_error="),
         "{again}"
     );
+    assert!(!again.contains("fetch_ok_at="), "nothing has worked yet: {again}");
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert!(out.contains("⇡1"), "{out}");
 }
