@@ -4,7 +4,9 @@
 
 use std::collections::BTreeMap;
 
-use super::read::{bounded_count, enum_field, field, id_list, is_bare_key, problem, text_field};
+use super::read::{
+    bounded_count, color_spec, enum_field, field, id_list, is_bare_key, problem, text_field,
+};
 use super::schema::{ModuleCfg, ModuleSchema};
 use super::{ConfigError, MAX_CELLS};
 use crate::ansi::Color;
@@ -823,13 +825,9 @@ fn resolve_title(
     errors: &mut Vec<ConfigError>,
 ) -> Option<TitleCfg> {
     let color = color.and_then(|spec| {
-        theme.resolve(spec).or_else(|| {
-            errors.push(problem(
-                &format!("{path}.title_color"),
-                "expected a role name, a color name, 0-255, or #rrggbb",
-            ));
-            None
-        })
+        color_spec(theme, spec)
+            .inspect_err(|msg| errors.push(problem(&format!("{path}.title_color"), msg)))
+            .ok()
     });
     let text = text?;
     Some(TitleCfg {
@@ -890,13 +888,9 @@ pub(super) fn resolve_boxes(
                 "fill" => cfg.fill = field(&path, value, errors).unwrap_or(false),
                 "color" => {
                     cfg.color = field::<String>(&path, value, errors).and_then(|spec| {
-                        theme.resolve(&spec).or_else(|| {
-                            errors.push(problem(
-                                &path,
-                                "expected a role name, a color name, 0-255, or #rrggbb",
-                            ));
-                            None
-                        })
+                        color_spec(theme, &spec)
+                            .inspect_err(|msg| errors.push(problem(&path, msg)))
+                            .ok()
                     });
                 }
                 _ => errors.push(problem(&path, &unknown_key(&BOX_KEYS))),

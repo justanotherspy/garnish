@@ -4,15 +4,14 @@
 
 use std::collections::BTreeMap;
 
-use super::read::{equal_width_frames, is_bare_key, problem};
+use super::read::{bad_color, equal_width_frames, is_bare_key, is_color_spec, problem};
 use super::schema::{
     COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
     common_keys,
 };
 use super::{ConfigError, STEP_MESSAGE, STEP_RANGE, Vocab};
-use crate::ansi::Color;
 use crate::icons::IconSet;
-use crate::theme::{Role, Theme};
+use crate::theme::Theme;
 
 /// The common keys a `[modules.text.<name>]` table may not carry (SPEC
 /// § 3.7), each with why: reported and removed before the shared parser
@@ -68,14 +67,13 @@ pub(super) fn resolve_texts(
         }
         let mut ov = parse_overrides(schema, &base, &table, errors);
         if let Some(color) = color {
+            let path = format!("{base}.color");
             match color.as_str() {
-                Some(s) if Role::parse(s).is_some() || Color::parse(s).is_some() => {
+                Some(s) if is_color_spec(s) => {
                     ov.colors.entry("text".to_owned()).or_insert_with(|| s.to_owned());
                 }
-                _ => errors.push(problem(
-                    &format!("{base}.color"),
-                    "expected a role name, a color name, 0-255, or #rrggbb",
-                )),
+                Some(s) => errors.push(problem(&path, &bad_color(s))),
+                None => errors.push(problem(&path, "expected a string")),
             }
         }
         if let Some(Value::Float(step)) = ov.opts.get("step")
@@ -299,13 +297,10 @@ fn parse_colors(
 ) {
     for (ck, cv) in table {
         match (schema.color(ck), cv.as_str()) {
-            (Some(_), Some(s)) if Role::parse(s).is_some() || Color::parse(s).is_some() => {
+            (Some(_), Some(s)) if is_color_spec(s) => {
                 ov.colors.insert(ck.clone(), s.to_owned());
             }
-            (Some(_), Some(s)) => err(
-                &format!("colors.{ck}"),
-                format!("invalid color {s:?}; use a role name, a color name, 0-255, or #rrggbb"),
-            ),
+            (Some(_), Some(s)) => err(&format!("colors.{ck}"), bad_color(s)),
             (None, _) => err(
                 &format!("colors.{ck}"),
                 format!(
@@ -356,13 +351,11 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
             let strs: Option<Vec<String>> =
                 items.iter().map(|i| i.as_str().map(str::to_owned)).collect();
             let strs = strs.ok_or_else(|| "expected a list of strings".to_owned())?;
-            let bad_color = (kind == Kind::ColorList)
-                .then(|| {
-                    strs.iter().find(|s| Role::parse(s).is_none() && Color::parse(s).is_none())
-                })
+            let bad = (kind == Kind::ColorList)
+                .then(|| strs.iter().enumerate().find(|(_, s)| !is_color_spec(s)))
                 .flatten();
-            if let Some(bad) = bad_color {
-                return Err(format!("invalid color {bad:?}"));
+            if let Some((i, spec)) = bad {
+                return Err(format!("item {i}: {}", bad_color(spec)));
             }
             Ok(Value::StrList(strs))
         }
@@ -387,8 +380,10 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ansi::Color;
     use crate::config::tests::schemas;
     use crate::config::{MAX_CELLS, MAX_DECIMALS, MAX_TEXT_CHARS, parse};
+    use crate::theme::Role;
 
     /// SPEC § 3.7: `[modules.text.<name>]` tables are validated against the
     /// text schema under their own path; `text.<name>` is a valid line id

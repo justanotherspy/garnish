@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 
 use super::{ConfigError, MAX_TEXT_CHARS, Vocab};
+use crate::ansi::Color;
+use crate::theme::{Role, Theme};
 
 /// A non-negative count with a ceiling: above it the key is reported and
 /// left unset, so its default applies (the pattern of
@@ -128,6 +130,39 @@ pub(super) fn string_table(
 
 pub(super) fn problem(path: &str, message: &str) -> ConfigError {
     ConfigError { path: path.to_owned(), message: message.to_owned(), line: None }
+}
+
+/// What a key that takes a colour spec accepts, as its message names it.
+const COLOR_SPECS: &str = "a role name, a color name, 0-255, or #rrggbb";
+
+/// Whether `spec` is a colour a role-or-literal key takes: a theme role
+/// (resolved against the theme in effect) or a literal colour.
+pub(super) fn is_color_spec(spec: &str) -> bool {
+    Role::parse(spec).is_some() || Color::parse(spec).is_some()
+}
+
+/// A role-or-literal colour (a title, a box, a module's `colors.*`, a text
+/// module's `color`, a colour list) resolved against `theme`, or the one
+/// message every such key reports.
+pub(super) fn color_spec(theme: &Theme, spec: &str) -> Result<Color, String> {
+    theme.resolve(spec).ok_or_else(|| bad_color(spec))
+}
+
+/// The message for a value that is no colour spec.
+pub(super) fn bad_color(spec: &str) -> String {
+    format!("invalid color {spec:?}; use {COLOR_SPECS}")
+}
+
+/// [`bad_color`] for `separator_color`, which takes `inherit` too.
+pub(super) fn bad_color_or_inherit(spec: &str) -> String {
+    format!("invalid color {spec:?}; use inherit, {COLOR_SPECS}")
+}
+
+/// A literal colour (a `[colors]` role's value: a role defined by another
+/// role would have no ground), or the literal-only form of the message.
+pub(super) fn literal_color(spec: &str) -> Result<Color, String> {
+    Color::parse(spec)
+        .ok_or_else(|| format!("invalid color {spec:?}; use a color name, 0-255, or #rrggbb"))
 }
 
 /// A bare TOML key: what a text module or a box may be called, so

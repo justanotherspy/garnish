@@ -3,7 +3,9 @@
 //! into a [`FrameCfg`].
 
 use super::presets::TopPreset;
-use super::read::{enum_field, equal_width_frames, field, problem};
+use super::read::{
+    bad_color_or_inherit, color_spec, enum_field, equal_width_frames, field, problem,
+};
 use super::{ConfigError, resolve_step};
 use crate::ansi::Color;
 use crate::frame::{FrameChars, FrameStyle};
@@ -312,14 +314,9 @@ fn resolve_separator_color(
     match spec {
         None => muted(),
         Some("inherit") => SeparatorColor::Inherit,
-        Some(spec) => theme.resolve(spec).map_or_else(
-            || {
-                errors.push(problem(
-                    "frame.separator_color",
-                    &format!(
-                        "invalid color {spec:?}; use inherit, a role name, a color name, 0-255, or #rrggbb"
-                    ),
-                ));
+        Some(spec) => color_spec(theme, spec).map_or_else(
+            |_| {
+                errors.push(problem("frame.separator_color", &bad_color_or_inherit(spec)));
                 muted()
             },
             |color| SeparatorColor::Fixed { spec: spec.to_owned(), color },

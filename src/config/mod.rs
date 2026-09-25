@@ -608,23 +608,16 @@ fn resolve_colors(
 ) -> BTreeMap<Role, Color> {
     let mut overrides: BTreeMap<Role, Color> = BTreeMap::new();
     for (k, v) in raw {
-        match (Role::parse(k), Color::parse(v)) {
-            (Some(role), Some(color)) => {
+        let path = format!("colors.{k}");
+        match (Role::parse(k), read::literal_color(v)) {
+            (Some(role), Ok(color)) => {
                 overrides.insert(role, color);
             }
-            (None, _) => errors.push(ConfigError {
-                path: format!("colors.{k}"),
-                message: format!(
-                    "unknown color role; expected one of {}",
-                    Role::ALL.iter().map(|r| r.name()).collect::<Vec<_>>().join(", ")
-                ),
-                line: None,
-            }),
-            (_, None) => errors.push(ConfigError {
-                path: format!("colors.{k}"),
-                message: format!("invalid color {v:?}; use a name, a 0-255 index, or #rrggbb"),
-                line: None,
-            }),
+            (None, _) => errors.push(problem(
+                &path,
+                &format!("unknown color role; expected one of {}", Role::choices()),
+            )),
+            (_, Err(message)) => errors.push(problem(&path, &message)),
         }
     }
     overrides
@@ -1222,6 +1215,65 @@ x = 1
                     listed(inner.as_table().unwrap(), &rows::INNER_ROW_KEYS, "row.col.row");
                 }
             }
+        }
+    }
+
+    /// cfg-15: every key that takes a colour refuses a bad one with the one
+    /// message, naming the value and what to write; `separator_color` adds
+    /// `inherit`, a `[colors]` role takes a literal only, a list names the
+    /// item.
+    #[test]
+    fn every_colour_key_refuses_a_bad_colour_the_same_way() {
+        let all = &crate::modules::SCHEMAS;
+        let specs = "a role name, a color name, 0-255, or #rrggbb";
+        let row = "[[row]]\nbox = \"a\"\nmodules = [\"clock\"]\n";
+        for (text, path, want) in [
+            (
+                "[[row]]\ntitle = \"T\"\ntitle_color = \"nope\"\nmodules = [\"clock\"]\n"
+                    .to_owned(),
+                "row[0].title_color",
+                format!("invalid color \"nope\"; use {specs}"),
+            ),
+            (
+                format!("[box.a]\ncolor = \"nope\"\n{row}"),
+                "box.a.color",
+                format!("invalid color \"nope\"; use {specs}"),
+            ),
+            (
+                format!("[box.a]\ntitle = \"B\"\ntitle_color = \"nope\"\n{row}"),
+                "box.a.title_color",
+                format!("invalid color \"nope\"; use {specs}"),
+            ),
+            (
+                "[modules.text.t]\ntext = \"x\"\ncolor = \"nope\"\n".to_owned(),
+                "modules.text.t.color",
+                format!("invalid color \"nope\"; use {specs}"),
+            ),
+            (
+                "[modules.context.colors]\nmarker = \"nope\"\n".to_owned(),
+                "modules.context.colors.marker",
+                format!("invalid color \"nope\"; use {specs}"),
+            ),
+            (
+                "[modules.context]\nband_colors = [\"ok\", \"nope\"]\n".to_owned(),
+                "modules.context.band_colors",
+                format!("item 1: invalid color \"nope\"; use {specs}"),
+            ),
+            (
+                "[frame]\nseparator_color = \"nope\"\n".to_owned(),
+                "frame.separator_color",
+                format!("invalid color \"nope\"; use inherit, {specs}"),
+            ),
+            (
+                "[colors]\naccent = \"warn\"\n".to_owned(),
+                "colors.accent",
+                "invalid color \"warn\"; use a color name, 0-255, or #rrggbb".to_owned(),
+            ),
+        ] {
+            let (_, errs) = parse(&text, all);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(problems, [(path, want.as_str())], "{text}");
         }
     }
 
