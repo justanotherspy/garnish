@@ -8,16 +8,22 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::config::format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
+use crate::config::presets::TopPreset;
 use crate::config::schema::{
     COMMON_OPTS, Kind, ModuleCfg, ModuleSchema, OptSpec, Preset, Value, toml_string,
 };
-use crate::config::{self, ColCfg, Config, Overlay};
+use crate::config::{
+    self, ColCfg, ColorChoice, Config, FillDirection, Justify, Overflow, Overlay, RightJustify,
+    StaleStyle, VAlign, Vocab,
+};
 use crate::frame::FrameStyle;
 use crate::icons::IconSet;
 use crate::modules::SCHEMAS;
 use crate::payload::Payload;
 use crate::render::{Clock, render_plain_at};
 use crate::theme::{PALETTES, Role};
+use crate::time::DurationStyle;
 
 /// One `#` comment line, written only for an annotated file (`config init`
 /// writes them; `config show` writes the values alone).
@@ -27,12 +33,27 @@ fn comment(out: &mut String, annotated: bool, text: &str) {
     }
 }
 
+/// A vocabulary as a comment lists it: `a | b | c`.
+fn bar<T: Vocab>() -> String {
+    T::names().join(" | ")
+}
+
+/// Words as a reference table cell lists them: `` `a` \| `b` ``.
+fn cells(words: &[&str]) -> String {
+    words.iter().map(|w| format!("`{w}`")).collect::<Vec<_>>().join(" \\| ")
+}
+
+/// A vocabulary as a reference table cell lists it.
+fn vocab_cells<T: Vocab>() -> String {
+    cells(&T::names())
+}
+
 /// The top-level keys of the config file, in schema order.
 fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     comment(out, annotated, "garnish configuration — see docs/config.md for every key.");
-    comment(out, annotated, "Top-level preset: default | minimal | full | compact");
+    comment(out, annotated, &format!("Top-level preset: {}", bar::<TopPreset>()));
     let _ = writeln!(out, "preset = {}", toml_string(cfg.preset.name()));
-    comment(out, annotated, "Icon set: nerd | unicode | emoji | ascii");
+    comment(out, annotated, &format!("Icon set: {}", bar::<IconSet>()));
     let _ = writeln!(out, "icons = {}", toml_string(cfg.icons.name()));
     comment(
         out,
@@ -40,11 +61,11 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         &format!("Theme: {}", PALETTES.iter().map(|p| p.name).collect::<Vec<_>>().join(" | ")),
     );
     let _ = writeln!(out, "theme = {}", toml_string(&cfg.theme_name));
-    comment(out, annotated, "Color output: auto | always | never | 256 | truecolor");
+    comment(out, annotated, &format!("Color output: {}", bar::<ColorChoice>()));
     let _ = writeln!(out, "color = {}", toml_string(cfg.color.name()));
     comment(out, annotated, "Truncate the left group when a line overflows the width.");
     let _ = writeln!(out, "truncate = {}", cfg.truncate);
-    comment(out, annotated, "Stale cached values: dim | hide | plain");
+    comment(out, annotated, &format!("Stale cached values: {}", bar::<StaleStyle>()));
     let _ = writeln!(out, "stale_style = {}", toml_string(cfg.stale_style.name()));
     comment(
         out,
@@ -195,11 +216,7 @@ fn write_colors(out: &mut String, cfg: &Config, annotated: bool) {
 /// `[frame]`: the style, the custom glyphs when there are any, and the
 /// animation keys of SPEC § 4.2.
 fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
-    comment(
-        out,
-        annotated,
-        "Frame style: none | rounded | square | double | heavy | powerline | custom",
-    );
+    comment(out, annotated, &format!("Frame style: {}", bar::<FrameStyle>()));
     let _ = writeln!(out, "[frame]");
     let _ = writeln!(out, "style = {}", toml_string(cfg.frame.style.name()));
     comment(out, annotated, "Extend the rule to the full width and close with the right cap.");
@@ -398,7 +415,7 @@ fn write_boxes(out: &mut String, cfg: &Config, annotated: bool) {
             let _ = writeln!(out, "# A box frames a run of adjacent rows, or a whole column:");
             let _ = writeln!(out, "# [box.repo]");
             let _ = writeln!(out, "# title = \"Repository\"");
-            let _ = writeln!(out, "# title_justify = \"left\"  # left | center | right");
+            let _ = writeln!(out, "# title_justify = \"left\"  # {}", bar::<Justify>());
             let _ =
                 writeln!(out, "# style = \"double\"        # inherits [frame] style when absent");
             let _ = writeln!(out, "# fill = false            # draw the rule inside the box too");
@@ -522,7 +539,10 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
         comment(
             out,
             annotated,
-            "preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)",
+            &format!(
+                "preset: {}; refresh: seconds between refreshes (0 = every tick)",
+                bar::<Preset>()
+            ),
         );
         let _ = writeln!(out, "enabled = {}", m.enabled);
         // An annotated file leaves the module preset and option values as
@@ -813,7 +833,8 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
     let _ = writeln!(o, "| `enabled` | bool | `true` | `true` | `true` | Render this module. |");
     let _ = writeln!(
         o,
-        "| `preset` | `minimal` \\| `default` \\| `full` | — | — | — | Which preset the options below default to. |"
+        "| `preset` | {} | — | — | — | Which preset the options below default to. |",
+        vocab_cells::<Preset>()
     );
     let _ = writeln!(
         o,
@@ -958,83 +979,19 @@ pub fn config_page() -> String {
         "A bad key never blanks the status line: every valid key stays in effect, the built-in default stands in for the bad one, and a dim `⚠ config: <file> <path>: <message>` line is appended; only a file that does not parse as TOML falls back to the defaults wholesale, with the line of the syntax error.\n"
     );
 
-    let _ =
-        writeln!(o, "## Top-level keys\n\n| key | values | default | meaning |\n|---|---|---|---|");
-    let _ = writeln!(
-        o,
-        "| `preset` | `default` \\| `minimal` \\| `full` \\| `compact` | `default` | Which rows exist and which module preset they imply, when `[[row]]` is absent. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `icons` | `nerd` \\| `unicode` \\| `emoji` \\| `ascii` | `nerd` | Glyph set. `nerd` needs a Nerd Font. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `theme` | {} | `garnish` | Color palette (see below). |",
-        PALETTES.iter().map(|p| format!("`{}`", p.name)).collect::<Vec<_>>().join(" \\| ")
-    );
-    let _ = writeln!(
-        o,
-        "| `color` | `auto` \\| `always` \\| `never` \\| `256` \\| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set and not empty. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `truncate` | bool | `true` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is never cut. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `stale_style` | `dim` \\| `hide` \\| `plain` | `dim` | How overdue cached values are shown. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |"
-    );
-    let _ = writeln!(
-        o,
-        "| `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |\n| `right_justify` | `end` \\| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |\n| `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing or were hidden by `hide_when_empty` or a `hide` list (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |\n| `overflow` | `truncate` \\| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |\n| `ticker_step` | number | `1` | Cells the ticker advances per tick ({steps}; `0.5` = every second tick). |\n| `ticker_gap` | string | `\"   \"` | Text between the end of a scrolled group and its wrapped-around start. |\n| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |",
-        steps = crate::config::STEP_BOUNDS
-    );
-    let _ = writeln!(
-        o,
-        "| `durations` | `compact` \\| `fixed` | `compact` (`fixed` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = \"ticker\"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` (`inherit` \\| `compact` \\| `fixed`) to pin one module. |"
-    );
-
-    let _ = writeln!(
-        o,
-        "\n## `[format]` — number styles\n\nOne style per kind of number, each defaulting to what garnish has always printed. Every module that prints a kind carries the same key with `inherit` as its default, to pin one module while the rest follow the table, the way `durations` works; a style on a module that prints no such number is an unknown key.\n"
-    );
-    let _ = writeln!(o, "| key | values | default | meaning |\n|---|---|---|---|");
-    let _ = writeln!(
-        o,
-        "| `tokens` | `compact` \\| `precise` \\| `whole` | `compact` | Token counts: `128k` and `1.0M`; `128,400`; `128400`. Printed by {}. |",
-        format_carriers("tokens")
-    );
-    let _ = writeln!(
-        o,
-        "| `percent` | `whole` \\| `precise` | `whole` | Percentages: `42%`; `42.3%`. Bands and thresholds compare the number printed, whichever style. Printed by {}. |",
-        format_carriers("percent")
-    );
-    let _ = writeln!(
-        o,
-        "| `cost` | `precise` \\| `whole` | `precise` | Money: `$1.23` (`cost.decimals` places, `$1.2k` from a thousand up); `$1`. Printed by {}. |",
-        format_carriers("cost")
-    );
-    let _ = writeln!(
-        o,
-        "| `parens` | `plain` \\| `dim` | `plain` | The parenthesised details (`api`'s share of the session, `lines`' net, the `both` reset form's time): in the colour of the value they follow, or in the muted role the way a `label` is drawn (Claude Code already dims every row, so the muted colour is what \"dim\" visibly means). |"
-    );
+    top_level_section(&mut o);
+    format_section(&mut o);
+    // The theme a file without one resolves to, looked up by name rather
+    // than assumed to be the first palette.
+    let theme = Config::defaults(&SCHEMAS).theme_name;
     let _ = writeln!(
         o,
         "\n## `[colors]` — theme roles\n\nEvery module color defaults to a role; override a role here to restyle every module at once.\n"
     );
-    let _ = writeln!(o, "| role | garnish default | used for |\n|---|---|---|");
-    let garnish = PALETTES.first();
+    let _ = writeln!(o, "| role | {theme} default | used for |\n|---|---|---|");
+    let palette = crate::theme::palette(&theme);
     for role in Role::ALL {
-        let def = garnish.map_or("", |p| p.spec(role));
+        let def = palette.map_or("", |p| p.spec(role));
         let _ = writeln!(o, "| `{}` | `{def}` | {} |", role.name(), role_doc(role));
     }
     let _ = writeln!(o, "\n### Themes\n\n| theme | description |\n|---|---|");
@@ -1048,11 +1005,150 @@ pub fn config_page() -> String {
     o
 }
 
+/// The top-level keys' table: each list of values from its type's
+/// vocabulary and each plain default from the config an empty file resolves
+/// to, so neither can drift from the parser.
+fn top_level_section(o: &mut String) {
+    let d = Config::defaults(&SCHEMAS);
+    let _ =
+        writeln!(o, "## Top-level keys\n\n| key | values | default | meaning |\n|---|---|---|---|");
+    let _ = writeln!(
+        o,
+        "| `preset` | {} | `{}` | Which rows exist and which module preset they imply, when `[[row]]` is absent. |",
+        vocab_cells::<TopPreset>(),
+        d.preset.name()
+    );
+    let _ = writeln!(
+        o,
+        "| `icons` | {} | `{}` | Glyph set. `nerd` needs a Nerd Font. |",
+        vocab_cells::<IconSet>(),
+        d.icons.name()
+    );
+    let _ = writeln!(
+        o,
+        "| `theme` | {} | `{}` | Color palette (see below). |",
+        cells(&PALETTES.iter().map(|p| p.name).collect::<Vec<_>>()),
+        d.theme_name
+    );
+    let _ = writeln!(
+        o,
+        "| `color` | {} | `{}` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set and not empty. |",
+        vocab_cells::<ColorChoice>(),
+        d.color.name()
+    );
+    let _ = writeln!(
+        o,
+        "| `truncate` | bool | `{}` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is never cut. |",
+        d.truncate
+    );
+    let _ = writeln!(
+        o,
+        "| `stale_style` | {} | `{}` | How overdue cached values are shown. |",
+        vocab_cells::<StaleStyle>(),
+        d.stale_style.name()
+    );
+    let _ = writeln!(
+        o,
+        "| `stale_after` | integer ≥ 1 | `{}` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |",
+        d.stale_after
+    );
+    let _ = writeln!(
+        o,
+        "| `padding` | integer | `{}` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |",
+        d.padding
+    );
+    let _ = writeln!(
+        o,
+        "| `align` | bool | `{}` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |",
+        d.align
+    );
+    let _ = writeln!(
+        o,
+        "| `right_justify` | {} | `{}` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |",
+        vocab_cells::<RightJustify>(),
+        d.right_justify.name()
+    );
+    let _ = writeln!(
+        o,
+        "| `hide_empty_rows` | bool | `{}` | Drop a row whose modules all rendered nothing or were hidden by `hide_when_empty` or a `hide` list (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = \"hide\"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |",
+        d.hide_empty_rows
+    );
+    let _ = writeln!(
+        o,
+        "| `overflow` | {} | `{}` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |",
+        vocab_cells::<Overflow>(),
+        d.overflow.name()
+    );
+    let _ = writeln!(
+        o,
+        "| `ticker_step` | number | `{}` | Cells the ticker advances per tick ({}; `0.5` = every second tick). |",
+        Value::Float(d.ticker_step).to_toml(),
+        crate::config::STEP_BOUNDS
+    );
+    let _ = writeln!(
+        o,
+        "| `ticker_gap` | string | `{}` | Text between the end of a scrolled group and its wrapped-around start. |",
+        toml_string(&d.ticker_gap)
+    );
+    let _ = writeln!(
+        o,
+        "| `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |"
+    );
+    let under_ticker = config::parse("overflow = \"ticker\"", &SCHEMAS).0.durations;
+    let _ = writeln!(
+        o,
+        "| `durations` | {} | `{}` (`{}` with a ticker) | How elapsed times and countdowns print: `compact` drops a zero second unit (`8m20s`, `9m`, `2h`); `fixed` always shows two units with the small one two digits wide (`8m20s`, `9m00s`, `2h00m`), so timers keep their width. Defaults to `fixed` when `overflow = \"ticker\"`, because a timer changing width inside the scrolled group makes the window jump; set it to `compact` to opt back in. Every module that prints a timer (`session`, `api`, `cache`, `limit5h`, `limit7d`, `spend`, `sync`) has its own `durations` ({}) to pin one module. |",
+        vocab_cells::<DurationStyle>(),
+        d.durations.name(),
+        under_ticker.name(),
+        cells(crate::modules::DURATION_CHOICES)
+    );
+}
+
+/// The `[format]` table's rows (SPEC § 4, Number formats), each list of
+/// values from its style's vocabulary and each default from [`FormatCfg`].
+fn format_section(o: &mut String) {
+    let d = FormatCfg::default();
+    let _ = writeln!(
+        o,
+        "\n## `[format]` — number styles\n\nOne style per kind of number, each defaulting to what garnish has always printed. Every module that prints a kind carries the same key with `inherit` as its default, to pin one module while the rest follow the table, the way `durations` works; a style on a module that prints no such number is an unknown key.\n"
+    );
+    let _ = writeln!(o, "| key | values | default | meaning |\n|---|---|---|---|");
+    let _ = writeln!(
+        o,
+        "| `tokens` | {} | `{}` | Token counts: `128k` and `1.0M`; `128,400`; `128400`. Printed by {}. |",
+        vocab_cells::<TokenStyle>(),
+        d.tokens.name(),
+        format_carriers("tokens")
+    );
+    let _ = writeln!(
+        o,
+        "| `percent` | {} | `{}` | Percentages: `42%`; `42.3%`. Bands and thresholds compare the number printed, whichever style. Printed by {}. |",
+        vocab_cells::<PercentStyle>(),
+        d.percent.name(),
+        format_carriers("percent")
+    );
+    let _ = writeln!(
+        o,
+        "| `cost` | {} | `{}` | Money: `$1.23` (`cost.decimals` places, `$1.2k` from a thousand up); `$1`. Printed by {}. |",
+        vocab_cells::<CostStyle>(),
+        d.cost.name(),
+        format_carriers("cost")
+    );
+    let _ = writeln!(
+        o,
+        "| `parens` | {} | `{}` | The parenthesised details (`api`'s share of the session, `lines`' net, the `both` reset form's time): in the colour of the value they follow, or in the muted role the way a `label` is drawn (Claude Code already dims every row, so the muted colour is what \"dim\" visibly means). |",
+        vocab_cells::<ParensStyle>(),
+        d.parens.name()
+    );
+}
+
 fn frame_section(o: &mut String) {
     let _ = writeln!(o, "\n## `[frame]`\n\n| key | default | meaning |\n|---|---|---|");
     let _ = writeln!(
         o,
-        "| `style` | `rounded` (`none` for the `minimal` preset) | `none` \\| `rounded` \\| `square` \\| `double` \\| `heavy` \\| `powerline` \\| `custom` |"
+        "| `style` | `rounded` (`none` for the `minimal` preset) | {} |",
+        vocab_cells::<FrameStyle>()
     );
     let _ = writeln!(
         o,
@@ -1088,7 +1184,9 @@ fn frame_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `fill_direction` | `right` | `left` \\| `right`: which way the pattern travels. |"
+        "| `fill_direction` | `{}` | {}: which way the pattern travels. |",
+        FillDirection::default().name(),
+        vocab_cells::<FillDirection>()
     );
     let _ = writeln!(
         o,
@@ -1137,7 +1235,8 @@ fn layout_sample(text: &str, columns: usize) -> String {
 fn columns_section(o: &mut String) {
     let _ = writeln!(
         o,
-        "## `[[row.col]]`\n\nA row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:\n\n| value | meaning |\n|---|---|\n| `\"<n>fr\"` | a share of the width left over once the others are placed (`\"1fr\"` by default, so three bare columns are thirds and six are sixths) |\n| `\"auto\"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = \"fixed\"`, a module with `max_width`), not for branch names |\n| an integer | that many cells |\n\n`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` (`left` \\| `center` \\| `right`) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = \"ticker\"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.\n"
+        "## `[[row.col]]`\n\nA row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:\n\n| value | meaning |\n|---|---|\n| `\"<n>fr\"` | a share of the width left over once the others are placed (`\"1fr\"` by default, so three bare columns are thirds and six are sixths) |\n| `\"auto\"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = \"fixed\"`, a module with `max_width`), not for branch names |\n| an integer | that many cells |\n\n`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` ({justify}) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = \"ticker\"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.\n",
+        justify = vocab_cells::<Justify>()
     );
     let _ = writeln!(
         o,
@@ -1149,7 +1248,8 @@ fn columns_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` (`top` \\| `center` \\| `bottom`) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.\n"
+        "A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` ({}) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.\n",
+        vocab_cells::<VAlign>()
     );
 }
 
@@ -1173,7 +1273,15 @@ fn titles_section(o: &mut String) {
 fn boxes_section(o: &mut String) {
     let _ = writeln!(
         o,
-        "## `[box.<name>]`\n\nA box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = \"<name>\"` form one box, inside a stack as at the top level; `box = \"<name>\"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest. A box is one run of adjacent rows in the whole file, so a name that comes back anywhere after it is reported and that run left unboxed.\n\n| key | default | meaning |\n|---|---|---|\n| `title` `title_justify` `title_pad` `title_color` | none | the title set into the box's top rule, as for a row |\n| `style` | the `[frame]` style | `none` \\| `rounded` \\| `square` \\| `double` \\| `heavy` \\| `custom`; when the frame's style has no box shape (`none`, `powerline`) an unstyled box is `rounded`, and a box that asks for `none` itself is invisible |\n| `fill` | `false` | draw the rule between a row's groups inside the box; off by default, because a clean interior is what a box is for |\n| `color` | the frame colour | role or literal for the box's glyphs |\n"
+        "## `[box.<name>]`\n\nA box frames a run of rows, or a whole column, with its own corners and sides in place of the frame's caps: two extra lines, so a box is at least three lines tall. Three ways to join one: adjacent rows with the same `box = \"<name>\"` form one box, inside a stack as at the top level; `box = \"<name>\"` or `box = true` on a column makes the whole column one box the row's full height; `box = true` on a row boxes that row alone, and then the row's own `title*` keys title it. Boxes never nest. A box is one run of adjacent rows in the whole file, so a name that comes back anywhere after it is reported and that run left unboxed.\n\n| key | default | meaning |\n|---|---|---|\n| `title` `title_justify` `title_pad` `title_color` | none | the title set into the box's top rule, as for a row |\n| `style` | the `[frame]` style | {styles}; when the frame's style has no box shape (`none`, `powerline`) an unstyled box is `rounded`, and a box that asks for `none` itself is invisible |\n| `fill` | `false` | draw the rule between a row's groups inside the box; off by default, because a clean interior is what a box is for |\n| `color` | the frame colour | role or literal for the box's glyphs |\n",
+        // Powerline has caps, not a box shape: the parser draws it rounded.
+        styles = cells(
+            &FrameStyle::ALL
+                .into_iter()
+                .filter(|s| *s != FrameStyle::Powerline)
+                .map(FrameStyle::name)
+                .collect::<Vec<_>>()
+        )
     );
     let _ = writeln!(
         o,
@@ -1509,6 +1617,41 @@ mod tests {
         // `init` leaves `animate` to Claude Code's prefersReducedMotion (SPEC § 4.2).
         assert_eq!(from_init.animate, None);
         assert!(config_toml(&cfg, true).contains("\n# animate = true\n"));
+    }
+
+    /// sch-10: the reference's default column is the config an empty file
+    /// resolves to, so a changed default cannot leave the page behind.
+    #[test]
+    fn the_reference_defaults_are_the_parsers() {
+        let d = Config::defaults(&SCHEMAS);
+        let page = config_page();
+        let default_of = |key: &str| -> String {
+            let row = page
+                .lines()
+                .find(|l| l.starts_with(&format!("| `{key}` |")))
+                .unwrap_or_else(|| panic!("no row for {key}"));
+            row.split(" | ").nth(2).unwrap().to_owned()
+        };
+        for (key, want) in [
+            ("preset", d.preset.name().to_owned()),
+            ("icons", d.icons.name().to_owned()),
+            ("theme", d.theme_name.clone()),
+            ("color", d.color.name().to_owned()),
+            ("truncate", d.truncate.to_string()),
+            ("stale_style", d.stale_style.name().to_owned()),
+            ("stale_after", d.stale_after.to_string()),
+            ("padding", d.padding.to_string()),
+            ("align", d.align.to_string()),
+            ("right_justify", d.right_justify.name().to_owned()),
+            ("hide_empty_rows", d.hide_empty_rows.to_string()),
+            ("overflow", d.overflow.name().to_owned()),
+            ("ticker_gap", toml_string(&d.ticker_gap)),
+            ("tokens", d.format.tokens.name().to_owned()),
+            ("parens", d.format.parens.name().to_owned()),
+        ] {
+            assert_eq!(default_of(key), format!("`{want}`"), "{key}");
+        }
+        assert!(default_of("durations").starts_with(&format!("`{}`", d.durations.name())));
     }
 
     #[test]

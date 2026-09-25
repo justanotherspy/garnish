@@ -123,9 +123,7 @@ impl App {
     /// `b`: the box picker for the selected line, open on the box it is in.
     fn ask_box(&mut self) {
         let Some(at) = self.builder.item().map(|i| i.at) else { return };
-        let mut items =
-            vec![Choice::noted("none", "no box"), Choice::noted("true", "a box of its own")];
-        items.extend(self.config.boxes.keys().map(|n| Choice::noted(n, "[box] table")));
+        let mut items = crate::setup::form::box_choices(&self.config);
         items.push(Choice::custom("A new box named"));
         let mut choose = Choose::new("Box", items, Target::BoxFor(at));
         let current = self.draft.row(at).and_then(|t| t.get("box")).map_or_else(

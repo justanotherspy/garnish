@@ -4,8 +4,6 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
-
 use super::read::{bounded_count, enum_field, field, id_list, is_bare_key, problem, text_field};
 use super::schema::{ModuleCfg, ModuleSchema};
 use super::{ConfigError, MAX_CELLS};
@@ -172,8 +170,7 @@ impl Width {
 
 /// Where a lone `modules` group sits in its column, and where a title sits
 /// in its rule (SPEC § 4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Justify {
     /// Against the column's left edge; a title right after the left cap.
     #[default]
@@ -185,6 +182,9 @@ pub enum Justify {
 }
 
 impl Justify {
+    /// Every place, left to right.
+    pub const ALL: [Self; 3] = [Self::Left, Self::Center, Self::Right];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -197,8 +197,7 @@ impl Justify {
 }
 
 /// Where a stack shorter than its row sits (SPEC § 4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VAlign {
     /// Padding lines below the content.
     #[default]
@@ -210,6 +209,9 @@ pub enum VAlign {
 }
 
 impl VAlign {
+    /// Every place, top to bottom.
+    pub const ALL: [Self; 3] = [Self::Top, Self::Center, Self::Bottom];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -335,8 +337,6 @@ const ROW_KEYS: &str =
 const INNER_ROW_KEYS: &str =
     "modules, right, separator, blank, title, title_justify, title_pad, title_color, box";
 const COL_KEYS: &str = "width, modules, right, justify, valign, box, row";
-const JUSTIFIES: &str = "left, center, right";
-const VALIGNS: &str = "top, center, bottom";
 
 impl RawRow {
     /// One `[[row]]` or `[[row.col.row]]` table. An inner row may not carry
@@ -369,9 +369,7 @@ impl RawRow {
                 }
                 "blank" => row.blank = field::<bool>(&path, value, errors).unwrap_or(false),
                 "title" => row.title = text_field(&path, value, errors),
-                "title_justify" => {
-                    row.title_justify = enum_field(&path, value, JUSTIFIES, errors);
-                }
+                "title_justify" => row.title_justify = enum_field(&path, &value, errors),
                 "title_pad" => row.title_pad = bounded_count(&path, value, MAX_TITLE_PAD, errors),
                 "title_color" => row.title_color = field(&path, value, errors),
                 "box" => row.boxed = box_ref(&path, value, errors),
@@ -421,8 +419,8 @@ impl RawCol {
                         col.right = ids;
                     }
                 }
-                "justify" => col.justify = enum_field(&path, value, JUSTIFIES, errors),
-                "valign" => col.valign = enum_field(&path, value, VALIGNS, errors),
+                "justify" => col.justify = enum_field(&path, &value, errors),
+                "valign" => col.valign = enum_field(&path, &value, errors),
                 "box" => col.boxed = box_ref(&path, value, errors),
                 "row" => {
                     let toml::Value::Array(items) = value else {
@@ -829,7 +827,6 @@ pub(super) fn resolve_boxes(
     theme: &Theme,
     errors: &mut Vec<ConfigError>,
 ) -> BTreeMap<String, BoxCfg> {
-    let styles = FrameStyle::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
     let mut out = BTreeMap::new();
     for (name, table) in raw {
         let base = format!("box.{name}");
@@ -847,13 +844,13 @@ pub(super) fn resolve_boxes(
             let path = format!("{base}.{key}");
             match key.as_str() {
                 "title" => title = text_field(&path, value, errors),
-                "title_justify" => justify = enum_field(&path, value, JUSTIFIES, errors),
+                "title_justify" => justify = enum_field(&path, &value, errors),
                 "title_pad" => pad = bounded_count(&path, value, MAX_TITLE_PAD, errors),
                 "title_color" => color = field::<String>(&path, value, errors),
                 // Powerline has caps, not a box shape; the box is drawn
                 // rounded rather than silently losing its sides.
                 "style" => {
-                    cfg.style = enum_field(&path, value, &styles, errors);
+                    cfg.style = enum_field(&path, &value, errors);
                     if cfg.style == Some(FrameStyle::Powerline) {
                         errors.push(problem(
                             &path,

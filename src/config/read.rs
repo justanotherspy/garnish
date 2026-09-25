@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{ConfigError, MAX_TEXT_CHARS};
+use super::{ConfigError, MAX_TEXT_CHARS, Vocab};
 
 /// A non-negative count with a ceiling: above it the key is reported and
 /// left unset, so its default applies (the pattern of
@@ -62,21 +62,22 @@ pub(super) fn field<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// [`field`] for a key with a fixed vocabulary, naming the choices in the
-/// message: `try_into` alone says "invalid type: unit variant" for a
-/// non-string and reads a table's keys as if they were the value.
-pub(super) fn enum_field<T: serde::de::DeserializeOwned>(
+/// A key with a fixed vocabulary: one of `T`'s words, read through
+/// [`Vocab::parse`] and refused naming [`Vocab::choices`], so the words the
+/// parser takes and the ones its message lists are the same list. The list
+/// is only built on the error path.
+pub(super) fn enum_field<T: Vocab>(
     path: &str,
-    value: toml::Value,
-    options: &str,
+    value: &toml::Value,
     errors: &mut Vec<ConfigError>,
 ) -> Option<T> {
-    let Some(text) = value.as_str().map(str::to_owned) else {
-        errors.push(problem(path, &format!("expected a string, one of {options}")));
+    let Some(text) = value.as_str() else {
+        errors.push(problem(path, &format!("expected a string, one of {}", T::choices())));
         return None;
     };
-    value.try_into::<T>().ok().or_else(|| {
-        errors.push(problem(path, &format!("unknown value {text:?}; expected one of {options}")));
+    T::parse(text).or_else(|| {
+        let message = format!("unknown value {text:?}; expected one of {}", T::choices());
+        errors.push(problem(path, &message));
         None
     })
 }

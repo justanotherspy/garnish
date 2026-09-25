@@ -2,8 +2,6 @@
 //! separator glyphs, their animation and the separator colour, resolved
 //! into a [`FrameCfg`].
 
-use serde::Deserialize;
-
 use super::presets::TopPreset;
 use super::read::{enum_field, equal_width_frames, field, problem};
 use super::{ConfigError, resolve_step};
@@ -12,8 +10,7 @@ use crate::frame::{FrameChars, FrameStyle};
 use crate::theme::{Role, Theme};
 
 /// Which way an animated rule pattern travels (`[frame] fill_direction`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FillDirection {
     /// Toward the left cap.
     Left,
@@ -23,6 +20,9 @@ pub enum FillDirection {
 }
 
 impl FillDirection {
+    /// Both directions, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::Left, Self::Right];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -139,12 +139,10 @@ const FRAME_KEYS: [&str; 24] = [
     "bottom_right",
     "side",
 ];
-const FILL_DIRECTIONS: &str = "left, right";
 
 impl RawFrame {
     pub(super) fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
         let mut f = Self::default();
-        let styles = FrameStyle::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
         for (key, value) in table {
             let path = format!("frame.{key}");
             let text_slot = match key.as_str() {
@@ -174,14 +172,12 @@ impl RawFrame {
                 continue;
             }
             match key.as_str() {
-                "style" => f.style = enum_field(&path, value, &styles, errors),
+                "style" => f.style = enum_field(&path, &value, errors),
                 "fill" => f.fill = field(&path, value, errors),
                 // A colour spec, resolved against the theme in `resolve_frame`.
                 "separator_color" => f.separator_color = field(&path, value, errors),
                 "fill_step" => f.fill_step = field(&path, value, errors),
-                "fill_direction" => {
-                    f.fill_direction = enum_field(&path, value, FILL_DIRECTIONS, errors);
-                }
+                "fill_direction" => f.fill_direction = enum_field(&path, &value, errors),
                 "separator_frames" => f.separator_frames = field(&path, value, errors),
                 "separator_step" => f.separator_step = field(&path, value, errors),
                 _ => errors.push(problem(

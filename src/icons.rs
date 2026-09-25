@@ -1,11 +1,8 @@
 //! Icon sets. Every glyph a module uses is declared in its schema with one
 //! value per set; users pick a set globally and may override any glyph.
 
-use serde::Deserialize;
-
 /// The four built-in icon sets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum IconSet {
     /// Nerd Font private-use glyphs (needs a patched font).
     #[default]

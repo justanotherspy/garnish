@@ -65,16 +65,18 @@ impl RenderArgs {
             .preset
             .as_deref()
             .map(|p| {
-                TopPreset::parse(p)
-                    .ok_or_else(|| typo("preset", p, "default, minimal, full or compact"))
+                TopPreset::parse(p).ok_or_else(|| {
+                    typo("preset", p, &either(TopPreset::ALL.map(TopPreset::name).to_vec()))
+                })
             })
             .transpose()?;
         let icons = self
             .icons
             .as_deref()
             .map(|i| {
-                IconSet::parse(i)
-                    .ok_or_else(|| typo("icon set", i, "nerd, unicode, emoji or ascii"))
+                IconSet::parse(i).ok_or_else(|| {
+                    typo("icon set", i, &either(IconSet::ALL.map(IconSet::name).to_vec()))
+                })
             })
             .transpose()?;
         let color = self
@@ -755,7 +757,8 @@ pub fn preset_text(preset: &str) -> Result<String> {
     let Some(p) = crate::gallery::find(preset) else {
         // A typo, not a fault: one line, no report.
         eprintln!(
-            "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
+            "unknown preset {preset:?}; expected {} or a gallery name ({})",
+            TopPreset::ALL.map(TopPreset::name).join(", "),
             crate::gallery::PRESETS.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")
         );
         return Err(Quiet.into());
@@ -773,4 +776,27 @@ pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
     config::write_target(explicit).ok_or_else(|| {
         refusal(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Vocab;
+
+    /// cfg-14: the `preview` flags that take a vocabulary name its words in
+    /// their help as the parser lists them (the attribute has to be a
+    /// literal, so this is what keeps it honest).
+    #[test]
+    fn the_overlay_flags_name_the_parsers_words() {
+        use clap::CommandFactory;
+        let cli = Cli::command();
+        let preview = cli.find_subcommand("preview").unwrap();
+        let value_name = |id: &str| {
+            let arg = preview.get_arguments().find(|a| a.get_id() == id).unwrap();
+            arg.get_value_names().unwrap().iter().map(ToString::to_string).collect::<String>()
+        };
+        assert_eq!(value_name("preset"), TopPreset::names().join("|"));
+        assert_eq!(value_name("icons"), IconSet::names().join("|"));
+        assert_eq!(value_name("color"), ColorChoice::names().join("|"));
+    }
 }

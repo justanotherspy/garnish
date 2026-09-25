@@ -9,7 +9,7 @@ use super::schema::{
     COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
     common_keys,
 };
-use super::{ConfigError, STEP_MESSAGE, STEP_RANGE};
+use super::{ConfigError, STEP_MESSAGE, STEP_RANGE, Vocab};
 use crate::ansi::Color;
 use crate::icons::IconSet;
 use crate::theme::{Role, Theme};
@@ -124,7 +124,7 @@ pub(super) fn parse_overrides(
             },
             "preset" => match value.as_str().and_then(Preset::parse) {
                 Some(p) => ov.preset = Some(p),
-                None => err(key, "expected \"minimal\", \"default\" or \"full\"".into()),
+                None => err(key, format!("expected one of {}", Preset::choices())),
             },
             "refresh" => match value.as_integer().and_then(|i| u64::try_from(i).ok()) {
                 Some(0) if schema.refresh > 0 => err(

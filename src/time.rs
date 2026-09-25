@@ -5,7 +5,6 @@
 use std::path::Path;
 
 use jiff::{Timestamp, tz::TimeZone};
-use serde::Deserialize;
 
 /// Environment variable that freezes the clock (epoch seconds or RFC 3339).
 pub const NOW_ENV: &str = "GARNISH_NOW";
@@ -202,8 +201,7 @@ pub fn fixed_duration(total_secs: u64) -> String {
 }
 
 /// How elapsed times and countdowns print (top-level `durations` key).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DurationStyle {
     /// [`compact_duration`]: at most two units, a zero second unit dropped.
     #[default]
@@ -213,6 +211,9 @@ pub enum DurationStyle {
 }
 
 impl DurationStyle {
+    /// Both styles, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::Compact, Self::Fixed];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -220,6 +221,13 @@ impl DurationStyle {
             Self::Compact => "compact",
             Self::Fixed => "fixed",
         }
+    }
+
+    /// The style a config name stands for; `None` for `inherit` (a module's
+    /// own `durations` deferring to the top-level key) and anything else.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
     /// Format a duration in this style.

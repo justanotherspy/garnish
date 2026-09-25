@@ -42,12 +42,7 @@ impl Picker {
             .iter()
             .map(|p| PickItem {
                 name: p.name().to_owned(),
-                summary: match p {
-                    TopPreset::Default => "four lines, every module at its default".to_owned(),
-                    TopPreset::Minimal => "one unframed line, the bare values".to_owned(),
-                    TopPreset::Full => "four lines, everything each module knows".to_owned(),
-                    TopPreset::Compact => "two lines".to_owned(),
-                },
+                summary: p.summary().to_owned(),
                 columns: None,
                 needs: None,
             })

@@ -254,11 +254,7 @@ impl Ctx<'_> {
     /// that is `inherit`, then the top-level key (SPEC § 4.1).
     #[must_use]
     pub fn durations_for(&self, cfg: &ModuleCfg) -> crate::time::DurationStyle {
-        match cfg.str("durations") {
-            "compact" => crate::time::DurationStyle::Compact,
-            "fixed" => crate::time::DurationStyle::Fixed,
-            _ => self.durations,
-        }
+        crate::time::DurationStyle::parse(cfg.str("durations")).unwrap_or(self.durations)
     }
 
     /// A duration in the module's style: `9m` (compact) or `9m00s` (fixed).

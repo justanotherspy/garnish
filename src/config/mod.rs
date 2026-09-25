@@ -10,8 +10,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::Deserialize;
-
 use crate::ansi::{Color, ColorMode};
 use crate::icons::IconSet;
 use crate::theme::{PALETTES, Role, Theme, palette};
@@ -26,6 +24,7 @@ mod load;
 mod overrides;
 mod read;
 mod rows;
+mod vocab;
 
 pub use frame::{FillDirection, FrameCfg, SeparatorColor};
 pub use load::{
@@ -39,6 +38,7 @@ pub use rows::{
     BoxCfg, BoxRef, ColCfg, DEFAULT_GAP, DEFAULT_TITLE_PAD, Justify, MAX_COLS, MAX_FR, MAX_GAP,
     MAX_TITLE_PAD, RowCfg, TitleCfg, VAlign, Width,
 };
+pub use vocab::Vocab;
 
 use format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
 use frame::RawFrame;
@@ -70,8 +70,7 @@ impl std::fmt::Display for ConfigError {
 }
 
 /// Stale-value styling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StaleStyle {
     /// Dim the value and append a refresh glyph.
     #[default]
@@ -83,6 +82,9 @@ pub enum StaleStyle {
 }
 
 impl StaleStyle {
+    /// Every style, in the order the reference lists them.
+    pub const ALL: [Self; 3] = [Self::Dim, Self::Hide, Self::Plain];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -95,8 +97,7 @@ impl StaleStyle {
 }
 
 /// Where a padded right-group module's text sits (`right_justify`, SPEC § 4.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RightJustify {
     /// Pad on the left: the text hugs the right cap.
     #[default]
@@ -106,6 +107,9 @@ pub enum RightJustify {
 }
 
 impl RightJustify {
+    /// Both sides, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::End, Self::Start];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -117,8 +121,7 @@ impl RightJustify {
 }
 
 /// What happens to a left group wider than its budget (`overflow`, SPEC § 4.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Overflow {
     /// Cut it with the ellipsis.
     #[default]
@@ -129,6 +132,9 @@ pub enum Overflow {
 }
 
 impl Overflow {
+    /// Both behaviours, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::Truncate, Self::Ticker];
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -140,8 +146,7 @@ impl Overflow {
 }
 
 /// Color emission choice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorChoice {
     /// Truecolor unless `NO_COLOR` is set and not empty.
     #[default]
@@ -151,7 +156,6 @@ pub enum ColorChoice {
     /// Never.
     Never,
     /// 256-color palette.
-    #[serde(rename = "256")]
     Ansi256,
     /// 24-bit color.
     TrueColor,
@@ -398,13 +402,12 @@ pub const TOP_KEYS: [&str; 24] = [
     "modules",
 ];
 
-const COLOR_CHOICES: &str = "auto, always, never, 256, truecolor";
-const STALE_STYLES: &str = "dim, hide, plain";
-const DURATION_STYLES: &str = "compact, fixed";
-const RIGHT_JUSTIFIES: &str = "end, start";
-const OVERFLOWS: &str = "truncate, ticker";
 /// Default `ticker_gap`: three blanks between the end of a scrolled group and its start.
 pub const DEFAULT_TICKER_GAP: &str = "   ";
+/// The theme a file without `theme` gets.
+pub const DEFAULT_THEME: &str = "garnish";
+/// `stale_after` when the file does not set it (SPEC § 3.6).
+pub const DEFAULT_STALE_AFTER: u32 = 5;
 
 impl RawConfig {
     /// The array name the file used, so an error points at what was typed.
@@ -416,26 +419,22 @@ impl RawConfig {
     // each value cost a fifth of the parse on the full annotated file.
     fn from_table(table: toml::Table, errors: &mut Vec<ConfigError>) -> Self {
         let mut raw = Self::default();
-        let presets = TopPreset::ALL.iter().map(|p| p.name()).collect::<Vec<_>>().join(", ");
-        let icon_sets = IconSet::ALL.iter().map(|s| s.name()).collect::<Vec<_>>().join(", ");
         // The two array names are reconciled after the loop: TOML gives no
         // order between two arrays of tables, so a file carries one or the
         // other (SPEC § 4.3).
         let (mut rows, mut alias): (Option<Vec<RawRow>>, Option<Vec<RawRow>>) = (None, None);
         for (key, value) in table {
             match key.as_str() {
-                "preset" => raw.preset = enum_field(&key, value, &presets, errors),
-                "icons" => raw.icons = enum_field(&key, value, &icon_sets, errors),
+                "preset" => raw.preset = enum_field(&key, &value, errors),
+                "icons" => raw.icons = enum_field(&key, &value, errors),
                 "theme" => raw.theme = field(&key, value, errors),
-                "color" => raw.color = enum_field(&key, value, COLOR_CHOICES, errors),
+                "color" => raw.color = enum_field(&key, &value, errors),
                 "truncate" => raw.truncate = field(&key, value, errors),
-                "stale_style" => raw.stale_style = enum_field(&key, value, STALE_STYLES, errors),
+                "stale_style" => raw.stale_style = enum_field(&key, &value, errors),
                 "stale_after" => raw.stale_after = field(&key, value, errors),
                 "padding" => raw.padding = field(&key, value, errors),
                 "align" => raw.align = field(&key, value, errors),
-                "right_justify" => {
-                    raw.right_justify = enum_field(&key, value, RIGHT_JUSTIFIES, errors);
-                }
+                "right_justify" => raw.right_justify = enum_field(&key, &value, errors),
                 // `hide_empty_lines` is the permanent alias of
                 // `hide_empty_rows` (SPEC § 4.3); the new name wins when a
                 // file carries both.
@@ -444,11 +443,11 @@ impl RawConfig {
                     let alias = field(&key, value, errors);
                     raw.hide_empty_rows = raw.hide_empty_rows.or(alias);
                 }
-                "overflow" => raw.overflow = enum_field(&key, value, OVERFLOWS, errors),
+                "overflow" => raw.overflow = enum_field(&key, &value, errors),
                 "ticker_step" => raw.ticker_step = field(&key, value, errors),
                 "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
                 "animate" => raw.animate = field(&key, value, errors),
-                "durations" => raw.durations = enum_field(&key, value, DURATION_STYLES, errors),
+                "durations" => raw.durations = enum_field(&key, &value, errors),
                 "format" => match value {
                     toml::Value::Table(t) => raw.format = Some(RawFormat::from_table(t, errors)),
                     _ => errors.push(problem("format", "expected a [format] table")),
@@ -539,10 +538,10 @@ impl RawFormat {
         for (key, value) in table {
             let path = format!("format.{key}");
             match key.as_str() {
-                "tokens" => f.tokens = enum_field(&path, value, TokenStyle::CHOICES, errors),
-                "percent" => f.percent = enum_field(&path, value, PercentStyle::CHOICES, errors),
-                "cost" => f.cost = enum_field(&path, value, CostStyle::CHOICES, errors),
-                "parens" => f.parens = enum_field(&path, value, ParensStyle::CHOICES, errors),
+                "tokens" => f.tokens = enum_field(&path, &value, errors),
+                "percent" => f.percent = enum_field(&path, &value, errors),
+                "cost" => f.cost = enum_field(&path, &value, errors),
+                "parens" => f.parens = enum_field(&path, &value, errors),
                 _ => errors.push(problem(
                     &path,
                     &format!("unknown key; expected one of {}", FORMAT_KEYS.join(", ")),
@@ -634,7 +633,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     let preset = raw.preset.unwrap_or_default();
     let icons = raw.icons.unwrap_or_default();
 
-    let requested = raw.theme.clone().unwrap_or_else(|| "garnish".to_owned());
+    let requested = raw.theme.clone().unwrap_or_else(|| DEFAULT_THEME.to_owned());
     let pal = palette(&requested).unwrap_or_else(|| {
         errors.push(ConfigError {
             path: "theme".into(),
@@ -773,7 +772,7 @@ fn resolve_step(path: &str, raw: Option<f64>, errors: &mut Vec<ConfigError>) -> 
 /// `stale_after`: TTL periods before an overdue value is styled stale.
 /// Zero is reported and clamped to one so rendering never divides the TTL away.
 fn resolve_stale_after(raw: Option<u32>, errors: &mut Vec<ConfigError>) -> u32 {
-    let stale_after = raw.unwrap_or(5);
+    let stale_after = raw.unwrap_or(DEFAULT_STALE_AFTER);
     if stale_after == 0 {
         errors.push(ConfigError {
             path: "stale_after".into(),

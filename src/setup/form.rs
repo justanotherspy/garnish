@@ -16,11 +16,17 @@ use super::app::{Action, Key};
 use super::draft::{Draft, RowAt, TITLE_KEYS};
 use super::pick::{Choice, Choose, InputBox, Layer, Outcome, Target};
 use super::ui::{Chrome, cells, centered, clip, hints, move_cursor, window};
+use crate::config::format::{CostStyle, FormatCfg, ParensStyle, PercentStyle, TokenStyle};
+use crate::config::presets::TopPreset;
 use crate::config::schema::{COMMON_OPTS, Kind, ModuleSchema, Preset};
-use crate::config::{self, Config};
+use crate::config::{
+    self, ColorChoice, Config, FillDirection, Justify, Overflow, RightJustify, StaleStyle, VAlign,
+    Vocab,
+};
 use crate::frame::FrameStyle;
 use crate::icons::IconSet;
 use crate::theme::{PALETTES, Role};
+use crate::time::DurationStyle;
 
 /// Where a field's value lives in the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -874,8 +880,9 @@ fn icon_choices(schema: &ModuleSchema, key: &str) -> Vec<Choice> {
     items
 }
 
-/// The entries of a `box` picker: none, this row alone, every defined box.
-fn box_choices(config: &Config) -> Vec<Choice> {
+/// The entries of a `box` picker: none, this row alone, every defined box
+/// (the builder's `b` adds a new name after them).
+pub(super) fn box_choices(config: &Config) -> Vec<Choice> {
     let mut items =
         vec![Choice::noted("none", "no box"), Choice::noted("true", "a box of its own")];
     items.extend(config.boxes.keys().map(|name| Choice::noted(name, "[box] table")));
@@ -910,7 +917,7 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
         fields.push(
             Field::new(
                 "preset",
-                "minimal | default | full; unset follows the top-level preset.",
+                &format!("{}; unset follows the top-level preset.", bar::<Preset>()),
                 SlotKind::Preset,
                 slot("preset"),
             )
@@ -1145,6 +1152,21 @@ fn names(items: &[&str]) -> SlotKind {
     SlotKind::Enum(items.iter().map(|v| (*v).to_owned()).collect())
 }
 
+/// An enum field's kind from a vocabulary: the parser's own words.
+fn vocab<T: Vocab>() -> SlotKind {
+    names(&T::names())
+}
+
+/// A vocabulary as a field's doc lists it: `a | b | c`.
+fn bar<T: Vocab>() -> String {
+    T::names().join(" | ")
+}
+
+/// A parser bound as a field's maximum.
+fn bound(max: usize) -> Option<i64> {
+    i64::try_from(max).ok()
+}
+
 /// A string value in effect.
 fn string(v: &str) -> Value {
     Value::String(v.to_owned())
@@ -1176,73 +1198,72 @@ fn top_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field>
 fn format_fields(draft: &Draft, config: &Config) -> Vec<Field> {
     let s = |key: &str| Slot::table(&["format"], key);
     let f = &config.format;
+    let d = FormatCfg::default();
     vec![
         Field::new(
             "format.tokens",
             "Token counts: compact (128k, 1.0M) | precise (128,400) | whole (128400).",
-            names(&["compact", "precise", "whole"]),
+            vocab::<TokenStyle>(),
             s("tokens"),
         )
-        .valued(draft, Some(string(f.tokens.name())), "compact"),
+        .valued(draft, Some(string(f.tokens.name())), d.tokens.name()),
         Field::new(
             "format.percent",
             "Percentages: whole (42%) | precise (42.3%).",
-            names(&["whole", "precise"]),
+            vocab::<PercentStyle>(),
             s("percent"),
         )
-        .valued(draft, Some(string(f.percent.name())), "whole"),
+        .valued(draft, Some(string(f.percent.name())), d.percent.name()),
         Field::new(
             "format.cost",
             "Money: precise ($1.23, cost.decimals places) | whole ($1).",
-            names(&["precise", "whole"]),
+            vocab::<CostStyle>(),
             s("cost"),
         )
-        .valued(draft, Some(string(f.cost.name())), "precise"),
+        .valued(draft, Some(string(f.cost.name())), d.cost.name()),
         Field::new(
             "format.parens",
             "Parenthesised details (api's share, lines' net, a both reset): plain | dim (the muted role).",
-            names(&["plain", "dim"]),
+            vocab::<ParensStyle>(),
             s("parens"),
         )
-        .valued(draft, Some(string(f.parens.name())), "plain"),
+        .valued(draft, Some(string(f.parens.name())), d.parens.name()),
     ]
 }
 
 /// The top-level keys that pick the preset, the glyphs and the colours.
 fn look_fields(draft: &Draft, config: &Config) -> Vec<Field> {
     let s = |key: &str| Slot::top(key);
-    let presets: Vec<&str> = config::presets::TopPreset::ALL.iter().map(|p| p.name()).collect();
-    let icon_sets: Vec<&str> = IconSet::ALL.iter().map(|i| i.name()).collect();
     let themes: Vec<&str> = PALETTES.iter().map(|p| p.name).collect();
     vec![
         Field::new(
             "preset",
-            "Which rows exist and how much each module says: default | minimal | full | compact.",
-            names(&presets),
+            &format!("Which rows exist and how much each module says: {}.", bar::<TopPreset>()),
+            vocab::<TopPreset>(),
             s("preset"),
         )
-        .valued(draft, Some(string(config.preset.name())), "default"),
+        .valued(draft, Some(string(config.preset.name())), TopPreset::default().name()),
         Field::new(
             "icons",
             "The glyph set: nerd needs a Nerd Font; unicode, emoji and ascii do not.",
-            names(&icon_sets),
+            vocab::<IconSet>(),
             s("icons"),
         )
-        .valued(draft, Some(string(config.icons.name())), "nerd"),
+        .valued(draft, Some(string(config.icons.name())), IconSet::default().name()),
         Field::new(
             "theme",
             "The colour palette every role comes from.",
             names(&themes),
             s("theme"),
         )
-        .valued(draft, Some(string(&config.theme_name)), "garnish"),
+        .valued(draft, Some(string(&config.theme_name)), config::DEFAULT_THEME),
         Field::new(
             "color",
-            "Colour output: auto | always | never | 256 | truecolor.",
-            names(&crate::config::ColorChoice::ALL.map(crate::config::ColorChoice::name)),
+            &format!("Colour output: {}.", bar::<ColorChoice>()),
+            vocab::<ColorChoice>(),
             s("color"),
         )
-        .valued(draft, Some(string(config.color.name())), "auto"),
+        .valued(draft, Some(string(config.color.name())), ColorChoice::default().name()),
         Field::new(
             "truncate",
             "Cut the left group when a line overflows the width.",
@@ -1252,22 +1273,30 @@ fn look_fields(draft: &Draft, config: &Config) -> Vec<Field> {
         .valued(draft, Some(Value::Boolean(config.truncate)), "true"),
         Field::new(
             "stale_style",
-            "How an overdue cached value is shown: dim | hide | plain.",
-            names(&["dim", "hide", "plain"]),
+            &format!("How an overdue cached value is shown: {}.", bar::<StaleStyle>()),
+            vocab::<StaleStyle>(),
             s("stale_style"),
         )
-        .valued(draft, Some(string(config.stale_style.name())), "dim"),
+        .valued(
+            draft,
+            Some(string(config.stale_style.name())),
+            StaleStyle::default().name(),
+        ),
         Field::new(
             "stale_after",
             "TTL periods a cached value may be overdue before it is styled stale.",
             SlotKind::Int { min: 1, max: None },
             s("stale_after"),
         )
-        .valued(draft, Some(Value::Integer(i64::from(config.stale_after))), "5"),
+        .valued(
+            draft,
+            Some(Value::Integer(i64::from(config.stale_after))),
+            &config::DEFAULT_STALE_AFTER.to_string(),
+        ),
         Field::new(
             "padding",
             "Extra cells subtracted from the width: 2 × statusLine.padding.",
-            SlotKind::Int { min: 0, max: Some(65_535) },
+            SlotKind::Int { min: 0, max: Some(i64::from(u16::MAX)) },
             s("padding"),
         )
         .valued(
@@ -1292,10 +1321,14 @@ fn layout_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Fie
         Field::new(
             "right_justify",
             "Where a padded right-group module's text sits: end (hugs the cap) | start.",
-            names(&["end", "start"]),
+            vocab::<RightJustify>(),
             s("right_justify"),
         )
-        .valued(draft, Some(string(config.right_justify.name())), "end"),
+        .valued(
+            draft,
+            Some(string(config.right_justify.name())),
+            RightJustify::default().name(),
+        ),
         Field::new(
             "hide_empty_rows",
             "Drop a row whose modules all rendered nothing (spacers stay).",
@@ -1306,10 +1339,10 @@ fn layout_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Fie
         Field::new(
             "overflow",
             "A left group wider than its budget: truncate (cut) | ticker (scroll).",
-            names(&["truncate", "ticker"]),
+            vocab::<Overflow>(),
             s("overflow"),
         )
-        .valued(draft, Some(string(config.overflow.name())), "truncate"),
+        .valued(draft, Some(string(config.overflow.name())), Overflow::default().name()),
         Field::new(
             "ticker_step",
             "Cells the ticker advances per tick (0.5 = every second tick).",
@@ -1335,10 +1368,14 @@ fn layout_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Fie
         Field::new(
             "durations",
             "How timers print: compact (9m) | fixed (9m00s); unset is fixed under a ticker.",
-            names(&["compact", "fixed"]),
+            vocab::<DurationStyle>(),
             s("durations"),
         )
-        .valued(draft, Some(string(config.durations.name())), "compact"),
+        .valued(
+            draft,
+            Some(string(config.durations.name())),
+            DurationStyle::default().name(),
+        ),
     ]
 }
 
@@ -1354,16 +1391,19 @@ fn frame_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Fiel
 
 fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let s = |key: &str| Slot::table(&["frame"], key);
-    let styles: Vec<String> = FrameStyle::ALL.iter().map(|f| f.name().to_owned()).collect();
     let c = &config.frame.chars;
     let mut fields = vec![
         Field::new(
             "style",
-            "none | rounded | square | double | heavy | powerline | custom.",
-            SlotKind::Enum(styles),
+            &format!("{}.", bar::<FrameStyle>()),
+            vocab::<FrameStyle>(),
             s("style"),
         )
-        .valued(draft, Some(string(config.frame.style.name())), "rounded"),
+        .valued(
+            draft,
+            Some(string(config.frame.style.name())),
+            FrameStyle::default().name(),
+        ),
         Field::new(
             "fill",
             "Rule to the full width and close with the right cap.",
@@ -1434,11 +1474,15 @@ fn frame_motion_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> V
         .valued(draft, Some(Value::Float(config.frame.fill_step)), "1"),
         Field::new(
             "fill_direction",
-            "left | right.",
-            SlotKind::Enum(vec!["left".into(), "right".into()]),
+            &format!("{}.", bar::<FillDirection>()),
+            vocab::<FillDirection>(),
             s("fill_direction"),
         )
-        .valued(draft, Some(string(config.frame.fill_direction.name())), "right"),
+        .valued(
+            draft,
+            Some(string(config.frame.fill_direction.name())),
+            FillDirection::default().name(),
+        ),
         Field::new(
             "separator_frames",
             "Separator frames cycled one per tick, all the same width, as a TOML array.",
@@ -1505,6 +1549,7 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
         .and_then(|r| r.separator.clone())
         .unwrap_or_else(|| config.frame.chars.separator.clone());
     let gap = resolved.map_or(config::DEFAULT_GAP, |r| r.gap);
+    let default_gap = config::DEFAULT_GAP.to_string();
     let mut fields = vec![
         Field::new(
             "separator",
@@ -1524,10 +1569,10 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
             Field::new(
                 "gap",
                 "Empty cells between columns.",
-                SlotKind::Int { min: 0, max: Some(16) },
+                SlotKind::Int { min: 0, max: bound(config::MAX_GAP) },
                 s("gap"),
             )
-            .valued(draft, raw("gap").or_else(|| Some(count(gap))), "1"),
+            .valued(draft, raw("gap").or_else(|| Some(count(gap))), &default_gap),
         );
     }
     if !named_box || TITLE_KEYS.iter().any(|k| table.contains_key(*k)) {
@@ -1573,28 +1618,33 @@ fn title_fields(
     config: &Config,
 ) -> Vec<Field> {
     let effect = resolved.cloned().unwrap_or_default();
+    let default = config::TitleCfg::default();
     vec![
         Field::new("title", "Plain text set into the rule.", SlotKind::Str, s("title"))
             .valued(draft, raw("title"), "none")
             .with_choices(hints.choices("title")),
         Field::new(
             "title_justify",
-            "left | center | right.",
-            SlotKind::Enum(vec!["left".into(), "center".into(), "right".into()]),
+            &format!("{}.", bar::<Justify>()),
+            vocab::<Justify>(),
             s("title_justify"),
         )
         .valued(
             draft,
             raw("title_justify").or_else(|| Some(string(effect.justify.name()))),
-            "left",
+            default.justify.name(),
         ),
         Field::new(
             "title_pad",
             "Spaces on each side of the title.",
-            SlotKind::Int { min: 0, max: Some(64) },
+            SlotKind::Int { min: 0, max: bound(config::MAX_TITLE_PAD) },
             s("title_pad"),
         )
-        .valued(draft, raw("title_pad").or_else(|| Some(count(effect.pad))), "1"),
+        .valued(
+            draft,
+            raw("title_pad").or_else(|| Some(count(effect.pad))),
+            &default.pad.to_string(),
+        ),
         Field::new(
             "title_color",
             "A role or literal for the title; the frame colour when unset.",
@@ -1630,15 +1680,38 @@ fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
     let justify = raw("justify").or_else(|| col.map(|c| string(c.justify.name())));
     let valign = raw("valign").or_else(|| col.map(|c| string(c.valign.name())));
     let mut fields = vec![
-        Field::new("width", "\"<n>fr\" (a share of what is left) | \"auto\" (the content) | a cell count.", SlotKind::Width, s("width"))
-            .valued(draft, raw("width"), "1fr"),
-        Field::new("justify", "Where a lone modules group sits: left | center | right (default follows the position).", SlotKind::Enum(vec!["left".into(), "center".into(), "right".into()]), s("justify"))
-            .valued(draft, justify, "by position"),
-        Field::new("valign", "Where a short stack sits in a taller row: top | center | bottom.", SlotKind::Enum(vec!["top".into(), "center".into(), "bottom".into()]), s("valign"))
-            .valued(draft, valign, "top"),
-        Field::new("box", "Box the whole column: none, true or a [box.<name>].", SlotKind::BoxRef, s("box"))
-            .valued(draft, raw("box"), "none")
-            .with_choices(box_choices(config)),
+        Field::new(
+            "width",
+            "\"<n>fr\" (a share of what is left) | \"auto\" (the content) | a cell count.",
+            SlotKind::Width,
+            s("width"),
+        )
+        .valued(draft, raw("width"), "1fr"),
+        Field::new(
+            "justify",
+            &format!(
+                "Where a lone modules group sits: {} (default follows the position).",
+                bar::<Justify>()
+            ),
+            vocab::<Justify>(),
+            s("justify"),
+        )
+        .valued(draft, justify, "by position"),
+        Field::new(
+            "valign",
+            &format!("Where a short stack sits in a taller row: {}.", bar::<VAlign>()),
+            vocab::<VAlign>(),
+            s("valign"),
+        )
+        .valued(draft, valign, VAlign::default().name()),
+        Field::new(
+            "box",
+            "Box the whole column: none, true or a [box.<name>].",
+            SlotKind::BoxRef,
+            s("box"),
+        )
+        .valued(draft, raw("box"), "none")
+        .with_choices(box_choices(config)),
     ];
     // The groups and the stack's rows are the builder's.
     let extra = extra_fields(&fields, Some(&table), &s, "", &["modules", "right", "row"], draft);
@@ -1798,6 +1871,53 @@ mod tests {
         }
         assert!(offenders.is_empty(), "entries the parser refuses:\n{}", offenders.join("\n"));
         assert!(tried > 1000, "{tried} entries tried");
+    }
+
+    /// cfg-14, frm-12: an enum row offers exactly the parser's words, in
+    /// its order, read from the type's own vocabulary, and a bounded row
+    /// the parser's bound.
+    #[test]
+    fn enum_rows_offer_the_parsers_vocabulary() {
+        fn words<T: Vocab>() -> SlotKind {
+            SlotKind::Enum(T::names().into_iter().map(str::to_owned).collect())
+        }
+        let kind = |form: &Form, key: &str| {
+            form.fields
+                .iter()
+                .find(|f| f.key == key)
+                .unwrap_or_else(|| panic!("{key}"))
+                .kind
+                .clone()
+        };
+        let (top, _) = built("", &FormKind::Top);
+        assert_eq!(kind(&top, "preset"), words::<TopPreset>());
+        assert_eq!(kind(&top, "icons"), words::<IconSet>());
+        assert_eq!(kind(&top, "color"), words::<ColorChoice>());
+        assert_eq!(kind(&top, "stale_style"), words::<StaleStyle>());
+        assert_eq!(kind(&top, "right_justify"), words::<RightJustify>());
+        assert_eq!(kind(&top, "overflow"), words::<Overflow>());
+        assert_eq!(kind(&top, "durations"), words::<DurationStyle>());
+        assert_eq!(kind(&top, "format.tokens"), words::<TokenStyle>());
+        assert_eq!(kind(&top, "format.percent"), words::<PercentStyle>());
+        assert_eq!(kind(&top, "format.cost"), words::<CostStyle>());
+        assert_eq!(kind(&top, "format.parens"), words::<ParensStyle>());
+        let (frame, _) = built("", &FormKind::Frame);
+        assert_eq!(kind(&frame, "style"), words::<FrameStyle>());
+        assert_eq!(kind(&frame, "fill_direction"), words::<FillDirection>());
+        let (col, _) = built(
+            "[[row]]\n[[row.col]]\nmodules = [\"clock\"]\n",
+            &FormKind::Col(RowAt { row: 0, col: Some(0), inner: None }),
+        );
+        assert_eq!(kind(&col, "justify"), words::<Justify>());
+        assert_eq!(kind(&col, "valign"), words::<VAlign>());
+        let (row, _) =
+            built("[[row]]\ntitle = \"T\"\nmodules = [\"clock\"]\n", &FormKind::Row(RowAt::row(0)));
+        assert_eq!(kind(&row, "title_justify"), words::<Justify>());
+        assert_eq!(kind(&row, "gap"), SlotKind::Int { min: 0, max: bound(config::MAX_GAP) });
+        assert_eq!(
+            kind(&row, "title_pad"),
+            SlotKind::Int { min: 0, max: bound(config::MAX_TITLE_PAD) }
+        );
     }
 
     /// SPEC § 14: every `OptSpec` kind and every top-level key has a form
