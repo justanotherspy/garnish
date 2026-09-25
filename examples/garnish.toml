@@ -488,7 +488,7 @@ warn = ""
 [modules.context.colors]
 # icon — Icon.
 icon = "accent"
-# percent — Percentage text.
+# percent — Percentage text (the band colour is the bar's).
 percent = "text"
 # empty — Empty part of the bar.
 empty = "muted"

@@ -424,7 +424,11 @@ Context bar: filled cells `█` with partial blocks for sub-cell precision,
 empty `░`; the **filled part** takes the color of the current band
 (`thresholds = [50, 75, 90]`, `band_colors = ["band1", "band2", "band3",
 "band4"]`: the theme's four band roles, overridable with any role or literal
-colour, as in the § 4 example); a `▏` marker at the autocompact position;
+colour, as in the § 4 example), and the band colour stays on the bar: the
+percentage is drawn in `colors.percent` (`text` by default; decided with
+Daniel 2026-09-25, when the key was found declared, documented and set by
+the `dracula-256` gallery preset while the percentage took the band
+colour and nothing read it); a `▏` marker at the autocompact position;
 `exceeds_200k = true` shows the `icons.exceeds` glyph (`‼`) in
 `colors.exceeds` (`danger`) when the payload says so (one flag plus the
 module's ordinary icon and colour tables, not a nested table: every module's

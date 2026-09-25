@@ -82,7 +82,7 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent` | Icon. |
-| `percent` | `text` | Percentage text. |
+| `percent` | `text` | Percentage text (the band colour is the bar's). |
 | `empty` | `muted` | Empty part of the bar. |
 | `marker` | `warn` | Compaction marker. |
 | `exceeds` | `danger` | Exceeds-200k indicator. |

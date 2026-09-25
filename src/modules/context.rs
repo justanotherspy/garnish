@@ -72,7 +72,11 @@ impl Module for ContextModule {
             ],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent" },
-                ColorSpec { key: "percent", doc: "Percentage text.", default: "text" },
+                ColorSpec {
+                    key: "percent",
+                    doc: "Percentage text (the band colour is the bar's).",
+                    default: "text",
+                },
                 bar_empty_color(),
                 ColorSpec { key: "marker", doc: "Compaction marker.", default: "warn" },
                 ColorSpec { key: "exceeds", doc: "Exceeds-200k indicator.", default: "danger" },
@@ -130,7 +134,10 @@ impl Module for ContextModule {
         if cfg.bool("show_percent") {
             let text =
                 pct.map_or_else(|| ctx.icons.placeholder().to_owned(), |p| ctx.percent(cfg, p));
-            segs.push(Segment::styled(format!(" {text}"), Style::fg(fill_color).bolded()));
+            segs.push(Segment::styled(
+                format!(" {text}"),
+                Style::fg(cfg.color("percent")).bolded(),
+            ));
         }
         // The label follows the threshold, not the marker: the two are
         // separate switches, and only the `usable` scale hides both (the
@@ -259,6 +266,37 @@ mod tests {
         assert!(errs.is_empty(), "{errs:?}");
         let clock = Clock { settings_env: env, ..Clock::fixed() };
         strip_ansi(&render_plain_at(&payload, &config, Some(80), &clock)).trim_end().to_owned()
+    }
+
+    /// SPEC § 3.2: the filled part of the bar takes the band's colour and
+    /// the percentage its own, `colors.percent` (`text` by default). The key
+    /// was declared, documented and set by the `dracula-256` gallery preset,
+    /// and nothing read it: the percentage took the band colour too.
+    #[test]
+    fn the_percentage_takes_its_own_colour_and_the_bar_the_band() {
+        use crate::theme::Role;
+        let row = |colors: &str| {
+            let payload = crate::fixtures::payload("ctx-1m-80");
+            let text = format!(
+                "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nwidth = 10\n{colors}"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let lines =
+                crate::render::render_lines_at(&payload, &config, Some(80), &Clock::fixed());
+            (lines[0].clone(), config.theme)
+        };
+        let (segs, theme) = row("");
+        let percent = segs.iter().find(|s| s.text().ends_with('%')).unwrap();
+        assert_eq!((percent.style.fg, percent.style.bold), (theme.role(Role::Text), true));
+        // 80 % has passed 50 and 75: the third band.
+        let filled = segs.iter().find(|s| s.text().contains('█')).unwrap();
+        assert_eq!(filled.style.fg, theme.role(Role::Band3));
+        let (segs, theme) = row("[modules.context.colors]\npercent = \"#f8f8f2\"\n");
+        let percent = segs.iter().find(|s| s.text().ends_with('%')).unwrap();
+        assert_eq!(Some(percent.style.fg), theme.resolve("#f8f8f2"));
+        let filled = segs.iter().find(|s| s.text().contains('█')).unwrap();
+        assert_eq!(filled.style.fg, theme.role(Role::Band3));
     }
 
     /// SPEC § 3.2 `scale = "usable"`: the percentage and the bar are
