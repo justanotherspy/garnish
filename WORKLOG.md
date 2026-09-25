@@ -986,4 +986,7 @@ was built, what the reviews found and what was decided, not how.
     two batches both reworded the `truncate`/`overflow` reference rows.
     Resolved by hand, and the generated docs regenerated.
   - What is left is in PLAN's backlog under *Left open by the 2026-09-25
-    review*. 319 → 474+ tests.
+    review*. 319 → 501 tests. `make bench` after the last batch, all
+    within budget: warm mean 2.5–2.6 ms (p99 3.0–4.7 ms) for `default`,
+    `full`, every module and the new `warm-tz`; cold 4.6 ms; a sync
+    refresh 14.3 ms.
