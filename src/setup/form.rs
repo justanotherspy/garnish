@@ -1,8 +1,10 @@
 //! The editors of `setup` (SPEC § 14): forms of fields.
 //!
-//! Every form is generated from the same tables the parser reads, so an
-//! option added to a schema appears in `setup` the next build. Nothing here
-//! is hand-coded per option.
+//! A module's editor is generated from its schema, so an option added to a
+//! schema appears in `setup` the next build; the top-level, frame, row,
+//! column and box forms list their keys by hand, since those are not
+//! schema options, and the unit tests hold them to the parser's own lists.
+//! Any other key a form's table holds is listed after its own rows.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -136,7 +138,9 @@ pub enum SlotKind {
     Float,
     /// Free text, with suggestions.
     Str,
-    /// A theme role or a literal colour.
+    /// A colour: a theme role or a literal where the key takes both (a
+    /// module's `colors.*`, a title, a box), a literal alone for a
+    /// `[colors]` role, whose picker offers only those.
     Color,
     /// An icon glyph.
     Icon,
@@ -323,7 +327,7 @@ pub struct Field {
     pub kind: SlotKind,
     /// Where it lives.
     pub slot: Slot,
-    /// The file sets it (a dot on the line).
+    /// The file sets it (a `*` on the line).
     pub set: bool,
     /// The value in effect, as shown.
     pub current: String,
