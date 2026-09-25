@@ -355,7 +355,7 @@ impl Ctx<'_> {
     }
 
     /// The wall-clock time of a future epoch-seconds instant in the tick's
-    /// zone, in one of the [`crate::time::WallClock`] forms, the absolute
+    /// zone, in one of the `time::WallClock` forms, the absolute
     /// twin of [`Ctx::countdown`] (SPEC § 3.3); `None` once passed, like it.
     #[must_use]
     pub fn wall_clock(&self, epoch_secs: i64, form: crate::time::WallClock) -> Option<String> {
@@ -366,7 +366,7 @@ impl Ctx<'_> {
         Some(crate::time::wall_clock(at, &self.tz, form))
     }
 
-    /// The animation frame (or scroll offset) at this tick: [`crate::time::frame`]
+    /// The animation frame (or scroll offset) at this tick: `time::frame`
     /// of the tick's clock, or 0 when animations are off. Every moving part
     /// goes through here so `animate = false` and `GARNISH_ANIMATE=0` freeze
     /// all of them at once.

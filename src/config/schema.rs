@@ -149,7 +149,7 @@ pub enum Rule {
     /// Numbers in ascending order (band thresholds: a band is the number of
     /// them a percentage has reached).
     Ascending,
-    /// A time zone as `TZ` names one ([`crate::time::zone`]), or empty for
+    /// A time zone as `TZ` names one (`time::zone`), or empty for
     /// the tick's own; resolved once, when the config is read
     /// ([`ModuleCfg::zone`]).
     TimeZone,

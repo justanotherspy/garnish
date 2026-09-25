@@ -404,6 +404,12 @@ path (`unwrap_used`, `expect_used`, `indexing_slicing`, `arithmetic_side_effects
   narrate what the code plainly does, do not leave "changed X" notes, and do
   not comment out code. When in doubt, leave the comment out.
 - Reviewing a file's comments is part of finishing a phase: delete fluff.
+- `lib.rs` makes a module `pub` only when `main.rs`, `tests/` or
+  `benches/` use it; the rest are `pub(crate)`, so rustc reports an item
+  that only tests call as dead instead of the public surface keeping it
+  alive. A public doc names an item in a `pub(crate)` module as a code
+  span (`` `time::frame` ``), not an intra-doc link, which rustdoc
+  refuses (`private_intra_doc_links`).
 
 ## Crate map (the chosen crate for each job; never add an alternative)
 

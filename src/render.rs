@@ -142,8 +142,7 @@ fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
     let message = first.map_or_else(String::new, |e| {
         if e.path.is_empty() { e.message.clone() } else { format!("{}: {}", e.path, e.message) }
     });
-    let extra = loaded.errors.len().saturating_sub(1);
-    let suffix = if extra > 0 { format!(" (+{extra} more)") } else { String::new() };
+    let suffix = crate::config::more(loaded.errors.len());
     let glyph = if config.icons == IconSet::Ascii { "!" } else { "⚠" };
     let line = vec![Segment::styled(
         format!("{glyph} config: {origin}{message}{suffix}"),
@@ -183,7 +182,7 @@ pub struct Clock {
     /// machine's).
     pub managed: Option<std::path::PathBuf>,
     /// `CLAUDE_CONFIG_DIR`, which moves the user settings file off
-    /// `~/.claude` ([`crate::claude_settings::user_dir`]); `None` when
+    /// `~/.claude` (`claude_settings::user_dir`); `None` when
     /// unset, and for a pinned render.
     pub claude_config_dir: Option<std::path::PathBuf>,
     /// The cache root, or `None` to take it from the environment.

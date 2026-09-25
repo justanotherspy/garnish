@@ -469,7 +469,7 @@ pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub mod tests {
     use super::*;
 
     /// The keys of a settings text, with an unparsable one contributing

@@ -141,7 +141,7 @@ pub enum Command {
         /// The caller already holds the module lock; release it when done.
         ///
         /// Only ever passed with `--module`, by the tick that took that one
-        /// lock ([`crate::spawn::Job::args`]). With `--all` it would adopt a
+        /// lock (`spawn::Job::args`). With `--all` it would adopt a
         /// lock per module — inventing one where there was none and taking
         /// over one a live worker still holds — so the two are exclusive.
         #[arg(long, conflicts_with = "all")]
