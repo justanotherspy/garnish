@@ -38,6 +38,24 @@ pub fn window(cursor: usize, len: usize, height: usize, start: usize) -> usize {
     start.min(max_start)
 }
 
+/// Where a list's cursor goes on `key` among `len` entries: `↑`/`↓` wrap,
+/// the page keys go ten at a time and stop at the ends, `Home`/`End` jump;
+/// `None` for any other key.
+#[must_use]
+pub fn move_cursor(cursor: usize, len: usize, key: crate::setup::Key) -> Option<usize> {
+    use crate::setup::Key;
+    let last = len.saturating_sub(1);
+    Some(match key {
+        Key::Up => cursor.checked_sub(1).unwrap_or(last),
+        Key::Down => cursor.saturating_add(1).checked_rem(len.max(1)).unwrap_or(0),
+        Key::PageUp => cursor.saturating_sub(10),
+        Key::PageDown => cursor.saturating_add(10).min(last),
+        Key::Home => 0,
+        Key::End => last,
+        _ => return None,
+    })
+}
+
 /// The chrome's styles: the screen's own text, never the config's colours.
 pub struct Chrome;
 
@@ -203,5 +221,18 @@ mod tests {
         let pairs = [("enter", "edit"), ("u", "undo")];
         assert_eq!(hint_cells(&pairs), vec![("enter", 0, 10), ("u", 12, 18)]);
         assert_eq!(hints(&pairs).width(), 18);
+    }
+
+    #[test]
+    fn a_list_cursor_wraps_pages_and_jumps() {
+        use crate::setup::Key;
+        assert_eq!(move_cursor(0, 5, Key::Up), Some(4), "wraps");
+        assert_eq!(move_cursor(4, 5, Key::Down), Some(0));
+        assert_eq!(move_cursor(3, 25, Key::PageDown), Some(13));
+        assert_eq!(move_cursor(20, 25, Key::PageDown), Some(24), "stops at the end");
+        assert_eq!(move_cursor(3, 25, Key::PageUp), Some(0));
+        assert_eq!((move_cursor(3, 5, Key::Home), move_cursor(3, 5, Key::End)), (Some(0), Some(4)));
+        assert_eq!(move_cursor(0, 0, Key::Down), Some(0));
+        assert_eq!(move_cursor(1, 5, Key::Enter), None);
     }
 }

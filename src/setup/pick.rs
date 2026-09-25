@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::app::{Action, Key};
-use super::ui::{Chrome, cells, centered, clip, hints, window};
+use super::ui::{Chrome, cells, centered, clip, hints, move_cursor, window};
 
 /// What a chosen value is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,32 +137,14 @@ impl Choose {
     /// Handle a key: the outcome says what to do.
     pub fn handle(&mut self, key: Key) -> Outcome {
         let n = self.matching().len();
+        if let Some(cursor) =
+            move_cursor(self.cursor, n, if key == Key::Tab { Key::Down } else { key })
+        {
+            self.cursor = cursor;
+            return Outcome::default();
+        }
         match key {
             Key::Esc => Outcome::close(),
-            Key::Up => {
-                self.cursor = self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Down | Key::Tab => {
-                self.cursor = self.cursor.saturating_add(1).checked_rem(n.max(1)).unwrap_or(0);
-                Outcome::default()
-            }
-            Key::PageUp => {
-                self.cursor = self.cursor.saturating_sub(10);
-                Outcome::default()
-            }
-            Key::PageDown => {
-                self.cursor = self.cursor.saturating_add(10).min(n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Home => {
-                self.cursor = 0;
-                Outcome::default()
-            }
-            Key::End => {
-                self.cursor = n.saturating_sub(1);
-                Outcome::default()
-            }
             Key::Backspace => {
                 self.filter.pop();
                 self.cursor = 0;
@@ -595,6 +577,18 @@ impl Outcome {
     #[must_use]
     pub const fn close() -> Self {
         Self { close: true, push: None, actions: Vec::new() }
+    }
+
+    /// Keep the layer and apply `action`.
+    #[must_use]
+    pub fn act(action: Action) -> Self {
+        Self { close: false, push: None, actions: vec![action] }
+    }
+
+    /// Keep the layer and open `layer` on top of it.
+    #[must_use]
+    pub const fn open(layer: Layer) -> Self {
+        Self { close: false, push: Some(layer), actions: Vec::new() }
     }
 }
 

@@ -13,7 +13,7 @@ use toml::Value;
 use super::app::{Action, Key};
 use super::draft::{Draft, RowAt, TITLE_KEYS};
 use super::pick::{Choice, Choose, InputBox, Layer, Outcome, Target};
-use super::ui::{Chrome, cells, centered, clip, hints, window};
+use super::ui::{Chrome, cells, centered, clip, hints, move_cursor, window};
 use crate::config::schema::{COMMON_OPTS, Kind, ModuleSchema, Preset};
 use crate::config::{self, Config};
 use crate::frame::FrameStyle;
@@ -431,34 +431,19 @@ impl Form {
         let Some(field) = self.fields.get(self.cursor).cloned() else {
             return if key == Key::Esc { Outcome::close() } else { Outcome::default() };
         };
+        let moved = match key {
+            Key::BackTab => Key::Up,
+            Key::Tab => Key::Down,
+            other => other,
+        };
+        if let Some(cursor) = move_cursor(self.cursor, n, moved) {
+            self.cursor = cursor;
+            return Outcome::default();
+        }
         match key {
             Key::Esc => Outcome::close(),
-            Key::Up | Key::BackTab => {
-                self.cursor = self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Down | Key::Tab => {
-                self.cursor = self.cursor.saturating_add(1).checked_rem(n.max(1)).unwrap_or(0);
-                Outcome::default()
-            }
-            Key::PageUp => {
-                self.cursor = self.cursor.saturating_sub(10);
-                Outcome::default()
-            }
-            Key::PageDown => {
-                self.cursor = self.cursor.saturating_add(10).min(n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Home => {
-                self.cursor = 0;
-                Outcome::default()
-            }
-            Key::End => {
-                self.cursor = n.saturating_sub(1);
-                Outcome::default()
-            }
             Key::Char('d') | Key::Delete | Key::Backspace => {
-                Outcome { close: false, push: None, actions: vec![Action::Unset(field.slot)] }
+                Outcome::act(Action::Unset(field.slot))
             }
             Key::Left | Key::Right | Key::Char('-' | '+') => {
                 let up = matches!(key, Key::Right | Key::Char('+'));
@@ -471,11 +456,8 @@ impl Form {
 
     /// `←`/`→`: the next value along for a stepped kind, else nothing.
     fn step(field: &Field, up: bool) -> Outcome {
-        let set = |v: Value| Outcome {
-            close: false,
-            push: None,
-            actions: vec![Action::Set(field.slot.clone(), v)],
-        };
+        let set = |v: Value| Outcome::act(Action::Set(field.slot.clone(), v));
+        let unset = || Outcome::act(Action::Unset(field.slot.clone()));
         match &field.kind {
             SlotKind::Bool => {
                 set(Value::Boolean(!matches!(field.value, Some(Value::Boolean(true)))))
@@ -486,14 +468,7 @@ impl Form {
                     (true, Some(Value::Boolean(true))) => Some(false),
                     _ => None,
                 };
-                next.map_or_else(
-                    || Outcome {
-                        close: false,
-                        push: None,
-                        actions: vec![Action::Unset(field.slot.clone())],
-                    },
-                    |b| set(Value::Boolean(b)),
-                )
+                next.map_or_else(unset, |b| set(Value::Boolean(b)))
             }
             SlotKind::Int { min, max } => {
                 let n = match field.value {
@@ -532,14 +507,8 @@ impl Form {
                     (Some(i), true) => Some(i.saturating_add(1)),
                     (Some(i), false) => Some(i.saturating_sub(1)),
                 };
-                next.and_then(|i| names.get(i)).map_or_else(
-                    || Outcome {
-                        close: false,
-                        push: None,
-                        actions: vec![Action::Unset(field.slot.clone())],
-                    },
-                    |v| set(Value::String((*v).to_owned())),
-                )
+                next.and_then(|i| names.get(i))
+                    .map_or_else(unset, |v| set(Value::String((*v).to_owned())))
             }
             _ => Outcome::default(),
         }
@@ -564,12 +533,10 @@ impl Form {
             choose.custom_title = format!("{}: custom value", field.key);
             choose.custom_start.clone_from(&typed);
             choose.select(&typed);
-            Outcome { close: false, push: Some(Layer::Choose(choose)), actions: Vec::new() }
+            Outcome::open(Layer::Choose(choose))
         };
-        let input = |title: String, text: String| Outcome {
-            close: false,
-            push: Some(Layer::Input(InputBox::new(&title, &text, target.clone()))),
-            actions: Vec::new(),
+        let input = |title: String, text: String| {
+            Outcome::open(Layer::Input(InputBox::new(&title, &text, target.clone())))
         };
         match &field.kind {
             SlotKind::Bool | SlotKind::Tri => Self::step(field, true),
@@ -1409,21 +1376,22 @@ fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Ve
                 .valued(draft, Some(string(value)), "the style's")
                 .with_choices(hints.choices(key)),
         );
+        if key == "separator" {
+            // A role, a literal, or `inherit` (SPEC § 4.1).
+            let mut choices = vec![Choice::noted("inherit", "the module before it")];
+            choices.extend(Role::ALL.iter().map(|r| Choice::noted(r.name(), "role")));
+            fields.push(
+                Field::new(
+                    "separator_color",
+                    "Every separator's colour: muted | inherit (the module before it) | a role or literal.",
+                    SlotKind::Str,
+                    s("separator_color"),
+                )
+                .valued(draft, Some(string(config.frame.separator_color.spec())), "muted")
+                .with_choices(choices),
+            );
+        }
     }
-    // Right after `separator`: a role, a literal, or `inherit` (SPEC § 4.1).
-    let mut choices = vec![Choice::noted("inherit", "the module before it")];
-    choices.extend(Role::ALL.iter().map(|r| Choice::noted(r.name(), "role")));
-    fields.insert(
-        3,
-        Field::new(
-            "separator_color",
-            "Every separator's colour: muted | inherit (the module before it) | a role or literal.",
-            SlotKind::Str,
-            s("separator_color"),
-        )
-        .valued(draft, Some(string(config.frame.separator_color.spec())), "muted")
-        .with_choices(choices),
-    );
     fields
 }
 
