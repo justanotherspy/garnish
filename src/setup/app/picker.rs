@@ -13,6 +13,7 @@ use crate::config::presets::TopPreset;
 use crate::config::{Config, ConfigError};
 use crate::install::Steps;
 use crate::setup::draft::Draft;
+use crate::setup::pick::{Confirm, Layer, Question};
 use crate::setup::ui::{Chrome, cells, window};
 
 /// The preset picker.
@@ -97,7 +98,7 @@ impl App {
             Key::Char('F') => self.preview.cycle(false),
             Key::Char('w') => self.ask_width(),
             Key::Char('e') => self.picker_edit(),
-            Key::Enter => self.picker_apply(),
+            Key::Enter => self.picker_apply(false),
             _ => {}
         }
     }
@@ -109,7 +110,7 @@ impl App {
         let at = line.saturating_add(picker.scroll);
         if at < picker.items.len() {
             if picker.cursor == at {
-                self.picker_apply();
+                self.picker_apply(false);
             } else {
                 picker.cursor = at;
             }
@@ -135,8 +136,22 @@ impl App {
 
     /// `Enter`: the highlighted preset becomes the config file, with the
     /// previous file kept as a backup; the install screen follows when the
-    /// settings file has no status line yet.
-    fn picker_apply(&mut self) {
+    /// settings file has no status line yet. A file that appeared or
+    /// changed since setup opened is replaced only once `force` says the
+    /// question was answered.
+    pub(super) fn picker_apply(&mut self, force: bool) {
+        if !force && self.draft.changed_on_disk() {
+            self.layers.push(Layer::Confirm(Confirm::new(
+                Question::ApplyPreset,
+                &[
+                    "The config file changed on disk since setup opened.",
+                    "Replace it with the preset (a backup is kept)?",
+                ],
+                "replace",
+                "keep it",
+            )));
+            return;
+        }
         let Screen::Picker(picker) = &mut self.screen else { return };
         let Some((preset, ..)) = picker.shown() else { return };
         let mut preset = preset.clone();

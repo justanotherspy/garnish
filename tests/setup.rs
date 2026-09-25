@@ -1164,6 +1164,29 @@ fn a_too_small_terminal_takes_no_edits() {
     assert!(snapshot(&mut app, 80, 24).contains("Quit and lose them?"));
 }
 
+/// app-14: the picker asks before replacing a file that appeared or
+/// changed since setup opened, and never replaces one that does not parse.
+#[test]
+fn the_picker_asks_before_replacing_a_changed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<enter>");
+    std::fs::write(&file, "theme = \"nord\"\n").unwrap();
+    keys(&mut app, "<enter>");
+    assert!(snapshot(&mut app, 80, 24).contains("changed on disk"));
+    keys(&mut app, "<esc>");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "theme = \"nord\"\n");
+    std::fs::write(&file, "theme = \n").unwrap();
+    keys(&mut app, "<enter>y");
+    assert!(app.status().unwrap().contains("never rewritten"), "{:?}", app.status());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "theme = \n");
+    std::fs::write(&file, "theme = \"nord\"\n").unwrap();
+    keys(&mut app, "<enter>y");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("preset = \"default\""));
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

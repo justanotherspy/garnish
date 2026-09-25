@@ -330,6 +330,11 @@ impl App {
                     self.load_preset(&name);
                 }
             }
+            Question::ApplyPreset => {
+                if yes {
+                    self.picker_apply(true);
+                }
+            }
             Question::Install => {
                 if yes {
                     self.install_apply();

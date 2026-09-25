@@ -354,21 +354,31 @@ impl Draft {
     /// A draft with no file, a file that does not parse (never rewritten),
     /// or the OS error of the write, each as one line.
     pub fn save(&mut self) -> Result<Option<PathBuf>, String> {
+        let text = toml::to_string_pretty(&self.table)
+            .map_err(|e| format!("the draft cannot be written as TOML: {e}"))?;
+        let backup = self.write(&text)?;
+        self.saved = self.table.clone();
+        Ok(backup)
+    }
+
+    /// Write `text` as the draft's file, with a save's checks and backup.
+    fn write(&mut self, text: &str) -> Result<Option<PathBuf>, String> {
         let Some(path) = self.path.clone() else {
             return Err("no file to save to; pass --config <FILE>".to_owned());
         };
-        if let Some(problem) = &self.unreadable {
+        // The file as it is now, not only as it was read: one that stopped
+        // parsing since is refused as well (SPEC § 5).
+        let now = std::fs::read_to_string(&path).ok();
+        let problem =
+            self.unreadable.clone().or_else(|| now.as_deref().and_then(config::syntax_error));
+        if let Some(problem) = problem {
             return Err(format!(
                 "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
                 path.display()
             ));
         }
-        let existed = path.exists();
-        let text = toml::to_string_pretty(&self.table)
-            .map_err(|e| format!("the draft cannot be written as TOML: {e}"))?;
-        let backup = crate::install::replace_file(&path, &text, existed)?;
+        let backup = crate::install::replace_file(&path, text, path.exists())?;
         self.stamp = Stamp::of(&path);
-        self.saved = self.table.clone();
         self.comments = false;
         Ok(backup)
     }
@@ -690,5 +700,14 @@ mod tests {
         // No file at all: the refusal names the flag.
         let mut none = Draft::from_text("");
         assert!(none.save().unwrap_err().contains("--config"));
+        // app-14: a file that stopped parsing after it was opened is never
+        // rewritten either, whatever the change check was answered.
+        std::fs::write(&path, "theme = \"nord\"\n").unwrap();
+        let mut d = Draft::open(Some(path.clone()));
+        d.set(&["theme"], Value::String("mono".into()));
+        std::fs::write(&path, "theme = \n").unwrap();
+        let err = d.save().unwrap_err();
+        assert!(err.contains("never rewritten"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "theme = \n");
     }
 }

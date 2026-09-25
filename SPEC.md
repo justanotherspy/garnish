@@ -1906,7 +1906,11 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
-  says so in the status bar, and `s` refuses until the file is moved.
+  says so in the status bar, and `s` refuses until the file is moved; the
+  check is made again at the moment of writing, so a file that stopped
+  parsing while `setup` was open is refused too, whatever the change
+  check was answered, and the picker's `Enter` asks before replacing a
+  file that appeared or changed since `setup` opened (2026-09-25 review).
 - **Install.** The install screen mirrors `install --dry-run`: it lists
   the settings path, the exact `statusLine` object it will merge, the
   backup rule, whether the skills will be written and the PATH warning if

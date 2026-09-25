@@ -393,6 +393,9 @@ pub enum Question {
     DropText(String),
     /// Replace a draft with unsaved edits by the named preset.
     ReplaceDraft(String),
+    /// Write the picker's preset over a config file that appeared or
+    /// changed since `setup` opened.
+    ApplyPreset,
     /// Apply the install plan.
     Install,
 }
