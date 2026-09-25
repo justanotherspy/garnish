@@ -1,5 +1,5 @@
 p┌ [frame] ───────────────────────────────────────────────────────────────────┐i
-▶│  style            rounded                     (rounded)                    │
+>│  style            rounded                     (rounded)                    │
  │  fill             true                        (true)                       │
 r│  separator         │                          (the style's)                │
 r│  separator_color  muted                       (muted)                      │

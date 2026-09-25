@@ -12,7 +12,7 @@ use ratatui::widgets::Paragraph;
 use toml::{Table, Value};
 
 use super::draft::{Draft, RowAt, TITLE_KEYS, dropped_boxes, string_list};
-use super::ui::{Chrome, cells, clip, window};
+use super::ui::{Chrome, cells, clip_spans, window};
 
 /// Which group of a row a module sits in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +66,9 @@ pub struct Item {
     /// The modules it places (none for a row with columns or a stacked
     /// column).
     pub chips: Vec<Chip>,
+    /// A spacer: a row (or inner row) with an empty `modules` and nothing
+    /// else placed (SPEC § 4.1).
+    pub spacer: bool,
     /// What else the table sets, in a few words.
     pub note: String,
 }
@@ -148,8 +151,18 @@ fn chips_of(table: &Table) -> Vec<Chip> {
     chips
 }
 
+/// Whether a row table is a spacer: `modules` written and empty, nothing on
+/// the right, no columns (a column is never one).
+fn is_spacer(table: &Table, kind: ItemKind) -> bool {
+    kind != ItemKind::Col
+        && !table.contains_key("col")
+        && table.contains_key("modules")
+        && ids(table, "modules").is_empty()
+        && ids(table, "right").is_empty()
+}
+
 /// What a row or column table sets besides its modules, in a few words.
-fn note_of(table: &Table, kind: ItemKind) -> String {
+fn note_of(table: &Table) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(w) = table.get("width") {
         parts.push(super::form::show(w));
@@ -171,14 +184,6 @@ fn note_of(table: &Table, kind: ItemKind) -> String {
     if table.get("blank").and_then(Value::as_bool) == Some(true) {
         parts.push("blank".to_owned());
     }
-    if kind != ItemKind::Col
-        && !table.contains_key("col")
-        && ids(table, "modules").is_empty()
-        && ids(table, "right").is_empty()
-        && table.contains_key("modules")
-    {
-        parts.push("spacer".to_owned());
-    }
     parts.join(" · ")
 }
 
@@ -195,7 +200,8 @@ impl Builder {
                 at: RowAt::row(r),
                 kind: ItemKind::Row,
                 chips,
-                note: note_of(table, ItemKind::Row),
+                spacer: is_spacer(table, ItemKind::Row),
+                note: note_of(table),
             });
             for (c, col) in cols.into_iter().flatten().enumerate() {
                 let Some(ct) = col.as_table() else { continue };
@@ -206,7 +212,8 @@ impl Builder {
                     at,
                     kind: ItemKind::Col,
                     chips,
-                    note: note_of(ct, ItemKind::Col),
+                    spacer: false,
+                    note: note_of(ct),
                 });
                 for (i, row) in inner.into_iter().flatten().enumerate() {
                     let Some(it) = row.as_table() else { continue };
@@ -215,7 +222,8 @@ impl Builder {
                         at,
                         kind: ItemKind::Inner,
                         chips: chips_of(it),
-                        note: note_of(it, ItemKind::Inner),
+                        spacer: is_spacer(it, ItemKind::Inner),
+                        note: note_of(it),
                     });
                 }
             }
@@ -278,36 +286,34 @@ impl Builder {
         };
     }
 
-    /// `Tab`: the next chip, across lines; `Shift-Tab` the previous.
+    /// `Tab`: the next chip, across lines; `Shift-Tab` the previous. With
+    /// no chip anywhere the cursor stays where it is.
     pub fn next_chip(&mut self, forward: bool) {
         let n = self.items.len();
-        if n == 0 {
+        let chips = self.item().map_or(0, |i| i.chips.len());
+        let along = match (self.chip, forward) {
+            (Some(c), true) if c.saturating_add(1) < chips => Some(c.saturating_add(1)),
+            (None, true) if chips > 0 => Some(0),
+            (Some(c), false) if c > 0 => Some(c.saturating_sub(1)),
+            _ => None,
+        };
+        if along.is_some() {
+            self.chip = along;
             return;
         }
-        for _ in 0..n.saturating_mul(2).saturating_add(2) {
-            let chips = self.item().map_or(0, |i| i.chips.len());
-            let next = match (self.chip, forward) {
-                (Some(c), true) if c.saturating_add(1) < chips => Some(c.saturating_add(1)),
-                (None, true) if chips > 0 => Some(0),
-                (Some(c), false) if c > 0 => Some(c.saturating_sub(1)),
-                _ => None,
-            };
-            if next.is_some() {
-                self.chip = next;
-                return;
-            }
-            self.cursor = if forward {
-                self.cursor.saturating_add(1).checked_rem(n).unwrap_or(0)
+        // The first chip of the next line holding one (the last chip of the
+        // previous, backwards), coming round to this line last.
+        let mut line = self.cursor;
+        for _ in 0..n {
+            line = if forward {
+                line.saturating_add(1).checked_rem(n).unwrap_or(0)
             } else {
-                self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1))
+                line.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1))
             };
-            let chips = self.item().map_or(0, |i| i.chips.len());
-            self.chip = if forward || chips == 0 { None } else { Some(chips.saturating_sub(1)) };
-            if forward && chips > 0 {
-                self.chip = Some(0);
-                return;
-            }
-            if !forward && chips > 0 {
+            let chips = self.items.get(line).map_or(0, |i| i.chips.len());
+            if chips > 0 {
+                self.cursor = line;
+                self.chip = Some(if forward { 0 } else { chips.saturating_sub(1) });
                 return;
             }
         }
@@ -417,22 +423,19 @@ impl Builder {
                 spans.push(Span::raw(" "));
             }
             hits.push(ranges);
-            if item.chips.is_empty() && item.kind != ItemKind::Col {
-                if item.note.contains("spacer") {
-                    spans.push(Span::styled("(spacer)", Chrome::muted()));
-                } else if !draft.row(item.at).is_some_and(|t| t.contains_key("col")) {
-                    spans.push(Span::styled("(empty)", Chrome::muted()));
-                }
+            if item.spacer {
+                spans.push(Span::styled("(spacer)", Chrome::muted()));
+            } else if item.chips.is_empty()
+                && item.kind != ItemKind::Col
+                && !draft.row(item.at).is_some_and(|t| t.contains_key("col"))
+            {
+                spans.push(Span::styled("(empty)", Chrome::muted()));
             }
             if !item.note.is_empty() {
                 spans.push(Span::styled(format!("  {}", item.note), Chrome::muted()));
             }
-            let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-            if text.chars().count() > width {
-                lines.push(Line::from(clip(&text, width)));
-            } else {
-                lines.push(Line::from(spans));
-            }
+            // Cut span by span, so a selection past the cut still shows.
+            lines.push(Line::from(clip_spans(spans, width)));
         }
         self.hits = hits;
         frame.render_widget(Paragraph::new(lines), Rect { height: cells(height), ..area });
@@ -887,7 +890,7 @@ impl Builder {
     ///
     /// # Errors
     /// Why nothing changed, for the status bar.
-    pub fn toggle_spacer(&mut self, draft: &mut Draft) -> Result<String, String> {
+    pub fn make_spacer(&mut self, draft: &mut Draft) -> Result<String, String> {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
         if item.kind == ItemKind::Col {
             return Err("a column cannot be a spacer".into());
@@ -1005,7 +1008,7 @@ mod tests {
         let mut d = draft();
         let mut b = Builder::default();
         b.rebuild(&d);
-        b.toggle_spacer(&mut d).unwrap();
+        b.make_spacer(&mut d).unwrap();
         let row = d.row(RowAt::row(0)).unwrap();
         assert!(row.get("right").is_none());
         assert_eq!(ids(row, "modules"), Vec::<String>::new());
@@ -1130,6 +1133,52 @@ mod tests {
         assert!(b.box_with_above(&mut d, "x").unwrap_err().contains("column"));
     }
 
+    /// app-30: `Tab` on a list with no chip leaves the cursor; a row is a
+    /// spacer by its keys, not by a note that a title can spell; a line
+    /// wider than the list keeps its selection when it is cut.
+    #[test]
+    fn tab_stays_put_spacers_are_flags_and_cut_lines_keep_the_selection() {
+        let mut d = Draft::from_text(
+            "[[row]]\nmodules = []\n[[row]]\nmodules = []\n[[row]]\nmodules = []\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.move_line(true);
+        b.next_chip(true);
+        assert_eq!((b.cursor, b.chip), (1, None), "no chip anywhere: Tab stays");
+        b.next_chip(false);
+        assert_eq!((b.cursor, b.chip), (1, None));
+        assert!(b.items.iter().all(|i| i.spacer && !i.note.contains("spacer")));
+        let titled = Draft::from_text("[[row]]\ntitle = \"spacer row\"\n");
+        b.rebuild(&titled);
+        assert!(!b.items[0].spacer, "a title is not a spacer");
+        let shot = |b: &mut Builder, d: &Draft, width: u16| {
+            let Ok(mut t) = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, 3));
+            let Ok(_) = t.draw(|f| b.draw(f, f.area(), d));
+            t.backend().buffer().clone()
+        };
+        let text = |buf: &ratatui::buffer::Buffer| -> String {
+            (0..buf.area.width).map(|x| buf.cell((x, 0)).unwrap().symbol().to_owned()).collect()
+        };
+        assert!(text(&shot(&mut b, &titled, 40)).contains("(empty)"));
+        // A chip past the width it is cut to still shows selected.
+        d = Draft::from_text(
+            "[[row]]\nmodules = [\"path\", \"branch\", \"sync\", \"model\", \"context\", \"limit5h\"]\n",
+        );
+        b = Builder::default();
+        b.rebuild(&d);
+        b.move_chip(true);
+        b.move_chip(true);
+        assert_eq!(b.selected_id(), Some("branch"));
+        let buf = shot(&mut b, &d, 30);
+        let line = text(&buf);
+        assert!(line.trim_end().ends_with('…'), "{line}");
+        let at = line.find("branch").unwrap();
+        let x = u16::try_from(line.char_indices().take_while(|(i, _)| *i < at).count()).unwrap();
+        let cell = buf.cell((x, 0)).unwrap();
+        assert!(cell.modifier.contains(ratatui::style::Modifier::REVERSED), "{line}");
+    }
+
     /// app-13: `B` naming a box that exists joins it, says so, and says
     /// that the rows' titles went (the box carries its own); a new box
     /// takes one title and says so when the other went.
@@ -1243,8 +1292,8 @@ mod tests {
         b.insert(&mut d, true).unwrap();
         assert_eq!(d.rows().len(), 3);
         assert_eq!(b.cursor, 2);
-        assert!(b.items[2].note.contains("spacer"));
-        b.toggle_spacer(&mut d).unwrap();
+        assert!(b.items[2].spacer);
+        b.make_spacer(&mut d).unwrap();
         b.clone_line(&mut d).unwrap();
         assert_eq!(d.rows().len(), 4);
         b.delete(&mut d).unwrap();

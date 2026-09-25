@@ -128,6 +128,41 @@ pub fn clip(text: &str, width: usize) -> String {
     crate::ansi::Painter::PLAIN.paint(&crate::ansi::truncate(&segs, width, "…"))
 }
 
+/// Spans cut to `width` cells with an ellipsis as [`clip`] cuts their
+/// text, each keeping its style (a selected chip past the cut still shows
+/// selected); spans that fit come back as they are.
+#[must_use]
+pub fn clip_spans(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    if crate::ansi::display_width(&text) <= width {
+        return spans;
+    }
+    let clipped = clip(&text, width);
+    let mut kept = clipped.chars().peekable();
+    let mut out: Vec<Span<'static>> = Vec::new();
+    'spans: for span in spans {
+        let mut part = String::new();
+        for c in span.content.chars() {
+            if kept.peek() != Some(&c) {
+                if !part.is_empty() {
+                    out.push(Span::styled(part, span.style));
+                }
+                break 'spans;
+            }
+            part.push(c);
+            kept.next();
+        }
+        out.push(Span::styled(part, span.style));
+    }
+    // What the cut put in place of the rest: the ellipsis, and a pad for a
+    // wide glyph it could not fit.
+    let rest: String = kept.collect();
+    if !rest.is_empty() {
+        out.push(Span::raw(rest));
+    }
+    out
+}
+
 /// Warnings as lines of their own, never clipped away.
 ///
 /// On one line when they all fit in `width`, else one per line (each cut

@@ -145,7 +145,8 @@ fn home_picker_and_builder_screens_match_their_goldens() {
     std::fs::write(&file, TWO_ROWS).unwrap();
     let mut app = for_test("", Some(file), home);
     let shot = check("builder", &mut app, 80, 24);
-    assert!(shot.contains("row 1") && shot.contains("path") && shot.contains("▶"), "{shot}");
+    assert!(shot.contains("row 1") && shot.contains("path"), "{shot}");
+    assert!(shot.lines().nth(1).unwrap().starts_with("> "), "the row marker: {shot}");
     check("builder", &mut app, 140, 40);
     // The module editor is generated from the schema.
     keys(&mut app, "<right><enter>");
@@ -275,7 +276,7 @@ fn a_click_in_the_preview_selects_and_then_opens_the_module() {
     click(&mut app, x, 2);
     assert_eq!(app.selected(), Some("model"), "{line2}");
     let marked = snapshot(&mut app, 80, 24);
-    assert_eq!(marked.lines().position(|l| l.starts_with('▶')), Some(2), "{marked}");
+    assert_eq!(marked.lines().position(|l| l.starts_with("> ")), Some(2), "{marked}");
     // A module placed on two rows: the clicked row is the one selected,
     // not the first row holding it.
     let twice = home.join("twice.toml");
@@ -290,7 +291,7 @@ fn a_click_in_the_preview_selects_and_then_opens_the_module() {
     click(&mut both, x, 2);
     assert_eq!(both.selected(), Some("clock"));
     let marked = snapshot(&mut both, 80, 24);
-    assert_eq!(marked.lines().position(|l| l.starts_with('▶')), Some(2), "{marked}");
+    assert_eq!(marked.lines().position(|l| l.starts_with("> ")), Some(2), "{marked}");
     // Back on `path`: the first click selects it, the second opens it.
     click(&mut app, 7, 1);
     assert_eq!(app.selected(), Some("path"));
@@ -304,7 +305,7 @@ fn a_click_in_the_preview_selects_and_then_opens_the_module() {
     keys(&mut app, "<esc>");
     // The wheel moves the row cursor.
     app.input(Input::Mouse { x: 10, y: 10, kind: Mouse::Wheel(1) });
-    assert!(snapshot(&mut app, 80, 24).lines().any(|l| l.contains("▶") && l.contains("Opus")));
+    assert!(snapshot(&mut app, 80, 24).lines().any(|l| l.starts_with("> ") && l.contains("Opus")));
 }
 
 #[test]

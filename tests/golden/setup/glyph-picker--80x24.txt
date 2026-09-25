@@ -1,5 +1,5 @@
 p┌ [modules.path] ────────────────────────────────────────────────────────────┐i
-▶│  enabled         true                        (true)                        │
+>│  enabled         true                        (true)                        │
  │  preset          default                     (default)                     │
 r│  refresh         0                           (0)                           │
 r│  hide            []                          ([])                          │

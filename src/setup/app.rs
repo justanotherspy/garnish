@@ -602,7 +602,9 @@ impl App {
         let header = cells(lines.len());
         let selection = Style::new().add_modifier(Modifier::REVERSED);
         for placed in &rendered.lines {
-            let marker = if Some(placed.row) == selected_row { "▶ " } else { "  " };
+            // ASCII: a geometric arrow is East Asian Ambiguous and draws two
+            // cells in some terminals, which would shift the click map.
+            let marker = if Some(placed.row) == selected_row { "> " } else { "  " };
             let mut spans: Vec<Span<'static>> = vec![Span::styled(marker, Chrome::key())];
             for piece in &placed.line.pieces {
                 let line = match (&piece.elem, selected_id) {

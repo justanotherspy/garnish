@@ -33,7 +33,7 @@ impl App {
             Key::Char(']') => self.edit(|b, d| b.switch_column(d, true)),
             Key::Char('C') => self.edit(Builder::add_column),
             Key::Char('S') => self.edit(Builder::stack),
-            Key::Char(' ') => self.edit(Builder::toggle_spacer),
+            Key::Char(' ') => self.edit(Builder::make_spacer),
             _ => return false,
         };
         self.report(out);
