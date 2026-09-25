@@ -329,14 +329,46 @@ pub(super) struct RawRow {
     cols: Option<Vec<RawCol>>,
 }
 
-const ROW_KEYS: &str =
-    "modules, right, separator, blank, gap, title, title_justify, title_pad, title_color, box, col";
+/// Every key a `[[row]]` takes, in the order the "expected one of" message
+/// names them.
+pub(super) const ROW_KEYS: [&str; 11] = [
+    "modules",
+    "right",
+    "separator",
+    "blank",
+    "gap",
+    "title",
+    "title_justify",
+    "title_pad",
+    "title_color",
+    "box",
+    "col",
+];
 /// An inner row (`[[row.col.row]]`) is one line of a stack: it takes no
 /// columns of its own and no `gap`, so the tree is two levels deep and never
 /// deeper (SPEC § 4.3).
-const INNER_ROW_KEYS: &str =
-    "modules, right, separator, blank, title, title_justify, title_pad, title_color, box";
-const COL_KEYS: &str = "width, modules, right, justify, valign, box, row";
+pub(super) const INNER_ROW_KEYS: [&str; 9] = [
+    "modules",
+    "right",
+    "separator",
+    "blank",
+    "title",
+    "title_justify",
+    "title_pad",
+    "title_color",
+    "box",
+];
+/// Every key a `[[row.col]]` takes.
+pub(super) const COL_KEYS: [&str; 7] =
+    ["width", "modules", "right", "justify", "valign", "box", "row"];
+/// Every key a `[box.<name>]` takes.
+pub(super) const BOX_KEYS: [&str; 7] =
+    ["title", "title_justify", "title_pad", "title_color", "style", "fill", "color"];
+
+/// The message for a key a table does not take, naming the ones it does.
+fn unknown_key(keys: &[&str]) -> String {
+    format!("unknown key; expected one of {}", keys.join(", "))
+}
 
 impl RawRow {
     /// One `[[row]]` or `[[row.col.row]]` table. An inner row may not carry
@@ -376,9 +408,8 @@ impl RawRow {
                 "gap" if !inner => row.gap = bounded_count(&path, value, MAX_GAP, errors),
                 "col" if !inner => row.cols = Some(col_array(&path, value, errors)),
                 _ => {
-                    let keys = if inner { INNER_ROW_KEYS } else { ROW_KEYS };
-                    let message = format!("unknown key; expected one of {keys}");
-                    errors.push(problem(&path, &message));
+                    let keys: &[&str] = if inner { &INNER_ROW_KEYS } else { &ROW_KEYS };
+                    errors.push(problem(&path, &unknown_key(keys)));
                 }
             }
         }
@@ -445,10 +476,7 @@ impl RawCol {
                         col.rows.push(inner);
                     }
                 }
-                _ => {
-                    let message = format!("unknown key; expected one of {COL_KEYS}");
-                    errors.push(problem(&path, &message));
-                }
+                _ => errors.push(problem(&path, &unknown_key(&COL_KEYS))),
             }
         }
         col
@@ -871,11 +899,7 @@ pub(super) fn resolve_boxes(
                         })
                     });
                 }
-                _ => errors.push(problem(
-                    &path,
-                    "unknown key; expected one of title, title_justify, title_pad, \
-                     title_color, style, fill, color",
-                )),
+                _ => errors.push(problem(&path, &unknown_key(&BOX_KEYS))),
             }
         }
         cfg.title =

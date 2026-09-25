@@ -530,6 +530,7 @@ struct RawFormat {
     parens: Option<ParensStyle>,
 }
 
+/// Every key `[format]` takes.
 const FORMAT_KEYS: [&str; 4] = ["tokens", "percent", "cost", "parens"];
 
 impl RawFormat {
@@ -1145,8 +1146,86 @@ x = 1
         }
     }
 
-    /// Every key the walk lists as valid is accepted (guards the key tables
-    /// against drifting from the match arms).
+    /// cfg-10: every key list is walked, so a key added to a match arm but
+    /// not to its message (or the reverse) fails here. Each listed key is
+    /// written with a value of the wrong type, which its own arm must
+    /// refuse as a value, never as an unknown key; a key that is not in the
+    /// list is refused naming the whole list.
+    #[test]
+    fn every_key_list_is_the_keys_its_table_takes() {
+        type Text = fn(&str) -> String;
+        let lists: [(&[&str], Text, &str); 7] = [
+            (&TOP_KEYS, |k| format!("{k} = {{}}\n"), ""),
+            (&frame::FRAME_KEYS, |k| format!("[frame]\n{k} = {{}}\n"), "frame."),
+            (&FORMAT_KEYS, |k| format!("[format]\n{k} = {{}}\n"), "format."),
+            (&rows::ROW_KEYS, |k| format!("[[row]]\n{k} = {{}}\n"), "row[0]."),
+            (
+                &rows::INNER_ROW_KEYS,
+                |k| format!("[[row]]\n[[row.col]]\n[[row.col.row]]\n{k} = {{}}\n"),
+                "row[0].col[0].row[0].",
+            ),
+            (&rows::COL_KEYS, |k| format!("[[row]]\n[[row.col]]\n{k} = {{}}\n"), "row[0].col[0]."),
+            (
+                &rows::BOX_KEYS,
+                |k| format!("[box.a]\n{k} = {{}}\n[[row]]\nbox = \"a\"\nmodules = []\n"),
+                "box.a.",
+            ),
+        ];
+        let all = &crate::modules::SCHEMAS;
+        for (keys, text, prefix) in lists {
+            for key in keys {
+                let (_, errs) = parse(&text(key), all);
+                let path = format!("{prefix}{key}");
+                assert!(
+                    !errs.iter().any(|e| e.path == path && e.message.starts_with("unknown key")),
+                    "{path} is listed but not taken: {errs:?}"
+                );
+            }
+            let (_, errs) = parse(&text("zz_not_a_key"), all);
+            let path = format!("{prefix}zz_not_a_key");
+            let problem = errs.iter().find(|e| e.path == path).unwrap_or_else(|| panic!("{path}"));
+            assert_eq!(
+                problem.message,
+                format!("unknown key; expected one of {}", keys.join(", ")),
+                "{path}"
+            );
+        }
+
+        // The other direction: every key `config show` writes for a config
+        // using every layout form is in its table's list.
+        let text = "[frame]\nstyle = \"custom\"\n[box.b]\ntitle = \"B\"\ntitle_justify = \"center\"\ntitle_pad = 2\ntitle_color = \"accent\"\nstyle = \"double\"\ncolor = \"warn\"\n[[row]]\ntitle = \"T\"\ntitle_pad = 2\nseparator = \" \"\nmodules = [\"path\"]\nright = [\"clock\"]\n[[row]]\ngap = 2\nblank = true\n[[row.col]]\nwidth = 9\njustify = \"center\"\nvalign = \"bottom\"\nbox = \"b\"\n[[row.col.row]]\ntitle = \"I\"\nseparator = \" \"\nmodules = [\"path\"]\nright = [\"clock\"]\n[[row.col]]\nbox = true\nmodules = [\"model\"]\n";
+        let (c, errs) = parse(text, all);
+        assert_eq!(errs, Vec::new());
+        let shown: toml::Table = toml::from_str(&crate::docs::config_toml(&c, false)).unwrap();
+        let listed = |table: &toml::Table, keys: &[&str], what: &str| {
+            for key in table.keys() {
+                assert!(keys.contains(&key.as_str()), "config show writes {what}.{key}");
+            }
+        };
+        let tables = |key: &str| -> Vec<toml::Table> {
+            shown.get(key).and_then(toml::Value::as_array).map_or_else(Vec::new, |a| {
+                a.iter().filter_map(toml::Value::as_table).cloned().collect()
+            })
+        };
+        listed(&shown, &TOP_KEYS, "");
+        listed(shown["frame"].as_table().unwrap(), &frame::FRAME_KEYS, "frame");
+        listed(shown["format"].as_table().unwrap(), &FORMAT_KEYS, "format");
+        for b in shown["box"].as_table().unwrap().values() {
+            listed(b.as_table().unwrap(), &rows::BOX_KEYS, "box");
+        }
+        for row in tables("row") {
+            listed(&row, &rows::ROW_KEYS, "row");
+            for col in row.get("col").and_then(toml::Value::as_array).into_iter().flatten() {
+                let col = col.as_table().unwrap();
+                listed(col, &rows::COL_KEYS, "row.col");
+                for inner in col.get("row").and_then(toml::Value::as_array).into_iter().flatten() {
+                    listed(inner.as_table().unwrap(), &rows::INNER_ROW_KEYS, "row.col.row");
+                }
+            }
+        }
+    }
+
+    /// A config that sets most keys, each to a valid value, parses clean.
     #[test]
     fn every_listed_key_is_accepted() {
         let text = "preset = \"compact\"\nicons = \"ascii\"\ntheme = \"nord\"\ncolor = \"never\"\ntruncate = false\nstale_style = \"hide\"\nstale_after = 3\npadding = 2\nalign = true\nright_justify = \"start\"\nhide_empty_lines = false\noverflow = \"ticker\"\nticker_step = 0.5\nticker_gap = \" ~ \"\nanimate = false\ndurations = \"fixed\"\n[colors]\naccent = \"red\"\n[frame]\nstyle = \"custom\"\nfill = true\nfirst = \"a\"\nmiddle = \"b\"\nlast = \"c\"\nsingle = \"d\"\nfill_char = \"-\"\nright_first = \"e\"\nright_middle = \"f\"\nright_last = \"g\"\nright_single = \"h\"\npad = \" \"\nseparator = \" | \"\nfill_pattern = \"-=\"\nfill_step = 2\nfill_direction = \"left\"\nseparator_frames = [\" | \", \" : \"]\nseparator_step = 0.5\n[[line]]\nmodules = [\"path\"]\nright = [\"clock\"]\nseparator = \"  \"\n[modules.path]\ndepth = 1\n";
