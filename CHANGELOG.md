@@ -42,7 +42,11 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 - `install`, `config init` and `setup` write the config the status line
   reads: an existing `~/.garnish.toml` is no longer hidden behind a new
-  XDG file.
+  XDG file. When `statusLine.command` passes its own `--config`, that
+  file is the one every command uses (`config path`, `check`, `show` and
+  `init`, `preview`, `doctor`, `setup` and `install`) instead of a
+  default file the status line never reads; a `--config` that names no
+  one file (a relative path) is refused on one line, never guessed.
 - `CLAUDE_CONFIG_DIR` is honoured for `settings.json`, the skills and the
   settings chain.
 - `install` keeps a garnish command's arguments, writes `--config` when
@@ -50,12 +54,14 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   longer reorders `settings.json`'s keys, and seeds a new config's
   `padding` from `statusLine.padding`. `install --absolute` records the
   launcher on `PATH`, not a versioned Homebrew path that an upgrade
-  deletes. `--dry-run` says "already up to date".
+  deletes. `--dry-run` says "already up to date". A reinstall keeps an
+  environment prefix (`NAME=value garnish …`, `env … garnish …`).
 - Backups keep the original file's permissions and are synced to disk;
   an edited `SKILL.md` is backed up before it is replaced. A
   `settings.json` or config that is not UTF-8 is refused on one line.
-- A typo'd flag in `statusLine.command`, or a panic, shows a
-  `⚠ garnish:` row instead of blanking the status line.
+- A typo'd flag in `statusLine.command` (`garnish render --bogus`
+  included), or a panic, shows a `⚠ garnish:` row instead of blanking the
+  status line, and a stderr nobody reads can no longer blank it either.
 - An empty `NO_COLOR` leaves colour on; the boolean `GARNISH_*` hooks
   accept `true`/`false`/`yes`/`no`/`on`/`off`; a relative `XDG_*`
   directory is ignored.
@@ -68,8 +74,9 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 *The payload*
 
 - A payload field of an unexpected type drops only that field instead of
-  blanking the whole status line; an empty `workspace.current_dir` no
-  longer hides `cwd`.
+  blanking the whole status line (an array where an object belongs
+  included: `"rate_limits": []` no longer hides the cost); an empty
+  `workspace.current_dir` no longer hides `cwd`.
 - Huge or non-finite numbers print bounded (at most `99999%` or
   `$100.0k`), never `$infk` or hundreds of digits.
 - `max_length`, fish-path initials and short ids count the text the row
@@ -114,6 +121,12 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   ligature scripts.
 - Inside a box without a rule, two columns a `gap` apart keep their full
   width, so a module is no longer cut two cells early.
+- A `width = 0` column takes no gap, so no stray rule cell follows the
+  last column; `align = true` stacks the separators of a column that has
+  a `right` group from its left end; a `custom` box too narrow for its
+  corners draws nothing instead of cutting the whole line to `…`; a tall
+  row under `custom` caps that leave a later line's right cap empty fills
+  the box on every line.
 - A bad payload says why on stderr and in the `GARNISH_DEBUG` log.
 
 *Config*
@@ -121,7 +134,7 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 - A `[row.col]` typo is reported and the row keeps its modules instead of
   becoming a blank spacer; a box on a stack inside a boxed row is
   reported (boxes never nest); `config show` writes an emptied row the
-  way it renders.
+  way it renders, and leaves out a `[box.x]` no written row joins.
 - Negative whole numbers in number options keep their sign, whole floats
   are written back as valid TOML, and `nan`/`inf` are refused.
 - Reported now: `thresholds` out of order, `title_justify`/`title_pad`/
@@ -152,7 +165,9 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 - `b` moves a box's last member out; deleting a box's last member drops
   the box; `d` keeps a box or text-module table; `x` on the last row is
   refused; builder edits are no longer refused over a problem the file
-  already had.
+  already had; removing a row's or a box's title removes its
+  `title_justify`, `title_pad` and `title_color` with it (one undo puts
+  all four back).
 - The home menu works at 60×12 and a too-small terminal ignores clicks
   and keys; clicks on titles, boxes, separators and the gutter open the
   right form; the preview marker is `>`, a selection inside a ticker

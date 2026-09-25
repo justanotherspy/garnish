@@ -162,7 +162,21 @@ documents *first*, with the reason, then start coding.
   empty `.git/reftable/tables.list`, which is how the reftable fallback is
   simulated there; CI's git runs the real format. A before/after benchmark
   is a temporary commit, `git checkout HEAD~1 -- <files>`, the bench, then
-  the files restored and `git reset --soft HEAD~1`.
+  the files restored and `git reset --soft HEAD~1`. `std::io::pipe()`
+  with the reader dropped gives a child a stderr nobody reads
+  (`tests/cli.rs::piped_with`). A layout fuzz must include `custom`
+  frames (the review's first fuzz filtered them out by accident, and
+  they are where uneven caps and corners broke), and "a line is exactly
+  the box" holds only with `fill = true` or on a boxed line; otherwise a
+  line is at most the box. Never edit a source while a background `make
+  check` runs: nextest and the doctests compile after clippy, so the run
+  no longer checks the tree being committed.
+- **The payload is read field by field.** A scalar field takes
+  `#[serde(deserialize_with = "or_none")]`, a struct-typed one
+  `object_or_none` (serde reads a struct from a JSON array by position,
+  so `"rate_limits": []` used to mean a subscription). A new payload field
+  also goes into `FULL` in `payload.rs`, which the sweep test gives every
+  wrong JSON type.
 
 ## Commands
 
@@ -496,9 +510,20 @@ for the contract and `docs/` for user docs.
   by concern: `load` (locating and reading), `rows`, `frame`,
   `overrides`, `read` (the value readers) and `vocab`.
 - **One helper per rule, and new code uses it.** `config::write_target`
-  (the file a writing command writes: the one `locate` finds, else the
-  default; callers resolve `GARNISH_CONFIG` into `Options.config_path`, so
-  a plan reads no environment), `claude_settings::user_dir` (the user
+  (the file a writing command writes: the explicit one, else the
+  `--config` the garnish `statusLine.command` passes, else the one
+  `locate` finds, else the default; callers resolve `GARNISH_CONFIG` into
+  `Options.config_path`, so a plan reads no environment) and its twin
+  `config::read_target` (the same order without the default, for the
+  commands a person runs to look at their config: `config check`,
+  `config show`, `preview`, `doctor`; the tick and its workers use
+  `locate` alone and never read the settings file),
+  `install::shell_words` (the one splitter for a `statusLine.command`, as
+  `sh` splits it, past `NAME=value` words and a leading `env`),
+  `debug::stderr_line` (the render path's only stderr writer: it ignores a
+  failed write, since `eprintln!` panics on a stderr nobody reads; a
+  source scan allows the macros only in `cli.rs` and `setup/`),
+  `claude_settings::user_dir` (the user
   settings directory, `CLAUDE_CONFIG_DIR` first), `claude_settings::env_flag`
   (the one truthiness rule for boolean hooks: `true`/`false`/`yes`/`no`/
   `on`/`off`), `config::no_color_env` (`NO_COLOR` counts only when not
