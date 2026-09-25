@@ -14,7 +14,7 @@ use crate::ansi::{
     truncate,
 };
 use crate::config::{BoxCfg, BoxRef, Justify, SeparatorColor, VAlign, Width};
-use crate::frame::{FrameChars, FrameStyle, Rule, Ticker};
+use crate::frame::{BLANK_CELL, FrameChars, FrameStyle, Rule, Ticker};
 use crate::theme::{Role, Theme};
 
 /// What one piece of a rendered line is.
@@ -42,7 +42,8 @@ pub enum Elem {
     /// still owns, counted from the run's first cell: a module may own two
     /// runs when it straddles the ticker's wrap, the module a cut lands in
     /// owns the ellipsis cells, and a module wholly outside the window owns
-    /// none (SPEC § 14). Empty when a whole line was recut.
+    /// none (SPEC § 14). Empty for a whole line recut to the width or given
+    /// the braille blank of a `blank` row: neither names a module.
     Group(Vec<(String, Range<usize>)>),
     /// A row's or a box's title.
     Title,
@@ -129,8 +130,8 @@ impl Line {
             .collect()
     }
 
-    /// Replace the line's segments, keeping one piece per original piece is
-    /// not possible after a cut, so the result is one piece.
+    /// The line cut to `width` cells as one piece: a cut can split any piece,
+    /// so the pieces, and the placement map with them, cannot be kept.
     fn recut(&self, width: usize, ellipsis: &str) -> Self {
         let segs = truncate(&self.segments(), width, ellipsis);
         Self { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs }] }
@@ -251,8 +252,10 @@ enum Draft {
 }
 
 impl Draft {
-    fn spaces(elem: Elem, n: usize) -> Self {
-        Self::Done(Piece { elem, segs: vec![Segment::plain(" ".repeat(n))] })
+    /// `n` spaces beside a title (`title_pad`): drawn as they are, never a
+    /// placement run another title could land in.
+    fn title_pad(n: usize) -> Self {
+        Self::Done(Piece { elem: Elem::Pad, segs: vec![Segment::plain(" ".repeat(n))] })
     }
 
     fn cells(&self) -> usize {
@@ -326,7 +329,9 @@ impl Layout<'_> {
                             .enumerate()
                             .map(|(i, drafts)| {
                                 // A row's title goes into its first line
-                                // alone, however tall the row is.
+                                // alone, however tall the row is. A boxed
+                                // row's belongs to its box, which draws it
+                                // on its top edge; none reaches this arm.
                                 let title = row.title.filter(|_| i == 0);
                                 let line =
                                     self.wrap_frame(drafts, *index, framed, row, fill, title);
@@ -343,28 +348,25 @@ impl Layout<'_> {
         )
     }
 
-    /// The lines of a block drawn inside a box: its top rule with the title,
-    /// the rows between its sides, and its bottom rule.
+    /// The lines of a block drawn inside a box, each tagged with the
+    /// configured row it belongs to: the top rule with the title goes with
+    /// the first row, the bottom rule with the last.
     fn boxed_block(&self, block: &Block<'_, '_>, boxed: &BoxRef) -> Vec<(usize, Vec<Line>)> {
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
         let (inner, pad) = self.box_interior(&chars, self.width).unwrap_or((0, 0));
-        // `box = true` on a row is the one way to title a one-row box, so
-        // the row's own title stands in when the box has none.
-        let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
-        let mut out: Vec<(usize, Vec<Line>)> = Vec::new();
+        let body = self.block_body(block, inner, &cfg, Fit::default());
+        let mut lines = self
+            .box_lines(&cfg, &chars, self.width, pad, box_title(&cfg, block), body)
+            .into_iter()
+            .map(|drafts| self.paint(drafts, false));
         let first = block.rows.first().map_or(0, |(at, _)| *at);
         let last = block.rows.last().map_or(0, |(at, _)| *at);
-        out.push((first, vec![self.edge_line(&chars, true, title, &cfg)]));
+        let mut out: Vec<(usize, Vec<Line>)> = vec![(first, lines.next().into_iter().collect())];
         for (at, row) in &block.rows {
-            let height = self.row_height(row);
-            let body =
-                self.row_body(row, inner, height, Fill::from_box(&cfg), Fit::default().in_box());
-            let lines =
-                body.into_iter().map(|d| self.wrap_box(d, &chars, &cfg, pad, row.blank)).collect();
-            out.push((*at, lines));
+            out.push((*at, lines.by_ref().take(self.row_height(row)).collect()));
         }
-        out.push((last, vec![self.edge_line(&chars, false, None, &cfg)]));
+        out.push((last, lines.collect()));
         out
     }
 
@@ -471,7 +473,7 @@ impl Fill {
 /// row is as tall as its tallest column (SPEC § 4.3).
 impl Layout<'_> {
     fn row_height(&self, row: &Row<'_>) -> usize {
-        row.cols.iter().map(|c| self.col_height(c)).max().unwrap_or(1).max(1)
+        row.cols.iter().map(|c| self.col_height(c)).max().unwrap_or(1)
     }
 
     fn col_height(&self, col: &Col<'_>) -> usize {
@@ -567,7 +569,7 @@ impl Layout<'_> {
                 }
                 let left = width.saturating_sub(used);
                 if left > 0 && fill.draws() {
-                    line.push(Self::filler(left, fill, Elem::Rule));
+                    line.push(Self::filler(left, fill));
                 }
                 line
             })
@@ -777,11 +779,7 @@ impl Layout<'_> {
         let interior = height.saturating_sub(2);
         // Inside its own box a column is padded by the box, not by the row.
         let body = self.col_body(col, inner, interior, row, Fill::from_box(&cfg), fit.in_box());
-        let mut lines = vec![self.edge_drafts(&chars, width, true, cfg.title.as_ref(), &cfg)];
-        for drafts in body {
-            lines.push(self.side_drafts(drafts, &chars, &cfg, pad));
-        }
-        lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
+        let mut lines = self.box_lines(&cfg, &chars, width, pad, cfg.title.as_ref(), body);
         lines.truncate(height.max(1));
         lines
     }
@@ -873,23 +871,8 @@ impl Layout<'_> {
                 .map(|_| vec![Draft::Space(width, Elem::Pad)])
                 .collect();
         };
-        // `box = true` on a row is the one way to title a one-row box, so a
-        // block's first row stands in when the box has no title of its own.
-        let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
-        let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
-        let inside = fit.in_box();
-        for (_, inner) in &block.rows {
-            let body = self.row_body(
-                inner,
-                interior,
-                self.row_height(inner),
-                Fill::from_box(&cfg),
-                inside,
-            );
-            lines.extend(body.into_iter().map(|d| self.side_drafts(d, &chars, &cfg, pad)));
-        }
-        lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
-        lines
+        let body = self.block_body(block, interior, &cfg, fit);
+        self.box_lines(&cfg, &chars, width, pad, box_title(&cfg, block), body)
     }
 
     /// One bare row of a stack: its line with its title set into it.
@@ -900,21 +883,57 @@ impl Layout<'_> {
             self.place_title(first, title, fill);
         }
         if inner.blank {
-            for line in &mut lines {
-                line.insert(0, Draft::Blank);
-            }
+            mark_blank(&mut lines);
         }
         lines
     }
+
+    /// The rows of a block laid out to a box's interior, their lines in
+    /// order, each `blank` row's marked (SPEC § 4.1).
+    fn block_body(
+        &self,
+        block: &Block<'_, '_>,
+        interior: usize,
+        cfg: &BoxCfg,
+        fit: Fit,
+    ) -> Vec<Vec<Draft>> {
+        let fill = Fill::from_box(cfg);
+        block
+            .rows
+            .iter()
+            .flat_map(|(_, row)| {
+                let mut lines =
+                    self.row_body(row, interior, self.row_height(row), fill, fit.in_box());
+                if row.blank {
+                    mark_blank(&mut lines);
+                }
+                lines
+            })
+            .collect()
+    }
+}
+
+/// Mark lines of a `blank = true` row: each keeps the braille cell once it
+/// is finished, if it is whitespace only then ([`Draft::Blank`]).
+fn mark_blank(lines: &mut [Vec<Draft>]) {
+    for line in lines {
+        line.insert(0, Draft::Blank);
+    }
+}
+
+/// A box's title: its own, or its first row's, since `box = true` on a row
+/// is the one way to title a one-row box.
+fn box_title<'t>(cfg: &'t BoxCfg, block: &Block<'t, '_>) -> Option<&'t crate::config::TitleCfg> {
+    cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title))
 }
 
 /// Composing one column's line from its groups.
 impl Layout<'_> {
     /// `n` cells of whatever fills empty space in this mode.
-    fn filler(n: usize, fill: Fill, elem: Elem) -> Draft {
+    const fn filler(n: usize, fill: Fill) -> Draft {
         match fill {
             Fill::Rule => Draft::Rule(n),
-            Fill::Spaces | Fill::Packed => Draft::Space(n, elem),
+            Fill::Spaces | Fill::Packed => Draft::Space(n, Elem::Rule),
         }
     }
 
@@ -1024,7 +1043,7 @@ impl Layout<'_> {
     /// One column's line: the flex form when the column has a `right` group,
     /// a lone group placed by `justify` otherwise (SPEC § 4.3).
     ///
-    /// `exact` is a column laid out to its own content (`width = "auto"`):
+    /// `fit.exact` is a column laid out to its own content (`width = "auto"`):
     /// it draws no rule, so its two groups join with the separator and
     /// nothing is cut to leave room for cells that are never drawn.
     fn compose_group(&self, group: &Group<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Draft> {
@@ -1119,7 +1138,7 @@ impl Layout<'_> {
             if left_pad > 0 {
                 drafts.push(self.pad(left_pad));
             }
-            drafts.push(Self::filler(rule, fill, Elem::Rule));
+            drafts.push(Self::filler(rule, fill));
             drafts.push(self.pad(pad_w));
             drafts.extend(right_pieces.into_iter().map(Draft::Done));
             return drafts;
@@ -1148,7 +1167,7 @@ impl Layout<'_> {
         let (before, after) = split(space, justify);
         let mut drafts: Vec<Draft> = Vec::new();
         if before > 0 || justify != Justify::Left {
-            drafts.push(Self::filler(before, fill, Elem::Rule));
+            drafts.push(Self::filler(before, fill));
         }
         if pad_left > 0 {
             drafts.push(self.pad(pad_left));
@@ -1157,7 +1176,7 @@ impl Layout<'_> {
         if pad_right > 0 {
             drafts.push(self.pad(pad_right));
         }
-        drafts.push(Self::filler(after, fill, Elem::Rule));
+        drafts.push(Self::filler(after, fill));
         drafts
     }
 }
@@ -1255,8 +1274,9 @@ struct Fit {
     /// that are never drawn.
     exact: bool,
     /// Cells of pad to keep on each side, so a rule beside the column never
-    /// runs into its text. Only an `exact` column needs them: every other
-    /// column's own composition pads its groups already.
+    /// runs into its text ([`Layout::edge_pads`]): drawn only on a side the
+    /// column's content reaches ([`Group::touches`]), since the rule already
+    /// stands clear of a group it surrounds.
     pads: (usize, usize),
     /// Nothing of the row is to this column's right, so `truncate = false`
     /// lets its content run past the box. Every other column is cut to its
@@ -1311,10 +1331,7 @@ impl Layout<'_> {
     fn box_chars(&self, cfg: &BoxCfg) -> BoxChars {
         let inherited = cfg.style.is_none();
         let mut style = cfg.style.unwrap_or(self.style);
-        if inherited && matches!(style, FrameStyle::None | FrameStyle::Powerline) {
-            style = FrameStyle::Rounded;
-        }
-        if style == FrameStyle::Powerline {
+        if (inherited && style == FrameStyle::None) || style == FrameStyle::Powerline {
             style = FrameStyle::Rounded;
         }
         let base = if inherited && style == self.style {
@@ -1387,17 +1404,10 @@ impl Layout<'_> {
             };
             Draft::Done(Piece { elem: Elem::Rule, segs: vec![Segment::styled(text, style)] })
         };
-        let Some(title) = title.filter(|t| !t.text.is_empty()) else {
+        let fitted = title.filter(|t| !t.text.is_empty()).and_then(|t| self.fit_title(t, middle));
+        let (Some(title), Some((text, pad, spare))) = (title, fitted) else {
             return vec![rule(middle)];
         };
-        let pad = title.pad.min(middle.checked_div(2).unwrap_or(0));
-        let room = middle.saturating_sub(pad.saturating_mul(2));
-        if room == 0 {
-            return vec![rule(middle)];
-        }
-        let text_style = Style::fg(title.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
-        let text = truncate(&[Segment::styled(&title.text, text_style)], room, self.ellipsis);
-        let spare = room.saturating_sub(segments_width(&text));
         // One rule cell between the corner and the title, so it reads as a
         // label on the box's edge rather than a word stuck to its corner:
         // `╭─ Repository ───╮`, the shape of the frame's own two-cell caps.
@@ -1409,11 +1419,11 @@ impl Layout<'_> {
         };
         let mut out = vec![rule(before)];
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(Draft::title_pad(pad));
         }
         out.push(Draft::Done(Piece { elem: Elem::Title, segs: text }));
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(Draft::title_pad(pad));
         }
         out.push(rule(after));
         out
@@ -1454,32 +1464,48 @@ impl Layout<'_> {
         out
     }
 
-    /// A box's interior line, its sides coloured by the box.
-    fn wrap_box(
+    /// A box `width` cells wide around `body`, whose lines are laid out to
+    /// its interior: the top edge with `title`, each body line between the
+    /// sides with `pad` inside them, the bottom edge. Every box is drawn
+    /// here, a row's, a column's and a stack's alike.
+    fn box_lines(
         &self,
-        drafts: Vec<Draft>,
-        chars: &BoxChars,
         cfg: &BoxCfg,
+        chars: &BoxChars,
+        width: usize,
         pad: usize,
-        blank: bool,
-    ) -> Line {
-        self.paint(self.side_drafts(drafts, chars, cfg, pad), blank)
-    }
-
-    /// A box's top or bottom line as a finished line.
-    fn edge_line(
-        &self,
-        chars: &BoxChars,
-        top: bool,
         title: Option<&crate::config::TitleCfg>,
-        cfg: &BoxCfg,
-    ) -> Line {
-        self.paint(self.edge_drafts(chars, self.width, top, title, cfg), false)
+        body: Vec<Vec<Draft>>,
+    ) -> Vec<Vec<Draft>> {
+        let mut lines = Vec::with_capacity(body.len().saturating_add(2));
+        lines.push(self.edge_drafts(chars, width, true, title, cfg));
+        lines.extend(body.into_iter().map(|drafts| self.side_drafts(drafts, chars, cfg, pad)));
+        lines.push(self.edge_drafts(chars, width, false, None, cfg));
+        lines
     }
 }
 
 /// Titles: plain text set into the rule of a row or a box (SPEC § 4.3).
 impl Layout<'_> {
+    /// `title` fitted to `cells`: its text in its colour, cut to what is
+    /// left once `title_pad` (at most half the cells) is taken on each side,
+    /// that pad, and the cells to spare. `None` when the pads leave no room.
+    fn fit_title(
+        &self,
+        title: &crate::config::TitleCfg,
+        cells: usize,
+    ) -> Option<(Vec<Segment>, usize, usize)> {
+        let pad = title.pad.min(cells.checked_div(2).unwrap_or(0));
+        let room = cells.saturating_sub(pad.saturating_mul(2));
+        if room == 0 {
+            return None;
+        }
+        let style = Style::fg(title.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
+        let text = truncate(&[Segment::styled(&title.text, style)], room, self.ellipsis);
+        let spare = room.saturating_sub(segments_width(&text));
+        Some((text, pad, spare))
+    }
+
     /// Put `title` into the widest run of rule cells the justification
     /// allows, cutting it rather than widening the line.
     fn place_title(&self, drafts: &mut Vec<Draft>, title: &crate::config::TitleCfg, fill: Fill) {
@@ -1504,17 +1530,12 @@ impl Layout<'_> {
             Justify::Right => runs.iter().rev().copied().find(|(_, n)| *n >= need).or_else(widest),
             Justify::Center => widest(),
         };
-        let Some((at, cells)) = target.filter(|(_, n)| *n > 0) else {
+        let Some((at, (text, pad, spare))) = target
+            .filter(|(_, n)| *n > 0)
+            .and_then(|(at, cells)| self.fit_title(title, cells).map(|fitted| (at, fitted)))
+        else {
             return;
         };
-        let pad = title.pad.min(cells.checked_div(2).unwrap_or(0));
-        let room = cells.saturating_sub(pad.saturating_mul(2));
-        if room == 0 {
-            return;
-        }
-        let style = Style::fg(title.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
-        let text = truncate(&[Segment::styled(&title.text, style)], room, self.ellipsis);
-        let spare = room.saturating_sub(segments_width(&text));
         let (before, after) = split(spare, title.justify);
         // Right after the frame's cap there is already a pad, and doubling
         // it reads as a typo: `├─ Repository ──┤`, not `├─  Repository`.
@@ -1533,18 +1554,18 @@ impl Layout<'_> {
         // padding line is spaces on a multi-line row (SPEC § 4.3).
         let around = |n: usize| match drafts.get(at) {
             Some(Draft::Space(_, elem)) => Draft::Space(n, elem.clone()),
-            _ => Self::filler(n, fill, Elem::Rule),
+            _ => Self::filler(n, fill),
         };
         let mut replacement: Vec<Draft> = Vec::new();
         if before > 0 {
             replacement.push(around(before));
         }
         if pad_before > 0 {
-            replacement.push(Draft::spaces(Elem::Pad, pad_before));
+            replacement.push(Draft::title_pad(pad_before));
         }
         replacement.push(Draft::Done(Piece { elem: Elem::Title, segs: text }));
         if pad > 0 {
-            replacement.push(Draft::spaces(Elem::Pad, pad));
+            replacement.push(Draft::title_pad(pad));
         }
         if after > 0 {
             replacement.push(around(after));
@@ -1642,9 +1663,7 @@ impl Layout<'_> {
             }
         }
         line.extend(drafts);
-        // A boxed row's title belongs to the box, which draws it on its top
-        // edge (SPEC § 4.3).
-        if let Some(title) = title.filter(|_| row.boxed.is_none()) {
+        if let Some(title) = title {
             self.place_title(&mut line, title, fill);
         }
         if fill.draws() && !cap.is_empty() {
@@ -1657,7 +1676,7 @@ impl Layout<'_> {
             let cap_total = display_width(cap).saturating_add(if padded { pad } else { 0 });
             let spare = self.width.saturating_sub(used).saturating_sub(cap_total);
             if spare > 0 {
-                line.push(Self::filler(spare, fill, Elem::Rule));
+                line.push(Self::filler(spare, fill));
             }
             if padded {
                 line.push(self.pad(pad));
@@ -1690,17 +1709,49 @@ const fn split(spare: usize, justify: Justify) -> (usize, usize) {
     }
 }
 
-/// A `blank = true` row (SPEC § 4.1): when the line is whitespace only, its
-/// first one-cell whitespace character becomes the braille blank so Claude
-/// Code keeps the row; a line with a visible frame is left alone.
+/// A `blank = true` line (SPEC § 4.1), finished: [`keep_blank`] as one
+/// piece when it needs the cell, the line as it is otherwise.
 fn blank_line(line: Line) -> Line {
-    let segs = line.segments();
-    let kept = crate::render::keep_blank(segs.clone());
-    if kept == segs {
-        line
-    } else {
-        Line { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs: kept }] }
+    keep_blank(&line.segments())
+        .map_or(line, |segs| Line { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs }] })
+}
+
+/// The segments of a whitespace-only line with its first one-cell
+/// whitespace character turned into [`BLANK_CELL`], so the harness keeps
+/// the line; an empty line becomes that one cell. `None` when the line
+/// already shows something (a frame, a box's side, a module) or has no
+/// one-cell whitespace to spare: the width never changes.
+fn keep_blank(row: &[Segment]) -> Option<Vec<Segment>> {
+    // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
+    // which `plain_text` has already dropped): the same set as
+    // `char::is_whitespace`, so this is the harness's own test.
+    if row.iter().any(|s| s.text().chars().any(|c| !c.is_whitespace())) {
+        return None;
     }
+    let one_cell = |c: char| display_width(c.encode_utf8(&mut [0; 4])) == 1;
+    let empty = row.iter().all(|s| s.text().is_empty());
+    let mut row = row.to_vec();
+    match row.iter().position(|s| s.text().chars().any(one_cell)).and_then(|i| row.get_mut(i)) {
+        Some(seg) => {
+            let mut done = false;
+            let text: String = seg
+                .text()
+                .chars()
+                .map(|c| {
+                    if !done && one_cell(c) {
+                        done = true;
+                        BLANK_CELL
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            *seg = seg.clone().with_text(text);
+        }
+        None if empty => row.push(Segment::plain(BLANK_CELL)),
+        None => return None,
+    }
+    Some(row)
 }
 
 #[cfg(test)]
@@ -2003,8 +2054,16 @@ mod tests {
         let short = [Segment::plain("ab")];
         let s = narrow.compose(0, 1, &short, &right, " │ ");
         assert_eq!(s, "── ab ─ R ──", "one rule cell, period three: static fill");
-        assert_eq!(Rule { cells: vec!["ab".into()], offset: 5 }.paint(3), "ababab", "offset wraps");
-        assert_eq!(Rule { cells: Vec::new(), offset: 0 }.paint(3), "", "no pattern, no rule text");
+        assert_eq!(
+            Rule { cells: vec!["ab".into()], offset: 5 }.paint_at(0, 3),
+            "ababab",
+            "offset wraps"
+        );
+        assert_eq!(
+            Rule { cells: Vec::new(), offset: 0 }.paint_at(0, 3),
+            "",
+            "no pattern, no rule text"
+        );
         // An empty pattern falls back to the fill character.
         f.rule = Some(Rule { cells: Vec::new(), offset: 0 });
         assert_eq!(f.compose(0, 1, &left, &right, " │ "), plain);
@@ -2544,7 +2603,7 @@ mod tests {
             ]),
             ..col(Width::Fr(1), "")
         };
-        let blank = crate::render::BLANK_CELL;
+        let blank = BLANK_CELL;
         let lines = |style: FrameStyle, boxed: Option<&'static BoxRef>| -> Vec<String> {
             let f = Fixture::new(style, false, 40);
             let l = f.layout();

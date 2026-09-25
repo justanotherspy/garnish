@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
-use crate::frame::Ticker;
+use crate::frame::{BLANK_CELL, Ticker};
 use crate::icons::IconSet;
 use crate::modules::{self, Ctx, Freshness, Rendered, SCHEMAS, decorate};
 use crate::payload::Payload;
@@ -580,55 +580,6 @@ fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
             col.left = row;
         }
     }
-}
-
-/// The one cell that keeps an unframed spacer on screen (SPEC § 4.1).
-///
-/// A braille blank: Claude Code's `trim` does not count it as whitespace
-/// (SPEC § 2.1), and a font with the clock spinner's braille should draw
-/// it empty.
-pub const BLANK_CELL: char = '\u{2800}';
-
-/// A `blank = true` spacer (SPEC § 4.1).
-///
-/// When the composed row is whitespace only, its first one-cell whitespace
-/// character becomes [`BLANK_CELL`] so the harness keeps the row (an empty
-/// row, `fill = false` with no frame, becomes that one cell); a row with a
-/// visible frame is returned as is. The width never changes: a whitespace
-/// character two cells wide is left alone.
-pub(crate) fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
-    // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
-    // which `plain_text` has already dropped): the same set as
-    // `char::is_whitespace`, so this is the harness's own test.
-    if row.iter().any(|s| s.text().chars().any(|c| !c.is_whitespace())) {
-        return row;
-    }
-    let one_cell = |c: char| crate::ansi::display_width(&c.to_string()) == 1;
-    let slot = row.iter().position(|s| s.text().chars().any(one_cell));
-    match slot.and_then(|i| row.get_mut(i)) {
-        Some(seg) => {
-            let mut done = false;
-            let text: String = seg
-                .text()
-                .chars()
-                .map(|c| {
-                    if !done && one_cell(c) {
-                        done = true;
-                        BLANK_CELL
-                    } else {
-                        c
-                    }
-                })
-                .collect();
-            *seg = seg.clone().with_text(text);
-        }
-        None => {
-            if row.iter().all(|s| s.text().is_empty()) {
-                row.push(Segment::plain(BLANK_CELL));
-            }
-        }
-    }
-    row
 }
 
 /// The rule pattern at this tick, if the frame has one (SPEC § 4.2): the
