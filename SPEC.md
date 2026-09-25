@@ -82,15 +82,32 @@ is cut with `…` on the right. garnish renders to exactly that width: the
 `2 × statusLine.padding` when that setting is non-zero (verified in the
 2.1.261 binary: footer `paddingX: 2`, status box `paddingX: padding`).
 
-**Whitespace-only rows are dropped.** The harness trims the script's stdout
-and removes every row that is empty after trimming (2.1.261:
-`stdout.trim().split("\n").flatMap(l => l.trim() || [])`). The trim runs on
-the raw bytes, escape sequences included, so a row is lost only when it is
-whitespace *after painting*: an unframed spacer with colour off
-(`color = "never"`, `NO_COLOR`) vanishes, while with colour on the rule's
-colour codes around the spaces keep it (verified in the 2.1.263 binary:
-no ANSI strip before the trim). `preview --color never` shows the row the
-screen drops; § 4.1 `blank = true` keeps it in both cases.
+**Every row is trimmed, and a whitespace-only row is dropped.** The
+harness trims the script's stdout, then trims every row and keeps the
+rows that are not empty after it (2.1.261:
+`stdout.trim().split("\n").flatMap(l => l.trim() || [])`), so what it
+draws is each row's *trimmed* text. The trim runs on the raw bytes,
+escape sequences included (verified in the 2.1.263 binary: no ANSI strip
+before the trim), so a row is lost only when it is whitespace *after
+painting*: an unframed spacer with colour off (`color = "never"`,
+`NO_COLOR`) vanishes, while with colour on the rule's colour codes around
+the spaces keep it. `preview --color never` shows the row the screen
+drops; § 4.1 `blank = true` keeps it in both cases.
+
+A row that *starts* with whitespace would lose those cells and be drawn
+shifted left: a column's padding line (§ 4.3), a `style = "none"` box's
+pad, the spaces that place a module under a frame with no caps, and with
+colour off the unstyled rule of `style = "none"`. A plain segment carries
+no escape sequence even with colour on, so colour does not save such a
+row. The tick holds those cells (decided with Daniel 2026-09-25, when the
+per-row trim was read for what it keeps rather than what it drops): with
+colour on, a painted row whose first byte would be whitespace starts with
+an empty SGR (`ESC[0m`), which the trim keeps and the harness's escape
+parser drops, so nothing shows; with colour off, its first leading space
+becomes the braille blank U+2800 of § 4.1, the trade-off `blank` makes.
+It is done once, on the painted row, never in the layout; a row that is
+whitespace throughout is left to the spacer rule above, and trailing
+whitespace moves nothing.
 
 **Every row is drawn dim by the harness, and nothing in the output can
 undo it** (read in the 2.1.261 and 2.1.270 binaries on 2026-09-12, PLAN
@@ -111,7 +128,8 @@ the tick never adds the dim itself: the harness does, and the bytes of a
 tick are what the goldens pin. FUTURE-SPEC § 7.1's A1 (a leading
 `ESC[0m` on every row) assumed the raw bytes reached the terminal inside
 SGR 2 and was dropped when Phase 19 read the component: the prefix would
-be parsed away in every supported version. What remains is the fact, in
+be parsed away in every supported version (which is exactly why it can
+hold a row's leading cells against the trim, above). What remains is the fact, in
 `CLAUDE.md` with how to re-verify it and in the guide's troubleshooting.
 The harness's trim keeps every row that carries a non-whitespace
 byte, so with colour on the painter's escape sequences keep a filled
@@ -691,7 +709,7 @@ preset = "default"        # default | minimal | full | compact
 icons  = "nerd"           # nerd | unicode | emoji | ascii
 theme  = "garnish"        # garnish | catppuccin-mocha | nord | dracula | tokyonight | mono
 color  = "auto"           # auto | always | never | 256 | truecolor
-truncate = true           # cut the left group when a line overflows; the right group is never cut
+truncate = true           # cut the left group when a line overflows; the right group only when it alone is wider than its column
 stale_style = "dim"       # dim | hide | plain: how overdue cached values are shown
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
 padding = 0               # extra cells subtracted from the width, on top of the harness's 4; set 2 × statusLine.padding
@@ -766,7 +784,10 @@ then apply inside each column, and `[[row.col]]` and `[box.<name>]` are
 listed there. A "column" in the aligned-columns paragraph is a module's
 position within its group, not a layout column. `hide_empty_lines`
 likewise becomes `hide_empty_rows` with the old name as an alias.) Overflow: drop the fill, then truncate the **left** group
-(ANSI-aware, `…`); never the right group. `preview --width` and
+(ANSI-aware, `…`); the right group is cut only when it alone is wider
+than its column, after the left group is gone (Phase 21: a right group
+wider than its column pushed the columns beside it off their shares).
+`preview --width` and
 `GARNISH_COLUMNS` stand in for `$COLUMNS` and get the same subtraction, so
 `preview` shows what Claude Code would show at that terminal width.
 
@@ -879,7 +900,8 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   + gap width)`, so it is stateless, deterministic under `GARNISH_NOW`, and
   survives the harness cancelling a tick. `ticker_gap` is plain text
   (escapes and control characters stripped at config time). The right group
-  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
+  is never scrolled, and is cut only when it alone is wider than its
+  column. `truncate` (default) keeps the `…` behaviour;
   `truncate = false` hands the whole row over, ticker or not. With
   animations off (`animate = false`, `GARNISH_ANIMATE=0`) a ticker line is
   cut with `…` like `truncate`, not frozen at offset 0 (decided 2026-09-06:
@@ -1075,7 +1097,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
 - **Columns and width.** The row's width is the box of § 2.1 minus
   `gap` cells per boundary. A column with `width = 24` takes 24 cells and
   `"auto"` takes its content's width (its modules joined by the
-  separator; `max_width` applies); what is left is the free width, shared
+  separator; `max_width` applies; a box around it adds its two sides and
+  two pads, 2026-09-25: they were left out and the content was cut); an
+  `auto` column with nothing to show takes no cells and no gap, since a
+  gap only ever sits between two columns that are drawn (2026-09-25: its
+  gap was reserved, never drawn, and turned up as a stray rule cell after
+  the last column); what is left is the free width, shared
   by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
   cells going one each to the first of them, so shares differ by at most
   one cell and always add up. Defaults: `"1fr"`, so three bare columns
@@ -1095,7 +1122,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   branch names; an `auto` flex column joins its two groups with the
   separator and draws no rule between them, and an `auto` stack is as
   wide as its widest inner row. With no `fr` column at all, the free
-  width is a rule after the last column. When the width runs out, the
+  width is a rule after the last column, running into the right cap (the
+  last column keeps a pad of its own before it, so the cap takes none;
+  2026-09-25: it did, and left a hole in the rule). When the width runs out, the
   row is laid out left to right, gap then column: a fixed or `auto`
   column takes at most what remains, and a column whose gap plus one
   cell does not fit renders nothing, as does everything to its right
@@ -1154,7 +1183,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   only (§ 2.1); `blank` on the outer `[[row]]` of a multi-line row keeps
   every one of its lines (the braille cell on any line that would be
   whitespace only, padding lines included), while on an inner row it
-  follows the § 4.1 rule.
+  follows the § 4.1 rule, judged on the finished line (2026-09-25: the
+  inner row marked its lines before the outer row had drawn its caps, a
+  box's sides or its other columns, so a framed line got the cell too).
 - **Titles.** `title` is plain text (reduced like every config string,
   § 5) set into the row's rule in the frame colour with `title_pad`
   spaces on each side; `title_color` picks another role or literal.
@@ -1164,7 +1195,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the widest of them, a left one in the first run wide enough to hold it
   and a right one in the last, and either falls back to the widest run
   when no run at its end can hold it (the alternative is a title cut to
-  its ellipsis in a one-cell gap). A title needs no rule: with `fill = false` or `style = "none"`
+  its ellipsis in a one-cell gap). The cells around a title stay what the
+  run was: rule, or the spaces of a gap or a padding line on a multi-line
+  row (2026-09-25: they were always drawn as rule). A title needs no rule: with `fill = false` or `style = "none"`
   it is the same text at the same place with `title_pad` spaces around
   it. On a multi-line row the title goes into the first line. On a
   `box = true` row the `title*` keys title that anonymous box (the one
@@ -1248,10 +1281,19 @@ color = "accent"               # role or literal for the box's glyphs; default t
   reaches (a flex column's two groups, a left- or right-justified lone
   group, and both ends of an `auto` column, whose declared width is its
   content plus those cells), and none where the rule already surrounds the
-  group or where the frame's cap or the box's side has padded it. A box's
+  group or where the frame's cap or the box's side has padded it. A
+  stack's column pads belong to the inner rows that reach its edges, as
+  they would to the same modules unstacked. A box's
   interior pad is the frame's `pad`, or one cell when the frame has none,
   so a box never has its content against its side and a `style = "none"`
-  box indents by it. A title right after a cap drops its own leading pad
+  box indents by it. Every one of these pads is the `pad` string itself,
+  unstyled, as the frame drew it before columns existed (2026-09-25:
+  Phase 21 drew its width in spaces, so `pad = "·"` showed as a space);
+  the one-cell pad of a box under a frame with none is a space. Inside a
+  box, a lone group keeps no fill cell and no pad on a side that faces the
+  box's own side, whose pad already keeps it off the side (2026-09-25: a
+  module up to two cells narrower than the interior was cut); between two
+  columns it keeps both, which is what separates them with `gap = 0`. A title right after a cap drops its own leading pad
   for the same reason (`├─ Repository ──┤`, not `├─  Repository`), and the
   cell goes back to the rule. A box's own top and bottom rules are static:
   `fill_pattern` belongs to the frame, and a travelling box edge would
@@ -1360,7 +1402,13 @@ without an error report.
 
 ## 5. Failure behaviour
 
-`garnish` (render) always exits 0 and always prints something:
+`garnish` (render) always exits 0, and prints every row that is not
+hidden. A render whose rows all hid (`hide_empty_rows`, § 4.1: a row of
+`pr` with no pull request open) prints one empty line, which Claude Code
+trims to nothing and so clears the status line until a module has
+something to show (§ 2.1; 2026-09-25: this used to be described as
+"always prints something", which the empty line does not change on
+screen). Otherwise:
 
 - invalid config → keep every valid key and substitute the built-in default
   for each invalid one (the resolver already does this per key), append dim
@@ -1370,7 +1418,10 @@ without an error report.
   look like a different program. Implemented in PLAN Phase 14: the file is
   read as a plain TOML table and each key is converted on its own; value
   errors carry the TOML path, syntax errors the line.)
-- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`;
+- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`,
+  with the parser's message (its line, column and what it expected) on
+  stderr and in the `GARNISH_DEBUG` log (2026-09-25: it was dropped, so
+  nothing said where the JSON went wrong);
   any JSON object renders. A known field of the wrong type is absent, alone,
   and so is a list entry that is not a string and a numeric string that is
   not finite (`inf`, `NaN`). (Decided 2026-09-25: a type change on one
@@ -1675,7 +1726,10 @@ per-module render cost.
   otherwise: `colour-on` pins the painter's escape sequences (with the
   faint `preview` folds into every segment, § 2.1) and the OSC 8 link
   (Phase 20's link goldens and Phase 22's snapshots use the same mode),
-  and the row-start guards of both suites look past escape sequences. A
+  and the row-start guards of both suites look past escape sequences;
+  both also fail on a row whose raw bytes start with whitespace that is
+  not whitespace throughout, which the harness would draw shifted left
+  (§ 2.1). A
   `# env:` value may name the repository root as `$ROOT`, which is how
   `reduced-motion` points `HOME` at a settings fixture. Every test that
   runs the binary sets `GARNISH_MANAGED_SETTINGS` to nothing, so a
@@ -1689,7 +1743,11 @@ per-module render cost.
   empty state in the docs and the in-process matrices without a cache
   directory (`tests/docs_sync.rs` asserts none appears), and the
   settings badges render on from keys the clock seeds in-process rather
-  than from any file.
+  than from any file. `render::render` is the only render that builds
+  its clock from the environment; every other entry point takes a
+  `Clock` (2026-09-25: a test helper that rendered on the environment's
+  clock took a lock in the developer's real cache and forked the test
+  binary as `account`'s worker on every run).
 - **Module matrix from the schema** (PLAN Phase 20; from FUTURE-SPEC § 15
   item 11): an in-crate rayon test generated from `ModuleSchema` renders
   every module × every preset × every icon set × `max_width ∈ {0, 1, 4,

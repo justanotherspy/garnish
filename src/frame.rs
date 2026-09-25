@@ -7,6 +7,14 @@
 
 use serde::Deserialize;
 
+/// The one cell that keeps a row on screen that Claude Code would trim
+/// away: a `blank = true` spacer (SPEC § 4.1), and the first leading space
+/// of a row painted without colour (SPEC § 2.1).
+///
+/// A braille blank: JavaScript's `trim` does not count it as whitespace,
+/// and a font with the clock spinner's braille should draw it empty.
+pub const BLANK_CELL: char = '\u{2800}';
+
 /// Named frame styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -240,12 +248,6 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// The rule text for `width` cells.
-    #[must_use]
-    pub fn paint(&self, width: usize) -> String {
-        self.paint_at(0, width)
-    }
-
     /// The rule text for `width` cells starting `start` cells into the
     /// line's rule.
     ///

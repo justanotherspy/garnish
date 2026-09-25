@@ -1,0 +1,24 @@
+# fixture: subscription-full
+# columns: 80
+# icons: unicode
+# `[frame] pad` is text, drawn wherever the frame pads (SPEC § 4.3 Pads):
+# after the prefix, around the groups, before the cap, beside a column's
+# text and inside a box's sides. Phase 21 drew its width in spaces, so a
+# `·` pad showed as a space.
+
+[frame]
+pad = "·"
+
+[[row]]
+modules = ["model", "effort"]
+right = ["clock"]
+
+[[row]]
+[[row.col]]
+modules = ["session"]
+[[row.col]]
+modules = ["api"]
+
+[[row]]
+box = true
+modules = ["context"]

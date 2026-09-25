@@ -1,0 +1,23 @@
+# fixture: subscription-full
+# columns: 80
+# icons: unicode
+# An `auto` column always fits its content, the box around it included
+# (SPEC § 4.3): a boxed `auto` column in the middle and an `auto` stack of
+# boxed rows at the end are each their content plus two sides and two
+# pads. Both used to be measured without the box and cut with `…`.
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+width = "auto"
+box = true
+modules = ["clock"]
+[[row.col]]
+width = "auto"
+[[row.col.row]]
+box = true
+modules = ["session"]
+[[row.col.row]]
+box = true
+modules = ["api"]

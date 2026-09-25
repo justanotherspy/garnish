@@ -1,0 +1,23 @@
+# fixture: subscription-full
+# columns: 14
+# icons: unicode
+# A 10-cell box has a 6-cell interior, and `❖ Opus` is 6 cells: it fills
+# the interior whole, left, centred or right (SPEC § 4.3 Pads). A lone
+# group used to keep a fill cell and a pad on the side facing the box's
+# own side as well, and was cut to `❖ O…`.
+
+[[row]]
+box = true
+modules = ["model"]
+
+[[row]]
+box = true
+[[row.col]]
+justify = "center"
+modules = ["model"]
+
+[[row]]
+box = true
+[[row.col]]
+justify = "right"
+modules = ["model"]

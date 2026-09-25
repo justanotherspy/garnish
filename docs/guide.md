@@ -218,7 +218,11 @@ Claude Code drops whitespace-only rows from the script's output, so with
 `style = "none"` and colour off (`color = "never"`, `NO_COLOR`) a spacer
 shows in `preview` only; add `blank = true` to that row to keep it on
 screen whatever the colour setting (the row then carries one invisible
-cell).
+cell). Claude Code trims every row as well, so a row that starts with
+spaces (a column's padding line, a module placed right or centre under
+`style = "none"`) would slide left; garnish keeps those cells with an
+invisible lead: an empty colour code with colour on, the same braille
+blank with it off.
 With `stale_style = "hide"`, a row made only of cached modules can vanish
 while its values are overdue; `hide_when_empty = false` on one of them pins
 the row.

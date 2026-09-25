@@ -73,12 +73,6 @@ pub struct Glyph {
 }
 
 impl Glyph {
-    /// Same text in every set.
-    #[must_use]
-    pub const fn same(s: &'static str) -> Self {
-        Self { nerd: s, unicode: s, emoji: s, ascii: s }
-    }
-
     /// Value for a set.
     #[must_use]
     pub const fn get(self, set: IconSet) -> &'static str {
@@ -177,6 +171,5 @@ mod tests {
         let g = glyph("N", "U", "E", "A");
         assert_eq!(g.get(IconSet::Nerd), "N");
         assert_eq!(g.get(IconSet::Ascii), "A");
-        assert_eq!(Glyph::same("x").get(IconSet::Emoji), "x");
     }
 }

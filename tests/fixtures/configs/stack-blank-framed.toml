@@ -1,0 +1,29 @@
+# fixture: subscription-full
+# columns: 44
+# icons: unicode
+# `blank` on an inner row follows the § 4.1 rule (SPEC § 4.3): only a line
+# that would be whitespace only gets the braille cell. Here the frame's
+# caps keep the middle line of the first row, and the box's sides that of
+# the second, so neither carries it; both used to.
+
+[frame]
+fill = false
+
+[[row]]
+[[row.col]]
+[[row.col.row]]
+modules = ["model"]
+[[row.col.row]]
+modules = []
+blank = true
+[[row.col.row]]
+modules = ["clock"]
+
+[[row]]
+[[row.col]]
+box = true
+[[row.col.row]]
+modules = ["session"]
+[[row.col.row]]
+modules = []
+blank = true

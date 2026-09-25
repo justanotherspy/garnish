@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width, strip_ansi};
+use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
-use crate::frame::Ticker;
+use crate::frame::{BLANK_CELL, Ticker};
 use crate::icons::IconSet;
 use crate::modules::{self, Ctx, Freshness, Rendered, SCHEMAS, decorate};
 use crate::payload::Payload;
@@ -33,18 +33,33 @@ pub struct Request<'a> {
     pub workers: bool,
 }
 
-/// Render a full tick. Never fails and never prints nothing.
+/// Render a full tick. Never fails (SPEC § 5).
+///
+/// The one render that reads the process environment: the tick and
+/// `preview` come through here, everything else names its [`Clock`].
 #[must_use]
 pub fn render(req: &Request<'_>) -> String {
-    let Ok(payload) = Payload::parse(req.payload_json) else {
-        return "⚠ garnish: bad payload\n".to_owned();
+    let payload = match Payload::parse(req.payload_json) {
+        Ok(payload) => payload,
+        Err(e) => {
+            // The row stays the one SPEC § 5 pins; the parser's message,
+            // which names the line, the column and what it expected, is what
+            // a Claude Code release that changed the payload needs.
+            let note = format!("garnish: bad payload: {e}");
+            eprintln!("{note}");
+            crate::debug::log(&note);
+            return "⚠ garnish: bad payload\n".to_owned();
+        }
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
-    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, req.workers)
+    let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
+    let clock = Clock { workers: req.workers, config_file, ..Clock::from_env() };
+    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, &clock)
 }
 
-/// Render with an already loaded config (used by tests, previews and
-/// benches). `dim` is [`Request::dim`] and `workers` [`Request::workers`].
+/// Render with an already loaded config on `clock`: every row painted, then
+/// the `⚠ config:` row when the config had problems. `dim` is
+/// [`Request::dim`].
 #[must_use]
 pub fn render_loaded(
     payload: &Payload,
@@ -52,24 +67,61 @@ pub fn render_loaded(
     columns: Option<usize>,
     no_color: bool,
     dim: bool,
-    workers: bool,
+    clock: &Clock,
 ) -> String {
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
     let painter = Painter { mode, links: mode != ColorMode::Never, dim };
-    let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
-    let clock = Clock { workers, config_file, ..Clock::from_env() };
-    let mut lines = render_lines_at(payload, config, columns, &clock);
+    let mut lines = render_lines_at(payload, config, columns, clock);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
     }
     let mut out = String::new();
     for line in &lines {
-        out.push_str(&painter.paint(line));
+        out.push_str(&hold_leading_cells(painter.paint(line), mode));
         out.push('\n');
     }
+    // Every row hid: one empty line, which the harness trims to nothing and
+    // so clears the status line (SPEC § 5).
     if out.is_empty() {
         out.push('\n');
+    }
+    out
+}
+
+/// A painted row whose leading cells survive Claude Code's trim.
+///
+/// The harness trims every row's raw bytes before drawing it (SPEC § 2.1),
+/// so a row that starts with whitespace (a column's padding line, a `none`
+/// box's pad, the spaces that place a module under a frame with no caps)
+/// would be drawn shifted left by those cells. With colour on, an empty SGR
+/// in front keeps them: the trim meets a byte that is not whitespace, and
+/// the harness parses the sequence away. With colour off, the first of them
+/// becomes [`BLANK_CELL`], the trade-off `blank` makes (§ 4.1). A row that is
+/// whitespace throughout is the spacer rule's, and is left as it is.
+fn hold_leading_cells(row: String, mode: ColorMode) -> String {
+    if !row.starts_with(char::is_whitespace) || row.chars().all(char::is_whitespace) {
+        return row;
+    }
+    if mode != ColorMode::Never {
+        return format!("\x1b[0m{row}");
+    }
+    let mut out = String::with_capacity(row.len().saturating_add(BLANK_CELL.len_utf8()));
+    let mut held = false;
+    for c in row.chars() {
+        if held || !c.is_whitespace() {
+            held = true;
+            out.push(c);
+            continue;
+        }
+        // A whitespace character that takes no cell (U+2028) is trimmed
+        // with the rest and shows nothing: dropping it moves no cell.
+        let cells = crate::ansi::display_width(c.encode_utf8(&mut [0; 4]));
+        if cells > 0 {
+            out.push(BLANK_CELL);
+            out.extend(std::iter::repeat_n(' ', cells.saturating_sub(1)));
+            held = true;
+        }
     }
     out
 }
@@ -219,17 +271,8 @@ impl Clock {
     }
 }
 
-/// Render every configured line to segments (no escape sequences yet).
-#[must_use]
-pub fn render_lines(
-    payload: &Payload,
-    config: &Config,
-    columns: Option<usize>,
-) -> Vec<Vec<Segment>> {
-    render_lines_at(payload, config, columns, &Clock::from_env())
-}
-
-/// [`render_lines`] with an explicit clock, zone and home.
+/// Every configured row rendered to segments (no escape sequences yet), its
+/// lines in order.
 #[must_use]
 pub fn render_lines_at(
     payload: &Payload,
@@ -237,33 +280,20 @@ pub fn render_lines_at(
     columns: Option<usize>,
     clock: &Clock,
 ) -> Vec<Vec<Segment>> {
-    render_rows_at(payload, config, columns, clock)
+    render_tree_at(payload, config, columns, clock)
         .into_iter()
-        .flatten()
+        .flat_map(|(_, lines)| lines)
         .map(crate::layout::Line::into_segments)
         .collect()
 }
 
-/// Every configured row rendered to its terminal lines (SPEC § 4.3).
+/// Every row that survives `hide_empty_rows`, as its terminal lines tagged
+/// by the index of its `[[row]]` (SPEC § 4.3).
 ///
-/// One entry per `[[row]]`, in order: a row is one line today and several
-/// once it carries a stack or a box, and each line carries what its pieces
-/// are, which is what `setup`'s placement map reads (SPEC § 14).
-#[must_use]
-pub fn render_rows_at(
-    payload: &Payload,
-    config: &Config,
-    columns: Option<usize>,
-    clock: &Clock,
-) -> Vec<Vec<crate::layout::Line>> {
-    render_tree_at(payload, config, columns, clock).into_iter().map(|(_, lines)| lines).collect()
-}
-
-/// [`render_rows_at`] with each entry tagged by the index of its `[[row]]`.
-///
-/// A row whose modules all rendered nothing is dropped, so the lines that
-/// remain would otherwise not say which configured row they belong to; the
-/// `setup` builder's row list needs to know (SPEC § 14).
+/// A row is several lines once it carries a stack or a box, and each line
+/// says what its pieces are; with the dropped rows gone, the index is what
+/// tells `setup`'s row list and placement map which configured row a line
+/// belongs to (SPEC § 14).
 #[must_use]
 pub fn render_tree_at(
     payload: &Payload,
@@ -274,41 +304,7 @@ pub fn render_tree_at(
     let width = config.width(columns);
     let cache =
         clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
-    let mut ctx = Ctx {
-        payload,
-        theme: &config.theme,
-        icons: config.icons,
-        now: clock.now,
-        width,
-        cache: &cache,
-        tz: clock.tz.clone(),
-        home: clock.home.clone(),
-        settings_env: clock.settings_env.clone(),
-        git: clock.git,
-        stale_after: config.stale_after,
-        durations: config.durations,
-        format: config.format,
-        animate: false,
-        dirs: std::cell::OnceCell::new(),
-        head: std::cell::OnceCell::new(),
-        settings_chain: clock.settings_chain(payload),
-        settings: clock
-            .settings_keys
-            .clone()
-            .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
-        // A refused root (SPEC § 6) is no cache at all: render as a pinned
-        // tick does, never spawning a worker that could not write.
-        workers: clock.workers && cache.refused().is_none(),
-        config_file: clock.config_file.clone(),
-    };
-    // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
-    // `animate` decides, else Claude Code's prefersReducedMotion freezes,
-    // else animations run. The chain is read only when the answer depends
-    // on it, and once for the tick (the context module shares the keys).
-    ctx.animate = clock.animate
-        && config
-            .animate
-            .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
+    let ctx = context(payload, config, clock, &cache, width);
     let stale = config.icons.stale_glyphs();
     let ellipsis: String = config.icons.ellipsis().into();
     let layout = crate::layout::Layout {
@@ -358,6 +354,57 @@ pub fn render_tree_at(
     }
     let rows: Vec<crate::layout::Row<'_>> = tree.iter().map(RowRender::to_layout).collect();
     tree.iter().map(|r| r.index).zip(layout.lines(&rows)).collect()
+}
+
+/// The context a render of `config` on `clock` hands every module, its
+/// cached modules looking in `cache`.
+///
+/// Built in one place so that the tick and the per-module benchmarks
+/// (`benches/tick.rs`) render modules in the same context.
+#[must_use]
+pub fn context<'a>(
+    payload: &'a Payload,
+    config: &'a Config,
+    clock: &Clock,
+    cache: &'a crate::cache::Cache,
+    width: usize,
+) -> Ctx<'a> {
+    let mut ctx = Ctx {
+        payload,
+        theme: &config.theme,
+        icons: config.icons,
+        now: clock.now,
+        width,
+        cache,
+        tz: clock.tz.clone(),
+        home: clock.home.clone(),
+        settings_env: clock.settings_env.clone(),
+        git: clock.git,
+        stale_after: config.stale_after,
+        durations: config.durations,
+        format: config.format,
+        animate: false,
+        dirs: std::cell::OnceCell::new(),
+        head: std::cell::OnceCell::new(),
+        settings_chain: clock.settings_chain(payload),
+        settings: clock
+            .settings_keys
+            .clone()
+            .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
+        // A refused root (SPEC § 6) is no cache at all: render as a pinned
+        // tick does, never spawning a worker that could not write.
+        workers: clock.workers && cache.refused().is_none(),
+        config_file: clock.config_file.clone(),
+    };
+    // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
+    // `animate` decides, else Claude Code's prefersReducedMotion freezes,
+    // else animations run. The chain is read only when the answer depends
+    // on it, and once for the tick (the context module shares the keys).
+    ctx.animate = clock.animate
+        && config
+            .animate
+            .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
+    ctx
 }
 
 /// One configured row with every module of it rendered, before any width is
@@ -474,19 +521,23 @@ fn render_row<'a>(
 /// `align = true` (SPEC § 4.3): module *k* of a column is padded to the
 /// widest module *k* of the columns in the same position, among the rows
 /// with the same column count. Inner rows align with the inner rows at the
-/// same position, never with the rows around them.
+/// same position, never with the rows around them, and a right-justified
+/// column, which counts *k* from its right end, only with other
+/// right-justified ones.
 fn align_tree(tree: &mut [RowRender<'_>], config: &Config) {
-    let mut buckets: std::collections::BTreeMap<(usize, usize, usize), Vec<&mut ColRender<'_>>> =
+    type Key = (usize, usize, usize, bool);
+    let mut buckets: std::collections::BTreeMap<Key, Vec<&mut ColRender<'_>>> =
         std::collections::BTreeMap::new();
+    let right = |c: &ColRender<'_>| c.justify == config::Justify::Right;
     for row in tree.iter_mut() {
         let n = row.cols.len();
         for (j, col) in row.cols.iter_mut().enumerate() {
             if col.rows.is_empty() {
-                buckets.entry((n, j, 0)).or_default().push(col);
+                buckets.entry((n, j, 0, right(col))).or_default().push(col);
             } else {
                 for inner in &mut col.rows {
                     for c in &mut inner.cols {
-                        buckets.entry((n, j, 1)).or_default().push(c);
+                        buckets.entry((n, j, 1, right(c))).or_default().push(c);
                     }
                 }
             }
@@ -506,9 +557,8 @@ fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
     };
     // A right-justified column hangs off the right edge, so its positions
     // count from the right end as a `right` group's do, and `right_justify`
-    // picks the pad side for both (SPEC § 4, § 4.3). The columns of a bucket
-    // are at the same position in rows with the same column count, so the
-    // first one's justification is the bucket's.
+    // picks the pad side for both (SPEC § 4, § 4.3). Every column of a
+    // bucket is right-justified or none is (`align_tree`).
     let from_right = cols.first().is_some_and(|c| c.justify == config::Justify::Right);
     let pad_left = config.right_justify == config::RightJustify::End;
     if config.frame.fill {
@@ -540,55 +590,6 @@ fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
             col.left = row;
         }
     }
-}
-
-/// The one cell that keeps an unframed spacer on screen (SPEC § 4.1).
-///
-/// A braille blank: Claude Code's `trim` does not count it as whitespace
-/// (SPEC § 2.1), and a font with the clock spinner's braille should draw
-/// it empty.
-pub const BLANK_CELL: char = '\u{2800}';
-
-/// A `blank = true` spacer (SPEC § 4.1).
-///
-/// When the composed row is whitespace only, its first one-cell whitespace
-/// character becomes [`BLANK_CELL`] so the harness keeps the row (an empty
-/// row, `fill = false` with no frame, becomes that one cell); a row with a
-/// visible frame is returned as is. The width never changes: a whitespace
-/// character two cells wide is left alone.
-pub(crate) fn keep_blank(mut row: Vec<Segment>) -> Vec<Segment> {
-    // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
-    // which `plain_text` has already dropped): the same set as
-    // `char::is_whitespace`, so this is the harness's own test.
-    if row.iter().any(|s| s.text().chars().any(|c| !c.is_whitespace())) {
-        return row;
-    }
-    let one_cell = |c: char| crate::ansi::display_width(&c.to_string()) == 1;
-    let slot = row.iter().position(|s| s.text().chars().any(one_cell));
-    match slot.and_then(|i| row.get_mut(i)) {
-        Some(seg) => {
-            let mut done = false;
-            let text: String = seg
-                .text()
-                .chars()
-                .map(|c| {
-                    if !done && one_cell(c) {
-                        done = true;
-                        BLANK_CELL
-                    } else {
-                        c
-                    }
-                })
-                .collect();
-            *seg = seg.clone().with_text(text);
-        }
-        None => {
-            if row.iter().all(|s| s.text().is_empty()) {
-                row.push(Segment::plain(BLANK_CELL));
-            }
-        }
-    }
-    row
 }
 
 /// The rule pattern at this tick, if the frame has one (SPEC § 4.2): the
@@ -706,12 +707,6 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
     }
 }
 
-/// Plain-text render (no escapes), for tests and docs.
-#[must_use]
-pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
-    strip_ansi(&render_loaded(payload, loaded, columns, true, false, true))
-}
-
 /// Plain-text render of the configured lines with a pinned clock (docs).
 #[must_use]
 pub fn render_plain_at(
@@ -730,7 +725,13 @@ pub fn render_plain_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ansi::display_width;
+    use crate::ansi::{display_width, strip_ansi};
+
+    /// A whole render as `render` paints it, `⚠ config:` row included, on the
+    /// pinned clock: no git, no settings files, no cache, no workers.
+    fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
+        strip_ansi(&render_loaded(payload, loaded, columns, true, false, &Clock::fixed()))
+    }
 
     fn fixture(name: &str) -> Payload {
         let path = format!("{}/tests/fixtures/payloads/{name}.json", env!("CARGO_MANIFEST_DIR"));
@@ -844,7 +845,7 @@ mod tests {
         assert!(!json.contains('\x1b'), "escaped on the wire");
         let payload = Payload::parse(&json).unwrap();
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
-        let out = render_loaded(&payload, &loaded, Some(160), false, false, true);
+        let out = render_loaded(&payload, &loaded, Some(160), false, false, &Clock::fixed());
         let plain = render_plain(&payload, &loaded, Some(160));
         assert_eq!(plain.lines().count(), loaded.config.rows.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
@@ -1297,6 +1298,123 @@ mod tests {
         assert!(rows[1].contains("Opus") && !rows[1].contains(BLANK_CELL), "{three:?}");
     }
 
+    /// SPEC § 9: an in-process render names its clock, and the pinned one
+    /// reads no cache and spawns nothing. `render_plain` rendered on the
+    /// environment's clock: every run of the unit tests took a lock in the
+    /// developer's real cache for `account` and forked the test binary as
+    /// its worker.
+    #[test]
+    fn cache_a_pinned_render_touches_no_cache_and_keeps_the_config_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("c");
+        let clock = Clock { cache: Some(root.clone()), ..Clock::fixed() };
+        let payload = fixture("subscription-full");
+        let every_id = SCHEMAS
+            .iter()
+            .map(|s| format!("[[line]]\nmodules = [\"{}\"]\n", s.id))
+            .collect::<Vec<_>>()
+            .concat();
+        for text in [every_id.clone(), format!("theme = \"nope\"\n{every_id}")] {
+            let loaded = loaded(&text);
+            let out = strip_ansi(&render_loaded(&payload, &loaded, Some(120), true, false, &clock));
+            assert!(!root.exists(), "a pinned render touched {}", root.display());
+            // The helper is that render: the rows `render_plain_at` draws,
+            // then the `⚠ config:` row when the config has problems.
+            let rows = render_plain_at(&payload, &loaded.config, Some(120), &Clock::fixed());
+            let warning = (!loaded.errors.is_empty())
+                .then(|| Painter::PLAIN.paint(&config_warning(&loaded, 116)));
+            let want: Vec<String> = std::iter::once(rows).chain(warning).collect();
+            assert_eq!(out, format!("{}\n", want.join("\n")));
+            assert_eq!(render_plain(&payload, &loaded, Some(120)), out);
+        }
+    }
+
+    /// A cached entry is fresh for the TTL its reader passes, the module's
+    /// `refresh`, whatever TTL it was written with: what `benches/tick.rs`
+    /// relies on to keep its seeded entries warm past the default `refresh`
+    /// without spawning a worker.
+    #[test]
+    fn cache_a_seed_under_a_long_refresh_stays_warm_past_the_default_ttl() {
+        use crate::cache::{Cache, Entry, Scope};
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = Cache::at(tmp.path().to_path_buf());
+        let payload = fixture("subscription-full");
+        let scope = Scope::Session(payload.session_id.clone().unwrap());
+        let values = [("email".to_owned(), "dev@example.com".to_owned())].into();
+        let mut entry = Entry::ok(60_000, values);
+        entry.computed_at_ms = entry.computed_at_ms.saturating_sub(700_000);
+        cache.write(&scope, "account", &entry).unwrap();
+        assert!(!cache.lookup(&scope, "account", 600_000).fresh, "past the default refresh");
+        let (config, errs) = config::parse(
+            "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"account\"]\n[modules.account]\nrefresh = 86400\n",
+            &SCHEMAS,
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        let clock =
+            Clock { workers: true, cache: Some(tmp.path().to_path_buf()), ..Clock::fixed() };
+        let out = render_plain_at(&payload, &config, Some(80), &clock);
+        assert!(out.contains("dev@example.com") && !out.contains('⟳'), "{out}");
+        assert!(!cache.lock_path(&scope, "account").exists(), "a worker was started");
+    }
+
+    /// SPEC § 2.1: Claude Code trims every row's raw bytes, so a row that
+    /// starts with whitespace was drawn shifted left. With colour on an empty
+    /// SGR holds its cells, with colour off the braille blank does; the width
+    /// never changes, and a row that is whitespace only stays the spacer
+    /// rule's (§ 4.1).
+    #[test]
+    fn a_row_that_starts_with_spaces_keeps_them_through_the_harness_trim() {
+        let payload = fixture("subscription-full");
+        let tick = |color: &str, text: &str| -> Vec<String> {
+            let loaded = loaded(&format!(
+                "icons = \"unicode\"\ncolor = \"{color}\"\n[frame]\nstyle = \"none\"\n{text}"
+            ));
+            assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
+            let out = render_loaded(&payload, &loaded, Some(40), false, false, &Clock::fixed());
+            out.lines().map(str::to_owned).collect()
+        };
+        let kept = |rows: &[String]| {
+            for row in rows {
+                assert!(row.trim().is_empty() || row.trim_start() == row, "trimmed: {row:?}");
+                assert_eq!(display_width(&strip_ansi(row)), 36, "{row:?}");
+            }
+        };
+        // Only a right group: the rule's spaces lead the row, styled with
+        // colour on and plain with it off.
+        let right = "[[row]]\nright = [\"clock\"]\n";
+        let rows = tick("never", right);
+        kept(&rows);
+        assert!(rows[0].starts_with(BLANK_CELL) && rows[0].ends_with("⠋ 16:00:00"), "{rows:?}");
+        let rows = tick("always", right);
+        kept(&rows);
+        assert!(!rows[0].contains(BLANK_CELL), "{rows:?}");
+        // A padding line above a short column: plain spaces even with
+        // colour on, so the reset goes in front.
+        let tall = "[[row]]\n[[row.col]]\nvalign = \"bottom\"\nmodules = [\"model\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"session\"]\n[[row.col.row]]\nmodules = [\"clock\"]\n";
+        let rows = tick("always", tall);
+        kept(&rows);
+        assert!(rows[0].starts_with("\x1b[0m "), "{rows:?}");
+        assert!(rows[1].contains("Opus") && !rows[1].starts_with("\x1b[0m"), "{rows:?}");
+        let rows = tick("never", tall);
+        kept(&rows);
+        assert!(rows[0].starts_with(BLANK_CELL), "{rows:?}");
+        // A spacer that is spaces only is still dropped by the harness with
+        // colour off: holding its cells is `blank`'s job.
+        let rows = tick("never", "[[row]]\nmodules = [\"model\"]\n[[row]]\nmodules = []\n");
+        assert!(rows[1].trim().is_empty() && !rows[1].is_empty(), "{rows:?}");
+    }
+
+    /// SPEC § 5: a render whose rows all hid prints one empty line, which
+    /// Claude Code trims to nothing and so clears the status line. The docs
+    /// promised "always prints something", which that line does not change
+    /// on screen; this pins what the tick does.
+    #[test]
+    fn a_render_whose_rows_all_hid_is_one_empty_line() {
+        let out =
+            render_plain(&fixture("pr-absent"), &loaded("[[row]]\nmodules = [\"pr\"]\n"), Some(80));
+        assert_eq!(out, "\n");
+    }
+
     #[test]
     fn config_warning_names_the_first_problem_and_counts_the_rest() {
         let out = render_plain(
@@ -1393,6 +1511,24 @@ mod tests {
         );
         // The default (align = false) render is untouched.
         assert_eq!(plain(base), plain(&format!("align = false\n{base}")));
+    }
+
+    /// SPEC § 4.3: with `align = true`, *k* counts from the right end in a
+    /// right-justified column, column by column. The bucket used to take
+    /// the first column's justification for all of them, so a left-justified
+    /// column in one row made the right-justified ones below it count from
+    /// the left, and their separators did not stack.
+    #[test]
+    fn align_counts_each_column_from_its_own_end() {
+        let payload = fixture("subscription-full");
+        let text = "icons = \"unicode\"\nalign = true\n[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\njustify = \"left\"\nmodules = [\"text.a\", \"text.b\"]\n[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\nmodules = [\"text.x\", \"text.yy\"]\n[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\nmodules = [\"text.xxx\", \"text.y\"]\n[modules.text.a]\ntext = \"aaaa\"\n[modules.text.b]\ntext = \"b\"\n[modules.text.x]\ntext = \"x\"\n[modules.text.yy]\ntext = \"yy\"\n[modules.text.xxx]\ntext = \"xxx\"\n[modules.text.y]\ntext = \"y\"\n";
+        let (config, errs) = config::parse(text, &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let out = strip_ansi(&render_plain_at(&payload, &config, Some(60), &Clock::fixed()));
+        let rows: Vec<&str> = out.lines().collect();
+        assert_eq!(rows.len(), 3, "{out}");
+        assert_eq!(last_bar(rows[1]), last_bar(rows[2]), "{out}");
+        assert!(rows[1].ends_with("x │ yy ─┤") && rows[2].ends_with("xxx │  y ─╯"), "{out}");
     }
 
     #[test]

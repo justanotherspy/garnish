@@ -1,0 +1,16 @@
+# fixture: pr-absent
+# columns: 80
+# icons: unicode
+# An `auto` column with nothing to show (no pull request) takes no cells
+# and no gap (SPEC § 4.3), so the other two columns share the whole row and
+# the clock ends a pad before the cap. Its gap used to be reserved and never
+# drawn, which left a stray rule cell after the clock: `16:00:00─ ─╮`.
+
+[[row]]
+[[row.col]]
+width = "auto"
+modules = ["pr"]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["clock"]

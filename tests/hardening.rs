@@ -75,6 +75,23 @@ fn hostile_stdin_never_blanks_the_line_or_fails() {
     assert!(out.contains("Op\u{fffd}s"), "{out}");
 }
 
+/// CLAUDE.md § Style: a render error is a `⚠ garnish:` row on stdout *and a
+/// note on stderr*. A bad payload dropped the parser's message, so nothing
+/// anywhere said where the JSON went wrong; the note and the debug log now
+/// carry it, and stdout keeps the one line SPEC § 5 pins.
+#[test]
+fn a_bad_payload_says_why_on_stderr_and_in_the_debug_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let (out, err, ok) = tick(br#"{"session_id": "s","#, &[("GARNISH_DEBUG", "1")], dir.path());
+    assert!(ok, "{err}");
+    assert_eq!(out, "⚠ garnish: bad payload\n");
+    assert!(err.contains("bad payload") && err.contains("line 1"), "{err:?}");
+    let log = std::fs::read_to_string(dir.path().join("cache/debug.log")).unwrap_or_default();
+    assert!(log.contains("bad payload") && log.contains("line 1"), "{log:?}");
+    let (_, err, _) = tick(b"[1,2]", &[], dir.path());
+    assert!(err.contains("bad payload") && err.contains("not a JSON object"), "{err:?}");
+}
+
 /// SPEC § 5: a payload field of the wrong type is absent, alone. One badge's
 /// field changing type in a Claude Code release used to blank every row
 /// behind `⚠ garnish: bad payload`.

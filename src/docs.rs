@@ -1060,7 +1060,7 @@ fn top_level_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `truncate` | bool | `{}` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is never cut. |",
+        "| `truncate` | bool | `{}` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is cut only when it alone is wider than its column. |",
         d.truncate
     );
     let _ = writeln!(
@@ -1097,7 +1097,7 @@ fn top_level_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `overflow` | {} | `{}` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |",
+        "| `overflow` | {} | `{}` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled, and is cut only when it alone is wider than its column. With animations off the line is cut with `…` like `truncate`. |",
         vocab_cells::<Overflow>(),
         d.overflow.name()
     );

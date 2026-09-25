@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# A `style = "none"` box indents its lines by the pad (SPEC § 4.3): plain
+# spaces, which Claude Code would trim (SPEC § 2.1), so each such line, the
+# titled top edge included, starts with the braille blank. The bottom edge
+# is spaces only with colour off and is dropped on screen, as a spacer is
+# (§ 4.1).
+
+[box.quiet]
+style = "none"
+title = "Session"
+
+[[row]]
+box = "quiet"
+modules = ["model", "session"]
+
+[[row]]
+box = "quiet"
+modules = ["clock"]
