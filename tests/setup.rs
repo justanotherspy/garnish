@@ -1076,6 +1076,24 @@ fn the_comment_warning_is_visible_on_an_80_column_screen() {
     assert!(!snapshot(&mut again, 80, 24).contains("comments"));
 }
 
+/// app-05: the home menu is whole at the smallest terminal the screen
+/// lays out for, and a click on the status or hint row below it is not a
+/// click on an entry.
+#[test]
+fn the_home_menu_fits_the_smallest_terminal() {
+    for height in [12, 13, 14, 15] {
+        let mut app = for_test("", None, Path::new("/home/dev"));
+        let shot = snapshot(&mut app, 60, height);
+        for item in ["Pick a preset", "Build a custom layout", "Install into Claude Code", "Quit"] {
+            assert!(shot.contains(item), "60x{height} lacks {item}: {shot}");
+        }
+        click(&mut app, 30, height - 2);
+        click(&mut app, 2, height - 1);
+        let shot = snapshot(&mut app, 60, height);
+        assert!(shot.contains("enter open"), "still home at 60x{height}: {shot}");
+    }
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

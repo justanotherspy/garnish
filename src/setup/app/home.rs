@@ -69,33 +69,44 @@ impl App {
 
     pub(super) fn draw_home(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let config = self.config.clone();
-        let pane = self.draw_pane(
-            frame,
-            area,
-            &config,
-            None,
-            None,
-            area.height.checked_div(2).unwrap_or(1),
-        );
-        let mut lines: Vec<Line<'static>> = vec![
-            Line::from(""),
-            Line::from(Span::styled("garnish setup", Chrome::title())),
-            Line::from(Span::styled(
-                self.draft.path().map_or_else(
-                    || "no config file yet".to_owned(),
-                    |p| {
-                        format!(
-                            "config: {}{}",
-                            self.shown(p),
-                            if p.exists() { "" } else { " (not written yet)" }
-                        )
-                    },
-                ),
-                Chrome::muted(),
-            )),
-            Line::from(""),
-        ];
-        let list_y = area.y.saturating_add(pane.height).saturating_add(cells(lines.len()));
+        let items = cells(HOME_ITEMS.len());
+        // The pane gives way to the menu: its entries, the two lines naming
+        // the file above them, and the status and hint rows below.
+        let max = area
+            .height
+            .checked_div(2)
+            .unwrap_or(1)
+            .min(area.height.saturating_sub(items.saturating_add(4)));
+        let pane = self.draw_pane(frame, area, &config, None, None, max);
+        let rect = Rect {
+            y: area.y.saturating_add(pane.height),
+            height: area.height.saturating_sub(pane.height).saturating_sub(2),
+            ..area
+        };
+        let title = Line::from(Span::styled("garnish setup", Chrome::title()));
+        let file = Line::from(Span::styled(
+            self.draft.path().map_or_else(
+                || "no config file yet".to_owned(),
+                |p| {
+                    format!(
+                        "config: {}{}",
+                        self.shown(p),
+                        if p.exists() { "" } else { " (not written yet)" }
+                    )
+                },
+            ),
+            Chrome::muted(),
+        ));
+        // On a short terminal the blank lines go first, then the file's.
+        let mut lines: Vec<Line<'static>> =
+            match usize::from(rect.height).saturating_sub(HOME_ITEMS.len()) {
+                0 => Vec::new(),
+                1 => vec![title],
+                2 => vec![title, file],
+                3 => vec![title, file, Line::from("")],
+                _ => vec![Line::from(""), title, file, Line::from("")],
+            };
+        let list_y = rect.y.saturating_add(cells(lines.len()));
         for (i, item) in HOME_ITEMS.iter().enumerate() {
             let style = if i == self.home_cursor { Chrome::selected() } else { Style::new() };
             lines.push(Line::from(Span::styled(
@@ -103,13 +114,10 @@ impl App {
                 style,
             )));
         }
-        let rect = Rect {
-            y: area.y.saturating_add(pane.height),
-            height: area.height.saturating_sub(pane.height).saturating_sub(2),
-            ..area
-        };
         frame.render_widget(Paragraph::new(lines), rect);
-        self.list_area = Rect { y: list_y, height: cells(HOME_ITEMS.len()), ..area };
+        // Only the entries drawn take a click.
+        let height = items.min(rect.bottom().saturating_sub(list_y));
+        self.list_area = Rect { y: list_y, height, ..area };
         self.draw_status(
             frame,
             area,
