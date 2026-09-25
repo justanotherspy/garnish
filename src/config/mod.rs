@@ -2624,11 +2624,13 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
             .filter(|i| *i >= 0)
             .map(Value::Int)
             .ok_or_else(|| "expected a non-negative integer".into()),
+        // TOML takes `nan` and `inf`; no option means either.
         Kind::Float => value
             .as_float()
             .or_else(|| {
                 value.as_integer().map(|i| crate::num::u64_to_f64(u64::try_from(i).unwrap_or(0)))
             })
+            .filter(|f| f.is_finite())
             .map(Value::Float)
             .ok_or_else(|| "expected a number".into()),
         Kind::Str => value
@@ -2665,10 +2667,12 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
             let nums: Option<Vec<f64>> = items
                 .iter()
                 .map(|i| {
-                    i.as_float().or_else(|| {
-                        i.as_integer()
-                            .map(|n| crate::num::u64_to_f64(u64::try_from(n).unwrap_or(0)))
-                    })
+                    i.as_float()
+                        .or_else(|| {
+                            i.as_integer()
+                                .map(|n| crate::num::u64_to_f64(u64::try_from(n).unwrap_or(0)))
+                        })
+                        .filter(|f| f.is_finite())
                 })
                 .collect();
             nums.map(Value::NumList).ok_or_else(|| "expected a list of numbers".into())
@@ -4136,6 +4140,23 @@ x = 1
         for opt in COMMON_OPTS.iter().filter(|o| text_takes(o.key)) {
             let text = format!("[modules.text.a]\n{} = {}\n", opt.key, opt.default.to_toml());
             assert_eq!(parse(&text, &crate::modules::SCHEMAS).1, Vec::new(), "{}", opt.key);
+        }
+    }
+
+    /// A number option takes finite numbers only: TOML's `nan` and `inf`
+    /// are reported at the key (frm-07), and the default stands in.
+    #[test]
+    fn a_number_option_refuses_nan_and_inf() {
+        for (text, path) in [
+            ("[modules.context]\nwarn_at = nan\n", "modules.context.warn_at"),
+            ("[modules.context]\nwarn_at = -inf\n", "modules.context.warn_at"),
+            ("[modules.context]\nthresholds = [50.0, nan]\n", "modules.context.thresholds"),
+        ] {
+            let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+            let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+            assert_eq!(paths, [path], "{text}");
+            let ctx = c.modules.get("context").unwrap();
+            assert!(ctx.value("warn_at").is_none_or(|v| *v == Value::Float(0.0)), "{text}");
         }
     }
 

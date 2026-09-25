@@ -213,10 +213,7 @@ impl SlotKind {
                 }
                 Value::Integer(n)
             }
-            Self::Float => {
-                let f: f64 = text.parse().map_err(|_| format!("{text:?} is not a number"))?;
-                Value::Float(f)
-            }
+            Self::Float => Value::Float(number(text)?),
             Self::Literal => {
                 if text.is_empty() {
                     return Ok(None);
@@ -247,11 +244,7 @@ impl SlotKind {
                     .split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .map(|s| {
-                        s.parse::<f64>()
-                            .map(Value::Float)
-                            .map_err(|_| format!("{s:?} is not a number"))
-                    })
+                    .map(|s| number(s).map(Value::Float))
                     .collect();
                 Value::Array(items?)
             }
@@ -265,6 +258,14 @@ impl SlotKind {
             },
         }))
     }
+}
+
+/// A finite number typed (`f64` itself also parses `nan` and `inf`).
+fn number(text: &str) -> Result<f64, String> {
+    text.parse::<f64>()
+        .ok()
+        .filter(|f| f.is_finite())
+        .ok_or_else(|| format!("{text:?} is not a number"))
 }
 
 /// A TOML value typed as the file would write it (`"12h"`, `[" │ "]`,
@@ -1850,6 +1851,12 @@ mod tests {
         assert_eq!(SlotKind::BoxRef.parse("true").unwrap(), Some(Value::Boolean(true)));
         assert_eq!(SlotKind::Tri.parse("").unwrap(), None);
         assert!(SlotKind::NumList.parse("1, x").is_err());
+        // frm-07: `f64` parses `nan` and `inf`, which no option means.
+        for text in ["nan", "NaN", "inf", "-inf"] {
+            assert!(SlotKind::Float.parse(text).is_err(), "{text}");
+            assert!(SlotKind::NumList.parse(&format!("1, {text}")).is_err(), "{text}");
+        }
+        assert_eq!(SlotKind::Float.parse("2.5"), Ok(Some(Value::Float(2.5))));
         // The animate tri-state cycles unset → true → false → unset.
         let (mut top, _) = built("", &FormKind::Top);
         top.focus("animate");
