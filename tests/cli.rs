@@ -712,6 +712,64 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// One run of the binary with `args` and a payload piped in, as the
+/// harness runs `statusLine.command`: stdout and the exit code.
+fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<i32>) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.args(args)
+        .current_dir(home)
+        .env("HOME", home)
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env("GARNISH_STDIN_TTY", "0")
+        .env("NO_COLOR", "1")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    // A run refused before it reads stdin may have exited already: the
+    // write then fails with a broken pipe, which is not the test's concern.
+    let _ = child.stdin.take().unwrap().write_all(payload.as_bytes());
+    let out = child.wait_with_output().unwrap();
+    (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code())
+}
+
+/// SPEC § 5: the render path always exits 0 and prints something, since a
+/// non-zero exit clears the status line. A mistyped flag in
+/// `statusLine.command` (or one an upgrade removed) and a panic both used
+/// to exit non-zero with nothing on stdout; each is a `⚠ garnish:` row
+/// now. A subcommand's bad flag is still clap's usage error.
+#[test]
+fn a_bad_flag_or_a_panic_on_the_render_path_is_a_warning_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let (out, code) = piped(&["--confg", "x.toml"], home, &[]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.starts_with("⚠ garnish: ") && out.contains("--confg"), "{out}");
+    assert_eq!(out.lines().count(), 1, "{out}");
+    let (out, code) = piped(&["--config"], home, &[]);
+    assert!(code == Some(0) && out.starts_with("⚠ garnish: "), "{out}");
+    let (out, code) = piped(&["config", "--no-such-flag"], home, &[]);
+    assert!(code == Some(2) && out.is_empty(), "{out}");
+    let (out, code) = piped(&["--version"], home, &[]);
+    assert!(code == Some(0) && out.starts_with("garnish "), "{out}");
+    // At a terminal a typo is clap's error as usual.
+    let (out, code) = piped(&["--confg"], home, &[("GARNISH_STDIN_TTY", "1")]);
+    assert!(code == Some(2) && out.is_empty(), "{out}");
+    let (out, code) = piped(&[], home, &[("GARNISH_TEST_PANIC", "1")]);
+    assert_eq!(code, Some(0), "{out}");
+    assert_eq!(out, "⚠ garnish: internal error\n");
+    let (out, code) = piped(&["render"], home, &[("GARNISH_TEST_PANIC", "1")]);
+    assert_eq!((out.as_str(), code), ("⚠ garnish: internal error\n", Some(0)));
+}
+
 /// SPEC § 9: `GARNISH_MANAGED_SETTINGS` names the managed settings file,
 /// first in Claude Code's chain, or, empty, says there is none; `config
 /// show`, `doctor` and the tick read the chain through it.

@@ -1322,7 +1322,16 @@ without an error report.
   read as a plain TOML table and each key is converted on its own; value
   errors carry the TOML path, syntax errors the line.)
 - malformed stdin → `⚠ garnish: bad payload`;
-- internal error → `⚠ garnish: <msg>`.
+- a command line clap refuses on the render path (no subcommand word and
+  stdin not a terminal: a typo in `statusLine.command`, or a flag an
+  upgrade removed) → `⚠ garnish: <the error's first line>`, the whole
+  error on stderr; a subcommand's bad flag, or one typed at a terminal,
+  keeps clap's usage error and exit code;
+- internal error (a panic) → `⚠ garnish: internal error`: a panic hook
+  installed on the render path prints it and exits 0, and it runs before
+  the release build's `panic = "abort"`; a stack overflow or a signal is
+  beyond it. (2026-09-25 review: nothing produced this line, and both a
+  typo and a panic cleared the status line with no word.)
 - **A file that fails to parse is never rewritten by any command** (PLAN
   Phase 19 for `install` and `config init --force`, Phase 22 for `setup`;
   from FUTURE-SPEC § 12.1 and § 13.4). `install`, `config init --force`
@@ -1672,6 +1681,7 @@ per-module render cost.
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
 | `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets |
 | `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish` (§ 7, § 14), so the pointer path is testable without a pty |
+| `GARNISH_TEST_PANIC` | debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row of § 5 is testable through the binary |
 
 ## 10. Documentation
 

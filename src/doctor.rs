@@ -470,7 +470,7 @@ fn probe(root: &Path, link: impl Fn(&Path, &Path) -> std::io::Result<()>) -> Str
 /// Every `GARNISH_*` test hook, named by the constant each reader uses so a
 /// new hook cannot be added without a row here (SPEC § 9 Test hooks; a unit
 /// test scans the source for a hook this list forgot).
-pub const TEST_HOOKS: [&str; 9] = [
+pub const TEST_HOOKS: [&str; 10] = [
     config::CONFIG_ENV,
     crate::cache::CACHE_DIR_ENV,
     crate::time::NOW_ENV,
@@ -480,6 +480,7 @@ pub const TEST_HOOKS: [&str; 9] = [
     crate::time::ANIMATE_ENV,
     crate::claude_settings::MANAGED_SETTINGS_ENV,
     crate::cli::STDIN_TTY_ENV,
+    crate::cli::TEST_PANIC_ENV,
 ];
 
 fn environment_section(o: &mut String) {

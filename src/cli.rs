@@ -256,8 +256,80 @@ pub fn run() -> Result<std::process::ExitCode> {
     }
 }
 
+/// A command line clap refused.
+///
+/// On the render path (no subcommand word, and stdin not a terminal: the
+/// harness running `statusLine.command`) a non-zero exit would clear the
+/// status line without a word, so the error's first line becomes the
+/// `⚠ garnish:` row and the exit is 0 (SPEC § 5), the whole error going
+/// to stderr. Anywhere else, and for `--help` and `--version`, clap
+/// reports it and exits as it always does.
+fn parse_failure(e: &clap::Error) -> Result<()> {
+    use clap::error::ErrorKind;
+    let shown = matches!(
+        e.kind(),
+        ErrorKind::DisplayHelp
+            | ErrorKind::DisplayVersion
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    );
+    if shown || names_a_subcommand() || stdin_is_terminal() {
+        e.exit();
+    }
+    let text = e.render().to_string();
+    eprint!("{text}");
+    let first = text.lines().next().unwrap_or_default();
+    let first = first.strip_prefix("error: ").unwrap_or(first);
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "⚠ garnish: {}", crate::ansi::plain_text(first))?;
+    Ok(())
+}
+
+/// Whether the command line names a subcommand, so it is not the render
+/// path whatever else is wrong with it.
+fn names_a_subcommand() -> bool {
+    use clap::CommandFactory as _;
+    let command = Cli::command();
+    std::env::args_os()
+        .skip(1)
+        .any(|arg| command.get_subcommands().any(|s| arg.as_os_str() == s.get_name()))
+}
+
+/// Debug builds only: set, a tick panics before it renders, so the
+/// internal-error row of SPEC § 5 is testable through the binary.
+pub const TEST_PANIC_ENV: &str = "GARNISH_TEST_PANIC";
+
+/// Make a panic on the render path what SPEC § 5 promises: a `⚠ garnish:
+/// internal error` row and exit 0, since a non-zero exit clears the status
+/// line. The release build aborts on a panic, after this hook has run.
+// A panic hook cannot return to the program, and an abort or an unwind
+// both exit non-zero: `exit(0)` is the one way to keep the status line.
+#[allow(clippy::exit)]
+fn render_panics_as_a_row() {
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("garnish: {info}");
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all("⚠ garnish: internal error\n".as_bytes());
+        let _ = stdout.flush();
+        std::process::exit(0);
+    }));
+}
+
+/// The [`TEST_PANIC_ENV`] hook.
+// A panic is this hook's whole job; it is compiled out of a release build.
+#[allow(clippy::panic)]
+fn test_panic() {
+    if cfg!(debug_assertions)
+        && crate::claude_settings::env_truthy(std::env::var(TEST_PANIC_ENV).ok().as_ref())
+    {
+        panic!("{TEST_PANIC_ENV} is set");
+    }
+}
+
 fn run_command() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => return parse_failure(&e),
+    };
     let config_path = cli.config.as_deref();
     let command = match cli.command {
         Some(command) => command,
@@ -282,6 +354,8 @@ fn run_command() -> Result<()> {
     }
     match command {
         Command::Render => {
+            render_panics_as_a_row();
+            test_panic();
             render_stdin(config_path);
             Ok(())
         }
