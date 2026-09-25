@@ -1938,7 +1938,8 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   with no repository at hand. The preview honours the config's `color`
   and `NO_COLOR` for the rendered rows while the screen's own chrome
   uses the terminal's default colours, so a `color = "never"` config
-  previews plain; in that case the preview's header says "colours off:
+  previews plain (no bold, italic or underline either, since the tick
+  prints no escape at all then; only the harness's faint stays); in that case the preview's header says "colours off:
   edits are saved, not previewed". A terminal smaller than 60 × 12 gets
   one line asking for more room instead of a broken layout, and while it
   is up takes no click and no key but `q`, `Esc` and `Ctrl+C` (2026-09-25

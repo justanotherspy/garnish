@@ -22,9 +22,14 @@ pub const fn color(c: ansi::Color) -> Option<Color> {
     }
 }
 
-/// The ratatui style a segment's style paints as under `painter`.
+/// The ratatui style a segment's style paints as under `painter`. With
+/// colour off the painter prints no escape at all, so nothing is left but
+/// the harness's own faint.
 #[must_use]
 pub fn style(painter: &Painter, s: ansi::Style) -> Style {
+    if painter.mode == ansi::ColorMode::Never {
+        return if painter.dim { Style::new().add_modifier(Modifier::DIM) } else { Style::new() };
+    }
     let s = painter.painted_style(s);
     let mut out = Style::new();
     if let Some(fg) = color(s.fg) {
@@ -100,10 +105,21 @@ mod tests {
                         assert_eq!(bytes, "a bc");
                     }
                 }
-                assert!(first.add_modifier.contains(Modifier::BOLD));
+                // Colour off prints no escape at all (app-16): the pane shows
+                // no weight or underline either, only the harness's faint.
+                let styled = mode != ColorMode::Never;
+                assert_eq!(first.add_modifier.contains(Modifier::BOLD), styled, "{mode:?}");
                 assert_eq!(first.add_modifier.contains(Modifier::DIM), dim, "{mode:?}");
-                assert!(spans[2].style.add_modifier.contains(Modifier::UNDERLINED));
-                assert!(spans[3].style.add_modifier.contains(Modifier::DIM), "dim segment");
+                let underlined = spans[2].style.add_modifier.contains(Modifier::UNDERLINED);
+                assert_eq!(underlined, styled, "{mode:?}");
+                let dimmed = spans[3].style.add_modifier.contains(Modifier::DIM);
+                assert_eq!(dimmed, styled || dim, "dim segment, {mode:?}");
+                if mode == ColorMode::Never {
+                    for span in &spans {
+                        let want = if dim { Modifier::DIM } else { Modifier::empty() };
+                        assert_eq!(span.style.add_modifier, want, "{span:?}");
+                    }
+                }
                 if mode != ColorMode::Never {
                     assert_eq!(spans[2].style.fg, Some(Color::Indexed(4)));
                     assert_eq!(spans[3].style.fg, Some(Color::Indexed(208)));
