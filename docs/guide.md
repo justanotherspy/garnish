@@ -385,6 +385,11 @@ so the two stay in step; an explicit `animate` wins over the setting, and
 - **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`
   (the lines come out 96 cells wide: what fits in Claude Code's box at that
   terminal width).
+- **A garbled terminal after `garnish setup` was killed** → `setup` puts
+  the terminal back when it exits, on `Ctrl+C` and on a crash, but a
+  `kill` (or a supervisor's SIGTERM) gives it no chance to, and the shell
+  is left without echo, on the alternate screen, with mouse reporting on.
+  Type `reset` (even unseen) and Enter.
 
 ## 8. Under the hood
 

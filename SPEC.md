@@ -1839,7 +1839,12 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the row list instead. A click (crossterm mouse capture, on while
   `setup` runs and off when it exits, on `Ctrl+C` and on a panic, through
   a hook chained ahead of color-eyre's so the report prints on a restored
-  terminal; the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
+  terminal, and which acts only while the screen holds the terminal; a
+  signal (`kill`, a supervisor's SIGTERM) runs neither, since std has no
+  signal hook and no crate was added for one, so a killed `setup` can
+  leave the terminal raw, on the alternate screen and reporting the
+  mouse until `reset` is typed (2026-09-25 review; the README's
+  troubleshooting says so); the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
   arrows move the selection; `Enter` or a second click on the selected
   item opens its editor as an **overlay panel** over the screen; clicking
   the rule or a cap opens the frame form, a separator the same form on

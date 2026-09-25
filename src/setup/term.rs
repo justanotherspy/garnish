@@ -5,6 +5,7 @@
 //! events as the screen's own inputs.
 
 use std::io::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::cursor::Show;
@@ -19,7 +20,9 @@ use ratatui::crossterm::terminal::{
 
 use super::app::{App, Input, Key, Mouse};
 
-/// The terminal put back the way it was found, whichever way `setup` ends.
+/// The terminal put back the way it was found, whichever way `setup` ends
+/// but a signal: a `kill` runs neither this nor the panic hook, and std has
+/// no signal hook to run them from (SPEC § 14 and the README say `reset`).
 ///
 /// The panic hook is chained ahead of the one already installed
 /// (color-eyre's), so a report prints on a restored terminal; it runs
@@ -27,17 +30,22 @@ use super::app::{App, Input, Key, Mouse};
 /// (or aborting) starts.
 struct Guard;
 
+/// A [`Guard`] holds the terminal: the panic hook, which stays installed
+/// after `run` returns, puts the terminal back only while this is set.
+static HELD: AtomicBool = AtomicBool::new(false);
+
 impl Guard {
     fn enter() -> std::io::Result<Self> {
         enable_raw_mode()?;
         // The guard exists from here, so a failure of the next step still
         // leaves raw mode the way it was found.
         let guard = Self;
+        HELD.store(true, Ordering::SeqCst);
         let mut out = std::io::stdout();
         execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            restore();
+            restore_if_held();
             previous(info);
         }));
         Ok(guard)
@@ -46,8 +54,18 @@ impl Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
+        HELD.store(false, Ordering::SeqCst);
         restore();
     }
+}
+
+/// [`restore`] while a guard holds the terminal; whether it did.
+fn restore_if_held() -> bool {
+    let held = HELD.load(Ordering::SeqCst);
+    if held {
+        restore();
+    }
+    held
 }
 
 /// Leave the alternate screen, drop mouse capture and raw mode, and show
@@ -211,6 +229,14 @@ mod tests {
         assert_eq!(input(&mouse(MouseEventKind::Moved)), None);
         assert_eq!(input(&Event::Resize(80, 24)), Some(Input::Resize(80, 24)));
         assert_eq!(input(&Event::FocusGained), None);
+    }
+
+    /// app-25: the panic hook outlives `run`, so it puts the terminal back
+    /// only while a guard holds it.
+    #[test]
+    fn the_panic_hook_restores_only_under_a_guard() {
+        assert!(!HELD.load(Ordering::SeqCst));
+        assert!(!restore_if_held(), "no guard: a later panic writes nothing");
     }
 
     /// app-24: an event the screen ignores (a mouse move) draws nothing,
