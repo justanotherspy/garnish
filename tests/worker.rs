@@ -460,6 +460,38 @@ fn worker_behind_diverged_and_no_upstream_render() {
     assert!(sync_entry(&env).contains("no upstream"), "{}", sync_entry(&env));
 }
 
+/// `sync` is the one cached module that carries a measure (its counts), so
+/// it is the only place a `hide` rule meets a cached value. At 0/0 with
+/// `hide = ["zero"]` it leaves the row, and it stays gone once its value
+/// is overdue: a stale value a rule hides is hidden, not marked `⟳`.
+#[test]
+fn worker_hide_zero_on_sync_hides_even_count_and_stale_value() {
+    let env = setup();
+    let line = "icons = \"unicode\"\n[[line]]\nmodules = [\"branch\", \"sync\"]\n\
+                [modules.sync]\nshow_zero = true\nshow_upstream = true\n";
+    config(&env, line);
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1") && out.contains("origin/main"), "one ahead, shown: {out}");
+    // Even: the upstream shows with its zero counts until a rule hides it.
+    git(&env.work, &["push", "-q", "origin", "main"]);
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("origin/main"), "shown without a rule: {out}");
+    config(&env, &format!("{line}hide = [\"zero\"]\n"));
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("main") && !out.contains("origin/main"), "hidden at 0/0: {out}");
+    // More than five TTLs overdue, the value is stale and still hidden.
+    let stale = (NOW.parse::<u64>().unwrap() + 26).to_string();
+    let (out, _, _) =
+        garnish(&env, &[], Some(&payload(&env.work)), &[("GARNISH_NOW", stale.as_str())]);
+    assert!(!out.contains("origin/main") && !out.contains('⟳'), "hidden when stale: {out}");
+}
+
 /// git quotes a config value holding `#` or `;`, so the upstream of a
 /// branch pushed with `git push -u origin fix/#12` is stored as
 /// `merge = "refs/heads/fix/#12"`. Read raw, the quotes went into the
