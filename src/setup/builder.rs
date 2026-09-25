@@ -884,23 +884,44 @@ impl Builder {
         Ok(if spacer { "already a spacer; m adds a module".into() } else { "now a spacer".into() })
     }
 
-    /// Put the selected row, column or inner row in the named box (or a
-    /// box of its own with an empty name); `[box.<name>]` is created when
-    /// missing.
+    /// Set the selected row's, column's or inner row's `box` as the form's
+    /// `box` field reads it: a name (its `[box.<name>]` made when missing),
+    /// `true` for a box of its own, `None` for no box. A box the line was
+    /// the last member of goes with its table, which the parser would
+    /// otherwise report on every tick.
     ///
     /// # Errors
     /// Why nothing was boxed, for the status bar.
-    pub fn set_box(&mut self, draft: &mut Draft, name: &str) -> Result<String, String> {
+    pub fn set_box(&mut self, draft: &mut Draft, value: Option<Value>) -> Result<String, String> {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
-        let value =
-            if name.is_empty() { Value::Boolean(true) } else { Value::String(name.to_owned()) };
-        if !name.is_empty() && draft.get(&["box", name]).is_none() {
-            draft.set(&["box", name, "title"], Value::String(name.to_owned()));
+        if let Some(Value::String(name)) = &value
+            && draft.get(&["box", name]).is_none()
+        {
+            draft.set(&["box", name, "title"], Value::String(name.clone()));
         }
         let table = draft.row_mut(item.at).ok_or("no such row")?;
-        table.insert("box".to_owned(), value);
+        let mut out = match value {
+            None => {
+                table.remove("box");
+                "unboxed".to_owned()
+            }
+            Some(Value::String(name)) => {
+                let out = format!("in box {name}");
+                table.insert("box".to_owned(), Value::String(name));
+                out
+            }
+            Some(other) => {
+                table.insert("box".to_owned(), other);
+                "boxed".to_owned()
+            }
+        };
+        let orphans = draft.prune_orphan_boxes();
+        if !orphans.is_empty() {
+            out.push_str("; ");
+            out.push_str(&dropped_boxes(&orphans));
+        }
         self.rebuild(draft);
-        Ok(if name.is_empty() { "boxed".into() } else { format!("in box {name}") })
+        Ok(out)
     }
 }
 
@@ -1167,7 +1188,7 @@ mod tests {
             ids_at(&d, RowAt { row: 1, col: Some(1), inner: Some(0) }, "modules"),
             vec!["path"]
         );
-        b.set_box(&mut d, "repo").unwrap();
+        b.set_box(&mut d, Some(Value::String("repo".into()))).unwrap();
         assert!(d.get(&["box", "repo", "title"]).is_some());
         let (config, errs) = d.resolved();
         assert!(errs.is_empty(), "{errs:?}");

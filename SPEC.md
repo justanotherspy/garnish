@@ -1722,9 +1722,11 @@ would take for it (`blank` on a spacer or a row of columns, the title
 keys outside a named box) plus any key the file already sets, so `d` can
 unset one the parser reports; a value the parser takes but that leaves
 another key reported (`fill = false` under a `fill_pattern`) is set and
-the status names that key; a `box` unset or changed, from the form or
-with `d`, drops a `[box.<name>]` nothing joins any more, as the
-builder's `b` does; a module's `label` picker starts with the module's
+the status names that key; a `box` unset or changed, from the form, with
+`d` or with the builder's `b`, drops a `[box.<name>]` nothing joins any
+more (`b` reads a typed value as the form does: `none`, `false` and
+nothing unbox, `true` is a box of its own; 2026-09-25 review: `b` had
+refused to move a box's last member elsewhere); a module's `label` picker starts with the module's
 own name, bare and capitalised; changing the top-level `preset` swaps
 the rows for the new preset's when they were still exactly the old
 preset's (the builder writes a preset's rows into the file so they can

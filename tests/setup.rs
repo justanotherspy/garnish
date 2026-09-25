@@ -932,6 +932,34 @@ fn an_edit_that_renumbers_an_old_problem_is_kept() {
     assert_eq!(ids(&app, 2), ["clok"], "{:?}", app.status());
 }
 
+/// app-02: `b` moves a box's only member into another box, a box of its
+/// own or a new one, dropping the box it leaves; a typed name is read as
+/// the form reads it.
+#[test]
+fn b_moves_a_last_member_out_of_its_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let two_boxes = "[box.a]\n[box.b]\n[[row]]\nbox = \"a\"\nmodules = [\"path\"]\n[[row]]\nbox = \"b\"\nmodules = [\"clock\"]\n";
+    let boxed = |app: &App| app.draft().rows()[0].get("box").cloned();
+    for (script, want) in [
+        ("b<enter>", Some(toml::Value::String("b".into()))),
+        ("<up><enter>", Some(toml::Value::Boolean(true))),
+        ("<end><enter>side<enter>", Some(toml::Value::String("side".into()))),
+        ("<end><enter>false<enter>", None),
+    ] {
+        std::fs::write(&file, two_boxes).unwrap();
+        let mut app = for_test("", Some(file.clone()), home);
+        keys(&mut app, "b");
+        keys(&mut app, script);
+        assert_eq!(boxed(&app), want, "{script}: {:?}", app.status());
+        assert!(app.draft().get(&["box", "a"]).is_none(), "{script}");
+        assert!(app.status().unwrap().contains("[box.a] dropped"), "{:?}", app.status());
+        assert_eq!(app.draft().resolved().1, Vec::new(), "{script}");
+        assert!(app.draft().get(&["box", "false"]).is_none(), "{script}");
+    }
+}
+
 /// What the adversarial review of 2026-09-20 found: `B` failed on a titled
 /// row and on a row in another box (the parser refused, the edit
 /// reverted), a row form left open across an undo edited a phantom, and

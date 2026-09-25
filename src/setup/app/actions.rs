@@ -175,37 +175,19 @@ impl App {
                 }
                 Err(_) => self.say(format!("{value:?} is not a width"), Level::Error),
             },
-            Target::BoxFor(_) => {
-                let name = if value == "true" {
-                    ""
-                } else if value == "none" {
-                    "-"
-                } else {
-                    value
-                };
-                if name == "-" {
-                    let out = self.edit(|builder, draft| {
-                        let at = builder.item().map(|i| i.at).ok_or("nothing selected")?;
-                        let table = draft.row_mut(at).ok_or("no such row")?;
-                        table.remove("box");
-                        // The last member leaving takes an unused
-                        // `[box.<name>]` with it, which the parser would
-                        // otherwise report on every tick.
-                        let orphans = draft.prune_orphan_boxes();
-                        Ok(if orphans.is_empty() {
-                            "unboxed".to_owned()
-                        } else {
-                            format!("unboxed; {}", dropped_boxes(&orphans))
-                        })
-                    });
-                    self.report(out);
-                } else if !name.is_empty() && !is_bare_key(name) {
+            // A pick or a typed name reads as the form's `box` field reads
+            // it: `none`, `false` and nothing unbox, `true` is a box of its
+            // own.
+            Target::BoxFor(_) => match SlotKind::BoxRef.parse(value) {
+                Ok(Some(Value::String(name))) if !is_bare_key(&name) => {
                     self.say(BOX_NAME_RULE.into(), Level::Error);
-                } else {
-                    let out = self.edit(|builder, draft| builder.set_box(draft, name));
+                }
+                Ok(v) => {
+                    let out = self.edit(|builder, draft| builder.set_box(draft, v));
                     self.report(out);
                 }
-            }
+                Err(e) => self.say(e, Level::Error),
+            },
             Target::BoxWith(at) => {
                 let name = value.trim();
                 if !is_bare_key(name) {
