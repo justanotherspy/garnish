@@ -599,7 +599,14 @@ its `✗`, `context` before the first response, `cache` without a ratio), is
 `–`, and `-` in the ascii set, whose marks are all 7-bit like its
 ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
 2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
-on the first tick of every session.
+on the first tick of every session. One character in an ascii row is not
+7-bit, and it is not a mark: with colour off, the braille blank U+2800
+that holds a row's leading cells through the harness's trim (§ 2.1: a
+row that would start with whitespace, such as a right group alone under
+`style = "none"`) and that `blank = true` puts in a spacer (§ 4.1). The
+only 7-bit character that takes a cell and shows nothing is the space,
+which the trim removes, so the alternative is a row drawn shifted left or
+dropped.
 
 ### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
@@ -1129,11 +1136,13 @@ color = "accent"               # role or literal for the box's glyphs; default t
   `gap` cells per boundary. A column with `width = 24` takes 24 cells and
   `"auto"` takes its content's width (its modules joined by the
   separator; `max_width` applies; a box around it adds its two sides and
-  two pads, 2026-09-25: they were left out and the content was cut); an
-  `auto` column with nothing to show takes no cells and no gap, since a
-  gap only ever sits between two columns that are drawn (2026-09-25: its
-  gap was reserved, never drawn, and turned up as a stray rule cell after
-  the last column); what is left is the free width, shared
+  two pads, 2026-09-25: they were left out and the content was cut); a
+  column that takes no cells (`width = 0`, or an `auto` column with
+  nothing to show) takes no gap either, since a gap only ever sits
+  between two columns that are drawn (2026-09-25: its gap was reserved,
+  never drawn, and turned up as a stray rule cell after the last column;
+  the `width = 0` case was fixed after the `auto` one); what is left is
+  the free width, shared
   by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
   cells going one each to the first of them, so shares differ by at most
   one cell and always add up. Defaults: `"1fr"`, so three bare columns
@@ -1179,9 +1188,13 @@ color = "accent"               # role or literal for the box's glyphs; default t
   rows with different column counts never align with each other, and
   inner rows of a stack align only with inner rows at the same column
   position), so separators stack; *k* counts from the left in a left- or
-  centre-justified column and from the right end in a right-justified
-  column or a `right` group, as § 4 does today; `right_justify` picks the
-  pad side for those.
+  centre-justified column and in the left group of any column with a
+  `right` group (the flex form anchors it left, whatever `justify` says),
+  and from the right end in a right-justified column with no `right`
+  group or in a `right` group, as § 4 does today; `right_justify` picks
+  the pad side for those. (2026-09-25: a last column is right-justified
+  by default, and the left group of one with a `right` group counted from
+  the right, so its bars did not stack.)
 - **Stacks and height.** `[[row.col.row]]` entries make the column a
   stack of rows, each laid out to the column's width with the rules above
   (an inner row's `justify` overrides the column's). A row's height in
@@ -1199,7 +1212,11 @@ color = "accent"               # role or literal for the box's glyphs; default t
   line carries the box's corners and sides at its ends instead, as the
   samples show. (Decided while building Phase 21: an earlier wording made
   a multi-line row one block for this, which would have repeated `╭─` on
-  every line of a tall row.) On a one-line row, `fill` draws the rule glyph (or the
+  every line of a tall row.) A `custom` frame's caps need not be one
+  width: a tall row is laid out to the room its widest pair leaves, and
+  a narrower or empty cap's spare cells go to the rule, so every line
+  fills the box (2026-09-25: an empty cap's went nowhere, and its line
+  came out short). On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is
@@ -1277,7 +1294,11 @@ color = "accent"               # role or literal for the box's glyphs; default t
   drawn rounded. A `custom` frame adds `top_left`, `top_right`,
   `bottom_left`, `bottom_right` and `side`, one cell each (reported
   otherwise, the style's glyph stays); every glyph passes the § 4.1
-  width guard.
+  width guard. Any of the five may be left empty; the corners are drawn
+  whatever the side is, so a box too narrow for its corners renders
+  nothing, as one too narrow for its sides does (2026-09-25: with corners
+  and no side, a one-cell box drew `++`, overflowed the line and had it
+  recut to `…`).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under

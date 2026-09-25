@@ -1,0 +1,42 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# A column with a `right` group is drawn in the flex form, its left group
+# anchored left, so under `align = true` that group counts a module's
+# position from the left, whatever the column's `justify` says (SPEC § 4.3),
+# and aligns with the left-justified column below it: all three bars stack.
+# A last column is right-justified by default, and the flex rows' left
+# groups used to count from the right, which padded nothing.
+align = true
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["text.a", "text.b"]
+right = ["text.r"]
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["text.aaaa", "text.b"]
+right = ["text.r"]
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+justify = "left"
+modules = ["text.aa", "text.b"]
+
+[modules.text.a]
+text = "a"
+[modules.text.aa]
+text = "aa"
+[modules.text.aaaa]
+text = "aaaa"
+[modules.text.b]
+text = "b"
+[modules.text.r]
+text = "r"

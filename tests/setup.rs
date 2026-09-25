@@ -679,6 +679,58 @@ fn an_empty_title_removes_the_key_and_a_refused_text_module_leaves_nothing() {
     assert_eq!(config.rows[0].cols[1].left, vec!["text.motd".to_owned()]);
 }
 
+/// D1 (review of 2026-09-25): a title removed takes the keys that decorate
+/// it, which the parser reports without one, from its row or box: `t`
+/// emptied, and `d` on the `title` of a row's form and of a box's.
+#[test]
+fn a_title_removed_takes_its_decorations_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let decorated = "title_color = \"accent\"\ntitle_pad = 2\ntitle_justify = \"center\"\n";
+    let row = format!(
+        "icons = \"unicode\"\n[[row]]\ntitle = \"Repository\"\n{decorated}modules = [\"path\"]\n[[row]]\nmodules = [\"clock\"]\n"
+    );
+    let bare = |app: &App, table: &toml::Value| {
+        let (_, problems) = app.draft().resolved();
+        assert!(problems.is_empty(), "{problems:?}; {:?}", app.status());
+        let keys: Vec<&String> = table.as_table().unwrap().keys().collect();
+        assert!(keys.iter().all(|k| !k.starts_with("title")), "{keys:?}");
+    };
+    let unset_title = |app: &mut App| {
+        let at = app.form_keys().unwrap().iter().position(|k| k == "title").unwrap();
+        keys(app, &format!("{}d", "<down>".repeat(at)));
+    };
+    std::fs::write(&file, &row).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "t");
+    keys(&mut app, &format!("{}<enter>", "<bs>".repeat(20)));
+    bare(&app, &app.draft().rows()[0]);
+    assert_eq!(
+        app.status(),
+        Some("row[0].title unset; title_justify, title_pad, title_color went with it")
+    );
+    // One undo puts all four back.
+    keys(&mut app, "u");
+    assert!(!app.draft().is_dirty(), "{:?}", app.status());
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<enter>");
+    unset_title(&mut app);
+    bare(&app, &app.draft().rows()[0]);
+    std::fs::write(
+        &file,
+        format!(
+            "icons = \"unicode\"\n[box.b]\ntitle = \"Bq\"\n{decorated}[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n"
+        ),
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), "Bq"), 1);
+    unset_title(&mut app);
+    bare(&app, app.draft().get(&["box", "b"]).unwrap());
+}
+
 #[test]
 fn a_click_on_a_scrolled_ticker_line_still_finds_its_module() {
     let dir = tempfile::tempdir().unwrap();

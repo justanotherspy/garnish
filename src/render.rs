@@ -518,23 +518,22 @@ fn render_row<'a>(
 /// `align = true` (SPEC § 4.3): module *k* of a column is padded to the
 /// widest module *k* of the columns in the same position, among the rows
 /// with the same column count. Inner rows align with the inner rows at the
-/// same position, never with the rows around them, and a right-justified
-/// column, which counts *k* from its right end, only with other
-/// right-justified ones.
+/// same position, never with the rows around them, and a column whose
+/// left group hangs off its right end, which counts *k* from there, only
+/// with other such columns.
 fn align_tree(tree: &mut [RowRender<'_>], config: &Config) {
     type Key = (usize, usize, usize, bool);
     let mut buckets: std::collections::BTreeMap<Key, Vec<&mut ColRender<'_>>> =
         std::collections::BTreeMap::new();
-    let right = |c: &ColRender<'_>| c.justify == config::Justify::Right;
     for row in tree.iter_mut() {
         let n = row.cols.len();
         for (j, col) in row.cols.iter_mut().enumerate() {
             if col.rows.is_empty() {
-                buckets.entry((n, j, 0, right(col))).or_default().push(col);
+                buckets.entry((n, j, 0, hangs_right(col))).or_default().push(col);
             } else {
                 for inner in &mut col.rows {
                     for c in &mut inner.cols {
-                        buckets.entry((n, j, 1, right(c))).or_default().push(c);
+                        buckets.entry((n, j, 1, hangs_right(c))).or_default().push(c);
                     }
                 }
             }
@@ -545,6 +544,14 @@ fn align_tree(tree: &mut [RowRender<'_>], config: &Config) {
     }
 }
 
+/// Whether a column's left group is anchored to its right end: a
+/// right-justified lone group is. A column with a `right` group is drawn
+/// in the flex form, its left group anchored left whatever `justify` says
+/// (SPEC § 4.3).
+fn hangs_right(col: &ColRender<'_>) -> bool {
+    col.justify == config::Justify::Right && col.right.is_empty()
+}
+
 /// One bucket of columns aligned against each other.
 fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
     let take = |cols: &mut Vec<&mut ColRender<'_>>, right: bool| -> Vec<Vec<Vec<Segment>>> {
@@ -552,11 +559,11 @@ fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
             .map(|c| std::mem::take(if right { &mut c.right } else { &mut c.left }))
             .collect()
     };
-    // A right-justified column hangs off the right edge, so its positions
-    // count from the right end as a `right` group's do, and `right_justify`
-    // picks the pad side for both (SPEC § 4, § 4.3). Every column of a
-    // bucket is right-justified or none is (`align_tree`).
-    let from_right = cols.first().is_some_and(|c| c.justify == config::Justify::Right);
+    // A right-justified lone group hangs off the right edge, so its
+    // positions count from the right end as a `right` group's do, and
+    // `right_justify` picks the pad side for both (SPEC § 4, § 4.3). Every
+    // column of a bucket hangs right or none does (`align_tree`).
+    let from_right = cols.first().is_some_and(|c| hangs_right(c));
     let pad_left = config.right_justify == config::RightJustify::End;
     if config.frame.fill {
         let mut lefts = take(&mut cols, false);
@@ -1528,6 +1535,38 @@ mod tests {
         assert!(rows[1].ends_with("x │ yy ─┤") && rows[2].ends_with("xxx │  y ─╯"), "{out}");
     }
 
+    /// SPEC § 4.3: a column with a `right` group is drawn in the flex form,
+    /// its left group anchored left, so with `align = true` that group
+    /// counts *k* from the left and aligns with the left-justified columns,
+    /// whatever the column's `justify` says. A last column is
+    /// right-justified by default, and its left group used to count from
+    /// the right, which padded nothing: the bars did not stack.
+    #[test]
+    fn align_counts_a_flex_columns_left_group_from_the_left() {
+        let payload = fixture("subscription-full");
+        let col = |justify: &str, left: &str, right: &str| {
+            format!(
+                "[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\n{justify}modules = [\"text.{left}\", \"text.b\"]\n{right}"
+            )
+        };
+        let text = [
+            "icons = \"unicode\"\nalign = true\n".to_owned(),
+            col("", "a", "right = [\"text.r\"]\n"),
+            col("", "aaaa", "right = [\"text.r\"]\n"),
+            col("justify = \"left\"\n", "aa", ""),
+            "[modules.text.a]\ntext = \"a\"\n[modules.text.aa]\ntext = \"aa\"\n[modules.text.aaaa]\ntext = \"aaaa\"\n[modules.text.b]\ntext = \"b\"\n[modules.text.r]\ntext = \"r\"\n".to_owned(),
+        ]
+        .concat();
+        let (config, errs) = config::parse(&text, &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let out = strip_ansi(&render_plain_at(&payload, &config, Some(60), &Clock::fixed()));
+        let rows: Vec<&str> = out.lines().collect();
+        assert_eq!(rows.len(), 3, "{out}");
+        assert!(rows.iter().all(|r| r.contains("aaaa │ b") || r.contains("  │ b")), "{out}");
+        assert_eq!(last_bar(rows[0]), last_bar(rows[1]), "{out}");
+        assert_eq!(last_bar(rows[1]), last_bar(rows[2]), "{out}");
+    }
+
     #[test]
     fn align_ignores_modules_that_render_nothing() {
         let payload = fixture("pr-absent");
@@ -1627,14 +1666,22 @@ mod tests {
                     )
                 }))
                 .collect();
-        for text in [preset.as_str(), every.as_str()] {
+        // With colour off, a row that would start with whitespace (a right
+        // group alone, unframed) and a `blank` spacer lead with the braille
+        // blank that keeps them through the harness's trim: the one
+        // character § 3.6 lets an ascii row carry, and only there.
+        let held = "icons = \"ascii\"\n[frame]\nstyle = \"none\"\n[[row]]\nmodules = [\"model\"]\n[[row]]\nright = [\"clock\"]\n[[row]]\nblank = true\nmodules = []\n";
+        for text in [preset.as_str(), every.as_str(), held] {
             let loaded = loaded(text);
             assert_eq!(loaded.errors, Vec::new());
             for f in &crate::fixtures::FIXTURES {
                 let out = render_plain(&Payload::parse(f.text).unwrap(), &loaded, Some(100));
                 for l in out.lines() {
-                    assert!(l.is_ascii(), "{}: {l:?}", f.name);
+                    let rest = l.strip_prefix(BLANK_CELL).unwrap_or(l);
+                    assert!(rest.is_ascii(), "{}: {l:?}", f.name);
                 }
+                let leading = out.lines().filter(|l| l.starts_with(BLANK_CELL)).count();
+                assert_eq!(leading, if text == held { 2 } else { 0 }, "{}: {out}", f.name);
             }
         }
         let every = render_plain(&fixture("pre-first-response"), &loaded(&every), Some(100));
