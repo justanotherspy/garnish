@@ -60,6 +60,14 @@ pub fn u64_to_f64(value: u64) -> f64 {
     f64::from(hi).mul_add(4_294_967_296.0, f64::from(lo))
 }
 
+/// Convert an `i64` to `f64` with its sign (lossy above 2^53 in magnitude,
+/// as [`u64_to_f64`] is).
+#[must_use]
+pub fn i64_to_f64(value: i64) -> f64 {
+    let magnitude = u64_to_f64(value.unsigned_abs());
+    if value < 0 { -magnitude } else { magnitude }
+}
+
 /// `usize` → `f64` via `u64`.
 #[must_use]
 pub fn usize_to_f64(value: usize) -> f64 {
@@ -101,6 +109,9 @@ mod tests {
         assert_eq!(u64_to_f64(u64::from(u32::MAX) + 1), 4_294_967_296.0);
         assert_eq!(usize_to_f64(7), 7.0);
         assert_eq!(u64_to_usize(9), 9);
+        assert_eq!(i64_to_f64(-10), -10.0);
+        assert_eq!(i64_to_f64(42), 42.0);
+        assert_eq!(i64_to_f64(i64::MIN), -9_223_372_036_854_775_808.0);
     }
 
     #[test]

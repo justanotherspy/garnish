@@ -79,13 +79,20 @@ pub fn toml_string(s: &str) -> String {
     out
 }
 
+/// A number as TOML that reads back as the same number: a whole one below
+/// 1e15 as the integer it is (`50`, as the docs print it), any other whole
+/// one in float form (`-10.0`, `1e20`: a digit string past 2^63 is no TOML
+/// integer, and a negative whole number must stay a float to keep its
+/// sign through a lossless path), anything else as its shortest decimal.
 fn format_float(f: f64) -> String {
     if f.is_nan() {
         "nan".into()
     } else if f.is_infinite() {
         if f > 0.0 { "inf".into() } else { "-inf".into() }
-    } else if f.fract() == 0.0 && f.abs() < 1e15 {
+    } else if f.fract() == 0.0 && (0.0..1e15).contains(&f) {
         format!("{f:.0}")
+    } else if f.fract() == 0.0 {
+        format!("{f:?}")
     } else {
         f.to_string()
     }
@@ -903,5 +910,22 @@ mod tests {
         assert_eq!(Value::NumList(vec![50.0, 75.5]).to_toml(), "[50, 75.5]");
         assert_eq!(Preset::parse("full"), Some(Preset::Full));
         assert!(Kind::Enum(&["a", "b"]).doc_name().contains("`a`"));
+    }
+
+    /// sch-06, cfg-04: every finite number is written as TOML that reads
+    /// back as that number: a whole one of 1e15 and up was a digit string
+    /// past TOML's integers (a syntax error that sank the whole file), and
+    /// a negative whole one read back through the integer path.
+    #[test]
+    fn every_finite_number_is_written_as_toml_it_reads_back() {
+        for f in [1e19, 1e20, 1e300, -5.0, -10.0, 0.1, 50.0, 1e15, 1e16, 0.001, 2.5, -0.5] {
+            let text = format!("x = {}", Value::Float(f).to_toml());
+            let table: toml::Table =
+                toml::from_str(&text).unwrap_or_else(|e| panic!("{text}: {e}"));
+            let x = table.get("x").unwrap();
+            let back = x.as_float().or_else(|| x.as_integer().map(crate::num::i64_to_f64));
+            assert_eq!(back, Some(f), "{text}");
+        }
+        assert_eq!(Value::Float(50.0).to_toml(), "50", "a plain whole number stays one");
     }
 }

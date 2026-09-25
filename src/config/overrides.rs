@@ -326,9 +326,7 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
         // TOML takes `nan` and `inf`; no option means either.
         Kind::Float => value
             .as_float()
-            .or_else(|| {
-                value.as_integer().map(|i| crate::num::u64_to_f64(u64::try_from(i).unwrap_or(0)))
-            })
+            .or_else(|| value.as_integer().map(crate::num::i64_to_f64))
             .filter(|f| f.is_finite())
             .map(Value::Float)
             .ok_or_else(|| "expected a number".into()),
@@ -365,10 +363,7 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
                 .iter()
                 .map(|i| {
                     i.as_float()
-                        .or_else(|| {
-                            i.as_integer()
-                                .map(|n| crate::num::u64_to_f64(u64::try_from(n).unwrap_or(0)))
-                        })
+                        .or_else(|| i.as_integer().map(crate::num::i64_to_f64))
                         .filter(|f| f.is_finite())
                 })
                 .collect();
@@ -851,6 +846,38 @@ mod tests {
             assert_eq!(paths, [path], "{text}");
             let ctx = c.modules.get("context").unwrap();
             assert!(ctx.value("warn_at").is_none_or(|v| *v == Value::Float(0.0)), "{text}");
+        }
+    }
+
+    /// cfg-04: a number option takes a negative integer as the number it
+    /// is (it used to read as 0 while `-10.0` stayed `-10`), and `config
+    /// show` writes every value so that it parses back to itself.
+    #[test]
+    fn number_options_keep_their_sign_and_round_trip() {
+        let all = &crate::modules::SCHEMAS;
+        for (text, key, want) in [
+            ("[modules.context]\nwarn_at = -2.0\n", "warn_at", Value::Float(-2.0)),
+            ("[modules.context]\nwarn_at = -2\n", "warn_at", Value::Float(-2.0)),
+            (
+                "[modules.context]\nthresholds = [-10.0, 50.0]\n",
+                "thresholds",
+                Value::NumList(vec![-10.0, 50.0]),
+            ),
+            (
+                "[modules.context]\nthresholds = [-10, 50]\n",
+                "thresholds",
+                Value::NumList(vec![-10.0, 50.0]),
+            ),
+            ("[modules.context]\nthresholds = [1e20]\n", "thresholds", Value::NumList(vec![1e20])),
+        ] {
+            let (c, errs) = parse(text, all);
+            assert_eq!(errs, Vec::new(), "{text}");
+            assert_eq!(c.modules.get("context").unwrap().value(key), Some(&want), "{text}");
+            let shown = crate::docs::config_toml(&c, false);
+            let (again, errs) = parse(&shown, all);
+            assert_eq!(errs, Vec::new(), "{text}: {shown}");
+            assert_eq!(again.modules, c.modules, "{text}");
+            assert_eq!(crate::docs::config_toml(&again, false), shown, "{text}: a fixed point");
         }
     }
 
