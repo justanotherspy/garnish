@@ -109,6 +109,57 @@ fn hostile_environment_is_tolerated() {
     assert!(ok && out.lines().count() == 4, "{out}");
 }
 
+/// SPEC § 5: the tick prints and exits 0 whatever the repository holds. A
+/// `.git/HEAD`, `config` or `packed-refs` that is a FIFO (tar extracts one
+/// for anybody) used to block the tick in `open` until the harness gave up,
+/// so the status line never updated in that directory again.
+#[test]
+fn a_fifo_in_the_git_directory_never_hangs_the_tick() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().join("work");
+    let git = work.join(".git");
+    for sub in ["objects", "refs/heads"] {
+        std::fs::create_dir_all(git.join(sub)).unwrap();
+    }
+    for name in ["HEAD", "config", "packed-refs", "commondir"] {
+        let made = Command::new("mkfifo").arg(git.join(name)).status();
+        if !made.is_ok_and(|s| s.success()) {
+            return; // no mkfifo here: nothing to test with
+        }
+    }
+    let w = work.display();
+    let payload = format!(
+        r#"{{"cwd":"{w}","session_id":"s","workspace":{{"current_dir":"{w}","project_dir":"{w}"}},"worktree":{{"branch":"main"}}}}"#
+    );
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.env("HOME", dir.path())
+        .env("GARNISH_CACHE_DIR", dir.path().join("cache"))
+        .env("XDG_CONFIG_HOME", dir.path().join(".config"))
+        .env_remove("GARNISH_CONFIG")
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_NOW", "1738425600")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "100")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let started = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > std::time::Duration::from_secs(10) {
+            let _ = child.kill();
+            panic!("the tick hung on a FIFO under .git");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("main"), "the payload's branch still shows: {text}");
+}
+
 #[test]
 fn unreadable_config_and_unwritable_cache_still_render() {
     let dir = tempfile::tempdir().unwrap();

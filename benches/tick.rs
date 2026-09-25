@@ -91,9 +91,11 @@ fn render_modules(c: &mut Criterion) {
         format: cfg.format,
         animate: clock.animate,
         dirs: std::cell::OnceCell::new(),
+        head: std::cell::OnceCell::new(),
         settings_files: Vec::new(),
         settings: std::cell::OnceCell::new(),
         workers: clock.workers,
+        config_file: None,
     };
     let mut group = c.benchmark_group("render_module");
     for entry in garnish::modules::REGISTRY.iter() {

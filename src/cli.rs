@@ -383,7 +383,7 @@ fn refresh(
     lock_held: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    use crate::modules::{REGISTRY, RefreshCtx, run_refresh};
+    use crate::modules::{REGISTRY, RefreshCtx, record_lock_failure, run_refresh};
     use rayon::prelude::*;
     let loaded = config::load(config_path, &SCHEMAS);
     let cache = crate::cache::Cache::from_env();
@@ -399,6 +399,7 @@ fn refresh(
         .map(|entry| {
             let Some(cfg) = loaded.config.modules.get(entry.schema.id) else { return Ok(()) };
             let scope = entry.module.scope(session, cwd);
+            let ctx = RefreshCtx { session, cwd, cfg, cache: &cache };
             // Hold (or inherit) the lock while working so ticks do not spawn twice.
             let guard = if lock_held {
                 crate::cache::LockGuard::adopt(cache.lock_path(&scope, entry.schema.id))
@@ -406,10 +407,12 @@ fn refresh(
                 match cache.lock(&scope, entry.schema.id) {
                     crate::cache::LockOutcome::Acquired(g) => g,
                     crate::cache::LockOutcome::Held => return Ok(()),
-                    crate::cache::LockOutcome::Unavailable(e) => return Err(e.into()),
+                    crate::cache::LockOutcome::Unavailable(e) => {
+                        let _ = record_lock_failure(entry.module.as_ref(), &ctx, &e);
+                        return Err(e.into());
+                    }
                 }
             };
-            let ctx = RefreshCtx { session, cwd, cfg, cache: &cache };
             run_refresh(entry.module.as_ref(), &ctx)
                 .with_context(|| format!("refreshing {}", entry.schema.id))?;
             drop(guard);

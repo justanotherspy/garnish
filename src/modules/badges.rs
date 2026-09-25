@@ -205,20 +205,15 @@ impl Module for AccountModule {
 /// A file that cannot be read, is longer than [`MAX_CLAUDE_JSON_BYTES`] or
 /// is not a JSON object: the text of a failed entry, retried once per TTL.
 pub fn read_account(path: &Path) -> Result<BTreeMap<String, String>, String> {
-    use std::io::Read as _;
     let shown = path.display();
-    let file = match claude_settings::open_regular(path) {
-        Ok(Some(file)) => file,
+    // One byte past the cap, as `claude_settings::read_file` reads a
+    // settings file: an over-long file is told from one at the cap, and
+    // never parsed.
+    let bytes = match claude_settings::read_regular(path, MAX_CLAUDE_JSON_BYTES.saturating_add(1)) {
+        Ok(Some(bytes)) => bytes,
         Ok(None) => return Ok(BTreeMap::new()),
         Err(e) => return Err(format!("{shown}: {e}")),
     };
-    // Bytes first, one past the cap, as `claude_settings::read_file` reads
-    // a settings file: an over-long file is told from one at the cap, and
-    // never parsed.
-    let mut bytes = Vec::new();
-    file.take(MAX_CLAUDE_JSON_BYTES.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("{shown}: {e}"))?;
     if u64::try_from(bytes.len()).is_ok_and(|n| n > MAX_CLAUDE_JSON_BYTES) {
         return Err(format!(
             "{shown}: longer than the {MAX_CLAUDE_JSON_BYTES} bytes garnish reads"

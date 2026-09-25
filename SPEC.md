@@ -302,6 +302,21 @@ from the schema's measure.
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
 
+`sync` treats a **gone** upstream as no upstream (decided 2026-09-25 with
+Daniel): when the config names one but its remote-tracking ref no longer
+exists (the branch merged and deleted on the forge, then pruned), the
+worker records an `ok` entry marked `gone` without counting, and the row
+shows the `no_upstream` glyph, no `✗` and no new icon. (It used to run
+`rev-list` against the missing ref, fail, and show `✗` for good, with a
+failing worker every TTL, in the most ordinary state after a pull request.)
+The fetch-age hint counts from the last fetch that *worked*: a
+`FETCH_HEAD` with something in it, or the worker's own record of its last
+good fetch (`fetch_ok_at`), whichever is newer, across the worktree's and
+the common git dir's `FETCH_HEAD` (the tracking refs are shared). git
+truncates `FETCH_HEAD` before it contacts the remote, so a failing fetch
+used to read as one that had just happened and the hint never appeared; a
+stamp from the future counts as no age at all.
+
 Two payload-only additions (PLAN Phase 20; from FUTURE-SPEC § 7.5, A7 and
 A8):
 
@@ -1357,46 +1372,150 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 ## 6. Cache & workers
 
 - Root: `$GARNISH_CACHE_DIR` > `$XDG_RUNTIME_DIR/garnish` > `$XDG_CACHE_HOME/garnish`
-  > `~/.cache/garnish` (macOS `~/Library/Caches/garnish`).
+  > `~/.cache/garnish` (macOS `~/Library/Caches/garnish`) > the temp
+  directory's `garnish-<uid>`, created `0700` and **refused** (no cache: no
+  entry read or written, no lock, no worker, and `doctor` says why) unless
+  it is a real directory this user owns that nobody else can write to
+  (review 2026-09-25, decided with Daniel: the old `/tmp/garnish` was shared
+  by every user, so another could read and plant entries or aim the sweep
+  and the temp-file writes through a link; the uid comes from a file the
+  process creates, there being no `libc`). Directories garnish creates are
+  `0700` and its files `0600`: an entry may carry the account's email.
 - `<root>/sessions/<session_id>/<module>.cache`; git data in
-  `<root>/repos/<hash(git-common-dir + worktree path)>/<module>.cache` so
-  sessions in one worktree share it. Never keyed on `transcript_path`.
+  `<root>/repos/<hash(git common dir + per-worktree git dir)>/<module>.cache`
+  so sessions in one worktree share it. Never keyed on `transcript_path`.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
-  or the error text. Malformed = miss. Written as `.<module>.tmp.<pid>` in
-  the entry's directory + rename. `account` (§ 3.8) keeps
+  or the error text. Malformed = miss, and so is anything that is not a
+  regular file of at most 64 KiB (a FIFO would block the tick in `open`;
+  locks are read the same way). The error text, and `fetch_error`, are
+  plain text of at most 500 characters: control characters and escape
+  sequences are dropped, since `doctor` prints them to a terminal. Written
+  as `.<module>.tmp.<pid>` in the entry's directory + rename; every
+  temporary name is unlinked first and created exclusively, so a link
+  planted at one is never followed. `ttl_ms` is informational: freshness is
+  always the reader's TTL. `account` (§ 3.8) keeps
   `<root>/sessions/<session_id>/account.cache` with an `email` line; an
   absent `.claude.json` is an `ok` entry without the line.
 - Tick: fresh → render; past TTL → spawn worker unless `<module>.lock` is
   live, rendering the last value unchanged; older than `stale_after` TTLs
   (or computed for another head/upstream) → dim `⟳`; `err` → dim `✗`. A failed entry is fresh for its TTL like any
   other (a broken git is retried once per TTL, never once per tick). Entries
-  record what they were computed for (`head`, `upstream`); a render whose
-  situation differs treats the entry as stale.
+  record what they were computed for (`branch`'s `head`, `sync`'s `branch`
+  and `upstream`: branches that share an upstream must not share counts);
+  a render whose situation differs treats the entry as stale.
 - Lock = file `pid epoch_ms`, created by `hard_link` from a pre-written temp
   file and re-stamped by `rename` (never truncated in place). Live when
   younger than 2 s (hand-over window), else while the pid exists (Linux,
-  `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
-  Stale locks are reclaimed by an atomic rename so racing ticks cannot both
-  win. A guard only unlinks a lock that still carries its own pid.
-  (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid reuse; the
-  60 s / 15 s age limit above already bounds a lock's life whatever its
-  pid, so nothing was added.)
-- Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
-  `process_group(0)`, spawned without wait. On Linux the tick takes the lock
-  and passes `--lock-held`; elsewhere the worker takes it itself.
-  `GARNISH_NO_SPAWN=1` logs intended spawns to `<root>/spawns.log` instead.
+  `/proc`) and it is younger than 60 s (30 s where pids cannot be checked:
+  longer than a `sync` worker's 20 s fetch plus 2 s count, which a
+  compile-time assertion keeps true, or the next tick reclaimed a lock
+  mid-fetch and a second fetch started). A stale lock is reclaimed by an
+  atomic rename, and the moved file is read back: one that is not the lock
+  judged dead was another process's fresh lock and is linked back, so at
+  most one process wins each reclaim. A guard only unlinks a lock that
+  still carries its own pid. A root where no lock can be taken (a
+  filesystem without hard links) is logged by the tick (`GARNISH_DEBUG`),
+  recorded by the worker as a failed entry (a rename still works, so the
+  row shows `✗` and the TTL spaces the retries), and named by `doctor`'s
+  probe. (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid
+  reuse; the 60 s / 30 s age limit above already bounds a lock's life
+  whatever its pid, so nothing was added.)
+- Worker: `garnish [--config C] refresh --module M --session S --cwd D`,
+  null stdio, `process_group(0)`, spawned without wait. `--config` names the
+  file the tick loaded (absolute), when it loaded one, so the worker reads
+  the same options: a `--config` on the status line command is not in the
+  environment the worker inherits, and it used to re-resolve the config
+  and take `sync.fetch_interval` from another file (review 2026-09-25).
+  On Linux the tick takes the lock and passes `--lock-held`; elsewhere the
+  worker takes it itself. `GARNISH_NO_SPAWN=1` logs intended spawns to
+  `<root>/spawns.log` instead.
 - `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
-- GC: bounded sweep when a session dir is first created (session and repo
-  dirs idle > 24 h by wall-clock mtime, ≤ 50 per sweep; temp/stale/adopt
-  files older than 1 h); `garnish gc` for manual runs.
+- GC: bounded sweep when a worker writes a module's first entry in a scope,
+  session or repo (session and repo dirs idle > 24 h by wall-clock mtime,
+  ≤ 50 per sweep; temp/stale/adopt files older than 1 h), never on the
+  tick; `garnish gc` for manual runs. (Corrected 2026-09-25: it used to
+  wait for a new session *directory*, which the lock always created first,
+  so the automatic sweep never ran for anyone.) It touches only what
+  garnish would have made, since the root may be shared
+  (`GARNISH_CACHE_DIR=~/.cache`): `sessions` and `repos` and each directory
+  in them only as real directories (never through a link), a repo
+  directory only when its name is a 16-digit hash and a session one only
+  when it is a sanitised id, and either only when every file in it has one
+  of garnish's own names.
 - **No child process on a warm tick.** Branch/upstream/HEAD are read from
   `.git` files (loose refs, `packed-refs` scanned as bytes with early exit,
-  worktree `gitdir`, symref chains capped at 5); reftable repos report no
-  head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
-  worker only through `git::run_program` (pipes drained on threads, kill on
-  timeout: 2 s for local commands, 20 s for `fetch`, `GIT_TERMINAL_PROMPT=0`).
+  worktree `gitdir`, symref chains capped at 5). Every such read is a
+  bounded read of a regular file (a FIFO or a link to `/dev/zero` is
+  refused, not opened: an archive can carry either and the tick repeats
+  the read every second), contained in the git directory, and a symbolic
+  ref may only point under `refs/` or at a capitalised pseudo-ref, as git's
+  own `refname_is_safe` has it; a `.git` file's `gitdir:` and a `commondir`
+  count only when they name a git directory by git's test (a `HEAD`, an
+  `objects/` and a `refs/`), since the containment is relative to them
+  (review 2026-09-25: `commondir: ~/.ssh` rendered a key's first line as
+  the SHA). The upstream comes from `.git/config`, read up to 1 MiB (a
+  byte that is not UTF-8 costs only what it touches) and parsed as git
+  parses it: quoted values, the escapes, `;`/`#` comments, section and key
+  names in any case, the first `merge` and the last `remote` (git quotes a
+  value holding `#`, so `fix/#12` used to read as a tracking ref with
+  quotes in it and `sync` showed `✗`). Reftable repos (whose refs are not
+  files) report no head to the tick and fall back to the workers (review
+  2026-09-25, decided with Daniel: this sentence used to be all there was,
+  and both modules rendered nothing): `branch`'s worker asks git
+  (`symbolic-ref -q --short HEAD`, else `rev-parse --verify HEAD` for a
+  detached one, plus the commit for `show_sha`) and records `branch` and
+  `detached`; `sync`'s resolves the branch the same way, reads the upstream
+  from the config and checks its ref with `show-ref --verify`, recording
+  `no_upstream` or `detached` as values the tick shows rather than
+  failures. Both entries carry `tables`, the mtimes of the worktree's and
+  the common `reftable/tables.list` (taken before git is asked), and the
+  tick treats an entry whose `tables` differs from what it stats as for
+  another state of the refs. A `HEAD` the tick refuses in a files
+  repository (a link out of the git directory) leaves `branch`'s entry
+  without a `head` key, which any render accepts (an empty one matched
+  nothing, so every tick spawned a worker). Ahead/behind, dirty, and fetch run in the
+  worker only through `git::run_program` (pipes drained on threads with 1 MiB
+  of stdout and 64 KiB of stderr kept and the rest discarded, kill on
+  timeout: 2 s for local commands, 20 s for `fetch`). `git` is the first
+  executable on an *absolute* `PATH` entry, looked up once (an empty or
+  relative entry would find a `git` the checkout ships, since the child
+  resolves the name after its `chdir`); every call clears `core.fsmonitor`,
+  sets `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0` and
+  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone), and removes
+  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the other variables that
+  point git elsewhere, so git finds the repository from the directory as the
+  tick did.
+- **The dirty check never reads a worktree file** (decided 2026-09-25 with
+  Daniel): `git status` hashes every file whose stat data no longer
+  matches the index, through the `clean`/`process` filter driver the
+  repository's own `.git/config` defines, so in an unpacked archive it ran
+  that command on every refresh. `dirty` is `git diff-index --cached --quiet
+  HEAD` (anything in the index before the first commit) plus `git -c
+  core.checkStat=default diff-files --quiet --ignore-submodules=dirty`,
+  which compare stat data and stop at the first difference; the stat rule
+  is pinned so a repository cannot relax it until its files look "racily
+  clean" and get hashed, and a submodule's own dirtiness (a `git status`
+  inside it) is not asked. The accepted cost: a file touched without
+  changing reads as dirty until the user's own git refreshes the index.
+  `status.showStash` no longer matters (porcelain printed `# stash N`).
+- **Fetch** (opt-in, `fetch_interval`) passes `--no-auto-maintenance`,
+  `--recurse-submodules=no`, `--upload-pack git-upload-pack` and the remote
+  after `--` (a name starting with `-` is refused), and sets
+  `SSH_ASKPASS_REQUIRE=force` with `SSH_ASKPASS` a program that fails
+  (`false`, found as `git` is): the worker keeps Claude Code's controlling
+  terminal, and ssh would otherwise draw a host-key or passphrase prompt on
+  it (OpenSSH 8.4 and later honour it; nothing else in git's environment
+  stops ssh reading `/dev/tty`). `core.sshCommand`, `core.gitProxy`, an
+  `ext::` URL, hooks and credential helpers stay a backlog decision (PLAN).
   A failed fetch is recorded in the entry (`fetch_error`, `fetch_attempt`)
-  without hiding the local counts and is not retried within `fetch_interval`.
+  without hiding the local counts and is not retried within `fetch_interval`;
+  a fetch that works records `fetch_ok_at`. Between attempts all three are
+  carried from the previous entry, so the error lasts until a fetch works
+  (it used to vanish at the next refresh), and `doctor` lists every entry
+  carrying one as `FETCH FAILED`. A fetch is due when both the entry's
+  `fetch_attempt` and `FETCH_HEAD`'s mtime (the newest of the two
+  worktree files) are at least `fetch_interval` old, a stamp from the
+  future counting as due.
 
 ## 7. CLI
 
@@ -1406,7 +1525,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | command | purpose |
 |---|---|
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
-| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
+| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help`; the tick passes its own `--config` ahead of it (§ 6) |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |

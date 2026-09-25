@@ -21,13 +21,22 @@ pub struct Job {
     pub session: String,
     /// Working directory the payload reported.
     pub cwd: PathBuf,
+    /// The config file the tick loaded, if it loaded one: the worker must
+    /// read the same options (`sync.fetch_interval`), and a `--config` on
+    /// the status line command is not in the environment it inherits.
+    pub config: Option<PathBuf>,
 }
 
 impl Job {
-    /// Arguments for `garnish refresh`.
+    /// Arguments for `garnish [--config C] refresh …`.
     #[must_use]
     pub fn args(&self, lock_held: bool) -> Vec<String> {
-        let mut v = vec![
+        let mut v = Vec::new();
+        if let Some(config) = &self.config {
+            v.push("--config".to_owned());
+            v.push(config.to_string_lossy().into_owned());
+        }
+        v.extend([
             "refresh".to_owned(),
             "--module".to_owned(),
             self.module.clone(),
@@ -35,7 +44,7 @@ impl Job {
             self.session.clone(),
             "--cwd".to_owned(),
             self.cwd.to_string_lossy().into_owned(),
-        ];
+        ]);
         if lock_held {
             v.push("--lock-held".to_owned());
         }
@@ -97,18 +106,45 @@ mod tests {
 
     #[test]
     fn job_args_are_stable() {
-        let job = Job { module: "branch".into(), session: "s1".into(), cwd: PathBuf::from("/x y") };
+        let job = Job {
+            module: "branch".into(),
+            session: "s1".into(),
+            cwd: PathBuf::from("/x y"),
+            config: None,
+        };
         assert_eq!(
             job.args(true),
             ["refresh", "--module", "branch", "--session", "s1", "--cwd", "/x y", "--lock-held"]
         );
         assert_eq!(job.args(false).len(), 7);
+        // The tick's own config file, ahead of the subcommand (the flag is
+        // global): a worker that re-resolved it read another file.
+        let job = Job { config: Some(PathBuf::from("/c.toml")), ..job };
+        assert_eq!(
+            job.args(false),
+            [
+                "--config",
+                "/c.toml",
+                "refresh",
+                "--module",
+                "branch",
+                "--session",
+                "s1",
+                "--cwd",
+                "/x y"
+            ]
+        );
     }
 
     #[test]
     fn no_spawn_logs_the_job() {
         let dir = tempfile::tempdir().unwrap();
-        let job = Job { module: "sync".into(), session: "s".into(), cwd: PathBuf::from("/r") };
+        let job = Job {
+            module: "sync".into(),
+            session: "s".into(),
+            cwd: PathBuf::from("/r"),
+            config: None,
+        };
         assert_eq!(log_spawn(&job, dir.path(), false), Spawned::Logged);
         assert_eq!(log_spawn(&job, dir.path(), true), Spawned::Logged);
         let log = fs::read_to_string(dir.path().join("spawns.log")).unwrap();

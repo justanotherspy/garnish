@@ -382,35 +382,50 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
     let _ = writeln!(o);
 }
 
+/// Bytes of `debug.log` read for its tail: the log rotates past 1 MiB.
+const MAX_DEBUG_LOG_BYTES: u64 = 2 * 1024 * 1024;
+
 fn cache_section(o: &mut String, cache: &Cache) {
     let root = cache.root();
-    let probe = root.join(format!(".probe.{}", std::process::id()));
-    let writable = std::fs::create_dir_all(root).is_ok() && std::fs::write(&probe, b"").is_ok();
-    let _ = std::fs::remove_file(&probe);
-    let _ = writeln!(
-        o,
-        "cache    {} ({})",
-        tilde(root),
-        if writable { "writable" } else { "NOT writable" }
+    let state = cache.refused().map_or_else(
+        || probe(root, |from, to| std::fs::hard_link(from, to)),
+        |why| format!("REFUSED: {why}; nothing is cached and no worker runs"),
     );
+    let _ = writeln!(o, "cache    {} ({state})", tilde(root));
     let sessions = count_dirs(&root.join("sessions"));
     let repos = count_dirs(&root.join("repos"));
     let _ = writeln!(o, "         {sessions} session dir(s), {repos} repo dir(s)");
     let failures = failed_entries(root);
-    if failures.is_empty() {
+    let fetches = fetch_failures(root);
+    if failures.is_empty() && fetches.is_empty() {
         let _ = writeln!(o, "         no failed refreshes");
-    } else {
-        for (path, entry) in failures {
-            let _ = writeln!(
-                o,
-                "         FAILED {} ({}s ago): {}",
-                path,
-                entry.age_ms() / 1000,
-                entry.error
-            );
-        }
     }
-    if let Ok(log) = std::fs::read_to_string(root.join("debug.log")) {
+    // The text came from a command run in a repository nobody here built,
+    // and this goes to a terminal: plain text, one line's worth.
+    for (path, entry) in failures {
+        let _ = writeln!(
+            o,
+            "         FAILED {} ({}s ago): {}",
+            path,
+            entry.age_ms() / 1000,
+            line_of(&crate::ansi::plain_text(&entry.error))
+        );
+    }
+    // A fetch that fails keeps the counts (they come from the refs on
+    // disk), so its entry is `ok` and this is the only place it shows.
+    for (path, entry) in fetches {
+        let tried = entry.get("fetch_attempt").and_then(|t| t.parse::<i64>().ok());
+        let ago = tried.map_or(0, |t| crate::time::now_secs().saturating_sub(t).max(0));
+        let error = entry.get("fetch_error").unwrap_or_default();
+        let _ = writeln!(
+            o,
+            "         FETCH FAILED {path} ({ago}s ago): {}",
+            line_of(&crate::ansi::plain_text(error))
+        );
+    }
+    let log = claude_settings::read_regular(&root.join("debug.log"), MAX_DEBUG_LOG_BYTES);
+    if let Ok(Some(bytes)) = log {
+        let log = String::from_utf8_lossy(&bytes);
         let lines: Vec<&str> = log.lines().collect();
         let tail = lines.iter().rev().take(10).rev();
         let _ = writeln!(
@@ -420,10 +435,30 @@ fn cache_section(o: &mut String, cache: &Cache) {
             lines.len()
         );
         for line in tail {
-            let _ = writeln!(o, "           {line}");
+            let _ = writeln!(o, "           {}", crate::ansi::plain_text(line));
         }
     }
     let _ = writeln!(o);
+}
+
+/// Whether workers can use the cache root: it takes a file, and a hard
+/// link to one, which is how a lock is taken (`link` is `hard_link`, or a
+/// test's stand-in). A filesystem without hard links (exFAT, some SMB
+/// mounts) is writable and still locks nothing.
+fn probe(root: &Path, link: impl Fn(&Path, &Path) -> std::io::Result<()>) -> String {
+    let probe = root.join(format!(".probe.{}", std::process::id()));
+    let linked = root.join(format!(".probe.{}.link", std::process::id()));
+    let writable = std::fs::create_dir_all(root).is_ok() && std::fs::write(&probe, b"").is_ok();
+    let state = if !writable {
+        "NOT writable".to_owned()
+    } else if let Err(e) = link(&probe, &linked) {
+        format!("writable, but no hard links ({e}): workers cannot lock")
+    } else {
+        "writable".to_owned()
+    };
+    let _ = std::fs::remove_file(&linked);
+    let _ = std::fs::remove_file(&probe);
+    state
 }
 
 /// Every `GARNISH_*` test hook, named by the constant each reader uses so a
@@ -578,6 +613,18 @@ fn count_dirs(dir: &Path) -> usize {
 /// Every `err` cache entry under the root, as `(scope/module, entry)`.
 #[must_use]
 pub fn failed_entries(root: &Path) -> Vec<(String, Entry)> {
+    entries_where(root, |e| e.status == Status::Err)
+}
+
+/// Every `ok` entry carrying a failed opt-in fetch (`fetch_error`), as
+/// `(scope/module, entry)`.
+#[must_use]
+pub fn fetch_failures(root: &Path) -> Vec<(String, Entry)> {
+    entries_where(root, |e| e.status == Status::Ok && e.get("fetch_error").is_some())
+}
+
+/// Every cache entry under the root that `keep` accepts, sorted by name.
+fn entries_where(root: &Path, keep: impl Fn(&Entry) -> bool) -> Vec<(String, Entry)> {
     let mut out = Vec::new();
     for kind in ["sessions", "repos"] {
         let Ok(dirs) = std::fs::read_dir(root.join(kind)) else { continue };
@@ -588,8 +635,8 @@ pub fn failed_entries(root: &Path) -> Vec<(String, Entry)> {
                 if p.extension().is_none_or(|e| e != "cache") {
                     continue;
                 }
-                if let Some(entry) = std::fs::read_to_string(&p).ok().and_then(|t| Entry::parse(&t))
-                    && entry.status == Status::Err
+                if let Some(entry) = crate::cache::read_entry(&p)
+                    && keep(&entry)
                 {
                     let name = format!(
                         "{kind}/{}/{}",
@@ -670,6 +717,73 @@ mod tests {
         let names: Vec<&str> = failed.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["repos/r1/sync", "sessions/s1/x"]);
         assert_eq!(failed[0].1.error, "git timed out");
+    }
+
+    /// The cache section goes to a terminal, and what it prints came from
+    /// outside: a failed entry's text (a command run in a repository nobody
+    /// here built, written by any version of garnish) and the debug log.
+    /// Neither may carry an escape sequence or a bell through.
+    #[test]
+    fn the_cache_section_prints_plain_text_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::at(dir.path().to_path_buf());
+        let entry = dir.path().join("repos").join("0123456789abcdef").join("sync.cache");
+        std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        std::fs::write(&entry, "v1 1 1000 err\nclear\u{1b}[2J bell\u{7} title\u{1b}]0;x\u{7}\n")
+            .unwrap();
+        std::fs::write(dir.path().join("debug.log"), "1 pid=2 odd\u{1b}[31m red\n").unwrap();
+        let mut o = String::new();
+        cache_section(&mut o, &cache);
+        assert!(!o.contains('\u{1b}') && !o.contains('\u{7}'), "{o:?}");
+        assert!(o.contains("FAILED repos/0123456789abcdef/sync") && o.contains("clear bell title"));
+        assert!(o.contains("odd red"), "{o}");
+    }
+
+    /// A fetch that fails keeps the counts, so its entry is `ok` and the
+    /// failure rode in `fetch_error` where nothing read it: `doctor` said
+    /// "no failed refreshes" while an expired token failed every fetch.
+    #[test]
+    fn a_failed_fetch_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::at(dir.path().to_path_buf());
+        let values: BTreeMap<String, String> = [
+            ("ahead", "1"),
+            ("fetch_attempt", "1"),
+            ("fetch_error", "fatal: Authentication failed"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let scope = Scope::Repo("0123456789abcdef".into());
+        cache.write(&scope, "sync", &Entry::ok(1, values)).unwrap();
+        cache.write(&scope, "branch", &Entry::ok(1, BTreeMap::new())).unwrap();
+        let mut o = String::new();
+        cache_section(&mut o, &cache);
+        assert!(!o.contains("no failed refreshes"), "{o}");
+        assert!(
+            o.contains("FETCH FAILED repos/0123456789abcdef/sync (")
+                && o.contains("s ago): fatal: Authentication failed"),
+            "{o}"
+        );
+        assert_eq!(fetch_failures(dir.path()).len(), 1);
+        assert_eq!(failed_entries(dir.path()).len(), 0);
+    }
+
+    /// A cache on a filesystem without hard links (exFAT, some SMB mounts)
+    /// takes files and refuses every lock; the report used to call it
+    /// writable while no worker could ever run there.
+    #[test]
+    fn the_probe_names_a_root_that_cannot_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("cache");
+        let no_links = |_: &Path, _: &Path| Err(std::io::Error::other("links unsupported"));
+        let state = probe(&root, no_links);
+        assert!(state.contains("no hard links") && state.contains("cannot lock"), "{state}");
+        assert_eq!(probe(&root, |a, b| std::fs::hard_link(a, b)), "writable");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0, "the probes are removed");
+        let blocked = dir.path().join("file");
+        std::fs::write(&blocked, "").unwrap();
+        assert_eq!(probe(&blocked.join("cache"), |a, b| std::fs::hard_link(a, b)), "NOT writable");
     }
 
     #[test]
