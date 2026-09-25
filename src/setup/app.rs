@@ -800,6 +800,27 @@ mod tests {
         assert!(marked > 0);
     }
 
+    /// app-29: every spelling of zero, like nothing typed, previews at the
+    /// real width; other widths are held to what the parser takes.
+    #[test]
+    fn the_preview_width_reads_zero_and_clamps_as_the_config_does() {
+        let mut app = crate::setup::for_test("", None, Path::new("/home/dev"));
+        let width = |app: &mut App, typed: &str| {
+            app.apply(Action::Typed(Target::Columns, typed.into()));
+            app.preview.columns
+        };
+        assert_eq!(width(&mut app, "80"), Some(80));
+        for typed in ["00", " 0 ", ""] {
+            app.preview.columns = Some(80);
+            assert_eq!(width(&mut app, typed), None, "{typed:?}");
+        }
+        let widest = crate::config::MAX_WIDTH + crate::config::HARNESS_PADDING;
+        assert_eq!(width(&mut app, "3"), Some(crate::config::MIN_WIDTH));
+        assert_eq!(width(&mut app, "99999"), Some(widest));
+        assert_eq!(app.status(), Some(format!("previewing at {widest} columns").as_str()));
+        assert_eq!(width(&mut app, "wide"), Some(widest), "refused: unchanged");
+    }
+
     /// app-28: a box picked for a line goes on that line or nowhere, as
     /// `B`'s typed name does.
     #[test]

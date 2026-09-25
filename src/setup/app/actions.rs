@@ -6,8 +6,8 @@
 use toml::Value;
 
 use super::{Action, App, Level, new_problem};
-use crate::config::is_bare_key;
 use crate::config::presets::TopPreset;
+use crate::config::{self, is_bare_key};
 use crate::setup::builder::Builder;
 use crate::setup::draft::{Draft, dropped_boxes};
 use crate::setup::form::{FormKind, Slot, SlotKind};
@@ -171,17 +171,23 @@ impl App {
                     self.load_preset(value);
                 }
             }
-            Target::Columns => match value.trim().parse::<usize>() {
-                Ok(0) | Err(_) if value.trim().is_empty() || value.trim() == "0" => {
-                    self.preview.columns = None;
-                    self.say("previewing at the terminal's own width".into(), Level::Info);
+            Target::Columns => {
+                let typed = value.trim();
+                match if typed.is_empty() { Ok(0) } else { typed.parse::<usize>() } {
+                    Ok(0) => {
+                        self.preview.columns = None;
+                        self.say("previewing at the terminal's own width".into(), Level::Info);
+                    }
+                    Ok(n) => {
+                        // The terminal around the widest box garnish renders.
+                        let widest = config::MAX_WIDTH.saturating_add(config::HARNESS_PADDING);
+                        let n = n.clamp(config::MIN_WIDTH, widest);
+                        self.preview.columns = Some(n);
+                        self.say(format!("previewing at {n} columns"), Level::Info);
+                    }
+                    Err(_) => self.say(format!("{value:?} is not a width"), Level::Error),
                 }
-                Ok(n) => {
-                    self.preview.columns = Some(n.clamp(10, 4100));
-                    self.say(format!("previewing at {} columns", n.clamp(10, 4100)), Level::Info);
-                }
-                Err(_) => self.say(format!("{value:?} is not a width"), Level::Error),
-            },
+            }
             // A pick or a typed name reads as the form's `box` field reads
             // it: `none`, `false` and nothing unbox, `true` is a box of its
             // own. It was asked for one line, as `B`'s name is, and goes on
