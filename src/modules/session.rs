@@ -8,7 +8,9 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::{Ctx, Module, Rendered, badge, detail, glyph_prefix, lead, seg};
+use super::{
+    Ctx, IconShown, Module, Rendered, badge, detail, glyph_prefix, lead, seg, show_icon_opt,
+};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -23,8 +25,7 @@ impl Module for SessionModule {
             sources: &["cost.total_duration_ms"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_start",
                     Kind::Bool,
@@ -79,8 +80,7 @@ impl Module for ApiModule {
             sources: &["cost.total_api_duration_ms", "cost.total_duration_ms"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_share",
                     Kind::Bool,
@@ -132,12 +132,11 @@ impl Module for CacheModule {
             id: "cache",
             measure: Some(MeasureKind::Percent),
             summary: "Prompt cache hit ratio, TTL and warmth.",
-            doc: "Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-read share), the cache lifetime badge (`5m` or `1h`), and a live countdown until the cached prefix goes cold. Shows `–` before the first API response.",
+            doc: "Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-read share), the cache lifetime badge (`5m` or `1h`), and a live countdown until the cached prefix goes cold. Shows `–` (`-` in the ascii set) before the first API response.",
             sources: &["prompt_cache.*", "context_window.current_usage"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new("show_ttl", Kind::Bool, "Show the TTL badge.", Value::Bool(true))
                     .minimal(Value::Bool(false)),
                 OptSpec::new(
@@ -199,7 +198,8 @@ impl Module for CacheModule {
                 .saturating_add(u.cache_creation_input_tokens.unwrap_or(0));
             (total > 0).then(|| crate::num::u64_to_f64(read) / crate::num::u64_to_f64(total))
         });
-        let text = ratio.map_or_else(|| "–".to_owned(), |r| ctx.percent(cfg, r * 100.0));
+        let text = ratio
+            .map_or_else(|| ctx.icons.placeholder().to_owned(), |r| ctx.percent(cfg, r * 100.0));
         segs.push(Segment::styled(text, Style::fg(cfg.color("percent")).bolded()));
         let measure = ratio.map(|r| super::Measure::Percent(ctx.percent_shown(cfg, r * 100.0)));
         let Some(pc) = pc else { return Rendered::fresh(segs).measured(measure) };

@@ -38,17 +38,17 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the window icon. |
 | `show_reset` | bool | `false` | `true` | `true` | Show when the window resets, in the form `reset` picks. |
 | `reset` | `countdown` \| `absolute` \| `both` \| `elapsed` | `"countdown"` | `"countdown"` | `"countdown"` | How the reset shows: `countdown` (`⏱3d4h`), `absolute` the local wall-clock time with its weekday, since the reset is days away (`⏱Tue 14:30`), `both` (`3d4h (Tue 14:30)`), or `elapsed` the time into the window over its length (`⏱3d20h/7d`); `show_reset = false` hides every form. |
 | `bar_width` | integer ≤ 1024 | `0` | `0` | `8` | Mini bar width in cells; 0 hides it. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
-| `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the color changes. |
+| `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the band color changes. |
 | `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
 | `percent` | `inherit` \| `whole` \| `precise` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. |
-| `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band. |
+| `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band (roles or literal colors). |
 | `pace` | bool | `false` | `false` | `false` | Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. |
 | `pace_colors` | bool | `false` | `false` | `false` | Colour the percentage by the pace band instead of `thresholds`: used ÷ elapsed at most 1 is nominal, at most 1.5 caution, above that critical; ignored under 20 % used, always critical above 80 %. |
 | `eta` | bool | `false` | `false` | `false` | Print the time until the window reaches 100 % at the current rate (`⇥ 1h37m`), only when that lands before the reset. |
@@ -61,9 +61,9 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `window` | `U+F073` | `≣` | `📅` | `7d` | Window icon. |
-| `reset` | `U+F017` | `⏱` | `⏰` | `reset` | Countdown glyph. |
-| `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
-| `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |
+| `reset` | `U+F017` | `⏱` | `⏰` | `reset` | The reset's glyph, in every `reset` form. |
+| `fill` | `█` | `█` | `█` | `#` | Filled bar cell. |
+| `empty` | `░` | `░` | `░` | `-` | Empty bar cell. |
 | `ahead` | `⇡` | `⇡` | `🔼` | `^` | Ahead-of-pace glyph. |
 | `behind` | `⇣` | `⇣` | `🔽` | `v` | Behind-pace glyph. |
 | `eta` | `U+F04E` | `⇥` | `⏩` | `eta` | Eta glyph. |
@@ -81,8 +81,8 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent2` | Icon. |
-| `reset` | `muted` | Countdown. |
-| `empty` | `muted` | Bar empty part. |
+| `reset` | `muted` | The reset, in every `reset` form. |
+| `empty` | `muted` | Empty part of the bar. |
 | `ahead` | `hot` | Pace delta, ahead. |
 | `behind` | `ok` | Pace delta, behind. |
 | `eta` | `hot` | Eta. |

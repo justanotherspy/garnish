@@ -1,0 +1,19 @@
+# fixture: ctx-200k
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# `warn_at` follows the percentage on display (SPEC § 3.2), as the band and
+# the `hide` measure do: the fixture's 61.5 % prints `62%`, so `warn_at =
+# 62` draws the badge. It used to compare the unrounded 61.5 and leave the
+# badge off beside a row that read 62 %.
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["context"]
+
+[modules.context]
+width   = 10
+warn_at = 62

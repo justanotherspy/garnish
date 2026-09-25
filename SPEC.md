@@ -244,8 +244,15 @@ says which (§ 7).
 | `pr.{number,url,review_state?,kind?}` | object? | open PR/MR; `review_state` approved/pending/changes_requested/draft; `kind = "mr"` for GitLab |
 | `worktree.{name,path,branch?,original_cwd,original_branch?}` | object? | Claude worktree session |
 
-Auth-mode rule: `rate_limits` present ⇒ subscription (show limits); absent ⇒
-API key/gateway (show `cost`).
+Auth-mode rule: `rate_limits` present, with any window in it (a gateway's
+`spend_limit` alone included) ⇒ treated as a subscription (the limit
+modules show, `cost` hides under its default `only_without_rate_limits =
+true`); absent ⇒ an API key, or a gateway that reports no spend limit
+(show `cost`). (Stated 2026-09-25: this section filed "gateway" under
+*absent* while the field row above says a gateway's spend limit arrives in
+`rate_limits`; `Payload::is_subscription` has always been
+`rate_limits.is_some()`. Whether a spend-only gateway session should show
+`cost` as well is open in PLAN's backlog.)
 
 garnish does not model `prompt_id`, `transcript_path` or
 `context_window.remaining_percentage` (no module will read a prompt id or
@@ -429,12 +436,17 @@ Context bar: filled cells `█` with partial blocks for sub-cell precision,
 empty `░`; the **filled part** takes the color of the current band
 (`thresholds = [50, 75, 90]`, `band_colors = ["band1", "band2", "band3",
 "band4"]`: the theme's four band roles, overridable with any role or literal
-colour, as in the § 4 example); a `▏` marker at the autocompact position;
+colour, as in the § 4 example), and the band colour stays on the bar: the
+percentage is drawn in `colors.percent` (`text` by default; decided with
+Daniel 2026-09-25, when the key was found declared, documented and set by
+the `dracula-256` gallery preset while the percentage took the band
+colour and nothing read it); a `▏` marker at the autocompact position;
 `exceeds_200k = true` shows the `icons.exceeds` glyph (`‼`) in
 `colors.exceeds` (`danger`) when the payload says so (one flag plus the
 module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
-threshold. No token counter. `used_percentage` null → empty bar and `–`.
+threshold. No token counter. `used_percentage` null → empty bar and the
+placeholder (§ 3.6).
 The band is the number of thresholds the percentage has reached; a
 `thresholds` list out of ascending order (here and on the usage modules)
 is reported and the default stands in (2026-09-25: `[90, 50, 75]` at 80 %
@@ -537,7 +549,8 @@ passed prints none of them.
 | `clock` | local time + spinner | `HH:MM` | spinner + `HH:MM:SS` | + date, UTC offset | 0 |
 
 `cache` hit % = `prompt_cache.hit_ratio`; fallback to the last request's
-cache-read share from `current_usage`; `prompt_cache` absent → `–`.
+cache-read share from `current_usage`; `prompt_cache` absent → the
+placeholder (§ 3.6).
 Spinner frame = `now_secs mod frames.len()` (stateless).
 
 The tick's local zone (the `clock`'s, and the absolute reset times' of
@@ -579,6 +592,14 @@ renders dimmed with `✗` and the error is kept in the cache file for
 `garnish doctor`. A missing entry renders the module's placeholder.
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
+
+The placeholder, what stands in for a value that is not there (a module
+with nothing to show under `hide_when_empty = false`, a failed one before
+its `✗`, `context` before the first response, `cache` without a ratio), is
+`–`, and `-` in the ascii set, whose marks are all 7-bit like its
+ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
+2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
+on the first tick of every session.
 
 ### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
@@ -683,7 +704,12 @@ document decides the count for these four alone).
   the tick. An absent file is an `ok` entry with no email (an API-key
   user has no account: nothing to show, never `✗`); an unreadable,
   unparsable or oversized one is a failed entry (`✗`, retried once per
-  TTL). The field name is what the community documents for the file
+  TTL). A file that does not parse is read once more, 100 ms later,
+  before it counts as failed (2026-09-25: Claude Code 2.1.282 writes the
+  file through a temporary file and a rename, but truncates and rewrites
+  it in place when the rename fails, as it does for a bind-mounted file,
+  so a worker can meet it half written and hold `✗` for the whole TTL).
+  The field name is what the community documents for the file
   (FUTURE-SPEC grades it C), so a file without it shows nothing rather
   than guessing. `style = "email" | "user"` picks the whole address or
   the part before `@`. The settings chain of § 2.3 honours the same
@@ -1859,7 +1885,8 @@ the empty one turns colour off.
   field is absent or zero.
 - The 13k compaction buffer mirrors Claude Code 2.1.260 internals and may
   drift; it is configurable and the marker can be disabled.
-- Cache TTL display uses `prompt_cache` only; when absent the module shows `–`.
+- Cache TTL display uses `prompt_cache` only; when absent the module shows
+  the placeholder (§ 3.6).
 - Session duration is `cost.total_duration_ms` and resets on `/clear`.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for

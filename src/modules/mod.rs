@@ -42,6 +42,31 @@ pub fn durations_opt() -> OptSpec {
     )
 }
 
+/// In which presets a module shows its leading icon: the three shapes its
+/// `show_icon` option takes ([`show_icon_opt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconShown {
+    /// On, and off in `minimal`: nearly every module.
+    ExceptMinimal,
+    /// Off, and on in `full`: `vim` and `version`, whose value is the badge.
+    OnlyFull,
+    /// On in every preset: the settings badges, whose glyph is the value.
+    Always,
+}
+
+/// The `show_icon` option [`lead`] reads, in one of the [`IconShown`]
+/// shapes; `doc` says which icon, so each module's reference names its own.
+#[must_use]
+pub fn show_icon_opt(doc: &'static str, shown: IconShown) -> OptSpec {
+    let spec =
+        OptSpec::new("show_icon", Kind::Bool, doc, Value::Bool(shown != IconShown::OnlyFull));
+    match shown {
+        IconShown::ExceptMinimal => spec.minimal(Value::Bool(false)),
+        IconShown::OnlyFull => spec.full(Value::Bool(true)),
+        IconShown::Always => spec,
+    }
+}
+
 /// The kinds of number a module prints, each with a `[format]` style and a
 /// per-module override of the same name (SPEC § 4, Number formats).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,7 +263,8 @@ pub struct Ctx<'a> {
 
 impl Ctx<'_> {
     /// The keys of the settings chain, read on first use and shared by
-    /// every reader on the tick (the autocompact marker, reduced motion).
+    /// every reader on the tick (the autocompact marker, reduced motion,
+    /// the `sandbox` and `voice` badges).
     #[must_use]
     pub fn settings(&self) -> &[crate::claude_settings::FileKeys] {
         self.settings.get_or_init(|| crate::claude_settings::read_keys(&self.settings_chain))
@@ -274,13 +300,14 @@ impl Ctx<'_> {
     /// option unless that is `inherit`, then `[format] percent`.
     #[must_use]
     pub fn percent(&self, cfg: &ModuleCfg, p: f64) -> String {
-        self.percent_style(cfg).format(p, true)
+        self.percent_with(cfg, p, true)
     }
 
-    /// [`Ctx::percent`] for a number that may pass 100 (`spend`, SPEC § 3.3).
+    /// [`Ctx::percent`], held to `0..=100` only when `clamp` says so: `spend`
+    /// prints a number that may pass 100 (SPEC § 3.3).
     #[must_use]
-    pub fn percent_unclamped(&self, cfg: &ModuleCfg, p: f64) -> String {
-        self.percent_style(cfg).format(p, false)
+    pub fn percent_with(&self, cfg: &ModuleCfg, p: f64, clamp: bool) -> String {
+        self.percent_style(cfg).format(p, clamp)
     }
 
     /// The number [`Ctx::percent`] prints, as a number: what a band
@@ -289,13 +316,13 @@ impl Ctx<'_> {
     /// § 3, § 4).
     #[must_use]
     pub fn percent_shown(&self, cfg: &ModuleCfg, p: f64) -> f64 {
-        self.percent_style(cfg).shown(p, true)
+        self.percent_shown_with(cfg, p, true)
     }
 
-    /// [`Ctx::percent_shown`] for a number that may pass 100 (`spend`).
+    /// The number [`Ctx::percent_with`] prints, as a number.
     #[must_use]
-    pub fn percent_shown_unclamped(&self, cfg: &ModuleCfg, p: f64) -> f64 {
-        self.percent_style(cfg).shown(p, false)
+    pub fn percent_shown_with(&self, cfg: &ModuleCfg, p: f64, clamp: bool) -> f64 {
+        self.percent_style(cfg).shown(p, clamp)
     }
 
     fn percent_style(&self, cfg: &ModuleCfg) -> PercentStyle {
@@ -377,7 +404,8 @@ impl Ctx<'_> {
     /// not spawn a worker on every tick. Returns the lookup plus the
     /// [`Freshness`] the render should carry: a value past its TTL still
     /// renders [`Freshness::Fresh`] while the worker runs and only becomes
-    /// [`Freshness::Stale`] after `stale_after` TTLs (SPEC § 3.6).
+    /// [`Freshness::Stale`] after `stale_after` TTLs (SPEC § 3.6); a miss is
+    /// [`Freshness::Fresh`], so the caller carries it as it is.
     #[must_use]
     pub fn cached(
         &self,
@@ -407,7 +435,9 @@ impl Ctx<'_> {
             self.spawn_refresh(cfg, scope);
         }
         let grace_ms = ttl_ms.saturating_mul(u64::from(self.stale_after.max(1)));
-        let overdue = mismatched || lookup.entry.as_ref().is_none_or(|e| !e.is_fresh(grace_ms));
+        // A miss is not overdue: there is no value to mark, and the module
+        // shows its placeholder while the worker runs (SPEC § 3.6).
+        let overdue = mismatched || lookup.entry.as_ref().is_some_and(|e| !e.is_fresh(grace_ms));
         let freshness = match failed {
             Some(_) => Freshness::Failed,
             None if overdue => Freshness::Stale,
@@ -471,7 +501,9 @@ pub struct RefreshCtx<'a> {
 pub trait Module: Send + Sync {
     /// The module's configuration schema.
     fn schema(&self) -> ModuleSchema;
-    /// Render for one tick. Must be cheap: no I/O beyond reading cache files.
+    /// Render for one tick. Must be cheap: never a process, and no I/O
+    /// beyond small reads (a cache entry, the `.git` files the repo group
+    /// reads, the settings chain through [`Ctx::settings`], once a tick).
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered;
     /// Cache scope for this module given a session and working directory.
     /// Payload-only modules never call this.
@@ -587,48 +619,62 @@ pub fn seg(cfg: &ModuleCfg, text: impl Into<String>, color_key: &str) -> Segment
     Segment::styled(text, Style::fg(cfg.color(color_key)))
 }
 
-/// A styled icon segment (empty when the icon set has no glyph), followed by a space.
-#[must_use]
-pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
+/// The leading glyph in the `icon` colour followed by `after`, or nothing
+/// when `show_icon` is off or the glyph is blank: [`lead`] and
+/// [`lead_only`] differ only in `after`.
+fn leading(cfg: &ModuleCfg, icon_key: &str, after: &str) -> Vec<Segment> {
     let glyph = cfg.icon(icon_key);
-    if glyph.is_empty() {
-        Vec::new()
-    } else {
-        vec![Segment::styled(format!("{glyph} "), Style::fg(cfg.color(color_key)))]
+    if !cfg.bool("show_icon") || glyph.is_empty() {
+        return Vec::new();
     }
+    vec![Segment::styled(format!("{glyph}{after}"), Style::fg(cfg.color("icon")))]
 }
 
-/// A module's leading icon: its `show_icon` option and its `icon` colour,
-/// which is how every module with a leading icon opens.
+/// A module's leading icon: its `show_icon` option ([`show_icon_opt`]) and
+/// its `icon` colour, then the space before the value, which is how every
+/// module with a leading icon opens.
 ///
 /// The one place the option and the colour key are spelled, so a module
 /// cannot quietly ignore `show_icon` or reach for a different colour.
 #[must_use]
 pub fn lead(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
-    if cfg.bool("show_icon") { icon(cfg, icon_key, "icon") } else { Vec::new() }
+    leading(cfg, icon_key, " ")
 }
 
 /// The leading glyph as a module's whole value (`sandbox` and `voice`
 /// under `style = "glyph"`, SPEC § 3.8).
 ///
 /// [`lead`] without the space that separates an icon from the value after
-/// it, so the badge is one cell and `align = true` counts it as one. The
-/// `show_icon` rule stays [`lead`]'s.
+/// it, so the badge is one cell and `align = true` counts it as one.
 #[must_use]
 pub fn lead_only(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
-    lead(cfg, icon_key)
-        .into_iter()
-        .map(|segment| {
-            let bare = segment.text().trim_end().to_owned();
-            segment.with_text(bare)
-        })
-        .collect()
+    leading(cfg, icon_key, "")
+}
+
+/// Drop the space the part at `first` opens with when nothing before it
+/// needs one: at the start of the module, or right after a [`lead`], whose
+/// glyph already ends in its space.
+///
+/// A part that follows a value carries its own space (a [`badge`], a
+/// ` 1.0M` tag). A module whose earlier parts can each be switched off
+/// (`context`'s bar and percentage, `effort`'s scale) marks where they
+/// start and closes the join up once, at the end, instead of every part
+/// asking what came before it: a double space or a leading one is a cell
+/// that shifts an aligned column.
+pub fn close_up(segs: &mut [Segment], first: usize) {
+    let after_space =
+        first.checked_sub(1).and_then(|i| segs.get(i)).is_none_or(|s| s.text().ends_with(' '));
+    if let Some(part) = segs.get_mut(first).filter(|_| after_space)
+        && let Some(rest) = part.text().strip_prefix(' ').map(str::to_owned)
+    {
+        *part = std::mem::take(part).with_text(rest);
+    }
 }
 
 /// A trailing badge: a space and the icon in its own colour, or nothing when
 /// the icon set (or an override) leaves that glyph empty.
 ///
-/// The twin of [`icon`] for a glyph that follows the value — the dirty
+/// The twin of [`lead`] for a glyph that follows the value — the dirty
 /// marker, the exceeds-200k mark, a review state. Without the empty check a
 /// dropped glyph leaves a lone space, which is a segment like any other: the
 /// module gains a cell and `align = true` shifts the whole column.
@@ -652,8 +698,7 @@ pub fn glyph_prefix(cfg: &ModuleCfg, icon_key: &str) -> String {
 }
 
 /// The segment with its style dimmed (an overdue or failed value).
-#[must_use]
-pub const fn dimmed(mut segment: Segment) -> Segment {
+const fn dimmed(mut segment: Segment) -> Segment {
     segment.style = segment.style.dimmed();
     segment
 }
@@ -698,24 +743,23 @@ pub fn detail(
 /// A *failed* module keeps its `✗` (SPEC § 3.6) even when it had nothing to
 /// say: `sync` at the default preset is built wholly from its cache entry,
 /// so a failed refresh leaves it with no segments at all, and hiding it
-/// then would report a broken git as an ordinary empty row. The placeholder
-/// `–` stands in for the value and the mark follows it.
+/// then would report a broken git as an ordinary empty row. The icon set's
+/// placeholder (`–`, `-` in the ascii set) stands in for the value and the
+/// mark follows it.
 ///
 /// An *overdue* module with nothing to say still hides, because its last
 /// value really was nothing and a `– ⟳` would flicker in every idle pause.
 /// Only a value that exists is dimmed and marked with `⟳`.
+///
+/// Every mark comes from `icons` ([`IconSet::placeholder`],
+/// [`IconSet::stale_glyphs`]), so an ascii-only row stays ascii.
 #[must_use]
 pub fn decorate(
     rendered: Rendered,
     cfg: &ModuleCfg,
     theme: &Theme,
-    stale_glyphs: (&str, &str),
+    icons: IconSet,
 ) -> Vec<Segment> {
-    // A failed module with nothing of its own is the one case `hide_when_empty`
-    // must not swallow: hiding it reports a broken git as an ordinary empty
-    // row. An *overdue* one still hides, because its last value really was
-    // nothing (an in-sync `sync` renders no segments), and showing `– ⟳` for
-    // it would flicker a row in every idle pause.
     if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hides_empty() {
         return Vec::new();
     }
@@ -727,23 +771,24 @@ pub fn decorate(
     if !cfg.label.is_empty() {
         out.push(muted(theme, format!("{} ", cfg.label)));
     }
-    let value = if rendered.is_empty() { vec![muted(theme, "–")] } else { rendered.segments };
+    let value = if rendered.is_empty() {
+        vec![muted(theme, icons.placeholder())]
+    } else {
+        rendered.segments
+    };
+    let (overdue, failed) = icons.stale_glyphs();
     match rendered.freshness {
         Freshness::Fresh => out.extend(value),
         Freshness::Stale => {
             out.extend(value.into_iter().map(dimmed));
-            if !stale_glyphs.0.is_empty() {
-                out.push(muted(theme, format!(" {}", stale_glyphs.0)));
-            }
+            out.push(muted(theme, format!(" {overdue}")));
         }
         Freshness::Failed => {
             out.extend(value.into_iter().map(dimmed));
-            if !stale_glyphs.1.is_empty() {
-                out.push(Segment::styled(
-                    format!(" {}", stale_glyphs.1),
-                    Style::fg(theme.role(crate::theme::Role::Danger)).dimmed(),
-                ));
-            }
+            out.push(Segment::styled(
+                format!(" {failed}"),
+                Style::fg(theme.role(crate::theme::Role::Danger)).dimmed(),
+            ));
         }
     }
     if !cfg.suffix.is_empty() {
@@ -783,10 +828,9 @@ mod tests {
         assert_eq!(marked.len(), 1);
         assert_eq!(marked.first().map(Segment::text), Some(&*format!(" {}", cfg.icon("dirty"))));
         // The same rule as the leading icon, which has always had it.
-        assert_eq!(
-            icon(&module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n"), "folder", "icon"),
-            Vec::new()
-        );
+        let blank = module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n");
+        assert_eq!(lead(&blank, "folder"), Vec::new());
+        assert_eq!(lead_only(&blank, "folder"), Vec::new());
         // The interpolated shape: glyph and its space, or nothing at all.
         let cfg = module_cfg("cache", "");
         assert_eq!(glyph_prefix(&cfg, "warm"), format!("{} ", cfg.icon("warm")));
@@ -809,7 +853,7 @@ mod tests {
     #[test]
     fn a_failed_module_with_no_value_still_carries_its_mark() {
         let theme = Theme::default();
-        let marks = ("⟳", "✗");
+        let marks = IconSet::Unicode;
         let cfg = module_cfg("sync", "");
         assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
         let text =
@@ -818,6 +862,17 @@ mod tests {
         assert_eq!(text(Rendered::empty()), "", "a fresh empty module is hidden");
         assert_eq!(text(empty(Freshness::Stale)), "", "so is an overdue one with no value");
         assert_eq!(text(empty(Freshness::Failed)), "– ✗", "a broken one is never silent");
+        // mod-02: the ascii set's marks, the placeholder included, are ascii.
+        let ascii = |r: Rendered| {
+            crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, IconSet::Ascii))
+        };
+        assert_eq!(ascii(empty(Freshness::Failed)), "- x");
+        let shown = module_cfg("sync", "hide_when_empty = false\n");
+        let plain = |r: Rendered, icons: IconSet| {
+            crate::ansi::Painter::PLAIN.paint(&decorate(r, &shown, &theme, icons))
+        };
+        assert_eq!(plain(Rendered::empty(), IconSet::Ascii), "-");
+        assert_eq!(plain(Rendered::empty(), IconSet::Nerd), "–");
         // A module that did render keeps its value, dimmed, with the mark.
         let value = || Rendered {
             segments: vec![Segment::plain("⇡2")],
@@ -826,6 +881,37 @@ mod tests {
         };
         assert_eq!(text(value()), "⇡2 ⟳");
         assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
+    }
+
+    /// SPEC § 3.6: a missing entry renders the module's placeholder, not an
+    /// overdue mark. `cached` reported a miss as `Stale` and every caller
+    /// undid it by hand, so a new cached module that forgot would draw
+    /// `– ⟳` on its first tick. A mismatched entry is still overdue at once.
+    #[test]
+    fn cache_a_miss_is_fresh_while_its_worker_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let (config, _) = crate::config::parse("", &SCHEMAS);
+        let cache = Cache::at(dir.path().join("cache"));
+        let clock = crate::render::Clock {
+            workers: true,
+            cache: Some(dir.path().join("cache")),
+            ..crate::render::Clock::fixed()
+        };
+        let ctx = crate::render::context(&payload, &config, &clock, &cache, 80);
+        assert!(ctx.workers);
+        let cfg = config.modules.get("account").unwrap();
+        let scope = Scope::Session("s".to_owned());
+        // A live lock: a refresh is in flight, so nothing is spawned.
+        let LockOutcome::Acquired(_guard) = cache.lock(&scope, "account") else {
+            panic!("the lock is free")
+        };
+        let (lookup, freshness) = ctx.cached(cfg, &scope, |_| true);
+        assert_eq!((lookup.entry, lookup.in_progress, freshness), (None, true, Freshness::Fresh));
+        cache.write(&scope, "account", &CacheEntry::ok(600_000, BTreeMap::new())).unwrap();
+        let (lookup, freshness) = ctx.cached(cfg, &scope, |_| false);
+        assert!(lookup.entry.is_some());
+        assert_eq!(freshness, Freshness::Stale, "an entry for another situation is overdue");
     }
 
     /// A worker that cannot lock (a cache on a filesystem without hard
@@ -852,10 +938,13 @@ mod tests {
 
     /// The string literals that are direct arguments of the call starting at
     /// `open` (the byte after the `(`; literals inside a nested call such as
-    /// `format!("…")` are skipped), and whether the last argument is one of
-    /// them.
+    /// `format!("…")` or a list are skipped, the arms of an `if` or a
+    /// `match` in the argument are not: `lead(cfg, if mr { "mr" } else {
+    /// "pr" })` reads both), and whether the last argument is one of them.
     fn literal_arguments(src: &str, open: usize) -> (Vec<String>, bool) {
-        let mut depth = 1_usize;
+        // Calls and lists nest; a block (`{ … }`) only groups the arms of one
+        // argument, so braces are not counted.
+        let mut calls = 1_usize;
         let mut in_str = false;
         let mut literals = Vec::new();
         let mut last_is_literal = false;
@@ -870,7 +959,7 @@ mod tests {
                     }
                     '"' => {
                         in_str = false;
-                        if depth == 1 {
+                        if calls == 1 {
                             literals.push(std::mem::take(&mut current));
                             last_is_literal = true;
                         }
@@ -882,16 +971,16 @@ mod tests {
             }
             match c {
                 '"' => in_str = true,
-                '(' | '[' | '{' => depth = depth.saturating_add(1),
-                ')' | ']' | '}' => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
+                '(' | '[' => calls = calls.saturating_add(1),
+                ')' | ']' => {
+                    calls = calls.saturating_sub(1);
+                    if calls == 0 {
                         return (literals, last_is_literal);
                     }
                 }
                 // An identifier or number after a literal means the literal
                 // was not the last argument (`"x", y)`).
-                c if depth == 1 && (c.is_alphanumeric() || c == '_' || c == '.') => {
+                c if calls == 1 && (c.is_alphanumeric() || c == '_' || c == '.') => {
                     last_is_literal = false;
                 }
                 _ => {}
@@ -900,44 +989,139 @@ mod tests {
         (literals, false)
     }
 
+    /// A module file and the ids of the modules it defines, or a call and the
+    /// keys it reads.
+    type Table = &'static [(&'static str, &'static [&'static str])];
+
+    /// The modules each file defines. A quoted id is no sign of one: `vim`'s
+    /// `style` option spells the `style` module's id.
+    const DEFINED: Table = &[
+        ("repo.rs", &["path", "branch", "sync", "worktree", "pr"]),
+        ("model.rs", &["model", "effort", "style"]),
+        ("context.rs", &["context"]),
+        ("usage.rs", &["limit5h", "limit7d", "spend", "cost"]),
+        ("session.rs", &["session", "api", "cache", "clock"]),
+        ("identity.rs", &["session_name", "vim", "agent", "lines", "version"]),
+        ("badges.rs", &["sandbox", "voice", "account"]),
+        ("text.rs", &["text"]),
+    ];
+
+    /// The typed readers of `ModuleCfg`, whose first argument is the key.
+    const READERS: [&str; 12] = [
+        ".icon(\"",
+        ".color(\"",
+        ".str(\"",
+        ".int(\"",
+        ".size(\"",
+        ".bool(\"",
+        ".float(\"",
+        ".nums(\"",
+        ".strs(\"",
+        ".value(\"",
+        ".color_list(\"",
+        ".icon_frames(\"",
+    ];
+
+    /// The calls whose every literal argument is a key: `badge(cfg, "icon",
+    /// "color")`, `glyph_prefix(cfg, "icon")`, `lead(cfg, "icon")`,
+    /// `settings_badge(ctx, cfg, "icon", …)`. The space or `(` before the
+    /// name keeps the pattern from matching inside another word.
+    const KEY_CALLS: [&str; 9] = [
+        " badge(",
+        "(badge(",
+        " glyph_prefix(",
+        "(glyph_prefix(",
+        " lead(",
+        "(lead(",
+        " lead_only(",
+        "(lead_only(",
+        " settings_badge(",
+    ];
+
+    /// The keys a helper reads from its caller's config whatever the
+    /// arguments say.
+    const IMPLIED: Table = &[
+        (" lead(", &["icon", "show_icon"]),
+        ("(lead(", &["icon", "show_icon"]),
+        (" lead_only(", &["icon", "show_icon"]),
+        ("(lead_only(", &["icon", "show_icon"]),
+        ("settings_badge(", &["icon", "show_icon", "style", "word"]),
+        ("added_removed(", &["added", "removed"]),
+        (".percent(", &["percent"]),
+        (".percent_with(", &["percent"]),
+        (".percent_shown(", &["percent"]),
+        (".percent_shown_with(", &["percent"]),
+        (".tokens(", &["tokens"]),
+        (".dollars(", &["cost"]),
+        (".dollars_shown(", &["cost"]),
+        (".duration(", &["durations"]),
+        (".countdown(", &["durations"]),
+        (".durations_for(", &["durations"]),
+    ];
+
+    /// Every key `src` reads by name, with the byte it is read at; a read
+    /// quoted in a comment (this test's own doc, say) is not one.
+    fn keys_read(src: &str) -> Vec<(String, usize)> {
+        let mut reads: Vec<(String, usize)> = Vec::new();
+        for reader in READERS {
+            for (at, _) in src.match_indices(reader) {
+                let rest = src.get(at.saturating_add(reader.len())..).unwrap();
+                let key = rest.split('"').next().unwrap();
+                reads.push((key.to_owned(), at));
+            }
+        }
+        // `seg(cfg, text, "color")` and `detail(ctx, cfg, before, inner,
+        // "color")`: the key is the last argument, when that is a literal
+        // (`seg(cfg, x, key)` passes a variable).
+        for call in ["seg(", " detail(", "(detail(", "::detail("] {
+            for (at, _) in src.match_indices(call) {
+                let (literals, last_is_literal) =
+                    literal_arguments(src, at.saturating_add(call.len()));
+                if last_is_literal && let Some(key) = literals.last() {
+                    reads.push((key.clone(), at));
+                }
+            }
+        }
+        for call in KEY_CALLS {
+            for (at, _) in src.match_indices(call) {
+                let literals = literal_arguments(src, at.saturating_add(call.len())).0;
+                reads.extend(literals.into_iter().map(|k| (k, at)));
+            }
+        }
+        for (call, keys) in IMPLIED {
+            for (at, _) in src.match_indices(call) {
+                reads.extend(keys.iter().map(|k| ((*k).to_owned(), at)));
+            }
+        }
+        let in_comment = |at: usize| {
+            let line_start =
+                src.get(..at).and_then(|s| s.rfind('\n')).map_or(0, |i| i.saturating_add(1));
+            src.get(line_start..).is_some_and(|l| l.trim_start().starts_with("//"))
+        };
+        reads.retain(|(_, at)| !in_comment(*at));
+        reads
+    }
+
     /// SPEC § 9 schema completeness: every icon, colour and option key the
     /// render code reads by name (`cfg.icon("…")`, `seg(cfg, …, "…")`,
-    /// `icon(cfg, "…", "…")`, `cfg.str("…")` and the other typed readers)
-    /// exists in a schema of a module defined in that file (a file that
-    /// defines none, like this one, is checked against every schema).
-    /// `ModuleCfg` answers an unknown key with an empty icon or the default
-    /// colour, so a typo would render silently; this scan of the module
-    /// sources is what catches it.
+    /// `badge(cfg, "…", "…")`, `cfg.str("…")` and the other typed readers,
+    /// and the keys a helper reads for its caller: `lead`'s `show_icon`,
+    /// `Ctx::percent`'s `percent`) exists in a schema of a module defined in
+    /// that file (a file that defines none, like this one, is checked
+    /// against every schema). `ModuleCfg` answers an unknown key with an
+    /// empty icon or the default colour, so a typo would render silently;
+    /// this scan catches one spelled in the source, and the test-build
+    /// guard in `ModuleCfg`'s readers one picked at run time.
     #[test]
     fn every_key_the_modules_read_is_in_a_schema() {
         let all: Vec<&ModuleSchema> =
             SCHEMAS.iter().chain(std::iter::once(&*text::SCHEMA)).collect();
-        let keys_of = |schemas: &[&ModuleSchema]| -> std::collections::BTreeSet<&str> {
-            schemas
-                .iter()
-                .flat_map(|s| {
-                    s.opts
-                        .iter()
-                        .map(|o| o.key)
-                        .chain(s.icons.iter().map(|i| i.key))
-                        .chain(s.colors.iter().map(|c| c.key))
-                })
-                .collect()
-        };
-        let readers = [
-            ".icon(\"",
-            ".color(\"",
-            ".str(\"",
-            ".int(\"",
-            ".size(\"",
-            ".bool(\"",
-            ".float(\"",
-            ".nums(\"",
-            ".strs(\"",
-            ".value(\"",
-            ".color_list(\"",
-            ".icon_frames(\"",
-        ];
+        let mut claimed: Vec<&str> =
+            DEFINED.iter().flat_map(|(_, ids)| ids.iter().copied()).collect();
+        claimed.sort_unstable();
+        let mut ids: Vec<&str> = all.iter().map(|s| s.id).collect();
+        ids.sort_unstable();
+        assert_eq!(claimed, ids, "every module is defined in exactly one file of the table");
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/modules");
         let mut seen = 0_usize;
         let mut unknown = Vec::new();
@@ -949,84 +1133,35 @@ mod tests {
             // Test modules render nothing (and this test quotes the patterns
             // it searches for).
             let src = std::fs::read_to_string(&path).unwrap();
-            let src = src.split("#[cfg(test)]").next().unwrap().to_owned();
+            let src = src.split("#[cfg(test)]").next().unwrap();
             let file = path.file_name().unwrap().to_string_lossy().into_owned();
-            // The schemas a file of module implementations defines: those
-            // whose id it quotes. A helper file (this one, `util.rs`) reads
-            // on behalf of any module.
-            let here: Vec<&ModuleSchema> = if src.contains("impl Module for") {
-                all.iter().copied().filter(|s| src.contains(&format!("\"{}\"", s.id))).collect()
-            } else {
-                all.clone()
-            };
-            let known = keys_of(&here);
-            // A read quoted in a comment (this test's own doc, say) is not one.
-            let in_comment = |at: usize| {
-                let line_start = src.get(..at).and_then(|s| s.rfind('\n')).map_or(0, |i| i + 1);
-                src.get(line_start..).is_some_and(|l| l.trim_start().starts_with("//"))
-            };
-            let mut check = |key: &str, at: usize| {
-                if in_comment(at) {
-                    return;
-                }
+            // A helper file (this one, `util.rs`) reads on behalf of any
+            // module; a file of module implementations must be in the table.
+            let here: Vec<&ModuleSchema> =
+                if let Some((_, ids)) = DEFINED.iter().find(|(f, _)| *f == file) {
+                    all.iter().copied().filter(|s| ids.contains(&s.id)).collect()
+                } else {
+                    assert!(!src.contains("impl Module for"), "{file} is not in the table");
+                    all.clone()
+                };
+            let known: std::collections::BTreeSet<&str> = here
+                .iter()
+                .flat_map(|s| {
+                    let icons = s.icons.iter().map(|i| i.key);
+                    s.opts.iter().map(|o| o.key).chain(icons).chain(s.colors.iter().map(|c| c.key))
+                })
+                .collect();
+            for (key, at) in keys_read(src) {
                 seen += 1;
-                if !known.contains(key) {
+                if !known.contains(key.as_str()) {
                     unknown.push(format!("{file}: {key:?} at byte {at}"));
-                }
-            };
-            for reader in readers {
-                for (at, _) in src.match_indices(reader) {
-                    let rest = src.get(at + reader.len()..).unwrap();
-                    let key = rest.split('"').next().unwrap();
-                    check(key, at);
-                }
-            }
-            // `seg(cfg, text, "color")` and `detail(ctx, cfg, before, inner,
-            // "color")`: the key is the last argument, when that is a
-            // literal (`seg(cfg, x, key)` passes a variable).
-            for call in ["seg(", " detail(", "(detail("] {
-                for (at, _) in src.match_indices(call) {
-                    let (literals, last_is_literal) = literal_arguments(&src, at + call.len());
-                    if last_is_literal && let Some(key) = literals.last() {
-                        check(key, at);
-                    }
-                }
-            }
-            // `icon(cfg, "icon", "color")` and `badge(cfg, "icon", "color")`:
-            // both literals are keys. The space or `(` before the name keeps
-            // the pattern from matching inside another word.
-            for call in [" icon(", "(icon(", " badge(", "(badge("] {
-                for (at, _) in src.match_indices(call) {
-                    for key in literal_arguments(&src, at + call.len()).0 {
-                        check(&key, at);
-                    }
-                }
-            }
-            // `glyph_prefix(cfg, "icon")`: one icon key, no colour of its
-            // own (the caller's `seg` carries that).
-            for call in [" glyph_prefix(", "(glyph_prefix("] {
-                for (at, _) in src.match_indices(call) {
-                    for key in literal_arguments(&src, at + call.len()).0 {
-                        check(&key, at);
-                    }
-                }
-            }
-            // `lead(cfg, "icon")` and `lead_only(cfg, "icon")` carry the
-            // icon key and, implicitly, the `icon` colour every module's
-            // leading glyph takes.
-            for call in [" lead(", "(lead(", " lead_only(", "(lead_only("] {
-                for (at, _) in src.match_indices(call) {
-                    for key in literal_arguments(&src, at + call.len()).0 {
-                        check(&key, at);
-                    }
-                    check("icon", at);
                 }
             }
         }
         assert!(unknown.is_empty(), "keys read but not in any schema: {unknown:#?}");
-        // A count well under what the sources hold today (≈ 200) means a
+        // A count well under what the sources hold today (≈ 300) means a
         // reader pattern went stale, not that the modules read less.
-        assert!(seen > 180, "the scan found only {seen} reads; are the patterns stale?");
+        assert!(seen > 250, "the scan found only {seen} reads; are the patterns stale?");
     }
 
     /// SPEC § 3: the `hide` list reads the measure a module attached; a
@@ -1062,32 +1197,14 @@ mod tests {
     #[test]
     fn a_detail_is_one_segment_plain_and_two_dim() {
         let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
-        let theme = Theme::default();
+        // The pinned clock turns workers off, so the cache is never touched.
         let cache = Cache::at(std::env::temp_dir().join("garnish-detail-test"));
         let (config, _) = crate::config::parse("", &SCHEMAS);
+        let theme = config.theme.clone();
         let cfg = config.modules.get("api").unwrap();
-        let mut ctx = Ctx {
-            payload: &payload,
-            theme: &theme,
-            icons: IconSet::Unicode,
-            now: Timestamp::from_second(1_738_425_600).unwrap(),
-            width: 80,
-            cache: &cache,
-            tz: jiff::tz::TimeZone::UTC,
-            home: None,
-            settings_env: crate::claude_settings::Env::default(),
-            git: false,
-            stale_after: 5,
-            durations: crate::time::DurationStyle::Compact,
-            format: FormatCfg::default(),
-            animate: false,
-            dirs: std::cell::OnceCell::new(),
-            head: std::cell::OnceCell::new(),
-            settings_chain: Vec::new(),
-            settings: std::cell::OnceCell::new(),
-            workers: false,
-            config_file: None,
-        };
+        let clock = crate::render::Clock::fixed();
+        let mut ctx = crate::render::context(&payload, &config, &clock, &cache, 80);
+        assert_eq!(ctx.format, FormatCfg::default());
         let plain = detail(&ctx, cfg, " 8m20s", "12%", "share");
         assert_eq!(plain.len(), 1);
         assert_eq!(plain[0].text(), " 8m20s (12%)");
@@ -1107,18 +1224,20 @@ mod tests {
         // The number styles resolve `inherit` to the table and a module
         // option pins its own.
         ctx.format.tokens = TokenStyle::Precise;
-        assert_eq!(ctx.tokens(cfg, 128_400), "128,400");
-        let (config, _) = crate::config::parse(
+        let (cache, cost) = (config.modules.get("cache").unwrap(), config.modules.get("cost"));
+        assert_eq!(ctx.tokens(cache, 128_400), "128,400");
+        assert_eq!(ctx.dollars(cost.unwrap(), 1.2345, 2), "$1.23");
+        let (pinned, _) = crate::config::parse(
             "[modules.context]\ntokens = \"whole\"\npercent = \"precise\"\n[modules.cost]\ncost = \"whole\"\n",
             &SCHEMAS,
         );
-        let context = config.modules.get("context").unwrap();
+        let context = pinned.modules.get("context").unwrap();
         assert_eq!(ctx.tokens(context, 128_400), "128400");
         assert_eq!(ctx.percent(context, 42.34), "42.3%");
         assert_eq!(ctx.percent(cfg, 42.34), "42%");
-        assert_eq!(ctx.percent_unclamped(cfg, 112.4), "112%");
-        assert_eq!(ctx.dollars(config.modules.get("cost").unwrap(), 1.2345, 2), "$1");
-        assert_eq!(ctx.dollars(cfg, 1.2345, 2), "$1.23");
+        assert_eq!(ctx.percent_with(cfg, 112.4, false), "112%");
+        assert_eq!(ctx.percent_with(cfg, 112.4, true), "100%");
+        assert_eq!(ctx.dollars(pinned.modules.get("cost").unwrap(), 1.2345, 2), "$1");
     }
 
     #[test]
@@ -1129,6 +1248,16 @@ mod tests {
         assert_eq!(literal_arguments(src, 5), (vec!["branch".to_owned(), "icon".to_owned()], true));
         assert_eq!(literal_arguments("seg(cfg, \"x\", key)", 4), (vec!["x".to_owned()], false));
         assert!(literal_arguments("seg(\n    cfg,\n    text,\n    \"k\",\n)", 4).1);
+        // Both arms of a branch in an argument are read; a list is nested.
+        let src = "lead(cfg, if mr { \"mr\" } else { \"pr\" })";
+        assert_eq!(literal_arguments(src, 5).0, vec!["mr", "pr"]);
+        let src = "lead(cfg, match k { A => \"a\", _ => \"b\" }, [\"c\"])";
+        assert_eq!(literal_arguments(src, 5).0, vec!["a", "b"]);
+        // `super::detail(` and `settings_badge(` are scanned like the rest.
+        let src = "super::detail(ctx, cfg, \"\", &format!(\"{x}\"), \"net\")";
+        assert_eq!(literal_arguments(src, 14), (vec![String::new(), "net".to_owned()], true));
+        let src = "settings_badge(ctx, cfg, \"sandbox\", |k| k.sandbox_enabled)";
+        assert_eq!(literal_arguments(src, 15).0, vec!["sandbox"]);
         // An escape is skipped whole; keys never carry one, the scan only
         // has to get past it.
         assert_eq!(literal_arguments("f(\"a\\\"b\")", 2).0, vec!["ab"]);

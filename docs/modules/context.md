@@ -38,7 +38,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `width` | integer ≤ 1024 | `0` | `20` | `30` | Bar width in cells; 0 hides the bar. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
@@ -63,8 +63,8 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `context` | `U+F2DB` | `⊞` | `🧠` | `ctx:` | Context icon. |
-| `fill` | `█` | `█` | `█` | `#` | Filled cell. |
-| `empty` | `░` | `░` | `░` | `-` | Empty cell. |
+| `fill` | `█` | `█` | `█` | `#` | Filled bar cell. |
+| `empty` | `░` | `░` | `░` | `-` | Empty bar cell. |
 | `marker` | `▏` | `▏` | `▏` | `\|` | Compaction marker. |
 | `compact` | `⤓` | `⤓` | `⤓` | `compact@` | Compaction label glyph. |
 | `exceeds` | `‼` | `‼` | `‼` | `!!` | Exceeds-200k indicator. |
@@ -82,7 +82,7 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent` | Icon. |
-| `percent` | `text` | Percentage text. |
+| `percent` | `text` | Percentage text (the band colour is the bar's). |
 | `empty` | `muted` | Empty part of the bar. |
 | `marker` | `warn` | Compaction marker. |
 | `exceeds` | `danger` | Exceeds-200k indicator. |

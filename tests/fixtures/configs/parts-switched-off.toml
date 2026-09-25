@@ -1,0 +1,24 @@
+# fixture: subscription-full
+# columns: 80
+# now: 1738425600
+# icons: unicode
+# A module whose earlier parts are switched off spaces the rest once: the
+# lead's own space is the one before the value, and nothing opens with a
+# space. `context` without its bar used to print `⊞  42%`, and `effort`
+# with a blank scale under `style = "both"` `⚙  high`.
+
+[frame]
+style = "none"
+fill  = false
+
+[[line]]
+modules = ["context", "effort"]
+
+[modules.context]
+width = 0
+
+[modules.effort]
+style = "both"
+
+[modules.effort.icons]
+scale = ""
