@@ -401,6 +401,55 @@ fn the_picker_writes_the_preset_and_offers_the_install_screen() {
     assert!(snapshot(&mut app, 80, 24).contains("80 cols, box 76"));
 }
 
+/// The draft is setup's config: installing from the builder writes the
+/// settings and the skills, never a default config under the unsaved
+/// draft, which used to make the next `s` ask to reload "the file changed
+/// on disk" and drop the edits on its default answer (app-v1).
+#[test]
+fn installing_under_an_unsaved_draft_writes_no_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "2m");
+    keys(&mut app, "clock<enter>");
+    keys(&mut app, "I<enter>y");
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.contains("done;") && !shot.contains("default config"), "{shot}");
+    assert!(!file.exists(), "no default config under the draft");
+    keys(&mut app, "<esc>s");
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(!shot.contains("changed on disk"), "{shot}");
+    let saved = std::fs::read_to_string(&file).unwrap();
+    assert!(saved.contains("\"clock\""), "the edits were saved: {saved}");
+}
+
+/// The install screen plans again when it applies: a key another program
+/// wrote into settings.json while the question was open (`/voice` in
+/// Claude Code writes `voice.enabled`) is kept, and the file it replaces
+/// is backed up even though it did not exist when the screen opened
+/// (cli-09).
+#[test]
+fn the_install_screen_applies_the_file_as_it_is_now() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let mut app = for_test("", None, home);
+    keys(&mut app, "3");
+    assert!(snapshot(&mut app, 80, 24).contains("the file will be created"));
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(&settings, r#"{"voice": {"enabled": true}}"#).unwrap();
+    keys(&mut app, "<enter>y");
+    let text = std::fs::read_to_string(&settings).unwrap();
+    assert!(text.contains("\"voice\"") && text.contains("\"statusLine\""), "{text}");
+    let backups = std::fs::read_dir(settings.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("settings.json.bak-"))
+        .count();
+    assert_eq!(backups, 1, "the file found at apply time is kept");
+}
+
 #[test]
 fn build_a_custom_layout_starts_from_the_preset_rows() {
     let mut app = for_test("", None, Path::new("/home/dev"));

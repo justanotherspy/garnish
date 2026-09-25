@@ -218,10 +218,11 @@ pub struct Ctx<'a> {
     /// agree on it even while a checkout rewrites the file.
     pub head: std::cell::OnceCell<Option<crate::git::Head>>,
     /// Claude Code's settings files this tick may read (SPEC § 2.3, § 4.2),
-    /// highest precedence first: the chain of the directory Claude Code was
-    /// launched in (not whatever subdirectory the session moved to) and the
-    /// home; empty for a pinned render, which reads no settings file.
-    pub settings_files: Vec<std::path::PathBuf>,
+    /// highest precedence first, each with its `doctor` label: the chain of
+    /// the directory Claude Code was launched in (not whatever subdirectory
+    /// the session moved to) and the user's; empty for a pinned render,
+    /// which reads no settings file.
+    pub settings_chain: Vec<(&'static str, std::path::PathBuf)>,
     /// The keys of those files, read at most once per tick (a pinned
     /// render may seed them, `Clock.settings_keys`).
     pub settings: std::cell::OnceCell<Vec<crate::claude_settings::FileKeys>>,
@@ -240,7 +241,7 @@ impl Ctx<'_> {
     /// every reader on the tick (the autocompact marker, reduced motion).
     #[must_use]
     pub fn settings(&self) -> &[crate::claude_settings::FileKeys] {
-        self.settings.get_or_init(|| crate::claude_settings::read_keys(&self.settings_files))
+        self.settings.get_or_init(|| crate::claude_settings::read_keys(&self.settings_chain))
     }
 
     /// The session id the payload reports (or a placeholder).
@@ -602,7 +603,7 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
 }
 
 /// A module's leading icon: its `show_icon` option and its `icon` colour,
-/// which is how all seventeen of them open.
+/// which is how every module with a leading icon opens.
 ///
 /// The one place the option and the colour key are spelled, so a module
 /// cannot quietly ignore `show_icon` or reach for a different colour.
@@ -1086,7 +1087,7 @@ mod tests {
             animate: false,
             dirs: std::cell::OnceCell::new(),
             head: std::cell::OnceCell::new(),
-            settings_files: Vec::new(),
+            settings_chain: Vec::new(),
             settings: std::cell::OnceCell::new(),
             workers: false,
             config_file: None,

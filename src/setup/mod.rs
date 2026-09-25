@@ -56,15 +56,23 @@ pub fn run(args: &Args<'_>) -> Result<()> {
         return Err(crate::cli::Quiet.into());
     }
     let draft = Draft::open(Some(target));
-    let options = crate::install::Options {
-        config_path: args.config_path.map(Path::to_path_buf),
-        ..crate::install::Options::default()
-    };
-    let no_color = std::env::var_os("NO_COLOR").is_some();
+    let options = install_options(crate::config::explicit(args.config_path));
+    let no_color = crate::config::no_color_env();
     let home = crate::claude_settings::home_dir();
     let mut app = App::new(draft, Preview::live(), options, home, no_color);
     term::run(&mut app)?;
     Ok(())
+}
+
+/// The install plan `setup` makes (SPEC § 14): `garnish install`'s
+/// defaults, the config named explicitly, and no config step.
+///
+/// The draft is `setup`'s config. A default file written under an unsaved
+/// draft read as a change on disk at the next save, whose default answer
+/// reloaded it over the edits; `setup --preset` writes its file itself.
+#[must_use]
+pub fn install_options(config_path: Option<PathBuf>) -> crate::install::Options {
+    crate::install::Options { config_path, write_config: false, ..Default::default() }
 }
 
 /// `setup --preset <name> [--install]`: the preset is written with the § 5
@@ -77,36 +85,25 @@ fn preset_twin(
     config_path: Option<&Path>,
 ) -> Result<()> {
     let text = crate::cli::preset_text(preset)?;
-    let backup = crate::cli::write_config_file(target, &text, true)?;
-    let mut stdout = std::io::stdout().lock();
-    match backup {
-        Some(b) => writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?,
-        None => writeln!(stdout, "wrote {}", target.display())?,
-    }
-    if install {
-        let options = crate::install::Options {
-            config_path: config_path.map(Path::to_path_buf),
-            ..crate::install::Options::default()
-        };
-        let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
-        for note in steps.notes() {
-            eprintln!("{note}");
-        }
-        for line in steps.apply().map_err(refusal)?.lines {
-            writeln!(stdout, "{line}")?;
-        }
+    // Planned before anything is written, as `garnish install` plans: a
+    // settings file it refuses must leave the config untouched too, not
+    // half the request applied.
+    let steps = install
+        .then(|| {
+            crate::install::Steps::plan(&install_options(crate::config::explicit(config_path)))
+        })
+        .transpose()
+        .map_err(crate::cli::refusal)?;
+    let backup = crate::install::write_config(target, &text, true).map_err(crate::cli::refusal)?;
+    writeln!(
+        std::io::stdout().lock(),
+        "{}",
+        crate::install::wrote_line(target, backup.as_deref())
+    )?;
+    if let Some(steps) = steps {
+        crate::cli::print_install(&steps, false)?;
     }
     Ok(())
-}
-
-fn refusal(r: crate::install::Refusal) -> color_eyre::Report {
-    match r {
-        crate::install::Refusal::Io(e) => color_eyre::eyre::eyre!(e),
-        other => {
-            eprintln!("{other}");
-            crate::cli::Quiet.into()
-        }
-    }
 }
 
 /// The screen drawn into a `width × height` buffer, as text: one line per
@@ -142,16 +139,16 @@ pub fn snapshot(app: &mut App, width: u16, height: u16) -> String {
     out
 }
 
-/// A screen for the tests: `text` as the config (with no file behind it
-/// unless `path` says so), a pinned clock, the install plan aimed at
-/// `home`.
+/// A screen for the tests.
+///
+/// `text` as the config (with no file behind it unless `path` says so), a
+/// pinned clock, [`install_options`] aimed at `home`.
 #[must_use]
 pub fn for_test(text: &str, path: Option<PathBuf>, home: &Path) -> App {
     let draft = path.map_or_else(|| Draft::from_text(text), |p| Draft::open(Some(p)));
     let options = crate::install::Options {
         settings: Some(home.join(".claude").join("settings.json")),
-        config_path: Some(home.join("garnish.toml")),
-        ..crate::install::Options::default()
+        ..install_options(None)
     };
     let preview = Preview::new(crate::render::Clock::fixed(), true);
     App::new(draft, preview, options, Some(home.to_path_buf()), false)

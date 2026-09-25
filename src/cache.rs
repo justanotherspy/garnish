@@ -64,9 +64,10 @@ pub const MAX_ERROR_CHARS: usize = 500;
 /// order is worth pinning; the macOS arm has no other coverage than CI's
 /// macOS job.
 fn root_from(lookup: impl Fn(&str) -> Option<PathBuf>, macos: bool) -> Option<PathBuf> {
+    let xdg = |key: &str| crate::config::xdg_base(lookup(key)).map(|d| d.join("garnish"));
     lookup(CACHE_DIR_ENV)
-        .or_else(|| lookup("XDG_RUNTIME_DIR").map(|d| d.join("garnish")))
-        .or_else(|| lookup("XDG_CACHE_HOME").map(|d| d.join("garnish")))
+        .or_else(|| xdg("XDG_RUNTIME_DIR"))
+        .or_else(|| xdg("XDG_CACHE_HOME"))
         .or_else(|| {
             lookup("HOME").map(|h| {
                 if macos {
@@ -1071,6 +1072,11 @@ mod tests {
         );
         // Nothing set at all: no root named, so the private temp one.
         assert_eq!(root_from(set(&[]), false), None);
+        // A relative XDG base is ignored (the XDG spec calls it invalid): it
+        // would put the cache in whatever repository the tick runs in.
+        let relative = [("XDG_RUNTIME_DIR", "run"), ("XDG_CACHE_HOME", "rel"), ("HOME", "/home/d")];
+        assert_eq!(root_from(set(&relative), false), path("/home/d/.cache/garnish"));
+        assert_eq!(root_from(set(&relative[1..]), false), path("/home/d/.cache/garnish"));
     }
 
     /// The last-resort root sits in the temp directory every user shares, so

@@ -128,6 +128,7 @@ fn every_preset_has_a_header_validates_and_renders() {
                 .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
                 .env_remove("DISABLE_AUTO_COMPACT")
                 .env_remove("DISABLE_COMPACT")
+                .env_remove("CLAUDE_CONFIG_DIR")
                 // The movement promises need animations on whatever the
                 // developer's shell says.
                 .env_remove("GARNISH_ANIMATE")

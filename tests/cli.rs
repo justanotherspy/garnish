@@ -34,7 +34,10 @@ fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, b
         .env_remove("GARNISH_ANIMATE")
         // No managed settings file (SPEC § 9); a test that wants one
         // points the hook at its own through `extra`.
-        .env("GARNISH_MANAGED_SETTINGS", "");
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        // It moves the user settings file and the skills (SPEC § 7); a
+        // test that wants it sets it through `extra`.
+        .env_remove("CLAUDE_CONFIG_DIR");
     for (k, v) in extra {
         cmd.env(k, v);
     }
@@ -107,8 +110,19 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
         run(&["install", "--absolute", "--refresh-interval", "2", "--padding", "1"], home, &[]);
     assert!(ok && out.contains("already up to date"), "{out}");
     assert!(out.contains(": 3 up to date"), "unchanged skills are not rewritten: {out}");
-    assert!(err.contains("set `padding = 2`"), "existing config gets the hint on stderr: {err}");
+    assert!(!err.contains("padding"), "the config already matches: {err}");
     assert!(!out.contains("padding"), "{out}");
+    // A dry run says so too, rather than "would write" (cli-16).
+    let (out, _, ok) = run(
+        &["install", "--dry-run", "--absolute", "--refresh-interval", "2", "--padding", "1"],
+        home,
+        &[],
+    );
+    let first = out.lines().next().unwrap_or_default();
+    assert!(ok && first == format!("{} already up to date", settings.display()), "{out}");
+    // Claude Code's minimum is 1: a 0 is refused, not quietly raised.
+    let (_, err, ok) = run(&["install", "--dry-run", "--refresh-interval", "0"], home, &[]);
+    assert!(!ok && err.contains("--refresh-interval"), "{err}");
 
     // --no-skills for real: settings and config written, no skills directory.
     let other = tempfile::tempdir().unwrap();
@@ -119,8 +133,9 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     // The config key is a u16; a value that would not round-trip is refused up front.
     let (_, err, ok) = run(&["install", "--dry-run", "--padding", "40000"], home, &[]);
     assert!(!ok && err.contains("40000"), "{err}");
-    let (out, _, ok) = run(&["install", "--dry-run", "--padding", "3"], home, &[]);
+    let (out, err, ok) = run(&["install", "--dry-run", "--padding", "3"], home, &[]);
     assert!(ok && !out.contains("would write a default config"), "config exists: {out}");
+    assert!(err.contains("set `padding = 6`"), "existing config gets the hint on stderr: {err}");
 
     let (out, err, _) = run(&["install", "--dry-run"], home, &[("PATH", "/nonexistent")]);
     assert!(err.contains("not on PATH"), "{err}");
@@ -242,6 +257,28 @@ fn setup_preset_twin_and_the_tty_pointer_work_without_a_screen() {
     assert!(std::fs::read_to_string(&cfg).unwrap().contains("preset = \"minimal\""));
     let (_, err, ok) = run(&["setup", "--preset", "nope"], home, &[]);
     assert!(!ok && err.contains("gallery name"), "{err}");
+    // `--install` plans before anything is written, as `install` does: a
+    // settings file it refuses leaves the config as it was, no backup
+    // beside it (cli-v2).
+    let settings = home.join(".claude/settings.json");
+    let before = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&settings, "{ broken").unwrap();
+    let names = || -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(cfg.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    let kept = names();
+    let (out, err, ok) = run(&["setup", "--preset", "compact", "--install"], home, &[]);
+    assert!(!ok && out.is_empty() && err.lines().count() == 1, "{out}{err}");
+    assert!(err.contains("settings.json") && !err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before, "the config is untouched");
+    assert_eq!(names(), kept, "no backup either");
+    std::fs::remove_file(&settings).unwrap();
     // A file that does not parse is never rewritten, even by a preset.
     std::fs::write(&cfg, "theme = \n").unwrap();
     let (_, err, ok) = run(&["setup", "--preset", "compact"], home, &[]);
@@ -256,6 +293,11 @@ fn setup_preset_twin_and_the_tty_pointer_work_without_a_screen() {
     let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "1")]);
     assert!(ok && out.contains("garnish setup"), "{out}");
     let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "0")]);
+    assert!(ok && out.contains("bad payload"), "{out}");
+    // Every boolean hook reads one rule (SPEC § 9): Claude Code's words.
+    let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "true")]);
+    assert!(ok && out.contains("garnish setup"), "{out}");
+    let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "Off")]);
     assert!(ok && out.contains("bad payload"), "{out}");
     let (out, _, ok) = run(&["render"], home, &[("GARNISH_STDIN_TTY", "1")]);
     assert!(ok && out.contains("bad payload"), "the explicit render always reads stdin: {out}");
@@ -280,9 +322,11 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
             .env("GARNISH_CACHE_DIR", home.join("cache"))
             .env("GARNISH_NOW", "1738425600")
             .env("GARNISH_NO_SPAWN", "1")
-            .env("CLICOLOR_FORCE", "1")
             .env("GARNISH_MANAGED_SETTINGS", "")
+            // Colour on (`color = auto` without NO_COLOR), so `--color
+            // never` is what keeps the rows plain.
             .env_remove("NO_COLOR")
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("GARNISH_CONFIG");
         let out = cmd.output().unwrap();
         let out = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -352,6 +396,15 @@ fn unparsable_files_are_never_rewritten() {
     let (_, err, ok) = run(&["install", "--absolute"], home, &[]);
     assert!(!ok && err.contains("object"), "{err}");
     assert_eq!(std::fs::read_to_string(&settings).unwrap(), "[1, 2]\n");
+    // Bytes that are not UTF-8 are a file that does not parse, refused the
+    // same way, not an error report (cli-14).
+    let latin1 = b"{\"theme\": \"caf\xe9\"}\n";
+    std::fs::write(&settings, latin1).unwrap();
+    let (out, err, ok) = run(&["install", "--absolute"], home, &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("settings.json: not valid UTF-8") && !err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read(&settings).unwrap(), latin1);
 
     // A TOML syntax error is refused with its line; a bad value still
     // parses, so the file is replaced and kept as a backup.
@@ -364,6 +417,12 @@ fn unparsable_files_are_never_rewritten() {
     assert!(err.contains("garnish.toml") && err.contains("line 2"), "{err}");
     assert!(!err.contains("Location:"), "{err}");
     assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "preset = \"full\"\n[frame\n");
+    assert_eq!(entries(cfg.parent().unwrap()), vec!["garnish.toml"]);
+    std::fs::write(&cfg, b"theme = \"\xff\"\n").unwrap();
+    let (_, err, ok) = run(&["config", "init", "--force"], home, &[]);
+    assert!(!ok && err.lines().count() == 1 && err.contains("not valid UTF-8"), "{err}");
+    assert!(!err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read(&cfg).unwrap(), b"theme = \"\xff\"\n");
     assert_eq!(entries(cfg.parent().unwrap()), vec!["garnish.toml"]);
     std::fs::write(&cfg, "theme = \"nope\"\n").unwrap();
     let (out, _, ok) = run(&["config", "init", "--force"], home, &[]);
@@ -458,12 +517,60 @@ fn preview_typos_are_one_line_not_a_report() {
         ("--preset", "fulll", "default, minimal, full or compact"),
         ("--icons", "nerdy", "nerd, unicode, emoji or ascii"),
         ("--color", "sometimes", "auto, always, never, 256 or truecolor"),
+        // A theme typo was blamed on the config file under every fixture.
+        ("--theme", "nrod", "garnish, catppuccin-mocha, nord"),
     ] {
         let (out, err, ok) = run(&["preview", payload, flag, value], dir.path(), &[]);
         assert!(!ok && out.is_empty(), "{flag} {value}: {out}");
+        assert_eq!(err.lines().count(), 1, "{flag}: {err}");
         assert!(err.contains(value) && err.contains(expected), "{flag}: {err}");
         assert!(!err.contains("Location:") && !err.contains("Error:"), "{flag}: {err}");
     }
+}
+
+/// A listing piped into a reader that stops early (`garnish presets |
+/// head`) is not a failure: a broken pipe used to end in a color-eyre
+/// report with a source location and exit 1.
+#[test]
+fn a_reader_that_stops_early_gets_no_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_garnish"))
+        .args(["preview", fixtures, "--width", "100"])
+        .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The reader is gone before the first write.
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && !err.contains("Location:"), "{:?}: {err}", out.status);
+}
+
+/// `garnish docs` is a maintainer's tool: hidden from `--help`, and with
+/// no default `--out`, so run in a project of one's own it cannot replace
+/// that project's `docs/README.md`.
+#[test]
+fn docs_needs_an_explicit_out_and_is_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    std::fs::create_dir_all(home.join("docs")).unwrap();
+    std::fs::write(home.join("docs/README.md"), "mine").unwrap();
+    let (_, err, ok) = run(&["docs"], home, &[]);
+    assert!(!ok && err.contains("--out"), "{err}");
+    assert_eq!(std::fs::read_to_string(home.join("docs/README.md")).unwrap(), "mine");
+    let (help, _, ok) = run(&["--help"], home, &[]);
+    assert!(ok && help.contains("preview") && !help.contains("docs"), "{help}");
+    let out = home.join("generated");
+    let (said, _, ok) = run(&["docs", "--out", out.to_str().unwrap()], home, &[]);
+    assert!(ok && out.join("README.md").exists(), "{said}");
 }
 
 /// `--lock-held` means "the caller already holds *this module's* lock" and
@@ -574,19 +681,38 @@ fn config_show_round_trips_every_fixture_and_preset() {
 fn writing_commands_refuse_to_guess_a_home_directory() {
     // With HOME unset the defaults fell back to the current directory, so
     // `install` dropped .claude/ and garnish/ into whatever repo it ran from.
+    // Every command SPEC § 5 names refuses, with HOME unset and with it set
+    // but empty (the shell's "unset", `claude_settings::home_dir`), naming
+    // the flag that says where instead.
     let dir = tempfile::tempdir().unwrap();
-    for args in [&["install", "--dry-run"][..], &["config", "init"]] {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
-        cmd.args(args)
-            .current_dir(dir.path())
-            .env_remove("HOME")
-            .env_remove("XDG_CONFIG_HOME")
-            .env("GARNISH_MANAGED_SETTINGS", "")
-            .env_remove("GARNISH_CONFIG");
-        let out = cmd.output().unwrap();
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert!(!out.status.success(), "{args:?}: {err}");
-        assert!(err.contains("HOME") && !err.contains("Location:"), "{args:?}: {err}");
+    let commands: [(&[&str], &str); 5] = [
+        (&["install", "--dry-run"], "--settings"),
+        (&["config", "init"], "--config"),
+        (&["config", "path"], "--config"),
+        (&["skills", "install"], "--dir"),
+        (&["setup", "--preset", "compact"], "--config"),
+    ];
+    for empty in [false, true] {
+        for (args, flag) in commands {
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+            cmd.args(args)
+                .current_dir(dir.path())
+                .env("GARNISH_MANAGED_SETTINGS", "")
+                .env_remove("GARNISH_CONFIG")
+                .env_remove("CLAUDE_CONFIG_DIR");
+            if empty {
+                cmd.env("HOME", "").env("XDG_CONFIG_HOME", "");
+            } else {
+                cmd.env_remove("HOME").env_remove("XDG_CONFIG_HOME");
+            }
+            let out = cmd.output().unwrap();
+            let err = String::from_utf8_lossy(&out.stderr);
+            let what = format!("{args:?} (HOME empty: {empty})");
+            assert_eq!(out.status.code(), Some(1), "{what}: {err}");
+            assert_eq!(err.lines().count(), 1, "{what}: {err}");
+            assert!(err.contains("HOME") && err.contains(flag), "{what}: {err}");
+            assert!(!err.contains("Location:"), "{what}: {err}");
+        }
     }
     assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "nothing written");
     // Neither does an explicit settings file make `install` guess the config
@@ -644,6 +770,7 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -655,6 +782,64 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// One run of the binary with `args` and a payload piped in, as the
+/// harness runs `statusLine.command`: stdout and the exit code.
+fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<i32>) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.args(args)
+        .current_dir(home)
+        .env("HOME", home)
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env("GARNISH_STDIN_TTY", "0")
+        .env("NO_COLOR", "1")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    // A run refused before it reads stdin may have exited already: the
+    // write then fails with a broken pipe, which is not the test's concern.
+    let _ = child.stdin.take().unwrap().write_all(payload.as_bytes());
+    let out = child.wait_with_output().unwrap();
+    (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code())
+}
+
+/// SPEC § 5: the render path always exits 0 and prints something, since a
+/// non-zero exit clears the status line. A mistyped flag in
+/// `statusLine.command` (or one an upgrade removed) and a panic both used
+/// to exit non-zero with nothing on stdout; each is a `⚠ garnish:` row
+/// now. A subcommand's bad flag is still clap's usage error.
+#[test]
+fn a_bad_flag_or_a_panic_on_the_render_path_is_a_warning_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let (out, code) = piped(&["--confg", "x.toml"], home, &[]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.starts_with("⚠ garnish: ") && out.contains("--confg"), "{out}");
+    assert_eq!(out.lines().count(), 1, "{out}");
+    let (out, code) = piped(&["--config"], home, &[]);
+    assert!(code == Some(0) && out.starts_with("⚠ garnish: "), "{out}");
+    let (out, code) = piped(&["config", "--no-such-flag"], home, &[]);
+    assert!(code == Some(2) && out.is_empty(), "{out}");
+    let (out, code) = piped(&["--version"], home, &[]);
+    assert!(code == Some(0) && out.starts_with("garnish "), "{out}");
+    // At a terminal a typo is clap's error as usual.
+    let (out, code) = piped(&["--confg"], home, &[("GARNISH_STDIN_TTY", "1")]);
+    assert!(code == Some(2) && out.is_empty(), "{out}");
+    let (out, code) = piped(&[], home, &[("GARNISH_TEST_PANIC", "1")]);
+    assert_eq!(code, Some(0), "{out}");
+    assert_eq!(out, "⚠ garnish: internal error\n");
+    let (out, code) = piped(&["render"], home, &[("GARNISH_TEST_PANIC", "1")]);
+    assert_eq!((out.as_str(), code), ("⚠ garnish: internal error\n", Some(0)));
 }
 
 /// SPEC § 9: `GARNISH_MANAGED_SETTINGS` names the managed settings file,
@@ -693,9 +878,10 @@ fn managed_settings_hook_names_the_first_file_of_the_chain() {
     assert!(show(&[]).contains("\nanimate = true\n"), "the hook left empty: no managed file");
     let (report, _, ok) = run(&["--config", cfg.to_str().unwrap(), "doctor"], home, &hook);
     assert!(ok, "{report}");
-    // The file sits under the project directory (the test's home), so the
-    // report names it relative to that, as it does the project's own files.
-    assert!(report.contains("  managed  managed.json  ok"), "{report}");
+    // The file sits under the project directory (the test's home), but
+    // only the project's own files are named relative to it: this one is
+    // under the home, so it is `~/`.
+    assert!(report.contains("  managed  ~/managed.json  ok"), "{report}");
     assert!(report.contains("command=org-garnish (managed)"), "{report}");
     assert!(report.contains("true (managed)"), "{report}");
     assert!(report.contains("GARNISH_MANAGED_SETTINGS=~/managed.json"), "{report}");
@@ -746,6 +932,26 @@ fn cache_debug_hook_logs_one_line_per_tick_and_nothing_without_it() {
     assert!(ok, "{report}");
     assert!(report.contains("debug.log (last 2 of 2 lines)"), "{report}");
     assert!(report.contains("GARNISH_CACHE_DIR="), "{report}");
+}
+
+/// no-color.org: `NO_COLOR` turns colour off when it is "present and not
+/// an empty string"; an empty one (a profile's `export NO_COLOR=`) used to
+/// turn it off too, links included, under `color = "auto"`.
+#[test]
+fn an_empty_no_color_leaves_colour_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "[[line]]\nmodules = [\"model\"]\n").unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    assert!(tick(&cfg, home, payload, &[("NO_COLOR", "")]).contains('\x1b'), "empty is unset");
+    assert!(!tick(&cfg, home, payload, &[("NO_COLOR", "1")]).contains('\x1b'), "set is off");
+    let fixture =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    let args = ["--config", cfg.to_str().unwrap(), "preview", fixture, "--width", "84"];
+    let (out, _, ok) = run(&args, home, &[("NO_COLOR", "")]);
+    let rows: String = out.lines().skip(1).collect();
+    assert!(ok && rows.contains("38;2;"), "preview too: {out:?}");
 }
 
 /// SPEC § 2.1: `preview` paints every row faint, as Claude Code draws the
@@ -815,6 +1021,7 @@ fn an_empty_path_variable_is_unset_not_a_path() {
             .env("NO_COLOR", "1")
             .env("COLUMNS", "84")
             .env_remove("GARNISH_ANIMATE")
+            .env_remove("CLAUDE_CONFIG_DIR")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -848,4 +1055,164 @@ fn an_empty_path_variable_is_unset_not_a_path() {
     std::fs::write(trap.join("garnish.toml"), marker("TRAP")).unwrap();
     let out = render(&[("XDG_CONFIG_HOME", "")]);
     assert!(!out.contains("TRAP"), "the working directory became the config: {out:?}");
+
+    // A *relative* XDG_CONFIG_HOME is the same trap, and the XDG Base
+    // Directory spec says to ignore one: the candidate is taken from the
+    // working directory, which for a tick is the session's repository.
+    let rel = home.join("rel").join("garnish");
+    std::fs::create_dir_all(&rel).unwrap();
+    std::fs::write(rel.join("garnish.toml"), marker("RELATIVE")).unwrap();
+    let out = render(&[("XDG_CONFIG_HOME", "rel")]);
+    assert!(!out.contains("RELATIVE"), "a relative base named a config: {out:?}");
+    let (out, _, ok) = run(&["config", "path"], home, &[("XDG_CONFIG_HOME", "rel")]);
+    assert!(ok && !out.contains("rel/garnish"), "{out}");
+    assert!(out.trim_end().ends_with(".config/garnish/garnish.toml"), "{out}");
+}
+
+/// SPEC § 7: `CLAUDE_CONFIG_DIR` moves every `~/.claude` path, so `install`
+/// writes the settings file and the skills where Claude Code reads them,
+/// `skills install` defaults there, and the settings chain (`config show`,
+/// `doctor`, the tick) reads the user file from there; empty is unset.
+#[test]
+fn claude_config_dir_moves_the_user_settings_and_the_skills() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let moved = home.join("work-claude");
+    let env = [("CLAUDE_CONFIG_DIR", moved.to_str().unwrap())];
+    let (out, _, ok) = run(&["install", "--dry-run", "--absolute"], home, &env);
+    assert!(ok, "{out}");
+    let settings = moved.join("settings.json");
+    assert!(out.contains(&format!("would write {}", settings.display())), "{out}");
+    assert!(out.contains(&format!("to {}", moved.join("skills").display())), "{out}");
+    let (out, _, ok) =
+        run(&["install", "--dry-run", "--absolute"], home, &[("CLAUDE_CONFIG_DIR", "")]);
+    let default = home.join(".claude").join("settings.json");
+    assert!(ok && out.contains(&default.display().to_string()), "empty is unset: {out}");
+    let (out, _, ok) = run(&["skills", "install"], home, &env);
+    assert!(ok && out.contains("work-claude/skills: wrote 3"), "{out}");
+    assert!(!home.join(".claude").exists(), "nothing under ~/.claude");
+    // The chain reads the moved user file: its prefersReducedMotion
+    // freezes an unset `animate`, and without the variable it is not read.
+    std::fs::write(&settings, r#"{"prefersReducedMotion": true}"#).unwrap();
+    let cfg = home.join("g.toml");
+    std::fs::write(&cfg, "preset = \"minimal\"\n").unwrap();
+    let show = ["--config", cfg.to_str().unwrap(), "config", "show"];
+    let (shown, _, ok) = run(&show, home, &env);
+    assert!(ok && shown.contains("\nanimate = false\n"), "{shown}");
+    let (shown, _, ok) = run(&show, home, &[]);
+    assert!(ok && shown.contains("\nanimate = true\n"), "{shown}");
+    let (report, _, ok) = run(&["doctor"], home, &env);
+    assert!(ok && report.contains("work-claude/settings.json  ok"), "{report}");
+    assert!(report.contains("true (user)"), "{report}");
+}
+
+/// One tick through `sh -c <command>`, as Claude Code runs
+/// `statusLine.command`, in the hermetic environment of [`run`].
+fn sh_tick(command: &str, home: &Path) -> String {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", command])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NOW", "1738425600")
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env("NO_COLOR", "1")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned()
+}
+
+/// SPEC § 7: `install` with an explicit config (`--config`, else
+/// `GARNISH_CONFIG`) writes a command that passes it, quoted for the
+/// shell, so the tick reads the file it was set up for; a reinstall
+/// without one replaces the program word only and keeps the arguments.
+#[test]
+fn install_passes_an_explicit_config_and_a_reinstall_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let work = home.join("my configs").join("work.toml");
+    std::fs::create_dir_all(work.parent().unwrap()).unwrap();
+    let marker = "[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"WORKFILE\"\n";
+    std::fs::write(&work, marker).unwrap();
+    let settings = home.join(".claude").join("settings.json");
+    let command = || -> String {
+        let text = std::fs::read_to_string(&settings).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        v["statusLine"]["command"].as_str().unwrap().to_owned()
+    };
+    let args = ["--config", work.to_str().unwrap(), "install", "--no-skills", "--absolute"];
+    let (out, _, ok) = run(&args, home, &[]);
+    assert!(ok, "{out}");
+    let written = command();
+    let quoted = format!(" --config '{}'", work.display());
+    assert!(written.ends_with(&quoted), "{written}");
+    assert!(sh_tick(&written, home).contains("WORKFILE"), "the tick reads work.toml");
+    // `install --padding 1` (the README's fix for cut rows) used to reset
+    // the command to a bare `garnish`, which reads another config.
+    let (out, _, ok) =
+        run(&["install", "--no-skills", "--no-config", "--absolute", "--padding", "1"], home, &[]);
+    assert!(ok, "{out}");
+    assert_eq!(command(), written);
+    let (out, _, ok) = run(
+        &["install", "--no-skills", "--no-config", "--dry-run"],
+        home,
+        &[("GARNISH_CONFIG", work.to_str().unwrap())],
+    );
+    assert!(ok && out.contains("\"command\": \"garnish --config '"), "{out}");
+}
+
+/// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,
+/// and the commands that write a config write *that* file rather than
+/// creating an XDG one that would hide it from the next tick.
+#[test]
+fn a_home_dot_file_is_the_config_the_writing_commands_see() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let dot = home.join(".garnish.toml");
+    let xdg = home.join(".config/garnish/garnish.toml");
+    let marker = "[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"DOTFILE\"\n";
+    std::fs::write(&dot, marker).unwrap();
+    let (out, _, ok) = run(&["config", "path"], home, &[]);
+    assert!(ok && out.trim_end() == dot.to_str().unwrap(), "{out}");
+    // `install` keeps it, and writes no default config over it.
+    let (out, _, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && !out.contains("default config"), "{out}");
+    assert!(!xdg.exists(), "an XDG config would hide ~/.garnish.toml");
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let tick = String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned();
+    assert!(tick.contains("DOTFILE"), "{tick}");
+    // `config init` refuses to replace it, naming it.
+    let (_, err, ok) = run(&["config", "init"], home, &[]);
+    assert!(!ok && err.contains(".garnish.toml exists"), "{err}");
+    // `setup --preset` edits it in place, with the backup next to it.
+    let (out, _, ok) = run(&["setup", "--preset", "compact"], home, &[]);
+    assert!(ok && out.contains(".garnish.toml (backup: "), "{out}");
+    assert!(std::fs::read_to_string(&dot).unwrap().contains("preset = \"compact\""));
+    let backups = std::fs::read_dir(home)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".garnish.toml.bak-"))
+        .count();
+    assert_eq!(backups, 1);
+    assert!(!xdg.exists(), "no XDG config was created");
 }

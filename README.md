@@ -123,7 +123,9 @@ edit the config in place.
 Without the screen, `garnish setup --preset compact --install` writes a
 preset and hooks it up, and `garnish install` alone does the settings
 (`--dry-run` shows the change; `--absolute` if `~/.cargo/bin` is not on the
-PATH Claude Code sees). The equivalent by hand:
+PATH Claude Code sees; `garnish --config FILE install` writes a command that
+reads FILE, and a later `install` keeps the arguments a garnish command
+already has). The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }
@@ -232,7 +234,9 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
 ## Skills
 
 Three Claude Code skills ship with garnish under `skills/` and are written to
-`~/.claude/skills/` by `garnish install` (or `garnish skills install`):
+`~/.claude/skills/` by `garnish install` (or `garnish skills install`); with
+`CLAUDE_CONFIG_DIR` set, the skills and the settings file go under it, where
+Claude Code reads them:
 
 - **garnish-statusline** offers `garnish setup` first, or builds the
   config from a conversation (terminal, font, width, what matters, rows or

@@ -72,8 +72,29 @@ impl Env {
 /// Claude Code's own rule for boolean environment variables (`isEnvTruthy`):
 /// only `1`, `true`, `yes`, `on` (case-insensitive) count as set.
 #[must_use]
-pub fn env_truthy(v: Option<&String>) -> bool {
-    v.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+pub fn env_truthy(v: Option<&str>) -> bool {
+    env_bool(v) == Some(true)
+}
+
+/// The one reading of a boolean environment variable (SPEC § 9).
+///
+/// Claude Code's truthy words (`1`, `true`, `yes`, `on`) are `Some(true)`,
+/// their opposites (`0`, `false`, `no`, `off`) `Some(false)`, both trimmed
+/// and in any case; anything else, unset or empty included, is `None`.
+#[must_use]
+pub fn env_bool(v: Option<&str>) -> Option<bool> {
+    match v?.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// [`env_bool`] of the process's variable `key`: how every `GARNISH_*`
+/// switch reads.
+#[must_use]
+pub fn env_flag(key: &str) -> Option<bool> {
+    env_bool(std::env::var(key).ok().as_deref())
 }
 
 /// The test hook that stands in for the platform's managed settings file
@@ -118,16 +139,22 @@ pub fn home_dir() -> Option<PathBuf> {
 /// every `~/.claude` path, `~/.claude.json` included, moves under it.
 pub const CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 
+/// `CLAUDE_CONFIG_DIR` as the process has it: `None` when unset or empty
+/// (the SPEC § 5 rule for a path variable).
+#[must_use]
+pub fn config_dir_from_env() -> Option<PathBuf> {
+    crate::config::env_path(CONFIG_DIR_ENV)
+}
+
 /// Where the file Claude Code keeps for itself lives (the sign-in, the MCP
 /// servers, per-project state).
 ///
 /// `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set and
-/// non-empty (the SPEC § 5 rule for a path variable), else
-/// `~/.claude.json`; `None` without either. The `account` worker reads it
-/// (SPEC § 3.8); the settings chain keeps ignoring the variable.
+/// non-empty, else `~/.claude.json`; `None` without either. The `account`
+/// worker reads it (SPEC § 3.8).
 #[must_use]
 pub fn claude_json_path(home: Option<&Path>) -> Option<PathBuf> {
-    claude_json_in(crate::config::env_path(CONFIG_DIR_ENV).as_deref(), home)
+    claude_json_in(config_dir_from_env().as_deref(), home)
 }
 
 /// [`claude_json_path`] for an explicit config directory.
@@ -136,18 +163,36 @@ pub fn claude_json_in(config_dir: Option<&Path>, home: Option<&Path>) -> Option<
     config_dir.or(home).map(|dir| dir.join(".claude.json"))
 }
 
+/// The directory Claude Code keeps the user's own files in: the user
+/// `settings.json`, the `skills/` directory.
+///
+/// `$CLAUDE_CONFIG_DIR` when set and non-empty, else `~/.claude`; `None`
+/// without either. `install` writes there and the settings chain reads
+/// there, so the two agree with Claude Code and with each other.
+#[must_use]
+pub fn user_dir(home: Option<&Path>) -> Option<PathBuf> {
+    user_dir_in(config_dir_from_env().as_deref(), home)
+}
+
+/// [`user_dir`] for an explicit config directory.
+#[must_use]
+pub fn user_dir_in(config_dir: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    config_dir.map(Path::to_path_buf).or_else(|| home.map(|h| h.join(".claude")))
+}
+
 /// Settings files in precedence order (highest first) for a project
 /// directory, each with the name `doctor` labels it by.
 ///
 /// `managed` (the organisation file, [`managed_settings_path`] for a real
 /// run and `None` for a pinned one) > `local`
 /// (`.claude/settings.local.json`) > `project` (`.claude/settings.json`) >
-/// `user` (`~/.claude/settings.json`).
+/// `user` (`settings.json` in `user_dir`, the directory [`user_dir`]
+/// names).
 #[must_use]
 pub fn settings_chain(
     managed: Option<&Path>,
     project_dir: Option<&Path>,
-    home: Option<&Path>,
+    user_dir: Option<&Path>,
 ) -> Vec<(&'static str, PathBuf)> {
     let mut files = Vec::with_capacity(4);
     if let Some(m) = managed {
@@ -157,20 +202,10 @@ pub fn settings_chain(
         files.push(("local", dir.join(".claude").join("settings.local.json")));
         files.push(("project", dir.join(".claude").join("settings.json")));
     }
-    if let Some(h) = home {
-        files.push(("user", h.join(".claude").join("settings.json")));
+    if let Some(dir) = user_dir {
+        files.push(("user", dir.join("settings.json")));
     }
     files
-}
-
-/// The paths of [`settings_chain`], highest precedence first.
-#[must_use]
-pub fn settings_files(
-    managed: Option<&Path>,
-    project_dir: Option<&Path>,
-    home: Option<&Path>,
-) -> Vec<PathBuf> {
-    settings_chain(managed, project_dir, home).into_iter().map(|(_, path)| path).collect()
 }
 
 /// Most bytes garnish reads from one settings file (SPEC § 5: sizes are
@@ -223,6 +258,9 @@ pub struct FileKeys {
     pub refresh_interval: Option<f64>,
     /// `statusLine.hideVimModeIndicator`.
     pub hide_vim_mode: Option<bool>,
+    /// `statusLine.padding`: cells the harness pads the status line with
+    /// on each side (SPEC § 2.1).
+    pub padding: Option<u64>,
     /// `disableAllHooks`.
     pub disable_all_hooks: Option<bool>,
     /// `sandbox.enabled`: Bash commands run isolated (the `sandbox` badge,
@@ -271,6 +309,7 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                 refresh_interval: status_key("refreshInterval").and_then(serde_json::Value::as_f64),
                 hide_vim_mode: status_key("hideVimModeIndicator")
                     .and_then(serde_json::Value::as_bool),
+                padding: status_key("padding").and_then(serde_json::Value::as_u64),
                 disable_all_hooks: v.get("disableAllHooks").and_then(serde_json::Value::as_bool),
                 sandbox_enabled: switch("sandbox"),
                 voice_enabled: switch("voice"),
@@ -361,26 +400,42 @@ pub fn read_file(path: &Path) -> FileState {
     }
 }
 
-/// The keys of the files of a chain that are there and parse, in the
-/// chain's order (highest precedence first); a file that is absent, too
-/// long or does not parse contributes nothing.
+/// Why Claude Code rejects the whole file `label` names for the keys it
+/// sets, or `None` when it reads it.
+///
+/// Its schema takes only `default` and `fullscreen` for `tui`: another
+/// value in the managed file is dropped on its own, but any other file
+/// carrying one is not read at all, so none of its keys may count (SPEC
+/// § 7, the `tui` row of `doctor`).
 #[must_use]
-pub fn read_keys(files: &[PathBuf]) -> Vec<FileKeys> {
-    files
+pub fn rejected(label: &str, keys: &FileKeys) -> Option<&'static str> {
+    (label != "managed" && matches!(keys.tui, Some(Tui::Other(_))))
+        .then_some("`tui` is not `default` or `fullscreen`, so Claude Code rejects this file")
+}
+
+/// The keys of the files of a chain that Claude Code reads, in the
+/// chain's order (highest precedence first); a file that is absent, too
+/// long, does not parse or is [`rejected`] contributes nothing.
+#[must_use]
+pub fn read_keys(chain: &[(&'static str, PathBuf)]) -> Vec<FileKeys> {
+    chain
         .iter()
-        .filter_map(|file| match read_file(file) {
-            FileState::Keys(keys) => Some(keys),
+        .filter_map(|(label, file)| match read_file(file) {
+            FileState::Keys(keys) if rejected(label, &keys).is_none() => Some(keys),
             _ => None,
         })
         .collect()
 }
 
-/// The keys a command run in `project` reads: the whole chain, the
-/// managed file ([`managed_settings_path`]) included (a render goes
-/// through `Clock` instead, which may forbid the read).
+/// The keys a command run in `project` reads: the whole chain.
+///
+/// The managed file ([`managed_settings_path`]) and `CLAUDE_CONFIG_DIR`
+/// ([`user_dir`]) included; a render goes through `Clock` instead, which
+/// may forbid the read.
 #[must_use]
 pub fn keys_for(project: Option<&Path>, home: Option<&Path>) -> Vec<FileKeys> {
-    read_keys(&settings_files(managed_settings_path().as_deref(), project, home))
+    let user = user_dir(home);
+    read_keys(&settings_chain(managed_settings_path().as_deref(), project, user.as_deref()))
 }
 
 /// A boolean key over a chain's keys: the first file that sets it wins,
@@ -406,8 +461,8 @@ pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
     let env_window = env.window.as_deref().and_then(|s| s.trim().parse::<u64>().ok());
     AutoCompact {
         enabled: enabled.unwrap_or(true)
-            && !env_truthy(env.disable.as_ref())
-            && !env_truthy(env.disable_all.as_ref()),
+            && !env_truthy(env.disable.as_deref())
+            && !env_truthy(env.disable_all.as_deref()),
         window: env_window.or(window),
         pct_override: env.pct.as_deref().and_then(|s| s.trim().parse::<f64>().ok()),
     }
@@ -468,6 +523,8 @@ pub(crate) mod tests {
         assert_eq!(keys.status_line_command.as_deref(), Some("garnish"));
         assert_eq!(keys.refresh_interval, Some(2.0));
         assert_eq!(keys.hide_vim_mode, Some(true));
+        assert_eq!(keys.padding, None);
+        assert_eq!(keys_of(r#"{"statusLine": {"padding": 2}}"#).padding, Some(2));
         assert_eq!(keys.disable_all_hooks, Some(false));
         assert_eq!(keys.tui, Some(Tui::Fullscreen));
         assert_eq!(keys_of(r#"{"tui": "default"}"#).tui, Some(Tui::Default));
@@ -549,17 +606,60 @@ pub(crate) mod tests {
         let fill = "é".repeat(usize::try_from(MAX_SETTINGS_BYTES).unwrap());
         std::fs::write(&wide, format!("{{\"note\": \"{fill}\"}}")).unwrap();
         assert!(matches!(read_file(&wide), FileState::Invalid(ref e) if e.contains("longer")));
-        assert_eq!(read_keys(&[huge, at_cap, dir.path().join("none.json")]).len(), 1);
+        let none = dir.path().join("none.json");
+        assert_eq!(read_keys(&[("user", huge), ("user", at_cap), ("user", none)]).len(), 1);
         let chain = settings_chain(
             Some(Path::new("/m/managed.json")),
             Some(Path::new("/p")),
-            Some(Path::new("/h")),
+            Some(Path::new("/h/.claude")),
         );
         let labels: Vec<&str> = chain.iter().map(|(l, _)| *l).collect();
         assert_eq!(labels, ["managed", "local", "project", "user"]);
         assert_eq!(chain[3].1, Path::new("/h/.claude/settings.json"));
-        assert_eq!(settings_files(None, None, None), Vec::<PathBuf>::new());
-        assert_eq!(settings_files(None, Some(Path::new("/p")), None).len(), 2);
+        assert_eq!(settings_chain(None, None, None), Vec::new());
+        assert_eq!(settings_chain(None, Some(Path::new("/p")), None).len(), 2);
+    }
+
+    /// SPEC § 7: `CLAUDE_CONFIG_DIR` moves the user directory (the settings
+    /// file and the skills) as it moves `.claude.json`; without it the
+    /// directory is `~/.claude`, and without a home there is none.
+    #[test]
+    fn the_user_dir_follows_the_config_dir_then_the_home() {
+        let home = Path::new("/h");
+        let dir = Path::new("/cfg");
+        assert_eq!(user_dir_in(None, Some(home)), Some(PathBuf::from("/h/.claude")));
+        assert_eq!(user_dir_in(Some(dir), Some(home)), Some(PathBuf::from("/cfg")));
+        assert_eq!(user_dir_in(Some(dir), None), Some(PathBuf::from("/cfg")));
+        assert_eq!(user_dir_in(None, None), None);
+        let user = user_dir_in(Some(dir), Some(home));
+        let chain = settings_chain(None, None, user.as_deref());
+        assert_eq!(chain, vec![("user", PathBuf::from("/cfg/settings.json"))]);
+        if std::env::var_os(CONFIG_DIR_ENV).is_none_or(|v| v.is_empty()) {
+            assert_eq!(user_dir(Some(home)), Some(PathBuf::from("/h/.claude")));
+        }
+    }
+
+    /// A `tui` that is neither name has Claude Code reject a whole file
+    /// (only the managed one merely loses the key), so the file's other keys
+    /// never count: `doctor` said "rejects that file" while the file's own
+    /// row said `ok` and the tick froze animations because of it.
+    #[test]
+    fn a_file_claude_code_rejects_contributes_no_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("local.json");
+        let user = dir.path().join("user.json");
+        std::fs::write(&local, r#"{"tui": "full", "prefersReducedMotion": true}"#).unwrap();
+        std::fs::write(&user, r#"{"prefersReducedMotion": false}"#).unwrap();
+        let keys = read_keys(&[("local", local.clone()), ("user", user.clone())]);
+        assert_eq!(keys.len(), 1);
+        assert!(!reduced_motion(&keys), "the user file decides");
+        let managed = read_keys(&[("managed", local), ("user", user)]);
+        assert!(reduced_motion(&managed), "the managed file only loses its `tui`");
+        let keys = parse_settings_json(r#"{"tui": "default"}"#).unwrap();
+        assert_eq!(rejected("local", &keys), None);
+        let keys = parse_settings_json(r#"{"tui": 1}"#).unwrap();
+        assert!(rejected("project", &keys).is_some_and(|why| why.contains("rejects")));
+        assert_eq!(rejected("managed", &keys), None);
     }
 
     /// SPEC § 4.2: `prefersReducedMotion` follows the file order of the
@@ -574,7 +674,9 @@ pub(crate) mod tests {
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::create_dir_all(proj.join(".claude")).unwrap();
         // No managed file: the tests must not depend on the machine's.
-        let chain = |p: Option<&Path>, h: Option<&Path>| read_keys(&settings_files(None, p, h));
+        let chain = |p: Option<&Path>, h: Option<&Path>| {
+            read_keys(&settings_chain(None, p, user_dir_in(None, h).as_deref()))
+        };
         assert!(!reduced_motion(&chain(Some(&proj), Some(&home))), "no file: off");
         std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": true}"#)
             .unwrap();
@@ -600,10 +702,10 @@ pub(crate) mod tests {
         // A managed file outranks them all.
         let managed = dir.path().join("managed.json");
         std::fs::write(&managed, r#"{"prefersReducedMotion": false}"#).unwrap();
-        assert!(!reduced_motion(&read_keys(&settings_files(
+        assert!(!reduced_motion(&read_keys(&settings_chain(
             Some(&managed),
             Some(&proj),
-            Some(&home)
+            Some(&home.join(".claude"))
         ))));
     }
 
@@ -656,7 +758,9 @@ pub(crate) mod tests {
         .unwrap();
         std::fs::write(proj.join(".claude/settings.json"), r#"{"autoCompactWindow": 400000}"#)
             .unwrap();
-        let chain = |p: Option<&Path>, h: Option<&Path>| read_keys(&settings_files(None, p, h));
+        let chain = |p: Option<&Path>, h: Option<&Path>| {
+            read_keys(&settings_chain(None, p, user_dir_in(None, h).as_deref()))
+        };
         let ac = resolve(&Env::default(), &chain(Some(&proj), Some(&home)));
         assert_eq!(ac, AutoCompact { enabled: true, window: Some(400_000), pct_override: None });
         std::fs::write(
@@ -686,6 +790,16 @@ pub(crate) mod tests {
             let env = Env { disable: Some(off.into()), ..Default::default() };
             assert!(resolve(&env, &[]).enabled, "{off}");
         }
+        // The one boolean rule of SPEC § 9: both word sets, anything else unset.
+        for on in ["1", "true", "YES", " On "] {
+            assert_eq!(env_bool(Some(on)), Some(true), "{on}");
+        }
+        for off in ["0", "false", "No", " OFF "] {
+            assert_eq!(env_bool(Some(off)), Some(false), "{off}");
+        }
+        for unset in [Some(""), Some("maybe"), Some("2"), None] {
+            assert_eq!(env_bool(unset), None, "{unset:?}");
+        }
         // The managed file: the platform's, the hook's, or none at all.
         let platform = managed_settings_from(None).unwrap();
         assert!(platform.ends_with("managed-settings.json"), "{}", platform.display());
@@ -694,7 +808,7 @@ pub(crate) mod tests {
             managed_settings_from(Some(std::ffi::OsStr::new("/tmp/m.json"))),
             Some(PathBuf::from("/tmp/m.json"))
         );
-        assert_eq!(settings_files(Some(&platform), None, None), vec![platform]);
-        assert_eq!(settings_files(None, None, None), Vec::<PathBuf>::new());
+        assert_eq!(settings_chain(Some(&platform), None, None), vec![("managed", platform)]);
+        assert_eq!(settings_chain(None, None, None), Vec::new());
     }
 }

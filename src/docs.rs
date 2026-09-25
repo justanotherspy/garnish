@@ -951,7 +951,7 @@ pub fn config_page() -> String {
     let _ = writeln!(o, "# Configuration reference\n");
     let _ = writeln!(
         o,
-        "garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.\n"
+        "garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init`, `garnish setup` and `garnish install` write the file found this way, and the XDG one only when there is none. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.\n"
     );
     let _ = writeln!(
         o,
@@ -975,7 +975,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `color` | `auto` \\| `always` \\| `never` \\| `256` \\| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set. |"
+        "| `color` | `auto` \\| `always` \\| `never` \\| `256` \\| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set and not empty. |"
     );
     let _ = writeln!(
         o,
@@ -1237,7 +1237,10 @@ fn environment_section(o: &mut String) {
         o,
         "| `COLUMNS` | Terminal width (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. The lines are rendered 4 cells narrower, plus `padding`: the width of Claude Code's status line box. |"
     );
-    let _ = writeln!(o, "| `NO_COLOR` | Disables escape codes under `color = \"auto\"`. |");
+    let _ = writeln!(
+        o,
+        "| `NO_COLOR` | Disables escape codes under `color = \"auto\"` when set and not empty (no-color.org). |"
+    );
     let _ = writeln!(o, "| `GARNISH_CONFIG` | Config file path. |");
     let _ = writeln!(
         o,
@@ -1253,7 +1256,7 @@ fn environment_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |"
+        "| `GARNISH_ANIMATE` | `0` (or `false`, `no`, `off`) freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |"
     );
     let _ = writeln!(
         o,
@@ -1465,9 +1468,6 @@ mod tests {
         assert!(index_page().contains("[`context`](modules/context.md)"));
     }
 
-    /// `config show` of a config with text modules parses back to the same
-    /// `Config`: names are bare keys and the `color` shorthand is written as
-    /// `colors.text`.
     /// Every animation key survives `config show`: frames, steps, direction
     /// and pattern come back as the same `Config`.
     #[test]
@@ -1483,6 +1483,9 @@ mod tests {
         assert_eq!(config_toml(&again, false), shown, "show is idempotent");
     }
 
+    /// `config show` of a config with text modules parses back to the same
+    /// `Config`: names are bare keys and the `color` shorthand is written as
+    /// `colors.text`.
     #[test]
     fn resolved_config_round_trips_text_modules() {
         let text = "[[line]]\nmodules = [\"path\", \"text.motd\"]\nright = [\"text.tag\"]\n[modules.text.motd]\ntext = \"ship it\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\nstep = 0.5\nlabel = \"motd\"\n[modules.text.tag]\ntext = \"v0.2\"\ncolor = \"muted\"\njustify = \"right\"\n";

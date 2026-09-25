@@ -3,11 +3,11 @@ Install into Claude Code
 settings file   ~/.claude/settings.json
 statusLine      { "type": "command", "command": "garnish", "refreshInterval": 1
                 the file will be created
-config          ~/garnish.toml (kept)
 skills          3 skill(s) to ~/.claude/skills
 warning: `garnish` is not on PATH; run `make install` first or use --absolute
 
 enter applies this, after one confirmation; esc goes back
+
 
 
 

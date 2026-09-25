@@ -121,6 +121,7 @@ fn cmd(env: &Env, args: &[&str]) -> Command {
         .env("NO_COLOR", "1")
         .env("HOME", env.work.parent().unwrap())
         .env("GARNISH_MANAGED_SETTINGS", "")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     cmd

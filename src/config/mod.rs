@@ -366,7 +366,7 @@ impl Overflow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ColorChoice {
-    /// Truecolor unless `NO_COLOR` is set.
+    /// Truecolor unless `NO_COLOR` is set and not empty.
     #[default]
     Auto,
     /// Always truecolor.
@@ -381,6 +381,16 @@ pub enum ColorChoice {
 }
 
 impl ColorChoice {
+    /// Every choice, in the order the reference lists them.
+    pub const ALL: [Self; 5] =
+        [Self::Auto, Self::Always, Self::Never, Self::Ansi256, Self::TrueColor];
+
+    /// The choice a config name stands for.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.name() == name)
+    }
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -393,7 +403,7 @@ impl ColorChoice {
         }
     }
 
-    /// Resolve to a concrete mode given the environment.
+    /// Resolve to a concrete mode given the environment ([`no_color_env`]).
     #[must_use]
     pub const fn mode(self, no_color_env: bool) -> ColorMode {
         match self {
@@ -409,6 +419,20 @@ impl ColorChoice {
             Self::Ansi256 => ColorMode::Ansi256,
         }
     }
+}
+
+/// Whether `NO_COLOR` asks for no colour: set *and not empty*, as
+/// no-color.org defines it (an empty value is the shell's "unset", the
+/// rule garnish applies to every path variable too).
+#[must_use]
+pub fn no_color_env() -> bool {
+    no_color_from(std::env::var_os("NO_COLOR").as_deref())
+}
+
+/// [`no_color_env`] for an explicit value of the variable.
+#[must_use]
+pub fn no_color_from(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| !v.is_empty())
 }
 
 /// Which way an animated rule pattern travels (`[frame] fill_direction`).
@@ -1341,19 +1365,39 @@ pub(crate) fn env_path(key: &str) -> Option<PathBuf> {
     std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+/// An XDG base directory variable (`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`,
+/// `XDG_RUNTIME_DIR`): [`env_path`], and `None` for a relative value too.
+///
+/// The XDG Base Directory spec calls a relative value invalid and says to
+/// ignore it, and garnish must: a relative base is the working directory's,
+/// which for a tick is the session's repository, so `XDG_CONFIG_HOME=.config`
+/// made a checkout's own `.config/garnish/garnish.toml` the config.
+pub(crate) fn xdg_path(key: &str) -> Option<PathBuf> {
+    xdg_base(env_path(key))
+}
+
+/// [`xdg_path`]'s rule for a value already looked up.
+pub(crate) fn xdg_base(value: Option<PathBuf>) -> Option<PathBuf> {
+    value.filter(|p| p.is_absolute())
+}
+
 /// The XDG base for garnish's own files: `XDG_CONFIG_HOME`, else `~/.config`.
 fn config_home() -> Option<PathBuf> {
-    env_path("XDG_CONFIG_HOME")
+    xdg_path("XDG_CONFIG_HOME")
         .or_else(|| crate::claude_settings::home_dir().map(|h| h.join(".config")))
+}
+
+/// The config file named explicitly: `--config` (`flag`), else
+/// `GARNISH_CONFIG`; `None` when neither names one.
+#[must_use]
+pub fn explicit(flag: Option<&Path>) -> Option<PathBuf> {
+    flag.map(Path::to_path_buf).or_else(|| env_path(CONFIG_ENV))
 }
 
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
 #[must_use]
-pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
-    if let Some(p) = explicit {
-        return Some(p.to_path_buf());
-    }
-    if let Some(p) = env_path(CONFIG_ENV) {
+pub fn locate(flag: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = explicit(flag) {
         return Some(p);
     }
     let xdg = config_home().map(|d| d.join("garnish").join("garnish.toml"));
@@ -1369,6 +1413,19 @@ pub fn default_path() -> Option<PathBuf> {
     // Without a home there is no default: guessing `.` would write into
     // whatever directory garnish happens to run from (a repository, say).
     Some(config_home()?.join("garnish").join("garnish.toml"))
+}
+
+/// The file a command that writes a config writes: [`locate`], else
+/// [`default_path`].
+///
+/// `config init`, `setup` and `install`'s default config all go there;
+/// `None` without a home and without `--config` or `GARNISH_CONFIG` (SPEC
+/// § 5: never guess the current directory). Writing the default path while `~/.garnish.toml` is the config would
+/// create a file that [`locate`] prefers, and the user's config would stop
+/// applying without a word.
+#[must_use]
+pub fn write_target(explicit: Option<&Path>) -> Option<PathBuf> {
+    locate(explicit).or_else(default_path)
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported
@@ -4349,5 +4406,10 @@ blank = true
         assert_eq!(ColorChoice::Auto.mode(true), ColorMode::Never);
         assert_eq!(ColorChoice::Never.mode(false), ColorMode::Never);
         assert_eq!(ColorChoice::Ansi256.mode(false), ColorMode::Ansi256);
+        // no-color.org: present *and not empty*.
+        assert!(!no_color_from(None));
+        assert!(!no_color_from(Some(std::ffi::OsStr::new(""))));
+        assert!(no_color_from(Some(std::ffi::OsStr::new("1"))));
+        assert!(no_color_from(Some(std::ffi::OsStr::new("0"))), "any value but empty");
     }
 }

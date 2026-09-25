@@ -16,10 +16,10 @@ pub const DEBUG_ENV: &str = "GARNISH_DEBUG";
 /// Rotate the log once it grows past this many bytes.
 const MAX_BYTES: u64 = 1024 * 1024;
 
-/// Whether logging is enabled (Claude Code's truthy rule).
+/// Whether logging is enabled (the boolean hook rule, SPEC § 9).
 #[must_use]
 pub fn enabled() -> bool {
-    crate::claude_settings::env_truthy(std::env::var(DEBUG_ENV).ok().as_ref())
+    crate::claude_settings::env_flag(DEBUG_ENV) == Some(true)
 }
 
 /// Append one line to the debug log when enabled.

@@ -176,6 +176,7 @@ fn render(case: &Case, cache: &Path) -> String {
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("NO_COLOR")
         // A developer running with animations off must not turn the ticker
         // goldens red; a fixture opts in through its own `# env:` line.

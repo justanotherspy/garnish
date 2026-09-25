@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{App, Key, Screen};
-use crate::install::{Applied, ConfigStep, Refusal, Steps};
+use crate::install::{ConfigStep, Refusal, Steps};
 use crate::setup::pick::{Confirm, Layer, Question};
 use crate::setup::ui::Chrome;
 
@@ -15,7 +15,8 @@ use crate::setup::ui::Chrome;
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct InstallScreen {
     steps: Result<Steps, Refusal>,
-    applied: Option<Result<Applied, Refusal>>,
+    /// What applying the plan wrote, one line each, or why it could not.
+    applied: Option<Result<Vec<String>, Refusal>>,
     /// Where `Esc` goes back to.
     back: Back,
 }
@@ -54,11 +55,16 @@ impl App {
         }
     }
 
+    /// Apply the plan, made again first: the screen may have been open for
+    /// a while, and a plan merged from the text read when it opened would
+    /// drop what another program wrote since (`/voice` in Claude Code
+    /// writes `voice.enabled` to the user file) and back up nothing if the
+    /// file was created meanwhile. The screen then shows the plan applied.
     pub(super) fn install_apply(&mut self) {
         let Screen::Install(screen) = &mut self.screen else { return };
-        if let Ok(steps) = &screen.steps {
-            screen.applied = Some(steps.apply());
-        }
+        let steps = Steps::plan(&self.options);
+        screen.applied = steps.as_ref().ok().map(Steps::apply);
+        screen.steps = steps;
     }
 
     pub(super) fn draw_install(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -74,9 +80,17 @@ impl App {
                     "settings file   {}",
                     self.shown(&steps.plan.settings)
                 )));
+                // The command may name a config path under the home, which
+                // is shown as `~` like every path here.
+                let command = self.home.as_deref().map_or_else(
+                    || steps.command.clone(),
+                    |home| {
+                        let prefix = format!("{}/", home.display());
+                        steps.command.replace(&prefix, "~/")
+                    },
+                );
                 lines.push(Line::from(format!(
-                    "statusLine      {{ \"type\": \"command\", \"command\": {:?}, \"refreshInterval\": {}{} }}",
-                    steps.plan.command,
+                    "statusLine      {{ \"type\": \"command\", \"command\": {command:?}, \"refreshInterval\": {}{} }}",
                     steps.plan.refresh_interval,
                     steps.plan.padding.map_or_else(String::new, |p| format!(", \"padding\": {p}"))
                 )));
@@ -120,7 +134,7 @@ impl App {
                         Chrome::muted(),
                     ))),
                     Some(Ok(applied)) => {
-                        for l in &applied.lines {
+                        for l in applied {
                             lines.push(Line::from(Span::styled(l.clone(), Chrome::set())));
                         }
                         lines.push(Line::from(Span::styled(
