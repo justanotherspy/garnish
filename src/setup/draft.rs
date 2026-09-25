@@ -314,7 +314,8 @@ impl Draft {
         col.get("row")?.as_array()?.get(i)?.as_table()
     }
 
-    /// The table at `at`, to edit; marks the draft dirty.
+    /// The table at `at`, to edit; a file with no `[[row]]` gets its
+    /// preset's rows written out first, as [`Draft::rows_mut`] does.
     pub fn row_mut(&mut self, at: RowAt) -> Option<&mut Table> {
         let row = self.rows_mut()?.get_mut(at.row)?.as_table_mut()?;
         let Some(c) = at.col else { return Some(row) };

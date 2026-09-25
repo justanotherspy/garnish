@@ -1682,7 +1682,10 @@ same information in less screen. The glyph suggestions are one table in
 `icons.rs` keyed by module and icon key rather than a field on each
 `IconSpec`, with the same guard test and the same *also try* list on the
 module pages, and the glyph picker prints each candidate's cell count
-(`|1`, `|2`) rather than the doctor's two-cell grid. The placement map is
+(`|1`, `|2`) rather than the doctor's two-cell grid. The marks of the
+screen's own chrome are ASCII (a chip's and a set key's `*`, the
+preview's `>` row marker) rather than the geometric dot and arrow first
+drawn, which some terminals draw two cells wide. The placement map is
 `layout::Line::modules()` over `render::render_tree_at`, which returns
 each row's lines as typed pieces. A click selects a module and a second
 click, or `Enter`, edits it; a click on a cap or the rule opens the frame
@@ -1863,9 +1866,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   and icons as the pickers below. Every change re-renders the preview at
   once; `Esc` closes the innermost layer (a picker over a panel over the
   builder) and, with none open, leaves the builder or the preset picker
-  as `q` does, and the module's chip shows a dot while it carries
-  overrides. The form is generated from `ModuleSchema`, so a new option
-  is a new row.
+  as `q` does, and the module's chip shows a `*` while it carries
+  overrides (a form marks a key the file sets the same way). The form is
+  generated from `ModuleSchema`, so a new option is a new row.
 - **Freeform values come with suggestions.** A string option (`label`,
   `prefix`, `suffix`, `text`, `gap`, a line's `separator`, `ticker_gap`,
   the frame's `fill_char` and caps) opens a picker whose first entries are
