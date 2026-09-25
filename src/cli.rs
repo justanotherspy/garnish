@@ -48,11 +48,18 @@ pub struct RenderArgs {
 
 impl RenderArgs {
     /// The overrides as a config overlay. A typo is a one-line note on
-    /// stderr and a [`Quiet`] failure, not an error report (bug 7).
+    /// stderr and a [`Quiet`] failure, not an error report, and each of the
+    /// four flags is checked here: a theme left to the config's resolver
+    /// was reported under every fixture as a problem of the config file.
     fn overlay(&self) -> Result<Overlay> {
         let typo = |what: &str, value: &str, expected: &str| {
             eprintln!("unknown {what} {value:?}; expected {expected}");
             color_eyre::Report::from(Quiet)
+        };
+        // `a, b or c`.
+        let either = |names: Vec<&str>| match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => names.join(""),
         };
         let preset = self
             .preset
@@ -73,16 +80,26 @@ impl RenderArgs {
         let color = self
             .color
             .as_deref()
-            .map(|c| match c {
-                "auto" => Ok(ColorChoice::Auto),
-                "always" => Ok(ColorChoice::Always),
-                "never" => Ok(ColorChoice::Never),
-                "256" => Ok(ColorChoice::Ansi256),
-                "truecolor" => Ok(ColorChoice::TrueColor),
-                other => Err(typo("color mode", other, "auto, always, never, 256 or truecolor")),
+            .map(|c| {
+                ColorChoice::parse(c).ok_or_else(|| {
+                    typo("color mode", c, &either(ColorChoice::ALL.map(ColorChoice::name).to_vec()))
+                })
             })
             .transpose()?;
-        Ok(Overlay { preset, icons, theme: self.theme.clone(), color })
+        let theme = self
+            .theme
+            .as_deref()
+            .map(|t| {
+                crate::theme::palette(t).map(|_| t.to_owned()).ok_or_else(|| {
+                    typo(
+                        "theme",
+                        t,
+                        &either(crate::theme::PALETTES.iter().map(|p| p.name).collect()),
+                    )
+                })
+            })
+            .transpose()?;
+        Ok(Overlay { preset, icons, theme, color })
     }
 }
 
@@ -129,10 +146,13 @@ pub enum Command {
     },
     /// Remove cache directories of sessions idle for more than a day.
     Gc,
-    /// Regenerate the reference documentation from the module schemas.
+    /// Regenerate the reference documentation from the module schemas (for
+    /// maintainers; `make docs` does it through the docs-sync test).
+    #[command(hide = true)]
     Docs {
-        /// Output directory (default `docs`).
-        #[arg(long, default_value = "docs")]
+        /// Output directory; there is no default, since the pages replace
+        /// same-named files in it.
+        #[arg(long)]
         out: PathBuf,
     },
     /// Wire garnish into Claude Code's settings.json (a backup is kept).
@@ -252,8 +272,20 @@ pub fn run() -> Result<std::process::ExitCode> {
     match run_command() {
         Ok(()) => Ok(std::process::ExitCode::SUCCESS),
         Err(e) if e.downcast_ref::<Quiet>().is_some() => Ok(std::process::ExitCode::FAILURE),
+        // A reader that stopped reading (`garnish presets | head`) wanted
+        // no more; that is not a failure worth a report.
+        Err(e) if broken_pipe(&e) => Ok(std::process::ExitCode::SUCCESS),
         Err(e) => Err(e),
     }
+}
+
+/// Whether an error is, at bottom, a write to a pipe nobody reads.
+fn broken_pipe(e: &color_eyre::Report) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
 }
 
 /// A command line clap refused.
@@ -719,7 +751,7 @@ pub fn preset_text(preset: &str) -> Result<String> {
         return Ok(crate::docs::config_toml(&cfg, true));
     }
     let Some(p) = crate::gallery::find(preset) else {
-        // A typo, not a fault: one line, no report (bug 7).
+        // A typo, not a fault: one line, no report.
         eprintln!(
             "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
             crate::gallery::PRESETS.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")

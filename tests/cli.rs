@@ -517,12 +517,60 @@ fn preview_typos_are_one_line_not_a_report() {
         ("--preset", "fulll", "default, minimal, full or compact"),
         ("--icons", "nerdy", "nerd, unicode, emoji or ascii"),
         ("--color", "sometimes", "auto, always, never, 256 or truecolor"),
+        // A theme typo was blamed on the config file under every fixture.
+        ("--theme", "nrod", "garnish, catppuccin-mocha, nord"),
     ] {
         let (out, err, ok) = run(&["preview", payload, flag, value], dir.path(), &[]);
         assert!(!ok && out.is_empty(), "{flag} {value}: {out}");
+        assert_eq!(err.lines().count(), 1, "{flag}: {err}");
         assert!(err.contains(value) && err.contains(expected), "{flag}: {err}");
         assert!(!err.contains("Location:") && !err.contains("Error:"), "{flag}: {err}");
     }
+}
+
+/// A listing piped into a reader that stops early (`garnish presets |
+/// head`) is not a failure: a broken pipe used to end in a color-eyre
+/// report with a source location and exit 1.
+#[test]
+fn a_reader_that_stops_early_gets_no_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_garnish"))
+        .args(["preview", fixtures, "--width", "100"])
+        .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The reader is gone before the first write.
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && !err.contains("Location:"), "{:?}: {err}", out.status);
+}
+
+/// `garnish docs` is a maintainer's tool: hidden from `--help`, and with
+/// no default `--out`, so run in a project of one's own it cannot replace
+/// that project's `docs/README.md`.
+#[test]
+fn docs_needs_an_explicit_out_and_is_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    std::fs::create_dir_all(home.join("docs")).unwrap();
+    std::fs::write(home.join("docs/README.md"), "mine").unwrap();
+    let (_, err, ok) = run(&["docs"], home, &[]);
+    assert!(!ok && err.contains("--out"), "{err}");
+    assert_eq!(std::fs::read_to_string(home.join("docs/README.md")).unwrap(), "mine");
+    let (help, _, ok) = run(&["--help"], home, &[]);
+    assert!(ok && help.contains("preview") && !help.contains("docs"), "{help}");
+    let out = home.join("generated");
+    let (said, _, ok) = run(&["docs", "--out", out.to_str().unwrap()], home, &[]);
+    assert!(ok && out.join("README.md").exists(), "{said}");
 }
 
 /// `--lock-held` means "the caller already holds *this module's* lock" and

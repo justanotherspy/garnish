@@ -381,6 +381,16 @@ pub enum ColorChoice {
 }
 
 impl ColorChoice {
+    /// Every choice, in the order the reference lists them.
+    pub const ALL: [Self; 5] =
+        [Self::Auto, Self::Always, Self::Never, Self::Ansi256, Self::TrueColor];
+
+    /// The choice a config name stands for.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.name() == name)
+    }
+
     /// Config name.
     #[must_use]
     pub const fn name(self) -> &'static str {

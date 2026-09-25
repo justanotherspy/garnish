@@ -1239,7 +1239,7 @@ fn look_fields(draft: &Draft, config: &Config) -> Vec<Field> {
         Field::new(
             "color",
             "Colour output: auto | always | never | 256 | truecolor.",
-            names(&["auto", "always", "never", "256", "truecolor"]),
+            names(&crate::config::ColorChoice::ALL.map(crate::config::ColorChoice::name)),
             s("color"),
         )
         .valued(draft, Some(string(config.color.name())), "auto"),
