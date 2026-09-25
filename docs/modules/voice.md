@@ -51,6 +51,8 @@ Shows while `voice.enabled` is `true` in Claude Code's settings chain (`/voice` 
 |---|---|---|---|---|---|
 | `voice` | `U+F130` | `∿` | `🎤` | `mic` | Voice glyph. |
 
+Also try (`voice`: `U+F130` `U+F028` `U+F2CE` `∿` `~`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

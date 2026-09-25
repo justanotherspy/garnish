@@ -53,6 +53,8 @@ Nothing to show above (—): the worker reads `~/.claude.json`, which a sample n
 |---|---|---|---|---|---|
 | `account` | `U+F007` | `@` | `👤` | `@` | Account icon. |
 
+Also try (`account`: `U+F007` `U+F2BD` `U+F2C0` `@` `&`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 

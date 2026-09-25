@@ -51,6 +51,8 @@ Shows while `sandbox.enabled` is `true` in Claude Code's settings chain (the fir
 |---|---|---|---|---|---|
 | `sandbox` | `U+F023` | `⊡` | `🔒` | `[]` | Sandbox glyph. |
 
+Also try (`sandbox`: `U+F023` `U+F132` `U+F1B2` `⊡` `⊠` `[]`).
+
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 
 
