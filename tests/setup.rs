@@ -1097,6 +1097,26 @@ fn the_home_menu_fits_the_smallest_terminal() {
     }
 }
 
+/// app-09: deleting a box's last member drops its table, as every other
+/// way out of a box does.
+#[test]
+fn deleting_a_boxs_last_member_drops_the_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[box.repo]\n[[row]]\nbox = \"repo\"\nmodules = [\"path\"]\n[[row]]\nmodules = [\"clock\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "x");
+    assert_eq!(app.draft().rows().len(), 1);
+    assert!(app.draft().get(&["box"]).is_none());
+    assert_eq!(app.draft().resolved().1, Vec::new());
+    assert!(app.status().unwrap().contains("[box.repo] dropped"), "{:?}", app.status());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

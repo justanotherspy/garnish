@@ -489,7 +489,8 @@ impl Builder {
     }
 
     /// Remove the selected module, or the selected line when no chip is;
-    /// the last `[[row]]` stays.
+    /// the last `[[row]]` stays, and a box the line was the last member of
+    /// goes with its table.
     ///
     /// # Errors
     /// Why nothing was removed, for the status bar.
@@ -528,8 +529,15 @@ impl Builder {
                 table.remove(if item.kind == ItemKind::Inner { "row" } else { "col" });
             }
         }
+        // The line may have been a box's last member.
+        let orphans = draft.prune_orphan_boxes();
         self.rebuild(draft);
-        Ok(format!("deleted {}", item.label().trim()))
+        let mut out = format!("deleted {}", item.label().trim());
+        if !orphans.is_empty() {
+            out.push_str("; ");
+            out.push_str(&dropped_boxes(&orphans));
+        }
+        Ok(out)
     }
 
     /// Insert a new row after (or before) the selected one, in the same
