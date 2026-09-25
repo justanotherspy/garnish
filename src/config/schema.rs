@@ -512,7 +512,6 @@ pub struct ModuleCfg {
     /// absent keys keep their static glyph.
     icon_frames: BTreeMap<&'static str, Vec<String>>,
     colors: BTreeMap<&'static str, Color>,
-    schema: ModuleSchema,
 }
 
 impl ModuleCfg {
@@ -597,7 +596,6 @@ impl ModuleCfg {
                 .filter_map(|i| overrides.icon_frames.get(i.key).map(|f| (i.key, f.clone())))
                 .collect(),
             colors,
-            schema: schema.clone(),
         }
     }
 
@@ -630,12 +628,6 @@ impl ModuleCfg {
             }
         }
         std::borrow::Cow::Owned(view)
-    }
-
-    /// The schema this config was resolved from.
-    #[must_use]
-    pub const fn schema(&self) -> &ModuleSchema {
-        &self.schema
     }
 
     /// The resolved value of a [`COMMON_OPTS`] key or of `hide`, for
@@ -738,24 +730,6 @@ impl ModuleCfg {
     #[must_use]
     pub fn color(&self, key: &str) -> Color {
         self.colors.get(key).copied().unwrap_or_default()
-    }
-
-    /// Every resolved option, for `config show` and docs.
-    #[must_use]
-    pub const fn opts(&self) -> &BTreeMap<&'static str, Value> {
-        &self.opts
-    }
-
-    /// Every resolved icon.
-    #[must_use]
-    pub const fn icons(&self) -> &BTreeMap<&'static str, String> {
-        &self.icons
-    }
-
-    /// Every resolved color.
-    #[must_use]
-    pub const fn colors(&self) -> &BTreeMap<&'static str, Color> {
-        &self.colors
     }
 }
 
