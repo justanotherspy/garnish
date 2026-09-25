@@ -1,0 +1,30 @@
+# fixture: subscription-full
+# columns: 40
+# icons: unicode
+# A `custom` box with corners and no side (SPEC § 4.3): the corners are
+# drawn whatever the side is, so a box needs their two cells even where its
+# side would fit in none. A one-cell boxed column is too narrow for them and
+# renders nothing; it used to draw `++`, overflow the line, and have the
+# whole line recut to `…`. The second row's box has room and draws them.
+[frame]
+style = "custom"
+top_left = "+"
+top_right = "+"
+bottom_left = "+"
+bottom_right = "+"
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+width = 1
+box = true
+modules = ["clock"]
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+width = 14
+box = true
+modules = ["clock"]

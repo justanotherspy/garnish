@@ -1283,7 +1283,11 @@ color = "accent"               # role or literal for the box's glyphs; default t
   drawn rounded. A `custom` frame adds `top_left`, `top_right`,
   `bottom_left`, `bottom_right` and `side`, one cell each (reported
   otherwise, the style's glyph stays); every glyph passes the § 4.1
-  width guard.
+  width guard. Any of the five may be left empty; the corners are drawn
+  whatever the side is, so a box too narrow for its corners renders
+  nothing, as one too narrow for its sides does (2026-09-25: with corners
+  and no side, a one-cell box drew `++`, overflowed the line and had it
+  recut to `…`).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under

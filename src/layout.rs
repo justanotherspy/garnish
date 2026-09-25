@@ -797,9 +797,17 @@ impl Layout<'_> {
     ///
     /// A box is its two sides, a pad each side of the content and the
     /// content: `None` when even the sides do not fit, and no pads when
-    /// they would leave nothing to draw in.
+    /// they would leave nothing to draw in. The corners are drawn whatever
+    /// the side is, so a `custom` box with corners and no side needs their
+    /// cells too, or its top and bottom lines would overflow.
     fn box_interior(&self, chars: &BoxChars, width: usize) -> Option<(usize, usize)> {
         let sides = display_width(&chars.side).saturating_mul(2);
+        let pair = |a: &str, b: &str| display_width(a).saturating_add(display_width(b));
+        let corners = pair(&chars.top_left, &chars.top_right)
+            .max(pair(&chars.bottom_left, &chars.bottom_right));
+        if width < corners {
+            return None;
+        }
         let left = width.checked_sub(sides)?;
         let pad = self.box_pad();
         if left > pad.saturating_mul(2) {
@@ -2309,6 +2317,50 @@ mod tests {
                             .collect();
                         assert_eq!(edges.len(), 2, "{text}");
                         assert_eq!(edges[1].end - edges[0].start, 14, "at {at}:\n{text}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// SPEC § 4.3: a box's corners are drawn whatever its side is, so a
+    /// `custom` box with corners and no side needs their two cells even
+    /// where its side would fit in none. The room used to count the side
+    /// alone: a one-cell boxed column drew `++`, the line overflowed, and
+    /// `paint` recut the whole of it to `…`, placement map and all.
+    #[test]
+    fn a_box_never_draws_corners_wider_than_its_room() {
+        let plus = || "+".to_owned();
+        for width in [12_usize, 40] {
+            for fill in [true, false] {
+                let mut f = Fixture::new(FrameStyle::Custom, fill, width);
+                f.chars.top_left = plus();
+                f.chars.top_right = plus();
+                f.chars.bottom_left = plus();
+                f.chars.bottom_right = plus();
+                f.chars.side = String::new();
+                let l = f.layout();
+                for cells in 0..=3_usize {
+                    let boxed = Col { boxed: Some(&BoxRef::Anon), ..col(Width::Cells(cells), "x") };
+                    let stack = Col {
+                        content: Content::Stack(vec![Row {
+                            boxed: Some(&BoxRef::Anon),
+                            ..row(vec![col(Width::Fr(1), "y")], 1)
+                        }]),
+                        ..col(Width::Cells(cells), "")
+                    };
+                    for last in [boxed, stack] {
+                        let r = row(vec![col(Width::Fr(1), "❖ Opus"), last], 1);
+                        for line in l.lines(std::slice::from_ref(&r)).into_iter().flatten() {
+                            let fits =
+                                if fill { line.width() == width } else { line.width() <= width };
+                            assert!(fits, "{cells}: {} cells: {}", line.width(), show(&line));
+                            assert!(
+                                !line.pieces.iter().any(|p| p.elem == Elem::Group(Vec::new())),
+                                "{cells}: the line was recut: {}",
+                                show(&line)
+                            );
+                        }
                     }
                 }
             }
