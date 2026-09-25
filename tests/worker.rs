@@ -739,15 +739,31 @@ fn worker_reads_the_config_file_its_tick_read() {
 /// Run the workers `modules` as their logged spawns would (on Linux the
 /// tick handed each its lock).
 fn run_workers(env: &Env, modules: &[&str]) {
+    run_workers_with(env, modules, &[]);
+}
+
+/// [`run_workers`] with `extra_env` in the workers' environment.
+fn run_workers_with(env: &Env, modules: &[&str], extra_env: &[(&str, &str)]) {
     let w = env.work.to_str().unwrap().to_owned();
     for module in modules {
         let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
         if cfg!(target_os = "linux") {
             args.push("--lock-held");
         }
-        let (_, err, ok) = garnish(env, &args, None, &[]);
+        let (_, err, ok) = garnish(env, &args, None, extra_env);
         assert!(ok, "{module}: {err}");
     }
+}
+
+/// A `PATH` whose first `git` fails every call, as a git that cannot read
+/// the repository does (too old for its format, a `safe.directory`
+/// refusal).
+fn failing_git_path(env: &Env) -> String {
+    let shim = env.work.parent().unwrap().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    std::fs::write(shim.join("git"), "#!/bin/sh\necho 'fatal: nope' >&2\nexit 128\n").unwrap();
+    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default())
 }
 
 /// SPEC § 6: a repository whose refs are not files (reftable) has no HEAD
@@ -781,22 +797,36 @@ fn worker_refs_that_are_not_files_fall_back_to_the_worker() {
     assert!(out.contains("main") && out.contains('⟳'), "{out}");
     assert_eq!(spawns(&env).len(), 4, "{:?}", spawns(&env));
     // A worker whose git fails leaves nothing to name, and still its mark.
-    let shim = env.work.parent().unwrap().join("shim");
-    std::fs::create_dir_all(&shim).unwrap();
-    std::fs::write(shim.join("git"), "#!/bin/sh\necho 'fatal: nope' >&2\nexit 128\n").unwrap();
-    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
-    let w = env.work.to_str().unwrap().to_owned();
-    for module in ["branch", "sync"] {
-        let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
-        if cfg!(target_os = "linux") {
-            args.push("--lock-held");
-        }
-        let (_, err, ok) = garnish(&env, &args, None, &[("PATH", path.as_str())]);
-        assert!(ok, "{err}");
-    }
+    let failing = failing_git_path(&env);
+    run_workers_with(&env, &["branch", "sync"], &[("PATH", failing.as_str())]);
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert_eq!(out.matches('✗').count(), 2, "{out}");
+}
+
+/// A reftable worker that fails (a git before 2.45 meeting the
+/// `refStorage` extension, a `safe.directory` refusal, the timeout) writes
+/// a failed entry, and a failed entry carries no `tables` stamp. The
+/// fallback's check compared the stamp alone, so the failure was never
+/// fresh and every tick spawned another worker (review 2026-09-25): a
+/// failed entry is fresh for its TTL like any other.
+#[test]
+fn worker_a_failed_reftable_worker_is_fresh_for_its_ttl() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let tables = env.work.join(".git").join("reftable").join("tables.list");
+    std::fs::create_dir_all(tables.parent().unwrap()).unwrap();
+    std::fs::write(&tables, "").unwrap();
+    let (_, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok);
+    assert_eq!(spawns(&env).len(), 2, "{:?}", spawns(&env));
+    let failing = failing_git_path(&env);
+    run_workers_with(&env, &["branch", "sync"], &[("PATH", failing.as_str())]);
+    for _ in 0..3 {
+        let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert_eq!(out.matches('✗').count(), 2, "{out}");
+        assert!(!out.contains('⟳'), "{out}");
+    }
+    assert_eq!(spawns(&env).len(), 2, "a failed entry spawns nothing: {:?}", spawns(&env));
 }
 
 /// The real reftable format, where the installed git has it (2.45 and

@@ -1643,7 +1643,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   failures. Both entries carry `tables`, the mtimes of the worktree's and
   the common `reftable/tables.list` (taken before git is asked), and the
   tick treats an entry whose `tables` differs from what it stats as for
-  another state of the refs. A `HEAD` the tick refuses in a files
+  another state of the refs; a failed entry, which keeps no values, is
+  fresh for its TTL whatever the stamp (a failing git used to get a worker
+  spawned on every tick). A `HEAD` the tick refuses in a files
   repository (a link out of the git directory) leaves `branch`'s entry
   without a `head` key, which any render accepts (an empty one matched
   nothing, so every tick spawned a worker). Ahead/behind, dirty, and fetch run in the
