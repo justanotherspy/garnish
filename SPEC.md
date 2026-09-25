@@ -1426,7 +1426,9 @@ Measured with hyperfine (`bench/run.sh`, release build, `-N`, warmup 20,
 | scenario | mean | p99 |
 |---|---|---|
 | warm tick, default preset | < 3 ms | < 8 ms |
-| warm tick, full preset, all modules | < 3 ms | < 8 ms |
+| warm tick, full preset (the default rows, every option) | < 3 ms | < 8 ms |
+| warm tick, one row of every module id (settings badges, `account`) | < 3 ms | < 8 ms |
+| warm tick, default preset, `TZ` naming a zone | < 3 ms | < 8 ms |
 | cold tick (empty cache, git repo) | < 30 ms | — |
 | `refresh --module sync` worker (rev-list, no fetch) | < 50 ms | — |
 
