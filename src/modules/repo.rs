@@ -432,7 +432,7 @@ impl Module for BranchModule {
             id: "branch",
             measure: None,
             summary: "Checked-out branch (or detached HEAD).",
-            doc: "The current branch read from the repository without spawning git; a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).",
+            doc: "The current branch read from the repository without spawning git (in a reftable repository, whose refs are not files, the background worker asks git instead); a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).",
             sources: &["worktree.branch", ".git/HEAD", "git diff-index and diff-files (worker)"],
             refresh: 5,
             opts: vec![
@@ -494,22 +494,42 @@ impl Module for BranchModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let dirs = ctx.git_dirs();
         let head = ctx.git_head();
-        let (name, detached) =
-            match (head, ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref())) {
-                (Some(Head::Branch(b)), _) => (b.clone(), false),
-                (Some(Head::Detached(sha)), _) => (short_sha(sha), true),
-                (None, Some(b)) => (b.to_owned(), false),
-                (None, None) => return Rendered::empty(),
-            };
+        let payload_branch = ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref());
+        // SPEC § 6: refs git keeps outside files (reftable) cannot be read
+        // on the tick, so the worker asks git, and its entry is keyed on
+        // the ref store's stamp, which the tick can `stat`.
+        let fallback = head.is_none() && dirs.is_some_and(git::Dirs::uses_reftable);
+        let cached = dirs.filter(|_| fallback || cfg.bool("dirty")).map(|d| {
+            let scope = Scope::Repo(d.cache_key());
+            if fallback {
+                let stamp = git::reftable_stamp(d);
+                ctx.cached(cfg, &scope, |e| e.get("tables") == stamp.as_deref())
+            } else {
+                // The name the row shows is the key, however it was found; a
+                // worker that could not read HEAD records none, which any
+                // key accepts (an empty one used to match nothing, so every
+                // tick spawned a worker).
+                let key =
+                    head.map_or_else(|| payload_branch.map(str::to_owned), |h| Some(head_key(h)));
+                ctx.cached(cfg, &scope, |e| e.get("head").is_none_or(|h| Some(h) == key.as_deref()))
+            }
+        });
+        let entry = cached.as_ref().and_then(|(lookup, _)| lookup.entry.as_ref());
+        let asked = if fallback { entry.and_then(asked_head) } else { None };
+        let (name, detached) = match (head.or(asked.as_ref()), payload_branch) {
+            (Some(Head::Branch(b)), _) => (b.clone(), false),
+            (Some(Head::Detached(sha)), _) => (short_sha(sha), true),
+            (None, Some(b)) => (b.to_owned(), false),
+            (None, None) => return Rendered::empty(),
+        };
         let shown = cut_name(&name, cfg.size("max_length"), ctx.icons);
-        let head_key = name;
         let mut segs: Vec<Segment> = lead(cfg, if detached { "detached" } else { "branch" });
         // SPEC § 3.1 `link`: the branch on the forge, from the payload's
         // repo identity alone (no git call); a detached head has no page.
         let url = (cfg.bool("link") && !detached)
             .then(|| ctx.payload.workspace.as_ref()?.repo.as_ref())
             .flatten()
-            .and_then(|repo| branch_url(repo, &head_key, is_gitlab(repo, ctx.payload)));
+            .and_then(|repo| branch_url(repo, &name, is_gitlab(repo, ctx.payload)));
         let mut name_seg = Segment::styled(
             shown,
             Style::fg(cfg.color("name")).bolded().underline_if(url.is_some()),
@@ -518,27 +538,23 @@ impl Module for BranchModule {
             name_seg = name_seg.with_link(url);
         }
         segs.push(name_seg);
+        let sha = if fallback {
+            entry.and_then(|e| e.get("sha")).map(str::to_owned)
+        } else {
+            dirs.zip(head).and_then(|(d, h)| git::head_commit(d, h))
+        };
         if cfg.bool("show_sha")
             && !detached
-            && let (Some(d), Some(h)) = (dirs, head)
-            && let Some(sha) = git::head_commit(d, h)
+            && let Some(sha) = sha
         {
             segs.push(seg(cfg, format!(" {}", short_sha(&sha)), "sha"));
         }
-        let mut freshness = Freshness::Fresh;
-        if cfg.bool("dirty")
-            && let Some(d) = dirs
-        {
-            let scope = Scope::Repo(d.cache_key());
-            let (lookup, fresh) =
-                ctx.cached(cfg, &scope, |e| e.get("head").is_none_or(|h| h == head_key));
-            if lookup.entry.as_ref().and_then(|e| e.get("dirty")) == Some("1") {
-                segs.extend(badge(cfg, "dirty", "dirty"));
-            }
-            if lookup.entry.is_some() {
-                freshness = fresh;
-            }
+        if cfg.bool("dirty") && entry.and_then(|e| e.get("dirty")) == Some("1") {
+            segs.extend(badge(cfg, "dirty", "dirty"));
         }
+        let freshness = cached
+            .filter(|(lookup, _)| lookup.entry.is_some())
+            .map_or(Freshness::Fresh, |(_, fresh)| fresh);
         Rendered { segments: segs, freshness, measure: None }
     }
 
@@ -548,17 +564,57 @@ impl Module for BranchModule {
 
     fn refresh(&self, ctx: &RefreshCtx<'_>) -> Result<BTreeMap<String, String>, String> {
         let dirs = git::discover(ctx.cwd).ok_or_else(|| "not a git repository".to_owned())?;
-        let head = match git::head(&dirs) {
-            Some(Head::Branch(b)) => b,
-            Some(Head::Detached(sha)) => short_sha(&sha),
-            None => String::new(),
-        };
-        let dirty = git::is_dirty(&dirs.toplevel, GIT_TIMEOUT)?;
         let mut values = BTreeMap::new();
+        match git::head(&dirs) {
+            Some(head) => {
+                values.insert("head".to_owned(), head_key(&head));
+            }
+            None if dirs.uses_reftable() => {
+                // Stamped before git is asked, so a change during the call
+                // reads as a change at the next tick.
+                if let Some(stamp) = git::reftable_stamp(&dirs) {
+                    values.insert("tables".to_owned(), stamp);
+                }
+                let head = git::head_from_git(&dirs.toplevel, GIT_TIMEOUT)?;
+                // Asked whatever `show_sha` says, as `dirty` is: the entry
+                // serves every render of this checkout.
+                if matches!(head, Head::Branch(_))
+                    && let Ok(sha) = git::run_git(
+                        &dirs.toplevel,
+                        &["rev-parse", "-q", "--verify", "HEAD"],
+                        GIT_TIMEOUT,
+                    )
+                {
+                    let sha: String = sha.trim().chars().take(64).collect();
+                    values.insert("sha".to_owned(), sha);
+                }
+                let detached = matches!(head, Head::Detached(_));
+                values.insert("branch".to_owned(), head_key(&head));
+                values.insert("detached".to_owned(), if detached { "1" } else { "0" }.to_owned());
+            }
+            // A HEAD the reader refused (a link out of the git directory, a
+            // name that is not UTF-8): no key at all, which the render's
+            // check accepts whatever name it shows.
+            None => {}
+        }
+        let dirty = git::is_dirty(&dirs.toplevel, GIT_TIMEOUT)?;
         values.insert("dirty".to_owned(), if dirty { "1" } else { "0" }.to_owned());
-        values.insert("head".to_owned(), head);
         Ok(values)
     }
+}
+
+/// The name a head is shown and keyed by: the branch, or the short commit.
+fn head_key(head: &Head) -> String {
+    match head {
+        Head::Branch(b) => b.clone(),
+        Head::Detached(sha) => short_sha(sha),
+    }
+}
+
+/// The head a reftable worker asked git for (`branch`, `detached`).
+fn asked_head(entry: &crate::cache::Entry) -> Option<Head> {
+    let name = entry.get("branch")?.to_owned();
+    Some(if entry.get("detached") == Some("1") { Head::Detached(name) } else { Head::Branch(name) })
 }
 
 /// `sync`: commits ahead of and behind the upstream.
@@ -637,17 +693,39 @@ impl Module for SyncModule {
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let Some(dirs) = ctx.git_dirs() else { return Rendered::empty() };
-        let Some(Head::Branch(branch)) = ctx.git_head() else { return Rendered::empty() };
-        let Some((_remote, tracking)) = git::upstream(dirs, branch) else {
-            return Rendered::fresh(no_upstream(cfg));
-        };
         let scope = Scope::Repo(dirs.cache_key());
-        // Branches that share an upstream (`switch -c feat --track
-        // origin/main`) must not share counts: the branch is half the key.
-        let (lookup, freshness) = ctx.cached(cfg, &scope, |e| {
-            e.get("upstream").is_none_or(|u| u == tracking)
-                && e.get("branch").is_none_or(|b| b == branch)
-        });
+        let (lookup, freshness, tracking) = match ctx.git_head() {
+            Some(Head::Branch(branch)) => {
+                let Some((_remote, tracking)) = git::upstream(dirs, branch) else {
+                    return Rendered::fresh(no_upstream(cfg));
+                };
+                // Branches that share an upstream (`switch -c feat --track
+                // origin/main`) must not share counts: the branch is half
+                // the key.
+                let (lookup, freshness) = ctx.cached(cfg, &scope, |e| {
+                    e.get("upstream").is_none_or(|u| u == tracking)
+                        && e.get("branch").is_none_or(|b| b == branch)
+                });
+                (lookup, freshness, tracking)
+            }
+            // SPEC § 6: a reftable repository's HEAD and upstream are the
+            // worker's to find; its entry is keyed on the ref store's stamp.
+            None if dirs.uses_reftable() => {
+                let stamp = git::reftable_stamp(dirs);
+                let (lookup, freshness) =
+                    ctx.cached(cfg, &scope, |e| e.get("tables") == stamp.as_deref());
+                let Some(entry) = lookup.entry.as_ref() else { return Rendered::empty() };
+                if entry.get("no_upstream") == Some("1") {
+                    return Rendered { segments: no_upstream(cfg), freshness, measure: None };
+                }
+                let Some(tracking) = entry.get("upstream").map(str::to_owned) else {
+                    // Detached, or a failed refresh: whatever the mark says.
+                    return Rendered { segments: Vec::new(), freshness, measure: None };
+                };
+                (lookup, freshness, tracking)
+            }
+            _ => return Rendered::empty(),
+        };
         let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
         if lookup.entry.as_ref().and_then(|e| e.get("gone")) == Some("1") {
             return Rendered { segments: no_upstream(cfg), freshness, measure: None };
@@ -681,16 +759,40 @@ impl Module for SyncModule {
 
     fn refresh(&self, ctx: &RefreshCtx<'_>) -> Result<BTreeMap<String, String>, String> {
         let dirs = git::discover(ctx.cwd).ok_or_else(|| "not a git repository".to_owned())?;
-        let Some(Head::Branch(branch)) = git::head(&dirs) else {
-            return Err("detached HEAD".to_owned());
+        let mut values = BTreeMap::new();
+        let branch = match git::head(&dirs) {
+            Some(Head::Branch(branch)) => branch,
+            Some(Head::Detached(_)) => return Err("detached HEAD".to_owned()),
+            // A reftable repository: the tick can read neither HEAD nor the
+            // tracking ref, so this answers for both, keyed on the ref
+            // store's stamp (taken first, so a change during the calls
+            // reads as a change), and says "no upstream" and "detached" as
+            // values the tick can show rather than failures.
+            None if dirs.uses_reftable() => {
+                if let Some(stamp) = git::reftable_stamp(&dirs) {
+                    values.insert("tables".to_owned(), stamp);
+                }
+                match git::head_from_git(&dirs.toplevel, GIT_TIMEOUT)? {
+                    Head::Branch(branch) => branch,
+                    Head::Detached(_) => {
+                        values.insert("detached".to_owned(), "1".to_owned());
+                        return Ok(values);
+                    }
+                }
+            }
+            None => return Err("HEAD cannot be read".to_owned()),
         };
-        let (remote, tracking) =
-            git::upstream(&dirs, &branch).ok_or_else(|| "no upstream".to_owned())?;
-        let mut values = if ctx.cfg.int("fetch_interval") > 0 && remote != "." {
-            fetch_if_due(ctx, &dirs, &remote)
-        } else {
-            BTreeMap::new()
+        let Some((remote, tracking)) = git::upstream(&dirs, &branch) else {
+            if values.contains_key("tables") {
+                values.insert("no_upstream".to_owned(), "1".to_owned());
+                values.insert("branch".to_owned(), branch);
+                return Ok(values);
+            }
+            return Err("no upstream".to_owned());
         };
+        if ctx.cfg.int("fetch_interval") > 0 && remote != "." {
+            values.extend(fetch_if_due(ctx, &dirs, &remote));
+        }
         values.insert("branch".to_owned(), branch);
         // The branch deleted on the forge and pruned here (`fetch --prune`
         // after a merge): the config still names the upstream, but there

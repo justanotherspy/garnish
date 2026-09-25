@@ -1450,8 +1450,22 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   parses it: quoted values, the escapes, `;`/`#` comments, section and key
   names in any case, the first `merge` and the last `remote` (git quotes a
   value holding `#`, so `fix/#12` used to read as a tracking ref with
-  quotes in it and `sync` showed `✗`). Reftable repos report no
-  head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
+  quotes in it and `sync` showed `✗`). Reftable repos (whose refs are not
+  files) report no head to the tick and fall back to the workers (review
+  2026-09-25, decided with Daniel: this sentence used to be all there was,
+  and both modules rendered nothing): `branch`'s worker asks git
+  (`symbolic-ref -q --short HEAD`, else `rev-parse --verify HEAD` for a
+  detached one, plus the commit for `show_sha`) and records `branch` and
+  `detached`; `sync`'s resolves the branch the same way, reads the upstream
+  from the config and checks its ref with `show-ref --verify`, recording
+  `no_upstream` or `detached` as values the tick shows rather than
+  failures. Both entries carry `tables`, the mtimes of the worktree's and
+  the common `reftable/tables.list` (taken before git is asked), and the
+  tick treats an entry whose `tables` differs from what it stats as for
+  another state of the refs. A `HEAD` the tick refuses in a files
+  repository (a link out of the git directory) leaves `branch`'s entry
+  without a `head` key, which any render accepts (an empty one matched
+  nothing, so every tick spawned a worker). Ahead/behind, dirty, and fetch run in the
   worker only through `git::run_program` (pipes drained on threads with 1 MiB
   of stdout and 64 KiB of stderr kept and the rest discarded, kill on
   timeout: 2 s for local commands, 20 s for `fetch`). `git` is the first

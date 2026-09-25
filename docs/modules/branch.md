@@ -2,7 +2,7 @@
 
 Checked-out branch (or detached HEAD).
 
-The current branch read from the repository without spawning git; a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).
+The current branch read from the repository without spawning git (in a reftable repository, whose refs are not files, the background worker asks git instead); a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).
 
 **Sources:** `worktree.branch`, `.git/HEAD`, `git diff-index and diff-files (worker)`
 

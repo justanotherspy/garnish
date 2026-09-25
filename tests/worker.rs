@@ -675,6 +675,129 @@ fn worker_branches_sharing_an_upstream_do_not_share_counts() {
     assert!(!out.contains('⇡') && !out.contains('⟳'), "{out}");
 }
 
+/// Run the workers `modules` as their logged spawns would (on Linux the
+/// tick handed each its lock).
+fn run_workers(env: &Env, modules: &[&str]) {
+    let w = env.work.to_str().unwrap().to_owned();
+    for module in modules {
+        let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
+        if cfg!(target_os = "linux") {
+            args.push("--lock-held");
+        }
+        let (_, err, ok) = garnish(env, &args, None, &[]);
+        assert!(ok, "{module}: {err}");
+    }
+}
+
+/// SPEC § 6: a repository whose refs are not files (reftable) has no HEAD
+/// the tick can read, so `branch` and `sync` fall back to their workers,
+/// which ask git, and whose entries are keyed on the ref store's
+/// `tables.list` stamp. Simulated with a `reftable/` directory the
+/// installed git ignores, so it runs on any git; the real format is
+/// `worker_a_reftable_repository_shows_its_branch_and_counts`.
+#[test]
+fn worker_refs_that_are_not_files_fall_back_to_the_worker() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let tables = env.work.join(".git").join("reftable").join("tables.list");
+    std::fs::create_dir_all(tables.parent().unwrap()).unwrap();
+    std::fs::write(&tables, "t\n").unwrap();
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(!out.contains("main"), "the tick cannot read this HEAD: {out}");
+    assert_eq!(spawns(&env).len(), 2, "{:?}", spawns(&env));
+    run_workers(&env, &["branch", "sync"]);
+    let sha = std::fs::read_to_string(env.work.join(".git/refs/heads/main")).unwrap();
+    let short: String = sha.chars().take(7).collect();
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("main") && out.contains(&short) && out.contains("⇡1"), "{out}");
+    assert!(!out.contains('⟳') && !out.contains('✗'), "{out}");
+    assert_eq!(spawns(&env).len(), 2, "a fresh entry spawns nothing");
+    // Any ref update rewrites `tables.list`: the entries are for another
+    // state of the refs now.
+    let later = std::time::SystemTime::now() + Duration::from_secs(60);
+    std::fs::File::options().write(true).open(&tables).unwrap().set_modified(later).unwrap();
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("main") && out.contains('⟳'), "{out}");
+    assert_eq!(spawns(&env).len(), 4, "{:?}", spawns(&env));
+}
+
+/// The real reftable format, where the installed git has it (2.45 and
+/// later); skipped otherwise. An upstream is made without a server: the
+/// tracking ref and the two config keys `push -u` would write.
+#[test]
+fn worker_a_reftable_repository_shows_its_branch_and_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().join("work");
+    let init = Command::new("git")
+        .args(["init", "-q", "-b", "main", "--ref-format=reftable", work.to_str().unwrap()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    if !init.status.success() {
+        return; // this git has no reftable
+    }
+    std::fs::write(work.join("a.txt"), "a\n").unwrap();
+    git(&work, &["add", "."]);
+    git(&work, &["commit", "-q", "-m", "one"]);
+    let head = Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&work).output().unwrap();
+    let sha = String::from_utf8_lossy(&head.stdout).trim().to_owned();
+    git(&work, &["update-ref", "refs/remotes/origin/main", &sha]);
+    git(&work, &["config", "branch.main.remote", "origin"]);
+    git(&work, &["config", "branch.main.merge", "refs/heads/main"]);
+    std::fs::write(work.join("b.txt"), "b\n").unwrap();
+    git(&work, &["add", "."]);
+    git(&work, &["commit", "-q", "-m", "two"]);
+    let cache = dir.path().join("cache");
+    let env = Env { _dir: dir, work, cache };
+    config(&env, ONE_LINE);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(!out.contains("main"), "{out}");
+    run_workers(&env, &["branch", "sync"]);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("main") && out.contains("⇡1"), "{out}");
+    assert!(!out.contains('⟳') && !out.contains('✗'), "{out}");
+    // A branch switch is a ref update: stale at once, then the new branch,
+    // which has no upstream.
+    git(&env.work, &["checkout", "-q", "-b", "other"]);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains('⟳'), "{out}");
+    run_workers(&env, &["branch", "sync"]);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("other") && out.contains('\u{f127}') && !out.contains('⟳'), "{out}");
+}
+
+/// A HEAD the tick refuses to read (here a link out of the git directory,
+/// which git itself follows) with a payload that names the branch: the
+/// render keyed the dirty entry on the payload's name while the worker
+/// stored an empty `head`, so no entry ever matched and every tick
+/// spawned a worker under a permanent `⟳`.
+#[test]
+fn worker_an_unreadable_head_with_a_payload_branch_settles() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let outside = env.work.parent().unwrap().join("HEAD-outside");
+    std::fs::write(&outside, "ref: refs/heads/main\n").unwrap();
+    let head = env.work.join(".git").join("HEAD");
+    std::fs::remove_file(&head).unwrap();
+    std::os::unix::fs::symlink(&outside, &head).unwrap();
+    let with_branch = payload(&env.work)
+        .replace(r#""model":"#, r#""worktree":{"name":"w","branch":"main"},"model":"#);
+    let w = env.work.to_str().unwrap().to_owned();
+    let (_, err, ok) = garnish(
+        &env,
+        &["refresh", "--module", "branch", "--session", "sess-worker", "--cwd", &w],
+        None,
+        &[],
+    );
+    assert!(ok, "{err}");
+    for _ in 0..2 {
+        let (out, _, _) = garnish(&env, &[], Some(&with_branch), &[]);
+        assert!(out.contains("main") && !out.contains('⟳'), "{out}");
+    }
+    assert!(spawns(&env).is_empty(), "{:?}", spawns(&env));
+}
+
 /// The first executable `git` on `PATH`.
 fn real_git() -> PathBuf {
     std::env::var("PATH")

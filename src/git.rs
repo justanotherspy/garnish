@@ -158,6 +158,60 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
     (!line.is_empty()).then(|| Head::Detached(line.to_owned()))
 }
 
+/// A stamp that changes whenever a reftable repository's refs do, `HEAD`
+/// included; `None` when there is nothing to stamp.
+///
+/// The mtimes of the `tables.list` of the worktree's own stack (where a
+/// linked worktree keeps `HEAD`) and of the common one, which git replaces
+/// on every update: two `stat`s, so the tick can tell whether what the
+/// worker asked git is still current.
+#[must_use]
+pub fn reftable_stamp(dirs: &Dirs) -> Option<String> {
+    let nanos = |dir: &Path| {
+        let at =
+            std::fs::metadata(dir.join("reftable").join("tables.list")).ok()?.modified().ok()?;
+        Some(at.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos())
+    };
+    match (nanos(&dirs.git_dir), nanos(&dirs.common_dir)) {
+        (None, None) => None,
+        (own, common) => Some(format!("{}.{}", own.unwrap_or(0), common.unwrap_or(0))),
+    }
+}
+
+/// Characters of a branch name the worker records: git's own limit on a
+/// ref name is the path length, and the entry has a cap to stay under.
+const MAX_BRANCH_CHARS: usize = 4096;
+
+/// `HEAD` asked of git, for a repository whose refs are not files
+/// (reftable): `symbolic-ref -q --short HEAD` for a branch, and when that
+/// says it is detached, `rev-parse --verify HEAD` for the commit.
+///
+/// # Errors
+/// Propagates git failures (an unborn detached `HEAD` among them).
+pub fn head_from_git(cwd: &Path, timeout: Duration) -> Result<Head, String> {
+    let args = ["symbolic-ref", "-q", "--short", "HEAD"];
+    let asked = git_call(git_program()?, cwd, &args, &[], timeout, Stdout::Read)?;
+    let first_line = |bytes: &[u8]| {
+        String::from_utf8_lossy(bytes).lines().next().unwrap_or("").trim().to_owned()
+    };
+    match asked.status.code() {
+        Some(0) => {
+            let name: String = first_line(&asked.stdout).chars().take(MAX_BRANCH_CHARS).collect();
+            if name.is_empty() {
+                Err("git symbolic-ref printed no branch".to_owned())
+            } else {
+                Ok(Head::Branch(name))
+            }
+        }
+        Some(1) => {
+            let sha = run_git(cwd, &["rev-parse", "--verify", "HEAD"], timeout)?;
+            let sha: String = first_line(sha.as_bytes()).chars().take(MAX_BRANCH_CHARS).collect();
+            Ok(Head::Detached(sha))
+        }
+        _ => Err(git_failed(&args, asked)),
+    }
+}
+
 /// Symbolic refs deeper than this are treated as broken (git's own limit).
 const SYMREF_MAX_DEPTH: usize = 5;
 
