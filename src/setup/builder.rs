@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use toml::{Table, Value};
 
-use super::draft::{Draft, RowAt, string_list};
+use super::draft::{Draft, RowAt, dropped_boxes, string_list};
 use super::ui::{Chrome, cells, clip, window};
 
 /// Which group of a row a module sits in.
@@ -79,6 +79,34 @@ impl Item {
                 self.at.inner.map_or(0, |i| i.saturating_add(1))
             ),
         }
+    }
+
+    /// Its index in the list it sits in: `[[row]]`, a row's `[[row.col]]`
+    /// or a column's `[[row.col.row]]`.
+    fn index(&self) -> usize {
+        match self.kind {
+            ItemKind::Row => self.at.row,
+            ItemKind::Col => self.at.col.unwrap_or(0),
+            ItemKind::Inner => self.at.inner.unwrap_or(0),
+        }
+    }
+
+    /// Where the entry at `index` of that same list sits.
+    fn sibling(&self, index: usize) -> RowAt {
+        RowAt {
+            row: if self.kind == ItemKind::Row { index } else { self.at.row },
+            col: if self.kind == ItemKind::Col { Some(index) } else { self.at.col },
+            inner: if self.kind == ItemKind::Inner { Some(index) } else { None },
+        }
+    }
+}
+
+/// Write a group back into its table; an emptied `right` goes with its key.
+fn set_group(table: &mut Table, side: Side, list: &[String]) {
+    if list.is_empty() && side == Side::Right {
+        table.remove("right");
+    } else {
+        table.insert(side.key().to_owned(), string_list(list));
     }
 }
 
@@ -316,6 +344,14 @@ impl Builder {
         Some((above, name))
     }
 
+    /// Select the line of kind `kind` standing for the table at `at`, when
+    /// the list has one.
+    fn select_at(&mut self, at: RowAt, kind: ItemKind) {
+        if let Some(i) = self.items.iter().position(|it| it.at == at && it.kind == kind) {
+            self.cursor = i;
+        }
+    }
+
     /// Select the first line of row `row`.
     pub fn select_row(&mut self, row: usize) {
         if let Some(i) = self.items.iter().position(|item| item.at.row == row) {
@@ -464,20 +500,12 @@ impl Builder {
             if chip.index < list.len() {
                 list.remove(chip.index);
             }
-            if list.is_empty() && chip.side == Side::Right {
-                table.remove("right");
-            } else {
-                table.insert(chip.side.key().to_owned(), string_list(&list));
-            }
+            set_group(table, chip.side, &list);
             self.rebuild(draft);
             return Ok(format!("removed {}", chip.id));
         }
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         if index < siblings.len() {
             siblings.remove(index);
         }
@@ -511,11 +539,7 @@ impl Builder {
             return Ok("added a row".into());
         };
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         let at = if after { index.saturating_add(1).min(siblings.len()) } else { index };
         let fresh = if item.kind == ItemKind::Col {
             Value::Table(Table::new())
@@ -524,14 +548,7 @@ impl Builder {
         };
         siblings.insert(at, fresh);
         self.rebuild(draft);
-        let target = RowAt {
-            row: if item.kind == ItemKind::Row { at } else { item.at.row },
-            col: if item.kind == ItemKind::Col { Some(at) } else { item.at.col },
-            inner: if item.kind == ItemKind::Inner { Some(at) } else { None },
-        };
-        if let Some(i) = self.items.iter().position(|it| it.at == target && it.kind == item.kind) {
-            self.cursor = i;
-        }
+        self.select_at(item.sibling(at), item.kind);
         self.chip = None;
         Ok(match item.kind {
             ItemKind::Col => "added a column".into(),
@@ -546,11 +563,7 @@ impl Builder {
     pub fn clone_line(&mut self, draft: &mut Draft) -> Result<String, String> {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         let Some(copy) = siblings.get(index).cloned() else {
             return Err("nothing to clone".into());
         };
@@ -587,25 +600,14 @@ impl Builder {
             return Ok(format!("moved {}", chip.id));
         }
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         let to = if down { index.saturating_add(1) } else { index.saturating_sub(1) };
         if to >= siblings.len() || to == index {
             return Err("already at the end".into());
         }
         siblings.swap(index, to);
         self.rebuild(draft);
-        let target = RowAt {
-            row: if item.kind == ItemKind::Row { to } else { item.at.row },
-            col: if item.kind == ItemKind::Col { Some(to) } else { item.at.col },
-            inner: if item.kind == ItemKind::Inner { Some(to) } else { None },
-        };
-        if let Some(i) = self.items.iter().position(|it| it.at == target && it.kind == item.kind) {
-            self.cursor = i;
-        }
+        self.select_at(item.sibling(to), item.kind);
         Ok("moved".into())
     }
 
@@ -627,11 +629,8 @@ impl Builder {
         let other = if chip.side == Side::Left { Side::Right } else { Side::Left };
         let mut to = ids(table, other.key());
         to.push(id.clone());
-        table.insert(chip.side.key().to_owned(), string_list(&from));
-        table.insert(other.key().to_owned(), string_list(&to));
-        if from.is_empty() && chip.side == Side::Right {
-            table.remove("right");
-        }
+        set_group(table, chip.side, &from);
+        set_group(table, other, &to);
         self.rebuild(draft);
         if let Some(c) = self
             .items
@@ -713,21 +712,13 @@ impl Builder {
             return Err("no such module".into());
         }
         let id = from.remove(chip.index);
-        if from.is_empty() && chip.side == Side::Right {
-            from_table.remove("right");
-        } else {
-            from_table.insert(chip.side.key().to_owned(), string_list(&from));
-        }
+        set_group(from_table, chip.side, &from);
         let to_table = draft.row_mut(target_at).ok_or("no such column")?;
         let mut to = ids(to_table, "modules");
         to.push(id.clone());
-        to_table.insert("modules".to_owned(), string_list(&to));
+        set_group(to_table, Side::Left, &to);
         self.rebuild(draft);
-        if let Some(i) =
-            self.items.iter().position(|it| it.at == target_at && it.kind == ItemKind::Col)
-        {
-            self.cursor = i;
-        }
+        self.select_at(target_at, ItemKind::Col);
         self.chip = self.item().and_then(|i| i.chips.iter().position(|c| c.id == id));
         let n = target.saturating_add(1);
         Ok(if made {
@@ -760,12 +751,7 @@ impl Builder {
             1
         };
         self.rebuild(draft);
-        let target = RowAt { row: at.row, col: Some(index), inner: None };
-        if let Some(i) =
-            self.items.iter().position(|it| it.at == target && it.kind == ItemKind::Col)
-        {
-            self.cursor = i;
-        }
+        self.select_at(RowAt { row: at.row, col: Some(index), inner: None }, ItemKind::Col);
         self.chip = None;
         Ok(format!("added column {}; m adds a module to it", index.saturating_add(1)))
     }
@@ -782,15 +768,7 @@ impl Builder {
         if item.kind == ItemKind::Col {
             return Err("a column is boxed on its own: b".into());
         }
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col | ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
-        let above_index = index.checked_sub(1).ok_or("no row above this one")?;
-        let above_at = match item.kind {
-            ItemKind::Row => RowAt::row(above_index),
-            ItemKind::Col | ItemKind::Inner => RowAt { inner: Some(above_index), ..item.at },
-        };
+        let above_at = item.sibling(item.index().checked_sub(1).ok_or("no row above this one")?);
         let joined = draft
             .row(above_at)
             .and_then(|t| t.get("box"))
@@ -847,9 +825,8 @@ impl Builder {
             out.push_str("] carries one)");
         }
         if !orphans.is_empty() {
-            out.push_str("; [box.");
-            out.push_str(&orphans.join("], [box."));
-            out.push_str("] dropped, nothing used it");
+            out.push_str("; ");
+            out.push_str(&dropped_boxes(&orphans));
         }
         Ok(out)
     }

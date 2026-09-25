@@ -389,6 +389,13 @@ impl Draft {
     }
 }
 
+/// The status line for the `[box.<name>]` tables
+/// [`Draft::prune_orphan_boxes`] dropped.
+#[must_use]
+pub fn dropped_boxes(names: &[String]) -> String {
+    format!("[box.{}] dropped, nothing used it", names.join("], [box."))
+}
+
 /// Remove the key at `path` under `table`, pruning every table the removal
 /// leaves empty on the way back up; true when something was removed.
 fn remove_at(table: &mut Table, path: &[&str]) -> bool {

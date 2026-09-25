@@ -563,8 +563,7 @@ fn rows(
 /// A path for a report that may be pasted into a public issue: the home
 /// directory (which carries the username) collapsed to `~`.
 fn tilde(path: &Path) -> String {
-    let home = std::env::var("HOME").ok();
-    crate::modules::repo::tildify(&path.display().to_string(), home.as_deref())
+    crate::modules::repo::tildify_path(path, crate::claude_settings::home_dir().as_deref())
 }
 
 fn git_version() -> String {

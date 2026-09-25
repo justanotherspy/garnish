@@ -915,7 +915,7 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
             "[]",
         ),
     );
-    for opt in COMMON_OPTS.iter().filter(|o| text.is_none() || o.key != "max_width") {
+    for opt in COMMON_OPTS.iter().filter(|o| text.is_none() || config::text_takes(o.key)) {
         let value = cfg.and_then(|c| c.common(opt.key)).map(to_toml);
         let kind = SlotKind::of(opt.kind, opt.max);
         let mut f = Field::new(opt.key, opt.doc, kind, slot(opt.key)).valued(

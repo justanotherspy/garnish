@@ -2103,9 +2103,19 @@ const TEXT_REJECTED_KEYS: [(&str, &str); 4] = [
     ("max_width", "a text module's box is sized by `width`; remove this key"),
 ];
 
-/// A text module name is a bare TOML key, so `text.<name>` is unambiguous on
-/// a line and `config show` can write `[modules.text.<name>]` back verbatim.
-fn is_bare_key(name: &str) -> bool {
+/// Whether a `[modules.text.<name>]` table takes the common key: every one
+/// but the [`TEXT_REJECTED_KEYS`] (SPEC § 3.7).
+#[must_use]
+pub(crate) fn text_takes(key: &str) -> bool {
+    !TEXT_REJECTED_KEYS.iter().any(|(rejected, _)| *rejected == key)
+}
+
+/// A bare TOML key: what a text module or a box may be called, so
+/// `text.<name>` and `box = "<name>"` are unambiguous on a line and
+/// `config show` can write `[modules.text.<name>]` and `[box.<name>]` back
+/// verbatim.
+#[must_use]
+pub(crate) fn is_bare_key(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
@@ -2471,7 +2481,7 @@ fn unknown_option_message(schema: &ModuleSchema) -> String {
     format!(
         "unknown option; expected one of {}",
         common_keys()
-            .filter(|k| !is_text || !TEXT_REJECTED_KEYS.iter().any(|(r, _)| r == k))
+            .filter(|k| !is_text || text_takes(k))
             .chain(std::iter::once("colors"))
             .chain(schema.opts.iter().map(|o| o.key))
             .collect::<Vec<_>>()
@@ -4119,6 +4129,13 @@ x = 1
                 errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
             assert_eq!(problems, [(&*format!("modules.text.a.{key}"), why)], "{key}");
             assert_eq!(c.texts.get("a").map(|t| t.str("text")), Some("hi"), "{key}");
+            assert!(!text_takes(key), "{key}");
+        }
+        // Every common key `text_takes` (what the docs page and the setup
+        // form list) parses there without a word.
+        for opt in COMMON_OPTS.iter().filter(|o| text_takes(o.key)) {
+            let text = format!("[modules.text.a]\n{} = {}\n", opt.key, opt.default.to_toml());
+            assert_eq!(parse(&text, &crate::modules::SCHEMAS).1, Vec::new(), "{}", opt.key);
         }
     }
 
