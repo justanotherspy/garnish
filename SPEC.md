@@ -1915,7 +1915,11 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   (§ 5) with the first problem in the status bar and a count of the
   rest; saving writes the file's keys as they are, the bad values
   included (the tick keeps reporting them until they are fixed, and `d`
-  in a form unsets one), and the status bar says so on opening. If the
+  in a form unsets one), and the status bar says so on opening. A builder
+  edit is refused only for a problem it adds: problems are compared by
+  message and by path with the indices taken out, count for count, so a
+  row inserted above a bad one, which renumbers the old problem, is kept,
+  and a bad row cloned, which doubles it, is not (2026-09-25 review). If the
   file on disk changes while `setup` is open (another
   session, the skill, an editor), `s` notices (a best-effort compare of
   mtime and length; a file absent at open and present at save counts as

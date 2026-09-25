@@ -882,6 +882,56 @@ fn b_boxes_two_rows_and_the_preset_key_follows_its_own_rows() {
     assert_eq!(app.status(), Some("preset set"));
 }
 
+/// The review of 2026-09-25 (app-01, frm-v1): a file that opens with a
+/// problem still takes builder edits that move the problem to another
+/// index; only a problem the edit adds refuses it.
+#[test]
+fn an_edit_that_renumbers_an_old_problem_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[[row]]\nmodules = [\"path\", \"brnach\", \"clock\"]\n[[row]]\nmodules = [\"model\"]\nseparator = 5\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    assert_eq!(app.draft().resolved().1.len(), 2);
+    let ids = |app: &App, row: usize| -> Vec<String> {
+        app.draft().rows()[row]
+            .get("modules")
+            .and_then(toml::Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect()
+    };
+    // `path` moves past the unknown id, which moves from index 1 to 0.
+    keys(&mut app, "<right>J");
+    assert_eq!(ids(&app, 0), ["brnach", "path", "clock"]);
+    assert!(!app.status().unwrap().contains('⚠'), "{:?}", app.status());
+    // A row inserted above the bad separator moves it from row[1] to row[2].
+    keys(&mut app, "<down>i");
+    assert_eq!(app.draft().rows().len(), 3);
+    let problems = app.draft().resolved().1;
+    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert!(problems.iter().any(|p| p.path == "row[2].separator"), "{problems:?}");
+    assert!(!app.status().unwrap().contains('⚠'), "{:?}", app.status());
+    // Cloning the broken row adds a second copy of its problem: refused.
+    keys(&mut app, "<down>c");
+    assert_eq!(app.draft().rows().len(), 3, "{:?}", app.status());
+    assert!(app.status().unwrap().contains("separator"), "{:?}", app.status());
+    // The verifier's case: `i` above a row with an unknown module, and
+    // `J` across it.
+    std::fs::write(&file, "[[row]]\nmodules = [\"clok\"]\n[[row]]\nmodules = [\"clock\"]\n")
+        .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "i");
+    assert_eq!(app.draft().rows().len(), 3, "{:?}", app.status());
+    keys(&mut app, "<down>J");
+    assert_eq!(ids(&app, 2), ["clok"], "{:?}", app.status());
+}
+
 /// What the adversarial review of 2026-09-20 found: `B` failed on a titled
 /// row and on a row in another box (the parser refused, the edit
 /// reverted), a row form left open across an undo edited a phantom, and

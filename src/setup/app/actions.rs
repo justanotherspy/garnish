@@ -5,7 +5,7 @@
 
 use toml::Value;
 
-use super::{Action, App, Level};
+use super::{Action, App, Level, new_problem};
 use crate::config::is_bare_key;
 use crate::setup::builder::Builder;
 use crate::setup::draft::{Draft, dropped_boxes};
@@ -238,8 +238,9 @@ impl App {
 
     /// A builder edit tried on the draft and kept only when the parser
     /// reports nothing new about the result (SPEC § 14: every edit is
-    /// validated as `config check` would); otherwise the draft and the
-    /// list are put back and the parser's message is the error.
+    /// validated as `config check` would; a problem the file already had
+    /// is not new because the edit renumbered it); otherwise the draft and
+    /// the list are put back and the parser's message is the error.
     pub(super) fn edit(
         &mut self,
         f: impl FnOnce(&mut Builder, &mut Draft) -> Result<String, String>,
@@ -247,9 +248,7 @@ impl App {
         let before = (self.draft.clone(), self.builder.clone());
         let result = f(&mut self.builder, &mut self.draft).and_then(|out| {
             let (_, problems) = self.draft.resolved();
-            problems
-                .iter()
-                .find(|p| !self.problems.contains(p))
+            new_problem(&self.problems, &problems)
                 .map_or(Ok(out), |p| Err(format!("{}: {}", p.path, p.message)))
         });
         // A refused edit leaves nothing behind, whichever step refused it.

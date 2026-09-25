@@ -290,10 +290,8 @@ impl App {
     /// naming the first problem the edit introduced, if any.
     fn refresh(&mut self) -> Option<String> {
         let (config, problems) = self.draft.resolved();
-        let new = problems
-            .iter()
-            .find(|p| !self.problems.contains(p))
-            .map(|p| format!("{}: {}", p.path, p.message));
+        let new =
+            new_problem(&self.problems, &problems).map(|p| format!("{}: {}", p.path, p.message));
         self.config = config;
         self.problems = problems;
         self.builder.rebuild(&self.draft);
@@ -625,6 +623,43 @@ impl App {
     }
 }
 
+/// The first problem of `after` that `before` did not have. Problems are
+/// compared by message and by path with every index taken out, count for
+/// count: an edit that renumbers rows or modules moves an old problem to
+/// another path without making it new, while a second copy of one (a
+/// broken row cloned) is new.
+fn new_problem<'a>(before: &[ConfigError], after: &'a [ConfigError]) -> Option<&'a ConfigError> {
+    let key = |p: &ConfigError| (without_indices(&p.path), p.message.clone());
+    let mut old: Vec<(String, String)> = before.iter().map(key).collect();
+    after.iter().find(|p| {
+        let k = key(p);
+        old.iter().position(|o| *o == k).map(|i| old.swap_remove(i)).is_none()
+    })
+}
+
+/// A problem's path with its `[<n>]` indices taken out
+/// (`row[1].modules[0]` → `row.modules`).
+fn without_indices(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some((head, tail)) = rest.split_once('[') {
+        out.push_str(head);
+        match tail.split_once(']') {
+            Some((index, after))
+                if !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()) =>
+            {
+                rest = after;
+            }
+            _ => {
+                out.push('[');
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The key a step of the wheel stands for in a list.
 const fn wheel_key(delta: i8) -> Key {
     if delta < 0 { Key::Up } else { Key::Down }
@@ -660,5 +695,26 @@ mod tests {
             assert_eq!(hint_key(several), None, "{several:?}");
         }
         assert_eq!((wheel_key(-1), wheel_key(1)), (Key::Up, Key::Down));
+    }
+
+    /// app-01: a problem renumbered by an edit is the same problem; one
+    /// more copy of it is new.
+    #[test]
+    fn a_renumbered_problem_is_not_new_and_a_copied_one_is() {
+        assert_eq!(without_indices("row[1].col[0].modules[12]"), "row.col.modules");
+        assert_eq!(without_indices("modules.text.a[b].x[]"), "modules.text.a[b].x[]");
+        assert_eq!(without_indices("frame.fill"), "frame.fill");
+        let p = |path: &str, message: &str| ConfigError {
+            path: path.into(),
+            message: message.into(),
+            line: None,
+        };
+        let before = [p("row[0].modules[1]", "unknown module"), p("row[1].separator", "a string")];
+        let moved = [p("row[2].separator", "a string"), p("row[0].modules[0]", "unknown module")];
+        assert_eq!(new_problem(&before, &moved), None);
+        let copied = [p("row[0].separator", "a string"), p("row[1].separator", "a string")];
+        assert_eq!(new_problem(&before[1..], &copied), Some(&copied[1]));
+        let other = [p("row[1].separator", "another message")];
+        assert_eq!(new_problem(&before[1..], &other), Some(&other[0]));
     }
 }
