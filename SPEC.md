@@ -2081,7 +2081,14 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the settings path, the exact `statusLine` object it will merge, the
   backup rule, whether the skills will be written and the PATH warning if
   any, and asks once. It runs the same code as `garnish install`; nothing
-  in `setup` writes to `settings.json` by another route.
+  in `setup` writes to `settings.json` by another route. Its plan has no
+  config step, since the draft is the config (a default file written under
+  an unsaved draft read as a change on disk at the next save, whose
+  default answer reloaded it over the edits), and it is made again when
+  applied, so a key another program wrote meanwhile (`/voice` writes
+  `voice.enabled`) is kept and the file found then is the one backed up
+  (2026-09-25 review). `setup --preset P --install` plans before it writes
+  the preset, so a settings file it refuses leaves the config untouched.
 - **Non-interactive twin.** `garnish setup --preset <name> [--install]`
   never opens the screen: it writes that preset and, with `--install`,
   hooks it up, for scripts and for the `garnish-statusline` skill (§ 13),

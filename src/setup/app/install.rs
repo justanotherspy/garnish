@@ -55,11 +55,16 @@ impl App {
         }
     }
 
+    /// Apply the plan, made again first: the screen may have been open for
+    /// a while, and a plan merged from the text read when it opened would
+    /// drop what another program wrote since (`/voice` in Claude Code
+    /// writes `voice.enabled` to the user file) and back up nothing if the
+    /// file was created meanwhile. The screen then shows the plan applied.
     pub(super) fn install_apply(&mut self) {
         let Screen::Install(screen) = &mut self.screen else { return };
-        if let Ok(steps) = &screen.steps {
-            screen.applied = Some(steps.apply());
-        }
+        let steps = Steps::plan(&self.options);
+        screen.applied = steps.as_ref().ok().map(Steps::apply);
+        screen.steps = steps;
     }
 
     pub(super) fn draw_install(&mut self, frame: &mut Frame<'_>, area: Rect) {

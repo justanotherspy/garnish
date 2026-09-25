@@ -257,6 +257,28 @@ fn setup_preset_twin_and_the_tty_pointer_work_without_a_screen() {
     assert!(std::fs::read_to_string(&cfg).unwrap().contains("preset = \"minimal\""));
     let (_, err, ok) = run(&["setup", "--preset", "nope"], home, &[]);
     assert!(!ok && err.contains("gallery name"), "{err}");
+    // `--install` plans before anything is written, as `install` does: a
+    // settings file it refuses leaves the config as it was, no backup
+    // beside it (cli-v2).
+    let settings = home.join(".claude/settings.json");
+    let before = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&settings, "{ broken").unwrap();
+    let names = || -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(cfg.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    let kept = names();
+    let (out, err, ok) = run(&["setup", "--preset", "compact", "--install"], home, &[]);
+    assert!(!ok && out.is_empty() && err.lines().count() == 1, "{out}{err}");
+    assert!(err.contains("settings.json") && !err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before, "the config is untouched");
+    assert_eq!(names(), kept, "no backup either");
+    std::fs::remove_file(&settings).unwrap();
     // A file that does not parse is never rewritten, even by a preset.
     std::fs::write(&cfg, "theme = \n").unwrap();
     let (_, err, ok) = run(&["setup", "--preset", "compact"], home, &[]);
