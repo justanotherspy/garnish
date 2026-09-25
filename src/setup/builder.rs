@@ -2,6 +2,8 @@
 //! stacks as lines to move a cursor over, and every edit those lines allow,
 //! each an operation on the draft.
 
+use std::fmt::Write as _;
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -9,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use toml::{Table, Value};
 
-use super::draft::{Draft, RowAt, dropped_boxes, string_list};
+use super::draft::{Draft, RowAt, TITLE_KEYS, dropped_boxes, string_list};
 use super::ui::{Chrome, cells, clip, window};
 
 /// Which group of a row a module sits in.
@@ -794,15 +796,18 @@ impl Builder {
             return Err("a box needs a name".into());
         }
         // A row in a named box has no title of its own (SPEC § 4.3): the
-        // first title either row carries becomes a new box's, and a title
-        // on a row joining a box that has one already goes.
-        let title_keys = ["title", "title_justify", "title_pad", "title_color"];
+        // first title either row carries becomes a new box's, and every
+        // other goes, all of them when the box exists already.
+        let existed = draft.get(&["box", &name]).is_some();
         let mut carried: Vec<(String, Value)> = Vec::new();
-        let mut lost_title = false;
+        let mut titled_rows = 0_usize;
         for at in [above_at, item.at] {
             let Some(t) = draft.row_mut(at) else { continue };
             let titled = t.contains_key("title");
-            for key in title_keys {
+            if titled {
+                titled_rows = titled_rows.saturating_add(1);
+            }
+            for key in TITLE_KEYS {
                 if let Some(v) = t.remove(key)
                     && titled
                     && carried.iter().all(|(k, _)| k != key)
@@ -810,9 +815,9 @@ impl Builder {
                     carried.push((key.to_owned(), v));
                 }
             }
-            lost_title |= titled && joined.is_some();
         }
-        if draft.get(&["box", &name]).is_none() {
+        let lost = if existed { titled_rows } else { titled_rows.saturating_sub(1) };
+        if !existed {
             if carried.is_empty() {
                 carried.push(("title".to_owned(), Value::String(name.clone())));
             }
@@ -827,17 +832,16 @@ impl Builder {
         // A row that left another box may have been its last member.
         let orphans = draft.prune_orphan_boxes();
         self.rebuild(draft);
-        let mut out = if joined.is_some() {
-            format!("joined box {name} with the row above")
-        } else {
-            format!(
+        let mut out = match (joined.is_some(), existed) {
+            (true, _) => format!("joined box {name} with the row above"),
+            (false, true) => format!("both rows joined box {name}"),
+            (false, false) => format!(
                 "both rows in a new box {name}; enter on a row edits it, [box.{name}] holds the title"
-            )
+            ),
         };
-        if lost_title {
-            out.push_str("; the row's title went ([box.");
-            out.push_str(&name);
-            out.push_str("] carries one)");
+        if lost > 0 {
+            let what = if lost == 1 { "the row's title went" } else { "the rows' titles went" };
+            let _ = write!(out, "; {what} ([box.{name}] carries one)");
         }
         if !orphans.is_empty() {
             out.push_str("; ");
@@ -1124,6 +1128,30 @@ mod tests {
         b.move_line(true);
         assert!(b.above(&d).is_none());
         assert!(b.box_with_above(&mut d, "x").unwrap_err().contains("column"));
+    }
+
+    /// app-13: `B` naming a box that exists joins it, says so, and says
+    /// that the rows' titles went (the box carries its own); a new box
+    /// takes one title and says so when the other went.
+    #[test]
+    fn b_into_an_existing_box_says_the_titles_went() {
+        let text = "[box.x]\ntitle = \"X\"\n[[row]]\nbox = \"x\"\nmodules = [\"a\"]\n[[row]]\ntitle = \"T\"\nmodules = [\"b\"]\n[[row]]\nmodules = [\"c\"]\n";
+        let mut d = Draft::from_text(text);
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.select_row(2);
+        let msg = b.box_with_above(&mut d, "x").unwrap();
+        assert!(msg.contains("title went") && !msg.contains("new box"), "{msg}");
+        assert!(msg.starts_with("both rows joined box x"), "{msg}");
+        assert_eq!(d.get(&["box", "x", "title"]).and_then(Value::as_str), Some("X"));
+        let text = "[[row]]\ntitle = \"A\"\nmodules = [\"a\"]\n[[row]]\ntitle = \"B\"\nmodules = [\"b\"]\n";
+        let mut d = Draft::from_text(text);
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.select_row(1);
+        let msg = b.box_with_above(&mut d, "ab").unwrap();
+        assert!(msg.contains("new box ab") && msg.contains("title went"), "{msg}");
+        assert_eq!(d.get(&["box", "ab", "title"]).and_then(Value::as_str), Some("A"));
     }
 
     /// app-12: a clone selects the copy, not the next line of the list,

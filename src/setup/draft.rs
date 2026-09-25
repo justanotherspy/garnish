@@ -413,6 +413,9 @@ impl Draft {
     }
 }
 
+/// The keys of a title, on a row or in a `[box.<name>]` (SPEC § 4.3).
+pub const TITLE_KEYS: [&str; 4] = ["title", "title_justify", "title_pad", "title_color"];
+
 /// Whether TOML text (text that parses) holds a comment: a `#` outside
 /// every kind of string.
 fn has_comment(text: &str) -> bool {

@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use toml::Value;
 
 use super::app::{Action, Key};
-use super::draft::{Draft, RowAt};
+use super::draft::{Draft, RowAt, TITLE_KEYS};
 use super::pick::{Choice, Choose, InputBox, Layer, Outcome, Target};
 use super::ui::{Chrome, cells, centered, clip, hints, window};
 use crate::config::schema::{COMMON_OPTS, Kind, ModuleSchema, Preset};
@@ -1480,9 +1480,6 @@ fn color_fields(draft: &Draft, config: &Config) -> Vec<Field> {
     fields.extend(extra);
     fields
 }
-
-/// The keys of a title, on a row or a box.
-const TITLE_KEYS: [&str; 4] = ["title", "title_justify", "title_pad", "title_color"];
 
 /// A row's form lists the keys the parser would take for it: `blank` only
 /// on a spacer or a row with columns, `gap` only on an outer row, the
