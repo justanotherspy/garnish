@@ -500,19 +500,23 @@ fn render_row<'a>(
 /// `align = true` (SPEC § 4.3): module *k* of a column is padded to the
 /// widest module *k* of the columns in the same position, among the rows
 /// with the same column count. Inner rows align with the inner rows at the
-/// same position, never with the rows around them.
+/// same position, never with the rows around them, and a right-justified
+/// column, which counts *k* from its right end, only with other
+/// right-justified ones.
 fn align_tree(tree: &mut [RowRender<'_>], config: &Config) {
-    let mut buckets: std::collections::BTreeMap<(usize, usize, usize), Vec<&mut ColRender<'_>>> =
+    type Key = (usize, usize, usize, bool);
+    let mut buckets: std::collections::BTreeMap<Key, Vec<&mut ColRender<'_>>> =
         std::collections::BTreeMap::new();
+    let right = |c: &ColRender<'_>| c.justify == config::Justify::Right;
     for row in tree.iter_mut() {
         let n = row.cols.len();
         for (j, col) in row.cols.iter_mut().enumerate() {
             if col.rows.is_empty() {
-                buckets.entry((n, j, 0)).or_default().push(col);
+                buckets.entry((n, j, 0, right(col))).or_default().push(col);
             } else {
                 for inner in &mut col.rows {
                     for c in &mut inner.cols {
-                        buckets.entry((n, j, 1)).or_default().push(c);
+                        buckets.entry((n, j, 1, right(c))).or_default().push(c);
                     }
                 }
             }
@@ -532,9 +536,8 @@ fn align_bucket(mut cols: Vec<&mut ColRender<'_>>, config: &Config) {
     };
     // A right-justified column hangs off the right edge, so its positions
     // count from the right end as a `right` group's do, and `right_justify`
-    // picks the pad side for both (SPEC § 4, § 4.3). The columns of a bucket
-    // are at the same position in rows with the same column count, so the
-    // first one's justification is the bucket's.
+    // picks the pad side for both (SPEC § 4, § 4.3). Every column of a
+    // bucket is right-justified or none is (`align_tree`).
     let from_right = cols.first().is_some_and(|c| c.justify == config::Justify::Right);
     let pad_left = config.right_justify == config::RightJustify::End;
     if config.frame.fill {
@@ -1524,6 +1527,24 @@ mod tests {
         );
         // The default (align = false) render is untouched.
         assert_eq!(plain(base), plain(&format!("align = false\n{base}")));
+    }
+
+    /// SPEC § 4.3: with `align = true`, *k* counts from the right end in a
+    /// right-justified column, column by column. The bucket used to take
+    /// the first column's justification for all of them, so a left-justified
+    /// column in one row made the right-justified ones below it count from
+    /// the left, and their separators did not stack.
+    #[test]
+    fn align_counts_each_column_from_its_own_end() {
+        let payload = fixture("subscription-full");
+        let text = "icons = \"unicode\"\nalign = true\n[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\njustify = \"left\"\nmodules = [\"text.a\", \"text.b\"]\n[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\nmodules = [\"text.x\", \"text.yy\"]\n[[row]]\n[[row.col]]\nmodules = [\"model\"]\n[[row.col]]\nmodules = [\"text.xxx\", \"text.y\"]\n[modules.text.a]\ntext = \"aaaa\"\n[modules.text.b]\ntext = \"b\"\n[modules.text.x]\ntext = \"x\"\n[modules.text.yy]\ntext = \"yy\"\n[modules.text.xxx]\ntext = \"xxx\"\n[modules.text.y]\ntext = \"y\"\n";
+        let (config, errs) = config::parse(text, &SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let out = strip_ansi(&render_plain_at(&payload, &config, Some(60), &Clock::fixed()));
+        let rows: Vec<&str> = out.lines().collect();
+        assert_eq!(rows.len(), 3, "{out}");
+        assert_eq!(last_bar(rows[1]), last_bar(rows[2]), "{out}");
+        assert!(rows[1].ends_with("x │ yy ─┤") && rows[2].ends_with("xxx │  y ─╯"), "{out}");
     }
 
     #[test]

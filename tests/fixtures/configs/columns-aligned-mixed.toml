@@ -1,0 +1,41 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# `align = true` counts a module's position from the right end of a
+# right-justified column and from the left of any other, column by column
+# (SPEC § 4.3). The first row's second column is left-justified; the two
+# below it keep the default for a last column, right, and their bars stack.
+# The bucket used to take the first row's justification for all three.
+align = true
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+justify = "left"
+modules = ["text.a", "text.b"]
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["text.x", "text.yy"]
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["text.xxx", "text.y"]
+
+[modules.text.a]
+text = "aaaa"
+[modules.text.b]
+text = "b"
+[modules.text.x]
+text = "x"
+[modules.text.yy]
+text = "yy"
+[modules.text.xxx]
+text = "xxx"
+[modules.text.y]
+text = "y"
