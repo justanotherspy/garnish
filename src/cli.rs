@@ -8,6 +8,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 
 use crate::config::{self, ColorChoice, Overlay, presets::TopPreset};
 use crate::icons::IconSet;
+use crate::install::Refusal;
 use crate::modules::SCHEMAS;
 use crate::render::{self, Request};
 
@@ -315,15 +316,19 @@ fn run_command() -> Result<()> {
             no_config,
             no_skills,
             dry_run,
-        } => install(
-            settings,
-            refresh_interval,
-            padding,
-            InstallSkip { config: no_config, skills: no_skills },
-            absolute,
-            dry_run,
-            config_path,
-        ),
+        } => {
+            let options = crate::install::Options {
+                settings,
+                refresh_interval,
+                padding,
+                absolute,
+                write_config: !no_config,
+                write_skills: !no_skills,
+                config_path: config_path.map(Path::to_path_buf),
+            };
+            let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
+            print_install(&steps, dry_run)
+        }
         Command::Skills { action } => skills(action),
         Command::Setup { preset, install } => {
             crate::setup::run(&crate::setup::Args { preset, install, config_path })
@@ -419,7 +424,7 @@ fn refresh(
             Ok(())
         })
         .collect();
-    results.into_iter().collect::<Result<Vec<()>>>().map(|_| ())
+    results.into_iter().collect()
 }
 
 /// `garnish skills list | install [--dir D]` (SPEC § 13).
@@ -435,7 +440,10 @@ fn skills(action: SkillsAction) -> Result<()> {
             let Some(dir) = dir.or_else(|| {
                 crate::install::default_settings_path().map(|s| crate::skills::default_dir(&s))
             }) else {
-                return Err(no_home("--dir <DIR>", "the skills go"));
+                return Err(refusal(Refusal::NoHome {
+                    flag: "--dir <DIR>",
+                    what: "the skills go",
+                }));
             };
             let report = crate::skills::install(&dir)
                 .with_context(|| format!("writing skills to {}", dir.display()))?;
@@ -445,54 +453,36 @@ fn skills(action: SkillsAction) -> Result<()> {
     Ok(())
 }
 
-/// The parts of `garnish install` a flag can switch off.
-#[derive(Debug, Clone, Copy)]
-struct InstallSkip {
-    /// `--no-config`: leave the default config file alone.
-    config: bool,
-    /// `--no-skills`: leave `~/.claude/skills` alone.
-    skills: bool,
-}
-
-fn install(
-    settings: Option<PathBuf>,
-    refresh_interval: u64,
-    padding: Option<u64>,
-    skip: InstallSkip,
-    absolute: bool,
-    dry_run: bool,
-    config_path: Option<&Path>,
-) -> Result<()> {
-    let options = crate::install::Options {
-        settings,
-        refresh_interval,
-        padding,
-        absolute,
-        write_config: !skip.config,
-        write_skills: !skip.skills,
-        config_path: config_path.map(Path::to_path_buf),
-    };
-    let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
-    let mut stdout = std::io::stdout().lock();
+/// Print an install plan's notes on stderr, then apply it (or, for
+/// `--dry-run`, describe it) and print what it did on stdout: `garnish
+/// install` and `setup --preset P --install` alike.
+///
+/// # Errors
+/// An apply's refusal ([`refusal`]), or a closed stdout.
+pub(crate) fn print_install(steps: &crate::install::Steps, dry_run: bool) -> Result<()> {
     // Advice goes to stderr: --dry-run's stdout is the settings preview.
     for note in steps.notes() {
         eprintln!("{note}");
     }
-    let lines = if dry_run { steps.dry_run() } else { steps.apply().map_err(refusal)?.lines };
+    let lines = if dry_run { steps.dry_run() } else { steps.apply().map_err(refusal)? };
+    let mut stdout = std::io::stdout().lock();
     for line in lines {
         writeln!(stdout, "{line}")?;
     }
     Ok(())
 }
 
-/// An install refusal as the CLI reports it: the quiet one-liners of SPEC
-/// § 5 for a missing home or an unparsable file, an error report for I/O.
-fn refusal(r: crate::install::Refusal) -> color_eyre::Report {
-    use crate::install::Refusal;
+/// A refusal as every command reports it (SPEC § 5): the one line
+/// [`Refusal`]'s `Display` words on stderr and a [`Quiet`] exit for what a
+/// person can fix (no home, a file that does not parse, one that exists),
+/// an error report for an I/O failure.
+pub(crate) fn refusal(r: Refusal) -> color_eyre::Report {
     match r {
-        Refusal::NoHome { flag, what } => no_home(flag, what),
-        Refusal::Unparsable { path, problem } => refuse_unparsable(&path, &problem),
         Refusal::Io(e) => eyre!(e),
+        other => {
+            eprintln!("{other}");
+            Quiet.into()
+        }
     }
 }
 
@@ -504,23 +494,6 @@ fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
         .map(Path::to_path_buf)
         .or_else(|| config::env_path(config::CONFIG_ENV))
         .or_else(config::default_path)
-}
-
-/// The one-line refusal for a file that does not parse (SPEC § 5: a file
-/// garnish cannot read is never rewritten). The path and the problem on one
-/// line, exit 1, no report.
-fn refuse_unparsable(path: &Path, problem: &str) -> color_eyre::Report {
-    eprintln!(
-        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-        path.display()
-    );
-    Quiet.into()
-}
-
-/// The one-line refusal for a writing command run without `HOME`.
-fn no_home(flag: &str, what: &str) -> color_eyre::Report {
-    eprintln!("HOME is not set; pass {flag} to say where {what}");
-    Quiet.into()
 }
 
 /// The per-tick diagnostic line of SPEC § 5, written only with
@@ -618,7 +591,10 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     match action {
         ConfigAction::Path => {
             let Some(p) = config::locate(config_path).or_else(|| config_target(config_path)) else {
-                return Err(no_home("--config <FILE>", "the config is"));
+                return Err(refusal(Refusal::NoHome {
+                    flag: "--config <FILE>",
+                    what: "the config is",
+                }));
             };
             writeln!(stdout, "{}", p.display())?;
         }
@@ -659,16 +635,9 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         }
         ConfigAction::Init { force, preset } => {
             let text = preset_text(preset)?;
-            let Some(target) = config_target(config_path) else {
-                return Err(no_home("--config <FILE>", "the config goes"));
-            };
-            let backup = write_config_file(&target, &text, *force)?;
-            match backup {
-                Some(b) => {
-                    writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?;
-                }
-                None => writeln!(stdout, "wrote {}", target.display())?,
-            }
+            let target = config_target_or_quiet(config_path)?;
+            let backup = crate::install::write_config(&target, &text, *force).map_err(refusal)?;
+            writeln!(stdout, "{}", crate::install::wrote_line(&target, backup.as_deref()))?;
         }
     }
     Ok(())
@@ -697,39 +666,13 @@ pub fn preset_text(preset: &str) -> Result<String> {
     Ok(crate::gallery::body(p.source))
 }
 
-/// Write a config file the way every garnish command does (SPEC § 5).
-///
-/// An existing file is refused without `force`, a file that does not parse
-/// is never rewritten, and a replaced file is kept as a backup, whose path
-/// comes back.
-///
-/// # Errors
-/// The refusals above are one stderr line and [`Quiet`]; an I/O failure is
-/// an error naming the file.
-pub fn write_config_file(target: &Path, text: &str, force: bool) -> Result<Option<PathBuf>> {
-    let existed = target.exists();
-    if existed && !force {
-        eprintln!("{} exists; pass --force to overwrite", target.display());
-        return Err(Quiet.into());
-    }
-    if existed {
-        // A file that does not parse is never rewritten (SPEC § 5): the only
-        // way past is fixing or moving it by hand. A file with bad values
-        // parses, and is replaced under its backup.
-        let current = std::fs::read_to_string(target)
-            .with_context(|| format!("reading {}", target.display()))?;
-        if let Some(problem) = config::syntax_error(&current) {
-            return Err(refuse_unparsable(target, &problem));
-        }
-    }
-    crate::install::replace_file(target, text, existed).map_err(|e| eyre!(e))
-}
-
 /// Where the config a command writes goes (`--config`, `GARNISH_CONFIG`,
 /// the default), or a [`Quiet`] refusal without a home directory.
 ///
 /// # Errors
 /// [`Quiet`] after the one-line note, without a home.
 pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
-    config_target(explicit).ok_or_else(|| no_home("--config <FILE>", "the config goes"))
+    config_target(explicit).ok_or_else(|| {
+        refusal(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" })
+    })
 }

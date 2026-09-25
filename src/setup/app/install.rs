@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{App, Key, Screen};
-use crate::install::{Applied, ConfigStep, Refusal, Steps};
+use crate::install::{ConfigStep, Refusal, Steps};
 use crate::setup::pick::{Confirm, Layer, Question};
 use crate::setup::ui::Chrome;
 
@@ -15,7 +15,8 @@ use crate::setup::ui::Chrome;
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct InstallScreen {
     steps: Result<Steps, Refusal>,
-    applied: Option<Result<Applied, Refusal>>,
+    /// What applying the plan wrote, one line each, or why it could not.
+    applied: Option<Result<Vec<String>, Refusal>>,
     /// Where `Esc` goes back to.
     back: Back,
 }
@@ -120,7 +121,7 @@ impl App {
                         Chrome::muted(),
                     ))),
                     Some(Ok(applied)) => {
-                        for l in &applied.lines {
+                        for l in applied {
                             lines.push(Line::from(Span::styled(l.clone(), Chrome::set())));
                         }
                         lines.push(Line::from(Span::styled(

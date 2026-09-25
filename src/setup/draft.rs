@@ -380,10 +380,7 @@ impl Draft {
         let problem =
             self.unreadable.clone().or_else(|| now.as_deref().and_then(config::syntax_error));
         if let Some(problem) = problem {
-            return Err(format!(
-                "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-                path.display()
-            ));
+            return Err(crate::install::Refusal::Unparsable { path, problem }.to_string());
         }
         let backup = crate::install::replace_file(&path, text, path.exists())?;
         self.stamp = Stamp::of(&path);

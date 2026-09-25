@@ -98,22 +98,41 @@ pub fn read_existing(path: &Path) -> Result<Option<String>, String> {
     }
 }
 
-/// Back the settings file up (if it exists) and write the merged text atomically.
+/// Write a config file the way every garnish command does (SPEC § 5).
 ///
-/// A symlinked settings file is updated through the link (the target is
-/// rewritten, the link stays), the new file keeps the old file's permissions,
-/// and backups never overwrite each other ([`replace_file`]).
+/// An existing file is refused without `force`, a file that does not parse
+/// is never rewritten, and a replaced file is kept as a backup, whose path
+/// comes back.
 ///
 /// # Errors
-/// Propagates I/O errors and invalid existing JSON.
-pub fn apply(plan: &Plan) -> Result<Outcome, String> {
-    let existing = read_existing(&plan.settings)?;
-    let merged = merge(existing.as_deref().unwrap_or(""), plan)?;
-    if existing.as_deref() == Some(merged.as_str()) {
-        return Ok(Outcome { backup: None, changed: false });
+/// [`Refusal::Exists`] without `force`, [`Refusal::Unparsable`] for a file
+/// with a TOML syntax error, [`Refusal::Io`] naming the file.
+pub fn write_config(target: &Path, text: &str, force: bool) -> Result<Option<PathBuf>, Refusal> {
+    let existed = target.exists();
+    if existed && !force {
+        return Err(Refusal::Exists(target.to_path_buf()));
     }
-    let backup = replace_file(&plan.settings, &merged, existing.is_some())?;
-    Ok(Outcome { backup, changed: true })
+    if existed {
+        // A file that does not parse is never rewritten (SPEC § 5): the only
+        // way past is fixing or moving it by hand. A file with bad values
+        // parses, and is replaced under its backup.
+        let current = std::fs::read_to_string(target)
+            .map_err(|e| Refusal::Io(format!("reading {}: {e}", target.display())))?;
+        if let Some(problem) = crate::config::syntax_error(&current) {
+            return Err(Refusal::Unparsable { path: target.to_path_buf(), problem });
+        }
+    }
+    replace_file(target, text, existed).map_err(Refusal::Io)
+}
+
+/// The line a command prints for a file it wrote: `wrote <path>`, with the
+/// backup it kept when it replaced one.
+#[must_use]
+pub fn wrote_line(path: &Path, backup: Option<&Path>) -> String {
+    backup.map_or_else(
+        || format!("wrote {}", path.display()),
+        |b| format!("wrote {} (backup: {})", path.display(), b.display()),
+    )
 }
 
 /// Write `contents` over `target` the way every garnish command edits a
@@ -239,15 +258,6 @@ fn write_backup(target: &Path) -> Result<PathBuf, String> {
     Err("too many backups with the same timestamp".to_owned())
 }
 
-/// What `apply` did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Outcome {
-    /// The backup file, when one was written.
-    pub backup: Option<PathBuf>,
-    /// Whether the settings file changed.
-    pub changed: bool,
-}
-
 /// What `garnish install` was asked for: the flags of the command, which the
 /// `setup` install screen fills in with their defaults (SPEC § 14).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,6 +311,8 @@ pub enum Refusal {
         /// The problem, as `doctor` words it.
         problem: String,
     },
+    /// A file that exists where one is to be created, without `--force`.
+    Exists(PathBuf),
     /// Anything the file system refused, naming the file.
     Io(String),
 }
@@ -311,6 +323,7 @@ impl std::fmt::Display for Refusal {
             Self::NoHome { flag, what } => {
                 write!(f, "HOME is not set; pass {flag} to say where {what}")
             }
+            Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
             Self::Unparsable { path, problem } => write!(
                 f,
                 "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
@@ -367,16 +380,6 @@ pub struct Steps {
     /// `garnish` is on `PATH` (or the plan writes an absolute path), so the
     /// command written will be found.
     pub found: bool,
-}
-
-/// What applying a plan did, one line per thing, plus the notes a person
-/// should read (the CLI prints those on stderr, the screen in its status bar).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Applied {
-    /// What was written, one line each.
-    pub lines: Vec<String>,
-    /// Advice that is not an error.
-    pub notes: Vec<String>,
 }
 
 impl Steps {
@@ -498,20 +501,21 @@ impl Steps {
     /// Write everything the plan decided: the settings (with `install`'s
     /// backup), the default config when none exists, the skills last (the
     /// optional part, so a problem with them never leaves the settings
-    /// updated and the config unwritten).
+    /// updated and the config unwritten). What was written comes back, one
+    /// line each; the advice is [`Steps::notes`], whether applied or not.
     ///
     /// # Errors
     /// The first I/O failure, naming the file; whatever was written before
     /// it stays.
-    pub fn apply(&self) -> Result<Applied, Refusal> {
-        let mut applied = Applied { lines: Vec::new(), notes: self.notes() };
+    pub fn apply(&self) -> Result<Vec<String>, Refusal> {
+        let mut lines = Vec::new();
         let settings = self.plan.settings.display();
         if self.settings_up_to_date() {
-            applied.lines.push(format!("{settings} already up to date"));
+            lines.push(format!("{settings} already up to date"));
         } else {
             let backup = replace_file(&self.plan.settings, &self.merged, self.existing.is_some())
                 .map_err(Refusal::Io)?;
-            applied.lines.push(backup.map_or_else(
+            lines.push(backup.map_or_else(
                 || format!("wrote {settings}"),
                 |b| format!("updated {settings} (backup: {})", b.display()),
             ));
@@ -521,18 +525,14 @@ impl Steps {
             let (cfg, _) = crate::config::parse(&seed, &crate::modules::SCHEMAS);
             replace_file(path, &crate::docs::config_toml(&cfg, true), false)
                 .map_err(Refusal::Io)?;
-            applied.lines.push(format!(
-                "wrote default config to {}{}",
-                path.display(),
-                seeded(*padding)
-            ));
+            lines.push(format!("wrote default config to {}{}", path.display(), seeded(*padding)));
         }
         if let Some(dir) = &self.skills {
             let report = crate::skills::install(dir)
                 .map_err(|e| Refusal::Io(format!("writing skills to {}: {e}", dir.display())))?;
-            applied.lines.push(report.summary());
+            lines.push(report.summary());
         }
-        Ok(applied)
+        Ok(lines)
     }
 }
 
@@ -582,23 +582,51 @@ mod tests {
         assert!(merge("{nope", &with_pad).is_err());
     }
 
+    /// Options that touch the settings file alone: no config, no skills.
+    fn settings_only(settings: &Path) -> Options {
+        Options {
+            settings: Some(settings.to_path_buf()),
+            write_config: false,
+            write_skills: false,
+            ..Options::default()
+        }
+    }
+
+    /// Plan and apply as `garnish install` does, returning the lines.
+    fn install(settings: &Path) -> Vec<String> {
+        Steps::plan(&settings_only(settings)).unwrap().apply().unwrap()
+    }
+
+    /// The `<name>.bak-*` files in `dir`, oldest name first.
+    fn backups(dir: &Path, name: &str) -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&format!("{name}.bak-")))
+            .map(|e| e.path())
+            .collect();
+        found.sort();
+        found
+    }
+
     #[test]
     fn apply_backs_up_writes_atomically_and_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
-        let p = plan(dir.path());
-        let first = apply(&p).unwrap();
-        assert!(first.changed && first.backup.is_none());
-        let text = std::fs::read_to_string(&p.settings).unwrap();
+        let settings = dir.path().join("settings.json");
+        let first = install(&settings);
+        assert_eq!(first, vec![format!("wrote {}", settings.display())]);
+        let text = std::fs::read_to_string(&settings).unwrap();
         assert!(text.contains("\"command\": \"garnish\""));
-        let again = apply(&p).unwrap();
-        assert!(!again.changed && again.backup.is_none());
-        std::fs::write(&p.settings, r#"{"a":1}"#).unwrap();
-        let third = apply(&p).unwrap();
-        assert!(third.changed);
-        let backup = third.backup.unwrap();
-        assert_eq!(std::fs::read_to_string(backup).unwrap(), r#"{"a":1}"#);
-        let v: Value =
-            serde_json::from_str(&std::fs::read_to_string(&p.settings).unwrap()).unwrap();
+        let again = install(&settings);
+        assert_eq!(again, vec![format!("{} already up to date", settings.display())]);
+        assert_eq!(backups(dir.path(), "settings.json"), Vec::<PathBuf>::new());
+        std::fs::write(&settings, r#"{"a":1}"#).unwrap();
+        let third = install(&settings);
+        assert!(third[0].starts_with("updated ") && third[0].contains("(backup: "), "{third:?}");
+        let kept = backups(dir.path(), "settings.json");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(std::fs::read_to_string(&kept[0]).unwrap(), r#"{"a":1}"#);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(v["a"], 1);
         assert_eq!(v["statusLine"]["type"], "command");
         assert!(
@@ -619,26 +647,27 @@ mod tests {
         std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
         let link = dir.path().join("settings.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        let p = Plan { settings: link.clone(), ..plan(dir.path()) };
-        let first = apply(&p).unwrap();
-        assert!(first.changed);
+        let first = install(&link);
+        assert!(first[0].starts_with("updated "), "{first:?}");
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "link kept");
         let text = std::fs::read_to_string(&real).unwrap();
         assert!(text.contains("\"dot\": 1") && text.contains("\"command\": \"garnish\""), "{text}");
         assert!(!text.starts_with('\u{feff}'));
         assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
-        let backup = first.backup.unwrap();
         // The backup sits next to the link target; compare canonical paths
         // because macOS temp dirs live under the `/var` → `/private/var` symlink.
         let real_dir = std::fs::canonicalize(real.parent().unwrap()).unwrap();
-        assert!(backup.starts_with(&real_dir), "{backup:?} not under {real_dir:?}");
+        let kept = backups(&real_dir, "settings.json");
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        let backup = kept[0].clone();
         assert_eq!(std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
         // a second change in the same second gets its own backup
         std::fs::write(&real, "{\"dot\":2}").unwrap();
-        let second = apply(&p).unwrap();
-        let b2 = second.backup.unwrap();
-        assert_ne!(b2, backup);
-        assert!(std::fs::read_to_string(&b2).unwrap().contains("\"dot\":2"));
+        install(&link);
+        let kept = backups(&real_dir, "settings.json");
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        let b2 = kept.iter().find(|b| **b != backup).unwrap();
+        assert!(std::fs::read_to_string(b2).unwrap().contains("\"dot\":2"));
         assert!(std::fs::read_to_string(&backup).unwrap().contains("\"dot\":1"));
         // read_existing distinguishes missing from unreadable
         assert_eq!(read_existing(&dir.path().join("nope.json")).unwrap(), None);

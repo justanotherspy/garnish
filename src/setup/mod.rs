@@ -77,36 +77,21 @@ fn preset_twin(
     config_path: Option<&Path>,
 ) -> Result<()> {
     let text = crate::cli::preset_text(preset)?;
-    let backup = crate::cli::write_config_file(target, &text, true)?;
-    let mut stdout = std::io::stdout().lock();
-    match backup {
-        Some(b) => writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?,
-        None => writeln!(stdout, "wrote {}", target.display())?,
-    }
+    let backup = crate::install::write_config(target, &text, true).map_err(crate::cli::refusal)?;
+    writeln!(
+        std::io::stdout().lock(),
+        "{}",
+        crate::install::wrote_line(target, backup.as_deref())
+    )?;
     if install {
         let options = crate::install::Options {
             config_path: config_path.map(Path::to_path_buf),
             ..crate::install::Options::default()
         };
-        let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
-        for note in steps.notes() {
-            eprintln!("{note}");
-        }
-        for line in steps.apply().map_err(refusal)?.lines {
-            writeln!(stdout, "{line}")?;
-        }
+        let steps = crate::install::Steps::plan(&options).map_err(crate::cli::refusal)?;
+        crate::cli::print_install(&steps, false)?;
     }
     Ok(())
-}
-
-fn refusal(r: crate::install::Refusal) -> color_eyre::Report {
-    match r {
-        crate::install::Refusal::Io(e) => color_eyre::eyre::eyre!(e),
-        other => {
-            eprintln!("{other}");
-            crate::cli::Quiet.into()
-        }
-    }
 }
 
 /// The screen drawn into a `width × height` buffer, as text: one line per
