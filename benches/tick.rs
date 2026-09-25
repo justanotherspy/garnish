@@ -16,6 +16,18 @@ fn parse_payload(c: &mut Criterion) {
     c.bench_function("parse_payload", |b| b.iter(|| Payload::parse(black_box(PAYLOAD))));
 }
 
+/// A branch name as long as a hostile `.git/HEAD` can make one
+/// (`git::MAX_REF_BYTES`) cut to the default `max_length`: the cut reads
+/// only the clusters it keeps.
+fn cut_name_hostile(c: &mut Criterion) {
+    let name = "a".repeat(65_536);
+    c.bench_function("cut_name_hostile", |b| {
+        b.iter(|| {
+            garnish::modules::util::cut_name(black_box(&name), 40, garnish::icons::IconSet::Unicode)
+        });
+    });
+}
+
 fn resolve_config(c: &mut Criterion) {
     let text = include_str!("../examples/garnish.toml");
     c.bench_function("resolve_config_defaults", |b| {
@@ -173,6 +185,7 @@ fn tick_in_process_layout(c: &mut Criterion) {
 criterion_group!(
     benches,
     parse_payload,
+    cut_name_hostile,
     resolve_config,
     render_modules,
     tick_in_process,

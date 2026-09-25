@@ -314,21 +314,34 @@ pub fn char_width(c: char) -> usize {
 /// half a flag is a lone letter and a dropped skin tone is a different
 /// person, so `truncate` and the fish path's initial both work in these
 /// units, not in `char`s.
-pub(crate) fn clusters(s: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut joined = false;
-    for c in s.chars() {
-        let attach = joined
-            || (char_width(c) == 0 && !out.is_empty())
-            || is_emoji_modifier(c)
-            || out.last().is_some_and(|last| is_lone_regional_indicator(last) && is_regional(c));
-        match out.last_mut() {
-            Some(last) if attach => last.push(c),
-            _ => out.push(c.to_string()),
+///
+/// The clusters are slices of `s`, produced as they are asked for, so a cut
+/// that keeps the first few clusters of a long string reads no further.
+pub(crate) fn clusters(s: &str) -> impl Iterator<Item = &str> {
+    let mut rest = s;
+    std::iter::from_fn(move || {
+        let mut chars = rest.char_indices();
+        let (_, first) = chars.next()?;
+        let mut end = first.len_utf8();
+        let mut joined = first == '\u{200d}';
+        // A lone regional indicator waits for the one that completes its flag.
+        let mut lone_regional = is_regional(first);
+        for (i, c) in chars {
+            if !(joined
+                || char_width(c) == 0
+                || is_emoji_modifier(c)
+                || (lone_regional && is_regional(c)))
+            {
+                break;
+            }
+            end = i.saturating_add(c.len_utf8());
+            joined = c == '\u{200d}';
+            lone_regional = false;
         }
-        joined = c == '\u{200d}';
-    }
-    out
+        let (cluster, tail) = rest.split_at_checked(end)?;
+        rest = tail;
+        Some(cluster)
+    })
 }
 
 /// A skin-tone modifier, which belongs to the emoji before it.
@@ -339,13 +352,6 @@ const fn is_emoji_modifier(c: char) -> bool {
 /// A regional indicator letter; a flag is exactly two of them.
 const fn is_regional(c: char) -> bool {
     matches!(c, '\u{1f1e6}'..='\u{1f1ff}')
-}
-
-/// Whether a cluster so far is a single regional indicator, so the next one
-/// completes its flag rather than starting another.
-fn is_lone_regional_indicator(cluster: &str) -> bool {
-    let mut chars = cluster.chars();
-    chars.next().is_some_and(is_regional) && chars.next().is_none()
 }
 
 /// Sum of segment widths.
@@ -371,7 +377,7 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
     'outer: for seg in segments {
         let mut kept = String::new();
         for cluster in clusters(&seg.text) {
-            let w = display_width(&cluster);
+            let w = display_width(cluster);
             if used.saturating_add(w) > budget {
                 if !kept.is_empty() {
                     out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
@@ -379,7 +385,7 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
                 break 'outer;
             }
             used = used.saturating_add(w);
-            kept.push_str(&cluster);
+            kept.push_str(cluster);
         }
         out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
     }
@@ -410,7 +416,7 @@ pub(crate) fn fit(s: &str, width: usize) -> &str {
 
 /// One terminal cluster of a segment, with the style it came from.
 struct Cell<'a> {
-    text: String,
+    text: &'a str,
     width: usize,
     style: Style,
     link: Option<&'a str>,
@@ -420,8 +426,8 @@ fn cells(segments: &[Segment]) -> Vec<Cell<'_>> {
     segments
         .iter()
         .flat_map(|seg| {
-            clusters(&seg.text).into_iter().map(move |text| Cell {
-                width: display_width(&text),
+            clusters(&seg.text).map(move |text| Cell {
+                width: display_width(text),
                 text,
                 style: seg.style,
                 link: seg.link.as_deref(),
@@ -500,7 +506,7 @@ pub fn scroll(
                 let visible_from = start.max(offset);
                 let visible_to = stop.min(end);
                 if visible_from == start && visible_to == stop {
-                    push(&cell.text, cell.style, cell.link);
+                    push(cell.text, cell.style, cell.link);
                     emitted = emitted.saturating_add(cell.width);
                 } else {
                     let cut = visible_to.saturating_sub(visible_from);
@@ -815,7 +821,9 @@ mod tests {
     /// shortening it, so those are clusters like a combining mark is.
     #[test]
     fn clusters_keep_flags_skin_tones_marks_and_zwj_sequences_whole() {
-        let c = |s: &str| clusters(s);
+        fn c(s: &str) -> Vec<&str> {
+            clusters(s).collect()
+        }
         assert_eq!(c("ab"), ["a", "b"]);
         assert_eq!(c("e\u{301}x"), ["e\u{301}", "x"]);
         assert_eq!(c("👨\u{200d}💻x"), ["👨\u{200d}💻", "x"]);
@@ -827,10 +835,54 @@ mod tests {
         assert_eq!(c("🇺x"), ["🇺", "x"]);
         // A skin tone belongs to the emoji before it.
         assert_eq!(c("👍🏽ab"), ["👍🏽", "a", "b"]);
+        // A leading zero-width character stands alone; one after a ZWJ is
+        // joined; three regional indicators are a flag and a lone letter.
+        assert_eq!(c("\u{301}ab"), ["\u{301}", "a", "b"]);
+        assert_eq!(c("\u{200d}ab"), ["\u{200d}a", "b"]);
+        assert_eq!(c("🇺🇸🇬"), ["🇺🇸", "🇬"]);
+        assert_eq!(c("🇺\u{301}🇸"), ["🇺\u{301}", "🇸"]);
+        assert_eq!(c(""), Vec::<&str>::new());
         // Cutting therefore keeps the glyph or drops it whole.
         let seg = |s: &str| vec![Segment::plain(s)];
         assert_eq!(Painter::PLAIN.paint(&truncate(&seg("🇺🇸ab"), 3, "…")), "🇺🇸…");
         assert_eq!(Painter::PLAIN.paint(&truncate(&seg("👍🏽ab"), 3, "…")), "👍🏽…");
+    }
+
+    /// The lazy slices are the clusters the eager splitter used to build as
+    /// one `String` each: every string of up to three pieces from an
+    /// alphabet of the joining cases splits the same way under both.
+    #[test]
+    fn lazy_clusters_equal_the_eager_splitter() {
+        fn eager(s: &str) -> Vec<String> {
+            let mut out: Vec<String> = Vec::new();
+            let mut joined = false;
+            for c in s.chars() {
+                let lone_ri = out.last().is_some_and(|last| {
+                    let mut chars = last.chars();
+                    chars.next().is_some_and(is_regional) && chars.next().is_none()
+                });
+                let attach = joined
+                    || (char_width(c) == 0 && !out.is_empty())
+                    || is_emoji_modifier(c)
+                    || (lone_ri && is_regional(c));
+                match out.last_mut() {
+                    Some(last) if attach => last.push(c),
+                    _ => out.push(c.to_string()),
+                }
+                joined = c == '\u{200d}';
+            }
+            out
+        }
+        let pieces =
+            ["a", "🇺", "🇸", "\u{200d}", "\u{301}", "\u{fe0f}", "🏽", "👍", "日", "\u{1b}", "😀"];
+        for a in pieces {
+            for b in pieces {
+                for c in pieces {
+                    let s = format!("{a}{b}{c}");
+                    assert_eq!(clusters(&s).collect::<Vec<_>>(), eager(&s), "{s:?}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -111,7 +111,7 @@ pub fn fish(path: &str) -> String {
 /// that is not there.
 fn initial(segment: &str) -> String {
     let keep = if segment.starts_with('.') { 2 } else { 1 };
-    let short: String = crate::ansi::clusters(segment).into_iter().take(keep).collect();
+    let short: String = crate::ansi::clusters(segment).take(keep).collect();
     if matches!(short.as_str(), "" | "." | "..") || crate::ansi::display_width(&short) == 0 {
         segment.to_owned()
     } else {

@@ -323,9 +323,9 @@ mod tests {
                             // Against the *reduced* text: the config strips
                             // escapes and control bytes on the way in, so the
                             // raw literal is not what the module rendered.
-                            let source = crate::ansi::clusters(&crate::ansi::plain_text(text));
-                            let mark: Vec<String> =
-                                crate::ansi::clusters(icons.ellipsis()).into_iter().collect();
+                            let plain = crate::ansi::plain_text(text);
+                            let source: Vec<&str> = crate::ansi::clusters(&plain).collect();
+                            let mark: Vec<&str> = crate::ansi::clusters(icons.ellipsis()).collect();
                             for seg in &row {
                                 for c in crate::ansi::clusters(seg.text()) {
                                     assert!(

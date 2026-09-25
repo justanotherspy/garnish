@@ -123,26 +123,12 @@ pub fn dollars(usd: f64, decimals: usize) -> String {
 /// `max` is smaller than it, so the result is never wider than asked.
 #[must_use]
 pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
-    if max == 0 {
-        return name.to_owned();
-    }
-    // A cluster is at least one char, so a name with no more chars than the
-    // budget cannot need cutting and never reaches `clusters`, which
-    // allocates a `String` per grapheme. That only covers the short names;
-    // the long ones are bounded at the source instead (`git::MAX_REF_BYTES`
-    // caps what `.git/HEAD` can make a branch name in a checkout garnish did
-    // not create), because there is no cheap way to count clusters without
-    // building them.
-    if name.chars().take(max.saturating_add(1)).count() <= max {
-        return name.to_owned();
-    }
-    let clusters = crate::ansi::clusters(name);
-    if clusters.len() <= max {
+    if max == 0 || crate::ansi::clusters(name).nth(max).is_none() {
         return name.to_owned();
     }
     let ellipsis: String = icons.ellipsis().chars().take(max).collect();
     let mut out: String =
-        clusters.into_iter().take(max.saturating_sub(ellipsis.chars().count())).collect();
+        crate::ansi::clusters(name).take(max.saturating_sub(ellipsis.chars().count())).collect();
     out.push_str(&ellipsis);
     out
 }
@@ -198,7 +184,7 @@ mod tests {
             for max in 1..8_usize {
                 let cut = cut_name("🇺🇸abcdef", max, icons);
                 assert!(
-                    crate::ansi::clusters(&cut).len() <= max,
+                    crate::ansi::clusters(&cut).count() <= max,
                     "{} max={max}: {cut:?}",
                     icons.name()
                 );
