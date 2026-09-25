@@ -1229,6 +1229,24 @@ fn unsetting_the_preset_swaps_its_rows_too() {
     assert!(app.status().unwrap().contains("rows replaced"), "{:?}", app.status());
 }
 
+/// app-18: a `nan` in the file (TOML takes it) neither keeps the draft
+/// dirty forever nor makes every key an edit that ends the redo chain.
+#[test]
+fn a_nan_in_the_file_is_equal_to_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, format!("{TWO_ROWS}[modules.context]\nwarn_at = nan\n")).unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert!(!app.draft().is_dirty());
+    assert!(!snapshot(&mut app, 80, 24).contains("(unsaved)"));
+    keys(&mut app, "<right>xuj");
+    keys(&mut app, "U");
+    assert_eq!(app.status(), Some("redone: removed path"));
+    keys(&mut app, "uq");
+    assert!(app.done(), "nothing unsaved: q quits at once");
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

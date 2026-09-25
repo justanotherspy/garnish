@@ -157,7 +157,7 @@ impl Draft {
     /// Whether the table differs from the file's (as read, or as last saved).
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.table != self.saved
+        !same_table(&self.table, &self.saved)
     }
 
     /// Swap the draft's content for `table` (a preset adopted, an edit
@@ -423,6 +423,26 @@ impl Draft {
     }
 }
 
+/// Whether two tables hold the same keys with the same values, in any
+/// order, a NaN equal to a NaN: TOML takes `nan`, and `f64`'s own `==`
+/// would leave a draft holding one different from itself for good.
+#[must_use]
+pub fn same_table(a: &Table, b: &Table) -> bool {
+    a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| same_value(v, w)))
+}
+
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        // As written: `-0.0` is not `0.0`, since a save would write it back.
+        (Value::Float(x), Value::Float(y)) => x.total_cmp(y).is_eq() || (x.is_nan() && y.is_nan()),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same_value(v, w))
+        }
+        (Value::Table(x), Value::Table(y)) => same_table(x, y),
+        _ => a == b,
+    }
+}
+
 /// The keys of a title, on a row or in a `[box.<name>]` (SPEC § 4.3).
 pub const TITLE_KEYS: [&str; 4] = ["title", "title_justify", "title_pad", "title_color"];
 
@@ -605,6 +625,20 @@ mod tests {
         assert_eq!(g.prune_orphan_boxes(), vec!["orphan".to_owned()]);
         assert!(g.get(&["box", "orphan"]).is_none() && g.get(&["box", "i"]).is_some());
         assert_eq!(g.prune_orphan_boxes(), Vec::<String>::new());
+    }
+
+    /// app-18: a NaN equals a NaN for the draft's comparisons, and nothing
+    /// else changes: order does not count, a value or a key does.
+    #[test]
+    fn tables_compare_with_nan_equal_to_itself() {
+        let d = Draft::from_text("x = nan\n[t]\nl = [1.0, nan]\n");
+        assert!(!d.is_dirty());
+        let t = |text: &str| toml::from_str::<Table>(text).unwrap();
+        assert!(same_table(&t("a = nan\nb = 1"), &t("b = 1\na = nan")));
+        assert!(!same_table(&t("a = nan"), &t("a = 1.0")));
+        assert!(!same_table(&t("a = [nan]"), &t("a = [nan, nan]")));
+        assert!(!same_table(&t("a = 1"), &t("a = 1\nb = 2")));
+        assert!(!same_table(&t("[a]\nb = 1"), &t("[a]\nc = 1")));
     }
 
     /// app-04: a comment is a `#` outside every kind of string, which is

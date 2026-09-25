@@ -3,6 +3,7 @@
 //! is undoable by construction.
 
 use super::{App, Key, Level, Screen};
+use crate::setup::draft::same_table;
 use crate::setup::form::FormKind;
 use crate::setup::pick::Layer;
 
@@ -51,7 +52,7 @@ impl App {
     /// Keep `before` when the input just handled changed the table; a new
     /// edit ends the redo chain.
     fn remember(&mut self, mut before: Snapshot) {
-        if self.draft.table() == &before.table {
+        if same_table(self.draft.table(), &before.table) {
             return;
         }
         before.what = self.status.as_ref().map_or_default(|(s, _)| s.clone());
