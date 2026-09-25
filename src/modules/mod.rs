@@ -404,7 +404,8 @@ impl Ctx<'_> {
     /// not spawn a worker on every tick. Returns the lookup plus the
     /// [`Freshness`] the render should carry: a value past its TTL still
     /// renders [`Freshness::Fresh`] while the worker runs and only becomes
-    /// [`Freshness::Stale`] after `stale_after` TTLs (SPEC § 3.6).
+    /// [`Freshness::Stale`] after `stale_after` TTLs (SPEC § 3.6); a miss is
+    /// [`Freshness::Fresh`], so the caller carries it as it is.
     #[must_use]
     pub fn cached(
         &self,
@@ -434,7 +435,9 @@ impl Ctx<'_> {
             self.spawn_refresh(cfg, scope);
         }
         let grace_ms = ttl_ms.saturating_mul(u64::from(self.stale_after.max(1)));
-        let overdue = mismatched || lookup.entry.as_ref().is_none_or(|e| !e.is_fresh(grace_ms));
+        // A miss is not overdue: there is no value to mark, and the module
+        // shows its placeholder while the worker runs (SPEC § 3.6).
+        let overdue = mismatched || lookup.entry.as_ref().is_some_and(|e| !e.is_fresh(grace_ms));
         let freshness = match failed {
             Some(_) => Freshness::Failed,
             None if overdue => Freshness::Stale,
@@ -878,6 +881,37 @@ mod tests {
         };
         assert_eq!(text(value()), "⇡2 ⟳");
         assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
+    }
+
+    /// SPEC § 3.6: a missing entry renders the module's placeholder, not an
+    /// overdue mark. `cached` reported a miss as `Stale` and every caller
+    /// undid it by hand, so a new cached module that forgot would draw
+    /// `– ⟳` on its first tick. A mismatched entry is still overdue at once.
+    #[test]
+    fn cache_a_miss_is_fresh_while_its_worker_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let (config, _) = crate::config::parse("", &SCHEMAS);
+        let cache = Cache::at(dir.path().join("cache"));
+        let clock = crate::render::Clock {
+            workers: true,
+            cache: Some(dir.path().join("cache")),
+            ..crate::render::Clock::fixed()
+        };
+        let ctx = crate::render::context(&payload, &config, &clock, &cache, 80);
+        assert!(ctx.workers);
+        let cfg = config.modules.get("account").unwrap();
+        let scope = Scope::Session("s".to_owned());
+        // A live lock: a refresh is in flight, so nothing is spawned.
+        let LockOutcome::Acquired(_guard) = cache.lock(&scope, "account") else {
+            panic!("the lock is free")
+        };
+        let (lookup, freshness) = ctx.cached(cfg, &scope, |_| true);
+        assert_eq!((lookup.entry, lookup.in_progress, freshness), (None, true, Freshness::Fresh));
+        cache.write(&scope, "account", &CacheEntry::ok(600_000, BTreeMap::new())).unwrap();
+        let (lookup, freshness) = ctx.cached(cfg, &scope, |_| false);
+        assert!(lookup.entry.is_some());
+        assert_eq!(freshness, Freshness::Stale, "an entry for another situation is overdue");
     }
 
     /// A worker that cannot lock (a cache on a filesystem without hard

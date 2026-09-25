@@ -524,10 +524,7 @@ impl Module for BranchModule {
             }
         });
         let entry = cached.as_ref().and_then(|(lookup, _)| lookup.entry.as_ref());
-        let freshness = cached
-            .as_ref()
-            .filter(|(lookup, _)| lookup.entry.is_some())
-            .map_or(Freshness::Fresh, |(_, fresh)| *fresh);
+        let freshness = cached.as_ref().map_or(Freshness::Fresh, |(_, fresh)| *fresh);
         let asked = if fallback { entry.and_then(asked_head) } else { None };
         let (name, detached) = match (head.or(asked.as_ref()), payload_branch) {
             (Some(Head::Branch(b)), _) => (b.clone(), false),
@@ -737,7 +734,6 @@ impl Module for SyncModule {
             }
             _ => return Rendered::empty(),
         };
-        let freshness = if lookup.entry.is_some() { freshness } else { Freshness::Fresh };
         if lookup.entry.as_ref().and_then(|e| e.get("gone")) == Some("1") {
             return Rendered { segments: no_upstream(cfg), freshness, measure: None };
         }
