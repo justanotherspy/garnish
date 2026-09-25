@@ -21,7 +21,7 @@ pub struct Request<'a> {
     pub overlay: Overlay,
     /// Terminal width (`COLUMNS`), when known.
     pub columns: Option<usize>,
-    /// `NO_COLOR` is set.
+    /// `NO_COLOR` is set and not empty ([`config::no_color_env`]).
     pub no_color: bool,
     /// Draw every row faint, as Claude Code draws the status line on screen
     /// (`preview`, SPEC § 2.1); the tick leaves that to the harness.

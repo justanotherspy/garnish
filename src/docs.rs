@@ -975,7 +975,7 @@ pub fn config_page() -> String {
     );
     let _ = writeln!(
         o,
-        "| `color` | `auto` \\| `always` \\| `never` \\| `256` \\| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set. |"
+        "| `color` | `auto` \\| `always` \\| `never` \\| `256` \\| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set and not empty. |"
     );
     let _ = writeln!(
         o,
@@ -1237,7 +1237,10 @@ fn environment_section(o: &mut String) {
         o,
         "| `COLUMNS` | Terminal width (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. The lines are rendered 4 cells narrower, plus `padding`: the width of Claude Code's status line box. |"
     );
-    let _ = writeln!(o, "| `NO_COLOR` | Disables escape codes under `color = \"auto\"`. |");
+    let _ = writeln!(
+        o,
+        "| `NO_COLOR` | Disables escape codes under `color = \"auto\"` when set and not empty (no-color.org). |"
+    );
     let _ = writeln!(o, "| `GARNISH_CONFIG` | Config file path. |");
     let _ = writeln!(
         o,
@@ -1253,7 +1256,7 @@ fn environment_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |"
+        "| `GARNISH_ANIMATE` | `0` (or `false`, `no`, `off`) freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |"
     );
     let _ = writeln!(
         o,

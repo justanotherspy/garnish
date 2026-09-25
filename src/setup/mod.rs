@@ -57,7 +57,7 @@ pub fn run(args: &Args<'_>) -> Result<()> {
     }
     let draft = Draft::open(Some(target));
     let options = install_options(crate::config::explicit(args.config_path));
-    let no_color = std::env::var_os("NO_COLOR").is_some();
+    let no_color = crate::config::no_color_env();
     let home = crate::claude_settings::home_dir();
     let mut app = App::new(draft, Preview::live(), options, home, no_color);
     term::run(&mut app)?;

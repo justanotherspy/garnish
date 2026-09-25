@@ -294,6 +294,11 @@ fn setup_preset_twin_and_the_tty_pointer_work_without_a_screen() {
     assert!(ok && out.contains("garnish setup"), "{out}");
     let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "0")]);
     assert!(ok && out.contains("bad payload"), "{out}");
+    // Every boolean hook reads one rule (SPEC § 9): Claude Code's words.
+    let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "true")]);
+    assert!(ok && out.contains("garnish setup"), "{out}");
+    let (out, _, ok) = run(&[], home, &[("GARNISH_STDIN_TTY", "Off")]);
+    assert!(ok && out.contains("bad payload"), "{out}");
     let (out, _, ok) = run(&["render"], home, &[("GARNISH_STDIN_TTY", "1")]);
     assert!(ok && out.contains("bad payload"), "the explicit render always reads stdin: {out}");
 }
@@ -859,6 +864,26 @@ fn cache_debug_hook_logs_one_line_per_tick_and_nothing_without_it() {
     assert!(ok, "{report}");
     assert!(report.contains("debug.log (last 2 of 2 lines)"), "{report}");
     assert!(report.contains("GARNISH_CACHE_DIR="), "{report}");
+}
+
+/// no-color.org: `NO_COLOR` turns colour off when it is "present and not
+/// an empty string"; an empty one (a profile's `export NO_COLOR=`) used to
+/// turn it off too, links included, under `color = "auto"`.
+#[test]
+fn an_empty_no_color_leaves_colour_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let cfg = home.join("garnish.toml");
+    std::fs::write(&cfg, "[[line]]\nmodules = [\"model\"]\n").unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    assert!(tick(&cfg, home, payload, &[("NO_COLOR", "")]).contains('\x1b'), "empty is unset");
+    assert!(!tick(&cfg, home, payload, &[("NO_COLOR", "1")]).contains('\x1b'), "set is off");
+    let fixture =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
+    let args = ["--config", cfg.to_str().unwrap(), "preview", fixture, "--width", "84"];
+    let (out, _, ok) = run(&args, home, &[("NO_COLOR", "")]);
+    let rows: String = out.lines().skip(1).collect();
+    assert!(ok && rows.contains("38;2;"), "preview too: {out:?}");
 }
 
 /// SPEC § 2.1: `preview` paints every row faint, as Claude Code draws the

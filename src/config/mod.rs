@@ -366,7 +366,7 @@ impl Overflow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ColorChoice {
-    /// Truecolor unless `NO_COLOR` is set.
+    /// Truecolor unless `NO_COLOR` is set and not empty.
     #[default]
     Auto,
     /// Always truecolor.
@@ -393,7 +393,7 @@ impl ColorChoice {
         }
     }
 
-    /// Resolve to a concrete mode given the environment.
+    /// Resolve to a concrete mode given the environment ([`no_color_env`]).
     #[must_use]
     pub const fn mode(self, no_color_env: bool) -> ColorMode {
         match self {
@@ -409,6 +409,20 @@ impl ColorChoice {
             Self::Ansi256 => ColorMode::Ansi256,
         }
     }
+}
+
+/// Whether `NO_COLOR` asks for no colour: set *and not empty*, as
+/// no-color.org defines it (an empty value is the shell's "unset", the
+/// rule [`env_path`] applies to a path).
+#[must_use]
+pub fn no_color_env() -> bool {
+    no_color_from(std::env::var_os("NO_COLOR").as_deref())
+}
+
+/// [`no_color_env`] for an explicit value of the variable.
+#[must_use]
+pub fn no_color_from(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| !v.is_empty())
 }
 
 /// Which way an animated rule pattern travels (`[frame] fill_direction`).
@@ -4385,5 +4399,10 @@ blank = true
         assert_eq!(ColorChoice::Auto.mode(true), ColorMode::Never);
         assert_eq!(ColorChoice::Never.mode(false), ColorMode::Never);
         assert_eq!(ColorChoice::Ansi256.mode(false), ColorMode::Ansi256);
+        // no-color.org: present *and not empty*.
+        assert!(!no_color_from(None));
+        assert!(!no_color_from(Some(std::ffi::OsStr::new(""))));
+        assert!(no_color_from(Some(std::ffi::OsStr::new("1"))));
+        assert!(no_color_from(Some(std::ffi::OsStr::new("0"))), "any value but empty");
     }
 }

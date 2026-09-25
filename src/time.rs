@@ -60,13 +60,14 @@ pub fn parse_now(value: &str) -> Option<Timestamp> {
         .or_else(|| v.parse::<Timestamp>().ok())
 }
 
-/// Environment variable that freezes every animation at frame 0 when set to `0`.
+/// Environment variable that freezes every animation at frame 0 when set to
+/// `0` (or another off word of the boolean hook rule, SPEC § 9).
 pub const ANIMATE_ENV: &str = "GARNISH_ANIMATE";
 
 /// Whether animations run for this process (`GARNISH_ANIMATE=0` freezes them).
 #[must_use]
 pub fn animate_from_env() -> bool {
-    !std::env::var(ANIMATE_ENV).is_ok_and(|v| v.trim() == "0")
+    crate::claude_settings::env_flag(ANIMATE_ENV) != Some(false)
 }
 
 /// The one stateless animation rule (SPEC § 4.2): the frame index or scroll

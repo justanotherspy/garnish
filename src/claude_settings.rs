@@ -72,8 +72,29 @@ impl Env {
 /// Claude Code's own rule for boolean environment variables (`isEnvTruthy`):
 /// only `1`, `true`, `yes`, `on` (case-insensitive) count as set.
 #[must_use]
-pub fn env_truthy(v: Option<&String>) -> bool {
-    v.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+pub fn env_truthy(v: Option<&str>) -> bool {
+    env_bool(v) == Some(true)
+}
+
+/// The one reading of a boolean environment variable (SPEC § 9).
+///
+/// Claude Code's truthy words (`1`, `true`, `yes`, `on`) are `Some(true)`,
+/// their opposites (`0`, `false`, `no`, `off`) `Some(false)`, both trimmed
+/// and in any case; anything else, unset or empty included, is `None`.
+#[must_use]
+pub fn env_bool(v: Option<&str>) -> Option<bool> {
+    match v?.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// [`env_bool`] of the process's variable `key`: how every `GARNISH_*`
+/// switch reads.
+#[must_use]
+pub fn env_flag(key: &str) -> Option<bool> {
+    env_bool(std::env::var(key).ok().as_deref())
 }
 
 /// The test hook that stands in for the platform's managed settings file
@@ -436,8 +457,8 @@ pub fn resolve(env: &Env, keys: &[FileKeys]) -> AutoCompact {
     let env_window = env.window.as_deref().and_then(|s| s.trim().parse::<u64>().ok());
     AutoCompact {
         enabled: enabled.unwrap_or(true)
-            && !env_truthy(env.disable.as_ref())
-            && !env_truthy(env.disable_all.as_ref()),
+            && !env_truthy(env.disable.as_deref())
+            && !env_truthy(env.disable_all.as_deref()),
         window: env_window.or(window),
         pct_override: env.pct.as_deref().and_then(|s| s.trim().parse::<f64>().ok()),
     }
@@ -762,6 +783,16 @@ pub(crate) mod tests {
         for off in ["0", "false", "no", "off", "", "maybe"] {
             let env = Env { disable: Some(off.into()), ..Default::default() };
             assert!(resolve(&env, &[]).enabled, "{off}");
+        }
+        // The one boolean rule of SPEC § 9: both word sets, anything else unset.
+        for on in ["1", "true", "YES", " On "] {
+            assert_eq!(env_bool(Some(on)), Some(true), "{on}");
+        }
+        for off in ["0", "false", "No", " OFF "] {
+            assert_eq!(env_bool(Some(off)), Some(false), "{off}");
+        }
+        for unset in [Some(""), Some("maybe"), Some("2"), None] {
+            assert_eq!(env_bool(unset), None, "{unset:?}");
         }
         // The managed file: the platform's, the hook's, or none at all.
         let platform = managed_settings_from(None).unwrap();

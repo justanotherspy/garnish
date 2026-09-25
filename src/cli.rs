@@ -314,15 +314,12 @@ fn render_panics_as_a_row() {
     }));
 }
 
-/// The [`TEST_PANIC_ENV`] hook.
-// A panic is this hook's whole job; it is compiled out of a release build.
-#[allow(clippy::panic)]
+/// The [`TEST_PANIC_ENV`] hook: a panic is its whole job, and a release
+/// build compiles it out.
 fn test_panic() {
-    if cfg!(debug_assertions)
-        && crate::claude_settings::env_truthy(std::env::var(TEST_PANIC_ENV).ok().as_ref())
-    {
-        panic!("{TEST_PANIC_ENV} is set");
-    }
+    let armed =
+        cfg!(debug_assertions) && crate::claude_settings::env_flag(TEST_PANIC_ENV) == Some(true);
+    assert!(!armed, "{TEST_PANIC_ENV} is set");
 }
 
 fn run_command() -> Result<()> {
@@ -448,7 +445,7 @@ fn render_stdin(config_path: Option<&Path>) {
         config_path,
         overlay: Overlay::default(),
         columns: env_columns(),
-        no_color: std::env::var_os("NO_COLOR").is_some(),
+        no_color: config::no_color_env(),
         dim: false,
         workers: true,
     };
@@ -599,11 +596,8 @@ pub const STDIN_TTY_ENV: &str = "GARNISH_STDIN_TTY";
 #[must_use]
 pub fn stdin_is_terminal() -> bool {
     use std::io::IsTerminal as _;
-    match std::env::var(STDIN_TTY_ENV).ok().as_deref().map(str::trim) {
-        Some("1") => true,
-        Some("0") => false,
-        _ => std::io::stdin().is_terminal(),
-    }
+    crate::claude_settings::env_flag(STDIN_TTY_ENV)
+        .unwrap_or_else(|| std::io::stdin().is_terminal())
 }
 
 /// Whether stdout is a terminal, which the `setup` screen needs.
@@ -644,7 +638,7 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
             config_path,
             overlay: overlay.clone(),
             columns,
-            no_color: std::env::var_os("NO_COLOR").is_some(),
+            no_color: config::no_color_env(),
             // Drawn as the screen draws it: every row faint (SPEC § 2.1).
             dim: true,
             // A preview is not a tick: no cache, no worker (SPEC § 14).

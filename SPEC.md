@@ -1683,6 +1683,14 @@ per-module render cost.
 | `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish` (§ 7, § 14), so the pointer path is testable without a pty |
 | `GARNISH_TEST_PANIC` | debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row of § 5 is testable through the binary |
 
+The boolean hooks (`GARNISH_NO_SPAWN`, `GARNISH_DEBUG`, `GARNISH_ANIMATE`,
+`GARNISH_STDIN_TTY`, `GARNISH_TEST_PANIC`) read one rule, Claude Code's:
+`1`, `true`, `yes`, `on` are on and `0`, `false`, `no`, `off` off, trimmed
+and in any case; anything else, empty included, is unset (so
+`GARNISH_ANIMATE=false` freezes as `0` does, 2026-09-25 review: four hooks
+had three rules). `NO_COLOR` follows no-color.org instead: any value but
+the empty one turns colour off.
+
 ## 10. Documentation
 
 - `docs/README.md`, `docs/config.md` and `docs/modules/<id>.md` are generated
