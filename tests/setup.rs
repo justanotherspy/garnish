@@ -1331,6 +1331,31 @@ fn a_line_that_held_a_text_modules_last_placement_asks() {
     }
 }
 
+/// frm-04: a click on a plain row's title opens the row's form, and one
+/// on a named box's title opens the box's (the box carries it).
+#[test]
+fn a_click_on_a_title_opens_what_holds_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, "icons = \"unicode\"\n[[row]]\nmodules = [\"clock\"]\ntitle = \"Tq\"\n")
+        .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), "Tq"), 1);
+    assert!(app.form_keys().is_some_and(|k| k.contains(&"title".to_owned())), "{:?}", app.status());
+    assert!(snapshot(&mut app, 80, 24).contains("┌ row[0]"));
+    std::fs::write(
+        &file,
+        "icons = \"unicode\"\n[box.b]\ntitle = \"Bq\"\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), "Bq"), 1);
+    assert!(snapshot(&mut app, 80, 24).contains("[box.b]"), "{:?}", app.status());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

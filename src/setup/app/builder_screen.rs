@@ -357,7 +357,8 @@ impl App {
 
     /// A click in the preview (SPEC § 14): a module selects it (again
     /// opens its editor), a rule or cap opens the frame form, a separator
-    /// its field, a title or box edge the row's form.
+    /// the field that draws it, a title or box edge the form of the named
+    /// box or the row that carries it.
     pub(super) fn click_preview(&mut self, x: usize, y: usize) {
         // The pane has a two-cell gutter for the row marker: a click there
         // is on the line's row, not on the cell after the gutter.
@@ -403,11 +404,15 @@ impl App {
                     .and_then(crate::config::BoxRef::name)
                     .map(str::to_owned);
                 // The map names the outer row only, so a title or a box
-                // edge inside a row of columns may belong to a column or
-                // an inner row; the list is the way to those.
-                let inside = row.is_some_and(|r| !r.cols.is_empty());
+                // edge inside a row the file wrote columns for may belong
+                // to a column or an inner row; the list is the way to those.
+                // (Every resolved row has a column: a plain row is one.)
+                let inside = row.is_some_and(|r| r.explicit_cols);
                 match (hit.elem, named) {
-                    (Elem::BoxEdge, Some(name)) => self.open_form(FormKind::Box(name)),
+                    // A named box carries the title of the rows in it.
+                    (Elem::BoxEdge | Elem::Title, Some(name)) => {
+                        self.open_form(FormKind::Box(name));
+                    }
                     (Elem::Title | Elem::BoxEdge, _) if inside => self.say(
                         "that may belong to a column or an inner row: select it in the list and press enter".into(),
                         Level::Info,

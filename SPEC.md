@@ -1694,10 +1694,13 @@ reach modules, rows and columns, `2` opens the frame form (the
 keyboard twin is in PLAN's backlog), and `e` opens the `[box.<name>]`
 form of the box the selected line is in (its own, or for an inner row
 its column's, then its row's), so a box needs no mouse either (added in
-the 2026-09-25 review: only a click on a box edge reached one). The placement map names the outer
-row of a line, so a click on a title or a box edge inside a row of
-columns selects that row and names the list as the way to the column or
-inner row it may belong to (the same backlog item). `Esc` closes the innermost layer
+the 2026-09-25 review: only a click on a box edge reached one). A click
+on a title or a box edge opens the form of what carries it: the named
+box's, else the row's (the 2026-09-25 review found the row's arm could
+never run). The placement map names the outer row of a line, so a click
+on a title or a box edge inside a row the file wrote columns for selects
+that row and names the list as the way to the column or inner row it
+may belong to (the same backlog item). `Esc` closes the innermost layer
 and, at the base of the builder or the picker, leaves it as `q` does. A
 module's editor is generated from `ModuleSchema`; the top-level, frame,
 row, column and box forms list their keys by hand, since those are not
