@@ -334,12 +334,17 @@ impl App {
 
     /// Feed one input in. A key or a click in the builder that changes the
     /// draft's table leaves the table it replaced on the undo stack; a
-    /// click on a hint of the bottom bar is that hint's key.
+    /// click on a hint of the bottom bar is that hint's key. On a terminal
+    /// too small to lay the screen out, only the ways out act: nothing a
+    /// key or a click would change is on screen.
     pub fn input(&mut self, input: Input) {
+        let too_small = self.size.0 < MIN_SIZE.0 || self.size.1 < MIN_SIZE.1;
         match input {
             Input::Tick => self.preview.tick(),
             Input::Resize(w, h) => self.size = (w, h),
             Input::Key(Key::CtrlC) => self.quit = true,
+            Input::Key(key) if too_small && !matches!(key, Key::Char('q') | Key::Esc) => {}
+            Input::Mouse { .. } if too_small => {}
             Input::Key(key) => {
                 if self.is_undo_key(key) {
                     self.undo_key(key);
@@ -512,6 +517,10 @@ impl App {
                 MIN_SIZE.0, MIN_SIZE.1, area.width, area.height
             );
             frame.render_widget(Paragraph::new(text), area);
+            // Nothing of the last full draw is on screen to be clicked.
+            self.hint_hits.clear();
+            self.pane_area = Rect::default();
+            self.list_area = Rect::default();
             return;
         }
         match self.screen.clone() {

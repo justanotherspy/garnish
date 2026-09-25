@@ -1933,7 +1933,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   uses the terminal's default colours, so a `color = "never"` config
   previews plain; in that case the preview's header says "colours off:
   edits are saved, not previewed". A terminal smaller than 60 × 12 gets
-  one line asking for more room instead of a broken layout, and a resize
+  one line asking for more room instead of a broken layout, and while it
+  is up takes no click and no key but `q`, `Esc` and `Ctrl+C` (2026-09-25
+  review: a click on the old place of `s save` saved), and a resize
   redraws everything at the new width (the preview's box width follows
   it). A config that parses with problems opens on the per-key fallbacks
   (§ 5) with the first problem in the status bar and a count of the

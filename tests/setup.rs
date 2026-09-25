@@ -1140,6 +1140,30 @@ fn a_reload_opens_the_file_as_a_start_does() {
     assert!(app.status().unwrap().contains("does not parse"), "{:?}", app.status());
 }
 
+/// app-11: while the terminal is too small for the screen, nothing but
+/// quitting acts: no click lands on the geometry of the last full draw.
+#[test]
+fn a_too_small_terminal_takes_no_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    let shot = snapshot(&mut app, 80, 24);
+    let save = col(shot.lines().nth(23).unwrap(), "s save");
+    keys(&mut app, "<right>x");
+    assert!(snapshot(&mut app, 58, 24).contains("needs at least"));
+    click(&mut app, save, 23);
+    click(&mut app, 7, 1);
+    keys(&mut app, "s<right>x");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), TWO_ROWS, "{:?}", app.status());
+    assert!(app.draft().is_dirty());
+    assert_eq!(app.draft().rows()[0].get("modules").unwrap().as_array().unwrap().len(), 2);
+    keys(&mut app, "q");
+    assert!(!app.done(), "q still asks about the unsaved edit");
+    assert!(snapshot(&mut app, 80, 24).contains("Quit and lose them?"));
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
