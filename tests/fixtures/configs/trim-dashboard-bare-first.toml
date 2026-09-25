@@ -1,0 +1,27 @@
+# fixture: subscription-full
+# columns: 80
+# icons: unicode
+# The SPEC § 4.3 dashboard with its bare column first. Every line after the
+# first starts with that column's padding and the gap, plain spaces the
+# harness would trim (SPEC § 2.1), which drew both boxes' sides at the left
+# edge under a top corner further right; the braille blank in the first
+# cell holds them in place.
+
+[frame]
+style = "none"
+
+[[row]]
+gap = 2
+
+[[row.col]]
+justify = "center"
+[[row.col.row]]
+modules = ["model"]
+
+[[row.col]]
+[[row.col.row]]
+box = true
+modules = ["context"]
+[[row.col.row]]
+box = true
+modules = ["cache"]

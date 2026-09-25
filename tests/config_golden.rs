@@ -17,11 +17,13 @@
 //! | `env` | `KEY=VALUE` added to the environment; repeatable; `$ROOT` in the value is the repository root | none |
 //! | `expect` | `config-warning` when the render is meant to end in a `⚠ config:` row | none |
 //!
-//! A render that carries `⚠ garnish:` (an internal error), or a `⚠ config:`
-//! row the header did not ask for, fails in both modes: `UPDATE_GOLDEN=1`
-//! must never bake a broken render into a golden. The row-start guards look
-//! at the rows with their escape sequences stripped, so a colour-on golden
-//! is guarded like a plain one.
+//! A render that carries `⚠ garnish:` (an internal error), a `⚠ config:`
+//! row the header did not ask for, or a row that starts with whitespace
+//! Claude Code would trim away fails in both modes: `UPDATE_GOLDEN=1` must
+//! never bake a broken render into a golden. The row-start guards look at
+//! the rows with their escape sequences stripped, so a colour-on golden is
+//! guarded like a plain one; the trim guard looks at the raw bytes, as the
+//! harness does.
 
 // Integration tests are not `#[cfg(test)]` modules, so the clippy.toml test
 // allowances do not apply; panicking on setup failure is the right behaviour here.
@@ -193,6 +195,14 @@ fn render(case: &Case, cache: &Path) -> String {
     text.lines().skip(1).collect::<Vec<_>>().join("\n") + "\n"
 }
 
+/// A row Claude Code would draw shifted left: it trims every row's raw
+/// bytes, escape sequences included (SPEC § 2.1), so a row that starts with
+/// whitespace loses those cells. A row that is whitespace throughout is the
+/// spacer rule's (SPEC § 4.1) and is not this guard's.
+fn trimmed_row(render: &str) -> Option<&str> {
+    render.lines().find(|row| !row.trim().is_empty() && row.trim_start() != *row)
+}
+
 #[test]
 fn config_goldens_match() {
     let golden_dir = root().join("tests/golden");
@@ -222,6 +232,12 @@ fn config_goldens_match() {
                     golden.display(),
                     if case.expect_warning { "missing" } else { "unexpected" },
                     if case.expect_warning { "config-warning" } else { "<nothing>" }
+                ));
+            }
+            if let Some(row) = trimmed_row(&actual) {
+                return Some(format!(
+                    "{}: the harness would trim this row's leading cells: {row:?}\n{actual}",
+                    golden.display()
                 ));
             }
             if update {

@@ -87,6 +87,16 @@ fn golden_renders_match() {
             {
                 return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
             }
+            // Claude Code trims every row's raw bytes (SPEC § 2.1): a row
+            // that starts with whitespace would be drawn shifted left.
+            if let Some(row) =
+                actual.lines().find(|row| !row.trim().is_empty() && row.trim_start() != *row)
+            {
+                return Some(format!(
+                    "{}: the harness would trim this row's leading cells: {row:?}",
+                    golden.display()
+                ));
+            }
             if update {
                 std::fs::write(&golden, &actual).unwrap();
                 return None;

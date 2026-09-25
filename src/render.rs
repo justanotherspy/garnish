@@ -69,11 +69,48 @@ pub fn render_loaded(
     }
     let mut out = String::new();
     for line in &lines {
-        out.push_str(&painter.paint(line));
+        out.push_str(&hold_leading_cells(painter.paint(line), mode));
         out.push('\n');
     }
     if out.is_empty() {
         out.push('\n');
+    }
+    out
+}
+
+/// A painted row whose leading cells survive Claude Code's trim.
+///
+/// The harness trims every row's raw bytes before drawing it (SPEC § 2.1),
+/// so a row that starts with whitespace (a column's padding line, a `none`
+/// box's pad, the spaces that place a module under a frame with no caps)
+/// would be drawn shifted left by those cells. With colour on, an empty SGR
+/// in front keeps them: the trim meets a byte that is not whitespace, and
+/// the harness parses the sequence away. With colour off, the first of them
+/// becomes [`BLANK_CELL`], the trade-off `blank` makes (§ 4.1). A row that is
+/// whitespace throughout is the spacer rule's, and is left as it is.
+fn hold_leading_cells(row: String, mode: ColorMode) -> String {
+    if !row.starts_with(char::is_whitespace) || row.chars().all(char::is_whitespace) {
+        return row;
+    }
+    if mode != ColorMode::Never {
+        return format!("\x1b[0m{row}");
+    }
+    let mut out = String::with_capacity(row.len().saturating_add(BLANK_CELL.len_utf8()));
+    let mut held = false;
+    for c in row.chars() {
+        if held || !c.is_whitespace() {
+            held = true;
+            out.push(c);
+            continue;
+        }
+        // A whitespace character that takes no cell (U+2028) is trimmed
+        // with the rest and shows nothing: dropping it moves no cell.
+        let cells = crate::ansi::display_width(c.encode_utf8(&mut [0; 4]));
+        if cells > 0 {
+            out.push(BLANK_CELL);
+            out.extend(std::iter::repeat_n(' ', cells.saturating_sub(1)));
+            held = true;
+        }
     }
     out
 }
@@ -1342,6 +1379,53 @@ mod tests {
         let out = render_plain_at(&payload, &config, Some(80), &clock);
         assert!(out.contains("dev@example.com") && !out.contains('⟳'), "{out}");
         assert!(!cache.lock_path(&scope, "account").exists(), "a worker was started");
+    }
+
+    /// SPEC § 2.1: Claude Code trims every row's raw bytes, so a row that
+    /// starts with whitespace was drawn shifted left. With colour on an empty
+    /// SGR holds its cells, with colour off the braille blank does; the width
+    /// never changes, and a row that is whitespace only stays the spacer
+    /// rule's (§ 4.1).
+    #[test]
+    fn a_row_that_starts_with_spaces_keeps_them_through_the_harness_trim() {
+        let payload = fixture("subscription-full");
+        let tick = |color: &str, text: &str| -> Vec<String> {
+            let loaded = loaded(&format!(
+                "icons = \"unicode\"\ncolor = \"{color}\"\n[frame]\nstyle = \"none\"\n{text}"
+            ));
+            assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
+            let out = render_loaded(&payload, &loaded, Some(40), false, false, &Clock::fixed());
+            out.lines().map(str::to_owned).collect()
+        };
+        let kept = |rows: &[String]| {
+            for row in rows {
+                assert!(row.trim().is_empty() || row.trim_start() == row, "trimmed: {row:?}");
+                assert_eq!(display_width(&strip_ansi(row)), 36, "{row:?}");
+            }
+        };
+        // Only a right group: the rule's spaces lead the row, styled with
+        // colour on and plain with it off.
+        let right = "[[row]]\nright = [\"clock\"]\n";
+        let rows = tick("never", right);
+        kept(&rows);
+        assert!(rows[0].starts_with(BLANK_CELL) && rows[0].ends_with("⠋ 16:00:00"), "{rows:?}");
+        let rows = tick("always", right);
+        kept(&rows);
+        assert!(!rows[0].contains(BLANK_CELL), "{rows:?}");
+        // A padding line above a short column: plain spaces even with
+        // colour on, so the reset goes in front.
+        let tall = "[[row]]\n[[row.col]]\nvalign = \"bottom\"\nmodules = [\"model\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"session\"]\n[[row.col.row]]\nmodules = [\"clock\"]\n";
+        let rows = tick("always", tall);
+        kept(&rows);
+        assert!(rows[0].starts_with("\x1b[0m "), "{rows:?}");
+        assert!(rows[1].contains("Opus") && !rows[1].starts_with("\x1b[0m"), "{rows:?}");
+        let rows = tick("never", tall);
+        kept(&rows);
+        assert!(rows[0].starts_with(BLANK_CELL), "{rows:?}");
+        // A spacer that is spaces only is still dropped by the harness with
+        // colour off: holding its cells is `blank`'s job.
+        let rows = tick("never", "[[row]]\nmodules = [\"model\"]\n[[row]]\nmodules = []\n");
+        assert!(rows[1].trim().is_empty() && !rows[1].is_empty(), "{rows:?}");
     }
 
     #[test]

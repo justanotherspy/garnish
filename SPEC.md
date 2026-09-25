@@ -82,15 +82,32 @@ is cut with `…` on the right. garnish renders to exactly that width: the
 `2 × statusLine.padding` when that setting is non-zero (verified in the
 2.1.261 binary: footer `paddingX: 2`, status box `paddingX: padding`).
 
-**Whitespace-only rows are dropped.** The harness trims the script's stdout
-and removes every row that is empty after trimming (2.1.261:
-`stdout.trim().split("\n").flatMap(l => l.trim() || [])`). The trim runs on
-the raw bytes, escape sequences included, so a row is lost only when it is
-whitespace *after painting*: an unframed spacer with colour off
-(`color = "never"`, `NO_COLOR`) vanishes, while with colour on the rule's
-colour codes around the spaces keep it (verified in the 2.1.263 binary:
-no ANSI strip before the trim). `preview --color never` shows the row the
-screen drops; § 4.1 `blank = true` keeps it in both cases.
+**Every row is trimmed, and a whitespace-only row is dropped.** The
+harness trims the script's stdout, then trims every row and keeps the
+rows that are not empty after it (2.1.261:
+`stdout.trim().split("\n").flatMap(l => l.trim() || [])`), so what it
+draws is each row's *trimmed* text. The trim runs on the raw bytes,
+escape sequences included (verified in the 2.1.263 binary: no ANSI strip
+before the trim), so a row is lost only when it is whitespace *after
+painting*: an unframed spacer with colour off (`color = "never"`,
+`NO_COLOR`) vanishes, while with colour on the rule's colour codes around
+the spaces keep it. `preview --color never` shows the row the screen
+drops; § 4.1 `blank = true` keeps it in both cases.
+
+A row that *starts* with whitespace would lose those cells and be drawn
+shifted left: a column's padding line (§ 4.3), a `style = "none"` box's
+pad, the spaces that place a module under a frame with no caps, and with
+colour off the unstyled rule of `style = "none"`. A plain segment carries
+no escape sequence even with colour on, so colour does not save such a
+row. The tick holds those cells (decided with Daniel 2026-09-25, when the
+per-row trim was read for what it keeps rather than what it drops): with
+colour on, a painted row whose first byte would be whitespace starts with
+an empty SGR (`ESC[0m`), which the trim keeps and the harness's escape
+parser drops, so nothing shows; with colour off, its first leading space
+becomes the braille blank U+2800 of § 4.1, the trade-off `blank` makes.
+It is done once, on the painted row, never in the layout; a row that is
+whitespace throughout is left to the spacer rule above, and trailing
+whitespace moves nothing.
 
 **Every row is drawn dim by the harness, and nothing in the output can
 undo it** (read in the 2.1.261 and 2.1.270 binaries on 2026-09-12, PLAN
@@ -111,7 +128,8 @@ the tick never adds the dim itself: the harness does, and the bytes of a
 tick are what the goldens pin. FUTURE-SPEC § 7.1's A1 (a leading
 `ESC[0m` on every row) assumed the raw bytes reached the terminal inside
 SGR 2 and was dropped when Phase 19 read the component: the prefix would
-be parsed away in every supported version. What remains is the fact, in
+be parsed away in every supported version (which is exactly why it can
+hold a row's leading cells against the trim, above). What remains is the fact, in
 `CLAUDE.md` with how to re-verify it and in the guide's troubleshooting.
 The harness's trim keeps every row that carries a non-whitespace
 byte, so with colour on the painter's escape sequences keep a filled
@@ -1628,7 +1646,10 @@ per-module render cost.
   otherwise: `colour-on` pins the painter's escape sequences (with the
   faint `preview` folds into every segment, § 2.1) and the OSC 8 link
   (Phase 20's link goldens and Phase 22's snapshots use the same mode),
-  and the row-start guards of both suites look past escape sequences. A
+  and the row-start guards of both suites look past escape sequences;
+  both also fail on a row whose raw bytes start with whitespace that is
+  not whitespace throughout, which the harness would draw shifted left
+  (§ 2.1). A
   `# env:` value may name the repository root as `$ROOT`, which is how
   `reduced-motion` points `HOME` at a settings fixture. Every test that
   runs the binary sets `GARNISH_MANAGED_SETTINGS` to nothing, so a
