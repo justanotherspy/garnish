@@ -160,6 +160,16 @@ Open items only; closed ones are in `WORKLOG.md`.
     setup screen re-plans before applying)
   - payload: a nested payload struct still accepts a JSON array
     positionally (serde's sequence form); harmless
+  - layout: under a rule (`Fill::Rule`) a column facing a gap of 1 or
+    more still reserves a fill cell beside the gap's rule cells
+    (cosmetic; without a rule the reservation is gone)
+  - gallery and docs: the ascii `pending` PR glyph `..` is the ascii
+    ellipsis too, so a cut and a pending check read alike (Daniel's call);
+    `animated-dots` could use Nerd moon glyphs once their code points are
+    checked in a Nerd Font; `docs/config.md`'s Environment table is still
+    written by hand (the hook tripwire guards it); `docs.rs` keeps a
+    module writer and a text-module writer that could share one, a few
+    unreachable fallbacks and `is_tooling_line`
   - With `RUST_BACKTRACE=1` in the environment every error report captures
     and symbolises a backtrace, so a quiet refusal (`config check` on a bad
     file) takes 0.7 s in a debug build, 5 ms without; a `Quiet` error never

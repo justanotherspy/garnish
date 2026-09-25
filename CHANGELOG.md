@@ -98,6 +98,8 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   left-justified ones; a `blank` inner row adds no braille cell to a
   framed line; scrolling text and the ticker no longer skip a step on
   ligature scripts.
+- Inside a box without a rule, two columns a `gap` apart keep their full
+  width, so a module is no longer cut two cells early.
 - A bad payload says why on stderr and in the `GARNISH_DEBUG` log.
 
 *Config*
@@ -138,6 +140,21 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   plain; unset layout keys step from their value in effect, colours show
   as roles, integer inputs show their bounds, and colour pickers list
   each colour once; mouse moves no longer redraw.
+
+*Reference and gallery*
+
+- The `animated-dots` preset's model icon cycles through ◐ ◓ ◑ ◒ instead
+  of four blank frames.
+- The reference no longer breaks a table on a `|` glyph, and an empty
+  glyph shows as `—`; it now documents the `[frame]` box glyph keys and
+  the `GARNISH_STDIN_TTY` and `GARNISH_TEST_PANIC` hooks; the `sync` and
+  `account` pages say why their samples are empty.
+- *also try* glyphs and the setup picker's suggestions cover `version`,
+  `sandbox`, `voice` and `account`.
+- The `config init` comment on `preset` says what it still picks (each
+  module's preset) and that the rows and frame written below it stay as
+  written; `config show` writes custom frame glyph keys in the setup
+  form's order.
 
 **Usage views and formats** (PLAN Phase 23)
 

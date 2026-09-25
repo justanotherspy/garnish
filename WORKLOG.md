@@ -959,6 +959,17 @@ was built, what the reviews found and what was decided, not how.
       a backtrace it never prints (backlog).
     - `make check` does not run rustdoc `-D warnings`, so one pushed
       commit needed a follow-up; `CLAUDE.md` now says so.
+    - The `config show` round trip over every fixture and preset took
+      48 s on the macOS runner, then crossed nextest's 60 s limit once the
+      review added fixtures; it and `tests/presets.rs` now run their
+      binaries in parallel.
+    - The gallery test never noticed `animated-dots`' four blank frames
+      because it looked for motion anywhere in the row. Each promise is
+      now checked on its own, and a test freezes a preset per promise to
+      prove the check fails. The frames are written as TOML escapes: the
+      fixing agent's own Edit tool turned `\uXXXX` into the glyph.
+    - Inside a box, the gap ≥ 1 decision changed one golden: the
+      `box-columns` "Panel" row now shows `42%` where it showed `4…`.
   - *Conflicts on merge:* the CLI batch renamed `settings_files` to
     `settings_chain` under the render batch's new `render::context`, and
     two batches both reworded the `truncate`/`overflow` reference rows.

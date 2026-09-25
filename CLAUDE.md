@@ -418,7 +418,7 @@ screen). Adding any new dependency needs the user's OK first.
 | jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
 | itertools | iterator helpers (interspersing, joining, grouping); the chosen crate for the job, but not a dependency since 2026-09-19, when its last use (interspersing separators) was replaced by a loop that colours each one; add it back when a job needs it | rendering |
 | std::process + `git::run_program` | every external command (status, rev-list, fetch, `--version`): kill-on-timeout, pipes drained on threads | `git.rs` |
-| rayon | data parallelism: `refresh --all`, `preview --all`, docs generation, the render matrices in tests; **never on the tick path** | `cli.rs`, `docs.rs`, tests |
+| rayon | data parallelism: `refresh --all`, the render matrices in tests, the golden suites, `tests/presets.rs` and the `config show` round trip (a macOS runner spawns slowly: a loop over binary runs is parallel or it times out); **never on the tick path** | `cli.rs`, tests |
 | unicode-width | terminal cell width of text | `ansi.rs` |
 | ratatui (crossterm backend, `default-features = false`) | the `setup` screen: widgets, the terminal, raw mode and mouse capture through the re-exported `ratatui::crossterm`; `TestBackend` for the snapshot tests; **never on the tick path** | `setup/` |
 | criterion (dev) | micro-benchmarks | `benches/` |
@@ -588,8 +588,19 @@ for the contract and `docs/` for user docs.
   matching the file, a summary, a width at which it renders uncut at three
   instants, motion where it promises motion, and, for a line ticker, a
   slide of exactly `ticker_step` cells, so a scrolled row carries nothing
-  that counts seconds. Register a new file in `gallery::FILES`
-  (alphabetical; the count is the array length) and run `make docs`.
+  that counts seconds. A cut is found by structure (a `Group` piece, or
+  modules and titles that differ from a render 200 columns wider), never
+  by looking for `…`, which the ascii set also prints for other things;
+  each motion promise is checked on its own from the parsed config, and
+  `each_motion_check_sees_its_promise_die` freezes a preset per promise
+  to prove the check can fail. A new check runs in-process; the binary
+  runs per preset are the slow part. Register a new file in
+  `gallery::FILES` (alphabetical; the count is the array length) and run
+  `make docs`. A frame list in a preset is written as TOML escapes
+  (`"\U000025D0"`): an editor once dropped raw glyphs and shipped four
+  empty frames, and the Edit and Write tools decode a `\uXXXX` in their
+  input into the glyph itself, so check the bytes with `od -c` after
+  writing one (Rust's `\u{…}` is unaffected).
 - `Segment.text` is private: `Segment::plain`/`styled`/`with_text`/`push_str`
   reduce text to plain text on the way in and `text()` reads it, so nothing
   can put an escape sequence on a row by assigning a field.
