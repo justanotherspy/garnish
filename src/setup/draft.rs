@@ -397,22 +397,38 @@ pub fn dropped_boxes(names: &[String]) -> String {
 }
 
 /// Remove the key at `path` under `table`, pruning every table the removal
-/// leaves empty on the way back up; true when something was removed.
+/// leaves empty on the way back up but one whose being there is what it
+/// says (a `[box.<name>]`, a `[modules.text.<name>]`); true when something
+/// was removed.
 fn remove_at(table: &mut Table, path: &[&str]) -> bool {
-    match path {
-        [] => false,
-        [last] => table.remove(*last).is_some(),
-        [first, rest @ ..] => {
+    remove_below(table, path, 0)
+}
+
+/// [`remove_at`] for the part of `path` from `depth` on, `table` being the
+/// table at the part before it.
+fn remove_below(table: &mut Table, path: &[&str], depth: usize) -> bool {
+    match path.get(depth..) {
+        None | Some([]) => false,
+        Some([last]) => table.remove(*last).is_some(),
+        Some([first, ..]) => {
             let Some(child) = table.get_mut(*first).and_then(Value::as_table_mut) else {
                 return false;
             };
-            let removed = remove_at(child, rest);
-            if removed && child.is_empty() {
+            let removed = remove_below(child, path, depth.saturating_add(1));
+            let defining = path.get(..=depth).is_some_and(defined_by_being_there);
+            if removed && child.is_empty() && !defining {
                 table.remove(*first);
             }
             removed
         }
     }
+}
+
+/// Whether the table at `path` defines something by existing at all: an
+/// empty `[box.<name>]` is still a box rows can join, an empty
+/// `[modules.text.<name>]` still a module rows place (SPEC § 3.7, § 4.3).
+fn defined_by_being_there(path: &[&str]) -> bool {
+    matches!(path, ["box", _] | ["modules", "text", _])
 }
 
 /// A TOML array of strings.
@@ -509,6 +525,40 @@ mod tests {
         assert_eq!(g.prune_orphan_boxes(), vec!["orphan".to_owned()]);
         assert!(g.get(&["box", "orphan"]).is_none() && g.get(&["box", "i"]).is_some());
         assert_eq!(g.prune_orphan_boxes(), Vec::<String>::new());
+    }
+
+    /// app-03, frm-01: a `[box.<name>]` or a `[modules.text.<name>]` is
+    /// defined by being there, so removing its last key leaves it (empty);
+    /// removing the table itself still prunes the parents it empties.
+    #[test]
+    fn a_box_or_text_table_outlives_its_last_key() {
+        for (text, table, key) in [
+            (
+                "[box.b]\ntitle = \"B\"\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+                ["box", "b"].as_slice(),
+                "title",
+            ),
+            (
+                "[modules.text.m]\ntext = \"x\"\n[[row]]\nmodules = [\"text.m\"]\n",
+                ["modules", "text", "m"].as_slice(),
+                "text",
+            ),
+        ] {
+            let mut d = Draft::from_text(text);
+            let mut path = table.to_vec();
+            path.push(key);
+            d.remove(&path);
+            assert_eq!(d.get(table), Some(&Value::Table(Table::new())), "{text}");
+            assert_eq!(d.resolved().1, Vec::new(), "{text}");
+            let again = Draft::from_text(&d.text());
+            assert_eq!(again.get(table), Some(&Value::Table(Table::new())), "{}", d.text());
+            d.remove(table);
+            assert!(d.get(table.get(..1).unwrap()).is_none(), "{text}: the parents go");
+        }
+        // A subtable of a text module is pruned as before.
+        let mut d = Draft::from_text("[modules.text.m.colors]\ntext = \"accent\"\n");
+        d.remove(&["modules", "text", "m", "colors", "text"]);
+        assert_eq!(d.get(&["modules", "text", "m"]), Some(&Value::Table(Table::new())));
     }
 
     #[test]

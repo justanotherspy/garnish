@@ -932,6 +932,45 @@ fn an_edit_that_renumbers_an_old_problem_is_kept() {
     assert_eq!(ids(&app, 2), ["clok"], "{:?}", app.status());
 }
 
+/// Move a form's cursor from its first field to `key` and press `then`.
+fn on_field(app: &mut App, key: &str, then: &str) {
+    let at = app.form_keys().unwrap().iter().position(|k| k == key).expect(key);
+    keys(app, &"<down>".repeat(at));
+    keys(app, then);
+}
+
+/// app-03, frm-01: `d` on the last key of a text module's or a box's table
+/// leaves the table (its being there is the definition), and the form
+/// stays open on it.
+#[test]
+fn d_on_the_last_key_keeps_a_text_module_or_a_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<right>m<up><enter>motd<enter>");
+    on_field(&mut app, "text", "d");
+    let empty = toml::Value::Table(toml::Table::new());
+    assert_eq!(app.draft().get(&["modules", "text", "motd"]), Some(&empty), "{:?}", app.status());
+    assert_eq!(app.draft().resolved().1, Vec::new());
+    assert!(app.form_keys().is_some(), "the editor stays open");
+    // A box whose table holds only its title, reached by a click on its edge.
+    std::fs::write(
+        &file,
+        "[box.repo]\ntitle = \"R\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, 2, 1);
+    assert!(snapshot(&mut app, 80, 24).contains("[box.repo]"), "{shot}");
+    on_field(&mut app, "title", "d");
+    assert_eq!(app.draft().get(&["box", "repo"]), Some(&empty), "{:?}", app.status());
+    assert_eq!(app.draft().resolved().1, Vec::new());
+    assert!(app.form_keys().is_some(), "the box form stays open");
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

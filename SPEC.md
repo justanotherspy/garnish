@@ -1726,7 +1726,10 @@ the status names that key; a `box` unset or changed, from the form, with
 `d` or with the builder's `b`, drops a `[box.<name>]` nothing joins any
 more (`b` reads a typed value as the form does: `none`, `false` and
 nothing unbox, `true` is a box of its own; 2026-09-25 review: `b` had
-refused to move a box's last member elsewhere); a module's `label` picker starts with the module's
+refused to move a box's last member elsewhere); `d` on the last key of
+a `[box.<name>]` or a `[modules.text.<name>]` leaves the table, empty,
+since its being there is what defines the box or the module (an emptied
+module table is pruned, an emptied box or text table is not); a module's `label` picker starts with the module's
 own name, bare and capitalised; changing the top-level `preset` swaps
 the rows for the new preset's when they were still exactly the old
 preset's (the builder writes a preset's rows into the file so they can
