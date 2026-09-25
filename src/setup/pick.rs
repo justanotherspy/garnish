@@ -139,18 +139,21 @@ impl Choose {
         if self.filter.is_empty() {
             return self.items.iter().collect();
         }
-        let listed = || self.items.iter().enumerate().filter(|(_, c)| !c.custom);
-        let mut by_value: Vec<(u32, usize)> = listed()
-            .filter_map(|(i, c)| super::fuzzy::score(&self.filter, &c.value).map(|s| (s, i)))
-            .collect();
-        by_value.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let by_value: Vec<usize> =
+            super::fuzzy::rank(&self.filter, self.items.iter().map(|c| c.value.as_str()))
+                .into_iter()
+                .filter(|i| self.items.get(*i).is_some_and(|c| !c.custom))
+                .collect();
         let query = self.filter.trim().to_lowercase();
-        let mut by_note: Vec<(usize, usize)> = listed()
-            .filter(|(i, _)| !by_value.iter().any(|(_, j)| j == i))
+        let mut by_note: Vec<(usize, usize)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| !c.custom && !by_value.contains(i))
             .filter_map(|(i, c)| c.note.to_lowercase().find(&query).map(|at| (at, i)))
             .collect();
         by_note.sort_unstable();
-        let order = by_value.iter().map(|(_, i)| *i).chain(by_note.iter().map(|(_, i)| *i));
+        let order = by_value.into_iter().chain(by_note.into_iter().map(|(_, i)| i));
         let mut out: Vec<&Choice> = order.filter_map(|i| self.items.get(i)).collect();
         out.extend(self.items.iter().filter(|c| c.custom));
         out
@@ -665,6 +668,10 @@ mod tests {
         }
         let notes: Vec<&str> = c.matching().iter().map(|c| c.note.as_str()).collect();
         assert_eq!(notes, ["the theme's text", "a named colour"]);
+        let mut blank =
+            Choose::new("Blank", vec![Choice::plain("a"), Choice::custom("x")], Target::Columns);
+        blank.handle(Key::Char(' '));
+        assert_eq!(blank.matching().iter().filter(|c| c.custom).count(), 1, "custom once");
         c.handle(Key::Backspace);
         c.handle(Key::Backspace);
         c.handle(Key::Backspace);
