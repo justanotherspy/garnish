@@ -36,8 +36,11 @@ pub enum Target {
 pub struct Choice {
     /// What the list shows.
     pub label: Line<'static>,
-    /// The text the filter matches and the value that is picked.
+    /// The value that is picked, and the text the filter matches first.
     pub value: String,
+    /// What the label says about the value (a summary, the role a colour
+    /// is the theme's for), which the filter matches after every value.
+    pub note: String,
     /// Picking it opens an input for a typed value instead.
     pub custom: bool,
 }
@@ -46,7 +49,12 @@ impl Choice {
     /// A plain entry whose label is its value.
     #[must_use]
     pub fn plain(value: &str) -> Self {
-        Self { label: Line::from(value.to_owned()), value: value.to_owned(), custom: false }
+        Self {
+            label: Line::from(value.to_owned()),
+            value: value.to_owned(),
+            note: String::new(),
+            custom: false,
+        }
     }
 
     /// An entry shown as `value  note`.
@@ -59,6 +67,7 @@ impl Choice {
                 Span::styled(note.to_owned(), Chrome::muted()),
             ]),
             value: value.to_owned(),
+            note: note.to_owned(),
             custom: false,
         }
     }
@@ -69,6 +78,7 @@ impl Choice {
         Self {
             label: Line::from(Span::styled(format!("{what}…"), Chrome::title())),
             value: String::new(),
+            note: String::new(),
             custom: true,
         }
     }
@@ -119,17 +129,29 @@ impl Choose {
         }
     }
 
-    /// The entries that match the filter, best first.
+    /// The entries that match the filter, best first: every entry whose
+    /// value matches (fuzzily), then every other whose note holds the
+    /// filter as written (a note is prose, where a subsequence matches
+    /// nearly anything), each once, two entries sharing a value included;
+    /// the `custom…` entry last.
     #[must_use]
     pub fn matching(&self) -> Vec<&Choice> {
         if self.filter.is_empty() {
             return self.items.iter().collect();
         }
-        let ranked = super::fuzzy::rank(&self.filter, self.items.iter().map(|c| c.value.as_str()));
-        let mut out: Vec<&Choice> = ranked
-            .iter()
-            .filter_map(|v| self.items.iter().find(|c| c.value == *v && !c.custom))
+        let listed = || self.items.iter().enumerate().filter(|(_, c)| !c.custom);
+        let mut by_value: Vec<(u32, usize)> = listed()
+            .filter_map(|(i, c)| super::fuzzy::score(&self.filter, &c.value).map(|s| (s, i)))
             .collect();
+        by_value.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let query = self.filter.trim().to_lowercase();
+        let mut by_note: Vec<(usize, usize)> = listed()
+            .filter(|(i, _)| !by_value.iter().any(|(_, j)| j == i))
+            .filter_map(|(i, c)| c.note.to_lowercase().find(&query).map(|at| (at, i)))
+            .collect();
+        by_note.sort_unstable();
+        let order = by_value.iter().map(|(_, i)| *i).chain(by_note.iter().map(|(_, i)| *i));
+        let mut out: Vec<&Choice> = order.filter_map(|i| self.items.get(i)).collect();
         out.extend(self.items.iter().filter(|c| c.custom));
         out
     }
@@ -625,6 +647,32 @@ mod tests {
         let out = c.handle(Key::Enter);
         assert!(matches!(out.push, Some(Layer::Input(_))), "custom opens an input");
         assert!(c.handle(Key::Esc).close);
+    }
+
+    /// frm-17: under a filter every entry shows once, two entries with one
+    /// value included, and a note is searched after the values.
+    #[test]
+    fn a_filtered_list_shows_each_entry_once_and_searches_notes_last() {
+        let items = vec![
+            Choice::noted("default", "the theme's text"),
+            Choice::noted("default", "a named colour"),
+            Choice::noted("red", "the theme's error"),
+            Choice::noted("text", "a role"),
+        ];
+        let mut c = Choose::new("Colour", items, Target::Columns);
+        for ch in "def".chars() {
+            c.handle(Key::Char(ch));
+        }
+        let notes: Vec<&str> = c.matching().iter().map(|c| c.note.as_str()).collect();
+        assert_eq!(notes, ["the theme's text", "a named colour"]);
+        c.handle(Key::Backspace);
+        c.handle(Key::Backspace);
+        c.handle(Key::Backspace);
+        for ch in "text".chars() {
+            c.handle(Key::Char(ch));
+        }
+        let values: Vec<&str> = c.matching().iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(values, ["text", "default"], "the value's match first, then the note's");
     }
 
     /// frm-16: a list drawn into an area shorter than its seven-row

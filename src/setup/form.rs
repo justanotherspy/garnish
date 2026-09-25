@@ -775,6 +775,7 @@ fn color_choices(config: &Config) -> Vec<Choice> {
                     Span::styled(format!("  {}", c.to_spec()), Chrome::muted()),
                 ]),
                 value: role.name().to_owned(),
+                note: c.to_spec(),
                 custom: false,
             }
         })
@@ -789,23 +790,34 @@ fn color_choices(config: &Config) -> Vec<Choice> {
 /// terminal colours.
 fn literal_color_choices(config: &Config) -> Vec<Choice> {
     let mut items: Vec<Choice> = Vec::new();
+    // One entry per colour, however it is spelled (`gray` is the theme's
+    // `bright-black`, `default` may be both a literal and a name).
+    let listed = |items: &[Choice], c: crate::ansi::Color| {
+        items.iter().any(|i| crate::ansi::Color::parse(&i.value) == Some(c))
+    };
     for role in Role::ALL {
         let c = config.theme.role(role);
-        let spec = c.to_spec();
-        if items.iter().any(|i| i.value == spec) {
+        if listed(&items, c) {
             continue;
         }
+        let spec = c.to_spec();
+        let note = format!("the theme's {}", role.name());
         items.push(Choice {
             label: Line::from(vec![
                 Span::raw(format!("{spec:<8} ")),
                 swatch(c),
-                Span::styled(format!("  the theme's {}", role.name()), Chrome::muted()),
+                Span::styled(format!("  {note}"), Chrome::muted()),
             ]),
             value: spec,
+            note,
             custom: false,
         });
     }
-    items.extend(NAMED_COLORS.iter().map(|name| Choice::plain(name)));
+    for name in NAMED_COLORS {
+        if crate::ansi::Color::parse(name).is_none_or(|c| !listed(&items, c)) {
+            items.push(Choice::plain(name));
+        }
+    }
     items
 }
 
@@ -840,13 +852,16 @@ fn icon_choices(schema: &ModuleSchema, key: &str) -> Vec<Choice> {
         seen.push(glyph.to_owned());
         let width = crate::ansi::display_width(glyph);
         let shown = if glyph.is_empty() { "(blank)".to_owned() } else { glyph.to_owned() };
+        // Padded to two cells by width: a two-cell glyph takes no space.
+        let pad = " ".repeat(2_usize.saturating_sub(crate::ansi::display_width(&shown)));
         items.push(Choice {
             label: Line::from(vec![
-                Span::raw(format!("{shown:<2}")),
+                Span::raw(format!("{shown}{pad}")),
                 Span::styled(format!("|{width}  "), Chrome::muted()),
                 Span::styled(note.to_owned(), Chrome::muted()),
             ]),
             value: glyph.to_owned(),
+            note: note.to_owned(),
             custom: false,
         });
     };
@@ -2126,6 +2141,34 @@ mod tests {
             built("[modules.text.m]\ntext = \"hi\"\ncolor = \"accent2\"\n", &module("text.m"));
         let text = t.fields.iter().find(|f| f.key == "colors.text").unwrap();
         assert_eq!(text.current, "accent2");
+    }
+
+    /// frm-17: the `[colors]` picker lists a colour once however it is
+    /// spelled and is found by the role its note names; a glyph is padded
+    /// to two cells by its width, not its characters.
+    #[test]
+    fn colour_pickers_list_each_colour_once_and_find_roles_by_note() {
+        let config = crate::config::parse("theme = \"mono\"\n", &SCHEMAS).0;
+        let items = literal_color_choices(&config);
+        let colours: Vec<crate::ansi::Color> =
+            items.iter().filter_map(|c| crate::ansi::Color::parse(&c.value)).collect();
+        for (i, c) in colours.iter().enumerate() {
+            assert!(!colours.get(..i).unwrap().contains(c), "{c:?} twice: {items:?}");
+        }
+        let mut choose = Choose::new("accent", literal_color_choices(&config), Target::Columns);
+        for ch in "accent".chars() {
+            choose.handle(Key::Char(ch));
+        }
+        let found: Vec<&str> = choose.matching().iter().map(|c| c.note.as_str()).collect();
+        assert!(found.iter().any(|n| n.contains("accent")), "{found:?}");
+        let model = SCHEMAS.iter().find(|s| s.id == "model").unwrap();
+        for choice in icon_choices(model, "model") {
+            let label: String = choice.label.spans.iter().map(|s| s.content.as_ref()).collect();
+            let (glyph, _) = label.split_once('|').unwrap();
+            let shown = if choice.value.is_empty() { "(blank)" } else { choice.value.as_str() };
+            let want = crate::ansi::display_width(shown).max(2);
+            assert_eq!(crate::ansi::display_width(glyph), want, "{label:?}");
+        }
     }
 
     #[test]
