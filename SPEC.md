@@ -686,7 +686,7 @@ preset = "default"        # default | minimal | full | compact
 icons  = "nerd"           # nerd | unicode | emoji | ascii
 theme  = "garnish"        # garnish | catppuccin-mocha | nord | dracula | tokyonight | mono
 color  = "auto"           # auto | always | never | 256 | truecolor
-truncate = true           # cut the left group when a line overflows; the right group is never cut
+truncate = true           # cut the left group when a line overflows; the right group only when it alone is wider than its column
 stale_style = "dim"       # dim | hide | plain: how overdue cached values are shown
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
 padding = 0               # extra cells subtracted from the width, on top of the harness's 4; set 2 × statusLine.padding
@@ -761,7 +761,10 @@ then apply inside each column, and `[[row.col]]` and `[box.<name>]` are
 listed there. A "column" in the aligned-columns paragraph is a module's
 position within its group, not a layout column. `hide_empty_lines`
 likewise becomes `hide_empty_rows` with the old name as an alias.) Overflow: drop the fill, then truncate the **left** group
-(ANSI-aware, `…`); never the right group. `preview --width` and
+(ANSI-aware, `…`); the right group is cut only when it alone is wider
+than its column, after the left group is gone (Phase 21: a right group
+wider than its column pushed the columns beside it off their shares).
+`preview --width` and
 `GARNISH_COLUMNS` stand in for `$COLUMNS` and get the same subtraction, so
 `preview` shows what Claude Code would show at that terminal width.
 
@@ -869,7 +872,8 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   + gap width)`, so it is stateless, deterministic under `GARNISH_NOW`, and
   survives the harness cancelling a tick. `ticker_gap` is plain text
   (escapes and control characters stripped at config time). The right group
-  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
+  is never scrolled, and is cut only when it alone is wider than its
+  column. `truncate` (default) keeps the `…` behaviour;
   `truncate = false` hands the whole row over, ticker or not. With
   animations off (`animate = false`, `GARNISH_ANIMATE=0`) a ticker line is
   cut with `…` like `truncate`, not frozen at offset 0 (decided 2026-09-06:
@@ -1363,7 +1367,13 @@ without an error report.
 
 ## 5. Failure behaviour
 
-`garnish` (render) always exits 0 and always prints something:
+`garnish` (render) always exits 0, and prints every row that is not
+hidden. A render whose rows all hid (`hide_empty_rows`, § 4.1: a row of
+`pr` with no pull request open) prints one empty line, which Claude Code
+trims to nothing and so clears the status line until a module has
+something to show (§ 2.1; 2026-09-25: this used to be described as
+"always prints something", which the empty line does not change on
+screen). Otherwise:
 
 - invalid config → keep every valid key and substitute the built-in default
   for each invalid one (the resolver already does this per key), append dim
@@ -1373,7 +1383,10 @@ without an error report.
   look like a different program. Implemented in PLAN Phase 14: the file is
   read as a plain TOML table and each key is converted on its own; value
   errors carry the TOML path, syntax errors the line.)
-- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`;
+- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`,
+  with the parser's message (its line, column and what it expected) on
+  stderr and in the `GARNISH_DEBUG` log (2026-09-25: it was dropped, so
+  nothing said where the JSON went wrong);
   any JSON object renders. A known field of the wrong type is absent, alone,
   and so is a list entry that is not a string and a numeric string that is
   not finite (`inf`, `NaN`). (Decided 2026-09-25: a type change on one

@@ -39,8 +39,17 @@ pub struct Request<'a> {
 /// `preview` come through here, everything else names its [`Clock`].
 #[must_use]
 pub fn render(req: &Request<'_>) -> String {
-    let Ok(payload) = Payload::parse(req.payload_json) else {
-        return "⚠ garnish: bad payload\n".to_owned();
+    let payload = match Payload::parse(req.payload_json) {
+        Ok(payload) => payload,
+        Err(e) => {
+            // The row stays the one SPEC § 5 pins; the parser's message,
+            // which names the line, the column and what it expected, is what
+            // a Claude Code release that changed the payload needs.
+            let note = format!("garnish: bad payload: {e}");
+            eprintln!("{note}");
+            crate::debug::log(&note);
+            return "⚠ garnish: bad payload\n".to_owned();
+        }
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
     let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
@@ -72,6 +81,8 @@ pub fn render_loaded(
         out.push_str(&hold_leading_cells(painter.paint(line), mode));
         out.push('\n');
     }
+    // Every row hid: one empty line, which the harness trims to nothing and
+    // so clears the status line (SPEC § 5).
     if out.is_empty() {
         out.push('\n');
     }
@@ -1429,6 +1440,17 @@ mod tests {
         // colour off: holding its cells is `blank`'s job.
         let rows = tick("never", "[[row]]\nmodules = [\"model\"]\n[[row]]\nmodules = []\n");
         assert!(rows[1].trim().is_empty() && !rows[1].is_empty(), "{rows:?}");
+    }
+
+    /// SPEC § 5: a render whose rows all hid prints one empty line, which
+    /// Claude Code trims to nothing and so clears the status line. The docs
+    /// promised "always prints something", which that line does not change
+    /// on screen; this pins what the tick does.
+    #[test]
+    fn a_render_whose_rows_all_hid_is_one_empty_line() {
+        let out =
+            render_plain(&fixture("pr-absent"), &loaded("[[row]]\nmodules = [\"pr\"]\n"), Some(80));
+        assert_eq!(out, "\n");
     }
 
     #[test]
