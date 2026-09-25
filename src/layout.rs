@@ -9,7 +9,10 @@
 
 use std::ops::Range;
 
-use crate::ansi::{Color, Segment, Style, display_width, scroll, segments_width, truncate};
+use crate::ansi::{
+    Color, Segment, Style, cluster_width, display_width, kept_width, scroll, scroll_period,
+    segments_width, truncate,
+};
 use crate::config::{BoxCfg, BoxRef, Justify, SeparatorColor, VAlign, Width};
 use crate::frame::{FrameChars, FrameStyle, Rule, Ticker};
 use crate::theme::{Role, Theme};
@@ -900,11 +903,12 @@ impl Layout<'_> {
             return pieces;
         }
         // Where each module sits in the uncut run, so the placement map can
-        // say which cells of the window it still owns (SPEC § 14).
+        // say which cells of the window it still owns (SPEC § 14), counted
+        // the way the cut and the scroller count.
         let mut owned: Vec<(String, Range<usize>)> = Vec::new();
         let mut at = 0_usize;
         for piece in &pieces {
-            let end = at.saturating_add(segments_width(&piece.segs));
+            let end = at.saturating_add(cluster_width(&piece.segs));
             if let Elem::Module(id) = &piece.elem {
                 owned.push((id.clone(), at..end));
             }
@@ -913,12 +917,11 @@ impl Layout<'_> {
         let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
         let (segs, map) = self.ticker.as_ref().filter(|_| scrolls).map_or_else(
             || {
-                let ellipsis = display_width(crate::ansi::fit(self.ellipsis, budget));
-                let kept = budget.saturating_sub(ellipsis);
+                let kept = kept_width(budget, self.ellipsis);
                 (truncate(&segs, budget, self.ellipsis), cut_map(&owned, kept, budget))
             },
             |ticker| {
-                let period = segments_width(&segs).saturating_add(display_width(&ticker.gap));
+                let period = scroll_period(&segs, &ticker.gap, true);
                 let offset = crate::time::frame(ticker.now, ticker.step, period);
                 (
                     scroll(&segs, budget, offset, &ticker.gap, true),
@@ -2345,6 +2348,56 @@ mod tests {
             assert!(kinds.contains(&want), "{want:?} never drawn: {kinds:?}");
         }
         assert!(kinds.iter().any(|k| matches!(k, Elem::Module(_))), "no module: {kinds:?}");
+    }
+
+    /// SPEC § 4.1, § 14: the ticker's offset, its window and the placement
+    /// map count cells the same way, cluster by cluster. `لا` is one cell to
+    /// `unicode-width` but two clusters to the scroller: the offset used to
+    /// wrap a cell early and the map to place the wrapped module a cell off.
+    #[test]
+    fn a_ticker_over_a_ligature_keeps_its_period_and_its_map() {
+        let left: Vec<Vec<Segment>> = vec![vec![Segment::plain("xلاy")], vec![Segment::plain("pq")]];
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        let line_at = |secs: i64| {
+            let mut f = Fixture::new(FrameStyle::None, false, 5);
+            f.ticker = Some(Ticker {
+                step: 1.0,
+                gap: "   ".to_owned(),
+                now: jiff::Timestamp::from_second(secs).unwrap(),
+            });
+            let l = f.layout();
+            let rows = vec![Row {
+                cols: vec![Col {
+                    width: Width::Fr(1),
+                    justify: Justify::Left,
+                    valign: VAlign::Top,
+                    boxed: None,
+                    content: Content::Groups {
+                        left: &left,
+                        right: &[],
+                        left_ids: &ids,
+                        right_ids: &[],
+                    },
+                }],
+                gap: 1,
+                separator: " ",
+                title: None,
+                boxed: None,
+                blank: false,
+            }];
+            let lines = l.lines(&rows);
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            (Painter::PLAIN.paint(&line.segments()), line.modules())
+        };
+        // `xلاy pq` is seven clusters, and the gap three: a period of ten.
+        let (text, map) = line_at(8);
+        assert_eq!(text, "  xلا");
+        assert_eq!(map, vec![("a".to_owned(), 2..5)]);
+        let (text, map) = line_at(9);
+        assert_eq!(text, " xلاy");
+        assert_eq!(map, vec![("a".to_owned(), 1..5)]);
+        assert_eq!(line_at(18), line_at(8));
+        assert_ne!(line_at(17), line_at(8));
     }
 
     /// SPEC § 14: the placement map names the module behind every cell it

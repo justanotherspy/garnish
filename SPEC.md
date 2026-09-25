@@ -588,7 +588,12 @@ color = "muted"
   then itself, so it flows continuously. Both are stateless: the offset is
   `floor(now_secs × step) mod period`, where the period is the text width
   for `scroll` and text plus gap for `scroll-wrap`, so a frozen clock
-  freezes the scroll and a cancelled tick loses nothing. Text modules have
+  freezes the scroll and a cancelled tick loses nothing. The width is
+  counted cluster by cluster, as the scroller advances (`ansi::scroll_period`):
+  a ligature `unicode-width` measures as one cell (Arabic `لا`) is two
+  clusters, and a period counted in display cells wrapped a cell early
+  (2026-09-25; the line ticker and the setup preview's placement map count
+  the same way). Text modules have
   no `preset` and no `refresh`; `config check` rejects both.
 - **Shared primitive.** The same scroller implements line-level
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.

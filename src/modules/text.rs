@@ -8,7 +8,7 @@
 
 use std::sync::LazyLock;
 
-use crate::ansi::{Segment, display_width, scroll, truncate};
+use crate::ansi::{Segment, display_width, scroll, scroll_period, truncate};
 use crate::config::schema::{ColorSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::config::{MAX_CELLS, MAX_TEXT_CHARS};
 
@@ -152,10 +152,13 @@ pub fn render(ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
             }
             "scroll-wrap" => {
                 let gap = cfg.str("gap");
-                let period = text_w.saturating_add(display_width(gap));
+                let period = scroll_period(&styled, gap, true);
                 scroll(&styled, box_w, ctx.frame(step, period), gap, true)
             }
-            _ => scroll(&styled, box_w, ctx.frame(step, text_w), "", false),
+            _ => {
+                let period = scroll_period(&styled, "", false);
+                scroll(&styled, box_w, ctx.frame(step, period), "", false)
+            }
         }
     };
     // `url` (SPEC § 3.7) links the whole box and nothing outside it: the
@@ -225,6 +228,33 @@ mod tests {
         assert_eq!(crate::ansi::Painter::PLAIN.paint(&centred), "  hi  ");
         assert!(linked(&centred), "{centred:?}");
         assert!(centred.len() >= 3, "fill, text, fill: {centred:?}");
+    }
+
+    /// SPEC § 4.2: a scrolling text cycles with the scroller's own period,
+    /// counted cluster by cluster. `لا` is one cell to `unicode-width` but
+    /// two clusters to the scroller, and the offset used to wrap a cell
+    /// early, never showing the last window of the cycle.
+    #[test]
+    fn a_scrolling_text_over_a_ligature_cycles_with_the_scroller() {
+        let payload = crate::payload::Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let text = "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"text.a\"]\n[modules.text.a]\ntext = \"abلاcd\"\nwidth = 3\noverflow = \"scroll-wrap\"\ngap = \"  \"\n";
+        let (config, errs) = crate::config::parse(text, &crate::modules::SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        let at = |secs: i64| {
+            let clock = Clock {
+                now: jiff::Timestamp::from_second(secs).unwrap(),
+                animate: true,
+                ..Clock::fixed()
+            };
+            let row = render_lines_at(&payload, &config, Some(80), &clock);
+            crate::ansi::Painter::PLAIN.paint(row.first().unwrap())
+        };
+        // Six clusters and a two-cell gap: eight windows, then the first.
+        let windows: Vec<String> = (0..8).map(at).collect();
+        for (i, w) in windows.iter().enumerate() {
+            assert!(!windows[..i].contains(w), "window {i} repeats early: {windows:?}");
+        }
+        assert_eq!(at(8), windows[0]);
     }
 
     /// SPEC § 9: the `text.<name>` family is the one module set outside the

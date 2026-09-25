@@ -383,6 +383,40 @@ pub fn segments_width(segments: &[Segment]) -> usize {
     segments.iter().map(Segment::width).sum()
 }
 
+/// Sum of segment widths counted cluster by cluster ([`clusters`]), the
+/// unit [`truncate`] and [`scroll`] advance in.
+///
+/// It exceeds [`segments_width`] by a cell for each ligature pair
+/// `unicode-width` measures as one cell (Arabic `لا`), which the cut and the
+/// scroller split in two; whoever places an offset or a cut against them
+/// counts this way too.
+#[must_use]
+pub fn cluster_width(segments: &[Segment]) -> usize {
+    segments.iter().flat_map(|seg| clusters(&seg.text)).map(display_width).sum()
+}
+
+/// The cells after which a [`scroll`] of `segments` repeats.
+///
+/// The text's [`cluster_width`], plus the gap's with `wrap`. A caller
+/// reduces its clock to an offset modulo this (`time::frame`), so the
+/// offset, the window and anything mapped onto the window share one period.
+#[must_use]
+pub fn scroll_period(segments: &[Segment], gap: &str, wrap: bool) -> usize {
+    let text = cluster_width(segments);
+    if wrap {
+        text.saturating_add(clusters(&plain_cow(gap)).map(display_width).sum())
+    } else {
+        text
+    }
+}
+
+/// The cells of text [`truncate`] keeps when it cuts to `max_width`: what
+/// the ellipsis, itself cut to fit ([`fit`]), leaves.
+#[must_use]
+pub fn kept_width(max_width: usize, ellipsis: &str) -> usize {
+    max_width.saturating_sub(display_width(fit(ellipsis, max_width)))
+}
+
 /// Truncate segments to at most `max_width` cells, appending `ellipsis` when
 /// anything was cut. Never splits a character. Returns the new segments.
 #[must_use]
@@ -390,11 +424,10 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
     if segments_width(segments) <= max_width {
         return segments.to_vec();
     }
+    let budget = kept_width(max_width, ellipsis);
     // A box narrower than the ellipsis still gets a mark: as much of the
     // ellipsis as fits (`..` becomes `.` in a one-cell ascii box).
     let ellipsis = fit(ellipsis, max_width);
-    let ell_width = display_width(ellipsis);
-    let budget = max_width.saturating_sub(ell_width);
     let mut out: Vec<Segment> = Vec::new();
     let mut used = 0_usize;
     'outer: for seg in segments {
@@ -412,7 +445,7 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
         }
         out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
     }
-    if ell_width > 0 && max_width >= ell_width {
+    if display_width(ellipsis) > 0 {
         // The style of whatever survived the cut, or of the text that would
         // have been there: with a budget narrower than the first cluster
         // nothing survives, and an unstyled `…` would make a module flip to
@@ -470,11 +503,8 @@ fn cells(segments: &[Segment]) -> Vec<Cell<'_>> {
 /// Text no wider than the window is returned as is, padded on the right.
 /// The result is always exactly `width` cells: a wide cluster cut by either
 /// edge becomes spaces for its visible part. Styles and links follow their
-/// clusters; the gap and padding are plain. The period is the sum of the
-/// cluster widths, which for ligature scripts (Arabic `لا`, Lisu tone pairs)
-/// can exceed [`display_width`] of the whole string by a cell; callers that
-/// compute the period with `display_width` then see the window jump a cell
-/// at the wrap, the same limitation [`truncate`] has.
+/// clusters; the gap and padding are plain. The period is
+/// [`scroll_period`], which a caller computes its offset with.
 #[must_use]
 pub fn scroll(
     segments: &[Segment],
@@ -515,11 +545,10 @@ pub fn scroll(
         _ => out.push(Segment { text: text.to_owned(), style, link: link.map(str::to_owned) }),
     };
     let mut start = 0_usize;
-    let mut rounds = 0_usize;
     let mut emitted = 0_usize;
-    // At most two passes over the sequence are ever needed: the window is
-    // narrower than one period plus itself.
-    'outer: while rounds < 2 || (wrap && start < end) {
+    // Without wrap one pass; with it, as many as the window spans (each
+    // advances a whole period, which is not zero).
+    'outer: loop {
         for cell in &sequence {
             let stop = start.saturating_add(cell.width);
             if start >= end {
@@ -539,7 +568,6 @@ pub fn scroll(
             }
             start = stop;
         }
-        rounds = rounds.saturating_add(1);
         if !wrap {
             break;
         }
@@ -849,6 +877,28 @@ mod tests {
         assert_eq!(out[2].link.as_deref(), Some("https://x"));
         let out = scroll(&segs, 4, 5, " · ", true);
         assert_eq!(out[1].style, Style::PLAIN, "gap is plain: {out:?}");
+    }
+
+    /// The period a caller reduces its clock by is the one the scroller
+    /// repeats on, ligatures included: `لا` is one cell to `unicode-width`
+    /// and two clusters here, and every window of the cycle is distinct.
+    #[test]
+    fn scroll_period_is_what_the_scroller_repeats_on() {
+        let segs = [Segment::plain("abلاcd")];
+        assert_eq!((segments_width(&segs), cluster_width(&segs)), (5, 6));
+        let period = scroll_period(&segs, "  ", true);
+        assert_eq!(period, 8);
+        assert_eq!(scroll_period(&segs, "  ", false), 6);
+        let window = |k: usize| plain(&scroll(&segs, 3, k, "  ", true));
+        let cycle: Vec<String> = (0..period).map(window).collect();
+        for (k, w) in cycle.iter().enumerate() {
+            assert!(!cycle[..k].contains(w), "offset {k} repeats early: {cycle:?}");
+            assert_eq!(window(k + period), *w);
+        }
+        assert_eq!(kept_width(5, "…"), 4);
+        assert_eq!(kept_width(1, ".."), 0);
+        assert_eq!(kept_width(3, ".."), 1);
+        assert_eq!(kept_width(0, "…"), 0);
     }
 
     /// A cut inside a flag or a skin tone changes the glyph rather than
