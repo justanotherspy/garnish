@@ -1181,9 +1181,13 @@ color = "accent"               # role or literal for the box's glyphs; default t
   rows with different column counts never align with each other, and
   inner rows of a stack align only with inner rows at the same column
   position), so separators stack; *k* counts from the left in a left- or
-  centre-justified column and from the right end in a right-justified
-  column or a `right` group, as § 4 does today; `right_justify` picks the
-  pad side for those.
+  centre-justified column and in the left group of any column with a
+  `right` group (the flex form anchors it left, whatever `justify` says),
+  and from the right end in a right-justified column with no `right`
+  group or in a `right` group, as § 4 does today; `right_justify` picks
+  the pad side for those. (2026-09-25: a last column is right-justified
+  by default, and the left group of one with a `right` group counted from
+  the right, so its bars did not stack.)
 - **Stacks and height.** `[[row.col.row]]` entries make the column a
   stack of rows, each laid out to the column's width with the rules above
   (an inner row's `justify` overrides the column's). A row's height in
