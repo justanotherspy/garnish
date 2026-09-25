@@ -1608,7 +1608,9 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
     fields
 }
 
-/// The title keys of a row or a box, `resolved` the title in effect.
+/// The title keys of a row or a box, `resolved` the title in effect: the
+/// three that decorate a title only once there is one (the parser reports
+/// them without it), each still listed while the table sets it.
 fn title_fields(
     s: &dyn Fn(&str) -> Slot,
     raw: &dyn Fn(&str) -> Option<Value>,
@@ -1619,10 +1621,11 @@ fn title_fields(
 ) -> Vec<Field> {
     let effect = resolved.cloned().unwrap_or_default();
     let default = config::TitleCfg::default();
-    vec![
-        Field::new("title", "Plain text set into the rule.", SlotKind::Str, s("title"))
-            .valued(draft, raw("title"), "none")
-            .with_choices(hints.choices("title")),
+    let titled = raw("title").is_some();
+    let title = Field::new("title", "Plain text set into the rule.", SlotKind::Str, s("title"))
+        .valued(draft, raw("title"), "none")
+        .with_choices(hints.choices("title"));
+    let decorations = vec![
         Field::new(
             "title_justify",
             &format!("{}.", bar::<Justify>()),
@@ -1653,7 +1656,10 @@ fn title_fields(
         )
         .valued(draft, raw("title_color"), "frame")
         .with_choices(color_choices(config)),
-    ]
+    ];
+    std::iter::once(title)
+        .chain(decorations.into_iter().filter(|f| titled || raw(&f.key).is_some()))
+        .collect()
 }
 
 /// A count as a TOML integer.
@@ -1795,10 +1801,16 @@ mod tests {
         for (text, kind, path, prefix) in [
             ("[frame]\nzz = 1\n", FormKind::Frame, "frame.zz", ""),
             ("[format]\nzz = 1\n", FormKind::Top, "format.zz", "format."),
-            // A spacer outside a named box: every row key is legal there.
-            ("[[row]]\nmodules = []\nzz = 1\n", FormKind::Row(RowAt::row(0)), "row[0].zz", ""),
+            // A titled spacer outside a named box: every row key is legal
+            // there (the title keys decorate a title, so one is set).
             (
-                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = []\nzz = 1\n",
+                "[[row]]\nmodules = []\ntitle = \"T\"\nzz = 1\n",
+                FormKind::Row(RowAt::row(0)),
+                "row[0].zz",
+                "",
+            ),
+            (
+                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = []\ntitle = \"T\"\nzz = 1\n",
                 FormKind::Row(inner),
                 "row[0].col[0].row[0].zz",
                 "",
@@ -1810,7 +1822,7 @@ mod tests {
                 "",
             ),
             (
-                "[box.b]\nzz = 1\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+                "[box.b]\ntitle = \"B\"\nzz = 1\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
                 FormKind::Box("b".into()),
                 "box.b.zz",
                 "",
@@ -2229,7 +2241,8 @@ mod tests {
         );
         assert_eq!(open(&mut c, "justify").as_deref(), Some("right"));
         assert_eq!(open(&mut c, "valign").as_deref(), Some("top"));
-        let (mut r, _) = built("[[row]]\nmodules = [\"clock\"]\n", &FormKind::Row(RowAt::row(0)));
+        let (mut r, _) =
+            built("[[row]]\nmodules = [\"clock\"]\ntitle = \"T\"\n", &FormKind::Row(RowAt::row(0)));
         assert_eq!(step(&mut r, "gap", Key::Right), Value::Integer(2));
         assert_eq!(step(&mut r, "title_pad", Key::Right), Value::Integer(2));
         assert_eq!(open(&mut r, "title_justify").as_deref(), Some("left"));
@@ -2375,6 +2388,13 @@ mod tests {
         let has = |keys: &[String], k: &str| keys.iter().any(|x| x == k);
         let plain = keys("[[row]]\nmodules = [\"clock\"]\n");
         assert!(!has(&plain, "blank") && has(&plain, "title"), "{plain:?}");
+        // cfg-21: the keys that decorate a title wait for one; one the file
+        // sets without it (which the parser reports) is listed to unset.
+        for key in ["title_justify", "title_pad", "title_color"] {
+            assert!(!has(&plain, key), "{key} in {plain:?}");
+            assert!(has(&keys("[[row]]\nmodules = [\"clock\"]\ntitle = \"T\"\n"), key), "{key}");
+        }
+        assert!(has(&keys("[[row]]\nmodules = [\"clock\"]\ntitle_pad = 2\n"), "title_pad"));
         assert!(has(&keys("[[row]]\nmodules = []\n"), "blank"));
         assert!(has(&keys("[[row]]\n[[row.col]]\nmodules = [\"clock\"]\n"), "blank"));
         assert!(has(&keys("[[row]]\nmodules = [\"clock\"]\nblank = true\n"), "blank"));

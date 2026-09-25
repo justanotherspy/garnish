@@ -404,11 +404,19 @@ impl RawRow {
                 "blank" => row.blank = field::<bool>(&path, value, errors).unwrap_or(false),
                 "title" => row.title = text_field(&path, value, errors),
                 "title_justify" => row.title_justify = enum_field(&path, &value, errors),
-                "title_pad" => row.title_pad = bounded_count(&path, value, MAX_TITLE_PAD, errors),
+                "title_pad" => {
+                    row.title_pad = bounded_count(&path, &value, MAX_TITLE_PAD, errors);
+                }
                 "title_color" => row.title_color = field(&path, value, errors),
                 "box" => row.boxed = box_ref(&path, value, errors),
-                "gap" if !inner => row.gap = bounded_count(&path, value, MAX_GAP, errors),
-                "col" if !inner => row.cols = Some(col_array(&path, value, errors)),
+                "gap" if !inner => row.gap = bounded_count(&path, &value, MAX_GAP, errors),
+                // Not an array (`[row.col]` with one bracket): reported, and
+                // the row keeps its own groups rather than becoming columns
+                // that are not there, which would read as a spacer.
+                "col" if !inner => match col_array(&path, value, errors) {
+                    Some(cols) => row.cols = Some(cols),
+                    None => row.bad_list = true,
+                },
                 _ => {
                     let keys: &[&str] = if inner { &INNER_ROW_KEYS } else { &ROW_KEYS };
                     errors.push(problem(&path, &unknown_key(keys)));
@@ -458,6 +466,7 @@ impl RawCol {
                 "row" => {
                     let toml::Value::Array(items) = value else {
                         errors.push(problem(&path, "expected [[row.col.row]] tables"));
+                        col.bad_list = true;
                         continue;
                     };
                     for (k, item) in items.into_iter().enumerate() {
@@ -485,11 +494,12 @@ impl RawCol {
     }
 }
 
-/// The `[[row.col]]` array of one row, bounded at [`MAX_COLS`].
-fn col_array(path: &str, value: toml::Value, errors: &mut Vec<ConfigError>) -> Vec<RawCol> {
+/// The `[[row.col]]` array of one row, bounded at [`MAX_COLS`]; `None`
+/// (reported) when the value is not an array at all.
+fn col_array(path: &str, value: toml::Value, errors: &mut Vec<ConfigError>) -> Option<Vec<RawCol>> {
     let toml::Value::Array(items) = value else {
         errors.push(problem(path, "expected [[row.col]] tables"));
-        return Vec::new();
+        return None;
     };
     let mut cols = Vec::new();
     for (j, item) in items.into_iter().enumerate() {
@@ -506,7 +516,7 @@ fn col_array(path: &str, value: toml::Value, errors: &mut Vec<ConfigError>) -> V
         };
         cols.push(col);
     }
-    cols
+    Some(cols)
 }
 
 /// `box = "<name>"` or `box = true`; `false` is "no box", as leaving the key
@@ -572,9 +582,9 @@ pub(super) fn resolve_rows(
     let mut rows: Vec<RowCfg> = raw
         .iter()
         .enumerate()
-        .map(|(i, r)| resolve_row(&format!("{key}[{i}]"), r, false, defined, theme, errors))
+        .map(|(i, r)| resolve_row(&format!("{key}[{i}]"), r, defined, theme, errors))
         .collect();
-    check_box_runs(key, &mut rows, errors);
+    check_box_run(key, &mut rows, &mut Vec::new(), errors);
     rows
 }
 
@@ -582,7 +592,6 @@ pub(super) fn resolve_rows(
 fn resolve_row(
     path: &str,
     raw: &RawRow,
-    inner: bool,
     defined: &BTreeMap<String, BoxCfg>,
     theme: &Theme,
     errors: &mut Vec<ConfigError>,
@@ -638,7 +647,8 @@ fn resolve_row(
         errors,
     );
     // Boxes never nest, in either direction (SPEC § 4.3): a column inside a
-    // boxed row keeps its place but loses its own box.
+    // boxed row keeps its place but loses its own box, and so does a row of
+    // its stack.
     if boxed.is_some() {
         for (j, col) in cols.iter_mut().enumerate() {
             if col.boxed.take().is_some() {
@@ -646,6 +656,14 @@ fn resolve_row(
                     &format!("{path}.col[{j}].box"),
                     "boxes never nest: this column is already inside its row's box",
                 ));
+            }
+            for (k, inner) in col.rows.iter_mut().enumerate() {
+                if inner.boxed.take().is_some() {
+                    errors.push(problem(
+                        &format!("{path}.col[{j}].row[{k}].box"),
+                        "boxes never nest: this row is already inside its outer row's box",
+                    ));
+                }
             }
         }
     }
@@ -675,11 +693,11 @@ fn resolve_row(
             "only a spacer (modules = [] with no right) or a row with columns can be marked blank",
         ));
     }
-    let gap = raw.gap.unwrap_or(DEFAULT_GAP);
     RowCfg {
         cols,
         explicit_cols,
-        gap: if inner { DEFAULT_GAP } else { gap },
+        // An inner row never has one: its reader refuses the key.
+        gap: raw.gap.unwrap_or(DEFAULT_GAP),
         separator: raw.separator.clone(),
         title,
         boxed,
@@ -708,7 +726,7 @@ fn resolve_col(
         .rows
         .iter()
         .enumerate()
-        .map(|(k, r)| resolve_row(&format!("{path}.row[{k}]"), r, true, defined, theme, errors))
+        .map(|(k, r)| resolve_row(&format!("{path}.row[{k}]"), r, defined, theme, errors))
         .collect();
     // Boxes never nest, in either direction: a boxed column's rows may not
     // box themselves, and the box a row carries is the one that is dropped.
@@ -763,13 +781,10 @@ fn check_box_ref(
 /// A named box is one run of adjacent rows (SPEC § 4.3): a name that comes
 /// back after another box, or after a bare row, is reported and the second
 /// run unboxed, since two boxes cannot share a name.
-fn check_box_runs(key: &str, rows: &mut [RowCfg], errors: &mut Vec<ConfigError>) {
-    check_box_run(key, rows, &mut Vec::new(), errors);
-}
-
-/// One list of rows. A stack is a run of its own, so a name inside one is
-/// never adjacent to a name outside it, but `seen` spans the whole tree: a
-/// box is one run in the config, not one run per list.
+///
+/// One call checks one list of rows. A stack is a run of its own, so a name
+/// inside one is never adjacent to a name outside it, but `seen` spans the
+/// whole tree: a box is one run in the config, not one run per list.
 fn check_box_run(
     key: &str,
     rows: &mut [RowCfg],
@@ -814,7 +829,9 @@ fn check_box_run(
     }
 }
 
-/// The four `title*` keys as one value (SPEC § 4.3).
+/// The four `title*` keys as one value (SPEC § 4.3). The other three with
+/// no `title` have nothing to act on and are reported, as the parser
+/// reports every other dead key.
 fn resolve_title(
     path: &str,
     text: Option<&str>,
@@ -824,12 +841,22 @@ fn resolve_title(
     theme: &Theme,
     errors: &mut Vec<ConfigError>,
 ) -> Option<TitleCfg> {
+    let Some(text) = text else {
+        let set = [
+            ("title_justify", justify.is_some()),
+            ("title_pad", pad.is_some()),
+            ("title_color", color.is_some()),
+        ];
+        for (key, _) in set.into_iter().filter(|(_, set)| *set) {
+            errors.push(problem(&format!("{path}.{key}"), "has no effect without title"));
+        }
+        return None;
+    };
     let color = color.and_then(|spec| {
         color_spec(theme, spec)
             .inspect_err(|msg| errors.push(problem(&format!("{path}.title_color"), msg)))
             .ok()
     });
-    let text = text?;
     Some(TitleCfg {
         text: text.to_owned(),
         justify: justify.unwrap_or_default(),
@@ -871,7 +898,7 @@ pub(super) fn resolve_boxes(
             match key.as_str() {
                 "title" => title = text_field(&path, value, errors),
                 "title_justify" => justify = enum_field(&path, &value, errors),
-                "title_pad" => pad = bounded_count(&path, value, MAX_TITLE_PAD, errors),
+                "title_pad" => pad = bounded_count(&path, &value, MAX_TITLE_PAD, errors),
                 "title_color" => color = field::<String>(&path, value, errors),
                 // Powerline has caps, not a box shape; the box is drawn
                 // rounded rather than silently losing its sides.
@@ -1124,6 +1151,103 @@ mod tests {
         assert_eq!(c.rows[0].cols[0].left, ["clock"]);
     }
 
+    /// cfg-01: `[row.col]` (one bracket: a table where an array of tables
+    /// belongs) is reported under its path and the row keeps its own
+    /// groups; it never turns the row into a spacer, and neither does a
+    /// `[row.col.row]` (SPEC § 4.1: a reported mistake is never a spacer).
+    #[test]
+    fn a_column_or_stack_that_is_not_an_array_is_reported_and_never_a_spacer() {
+        let schemas = schemas();
+        let paths =
+            |errs: &[ConfigError]| -> Vec<String> { errs.iter().map(|e| e.path.clone()).collect() };
+        let (c, errs) =
+            parse("[[row]]\nmodules = [\"path\"]\n[row.col]\nmodules = [\"clock\"]\n", &schemas);
+        assert_eq!(paths(&errs), ["row[0].col"], "{errs:?}");
+        assert_eq!(c.rows[0].cols[0].left, ["path"], "the row keeps its own modules");
+        assert!(!c.rows[0].explicit_cols && !c.rows[0].spacer);
+        let (c, errs) = parse("[[row]]\n[row.col]\nmodules = [\"clock\"]\n", &schemas);
+        assert_eq!(paths(&errs), ["row[0].col"], "{errs:?}");
+        assert!(!c.rows[0].spacer, "an empty row, dropped like any other");
+        let (c, errs) =
+            parse("[[row]]\n[[row.col]]\n[row.col.row]\nmodules = [\"path\"]\n", &schemas);
+        assert_eq!(paths(&errs), ["row[0].col[0].row"], "{errs:?}");
+        assert!(!c.rows[0].spacer);
+    }
+
+    /// cfg-02: boxes never nest in either direction, however deep: a boxed
+    /// row's inner rows lose their boxes too, and a named box only they
+    /// joined is then unused.
+    #[test]
+    fn a_boxed_rows_stack_carries_no_box_of_its_own() {
+        let schemas = schemas();
+        let (c, errs) = parse(
+            "[[row]]\nbox = true\n[[row.col]]\n[[row.col.row]]\nbox = true\nmodules = [\"path\"]\n",
+            &schemas,
+        );
+        let problems: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(problems, ["row[0].col[0].row[0].box"], "{errs:?}");
+        assert!(errs[0].message.contains("boxes never nest"), "{}", errs[0].message);
+        assert_eq!(c.rows[0].boxed, Some(BoxRef::Anon));
+        assert_eq!(c.rows[0].cols[0].rows[0].boxed, None);
+        let (c, errs) = parse(
+            "[box.a]\n[[row]]\nbox = true\n[[row.col]]\n[[row.col.row]]\nbox = \"a\"\nmodules = [\"path\"]\n",
+            &schemas,
+        );
+        let problems: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(problems, ["row[0].col[0].row[0].box", "box.a"], "{errs:?}");
+        assert_eq!(c.rows[0].cols[0].rows[0].boxed, None);
+    }
+
+    /// cfg-07: a count that is negative, quoted or over its cap is one
+    /// message naming the range, never a Rust type.
+    #[test]
+    fn a_bad_count_names_its_range() {
+        let schemas = schemas();
+        for (text, path, max) in [
+            ("[[row]]\ngap = -1\nmodules = [\"path\"]\n", "row[0].gap", MAX_GAP),
+            ("[[row]]\ngap = \"2\"\nmodules = [\"path\"]\n", "row[0].gap", MAX_GAP),
+            ("[[row]]\ngap = 17\nmodules = [\"path\"]\n", "row[0].gap", MAX_GAP),
+            (
+                "[[row]]\ntitle = \"T\"\ntitle_pad = -1\nmodules = [\"path\"]\n",
+                "row[0].title_pad",
+                MAX_TITLE_PAD,
+            ),
+            (
+                "[box.a]\ntitle = \"T\"\ntitle_pad = \"2\"\n[[row]]\nbox = \"a\"\nmodules = [\"path\"]\n",
+                "box.a.title_pad",
+                MAX_TITLE_PAD,
+            ),
+        ] {
+            let (_, errs) = parse(text, &schemas);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(problems, [(path, &*format!("expected an integer 0–{max}"))], "{text}");
+        }
+        let (_, errs) = parse("stale_after = 5000000000\n", &schemas);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].message.contains("0–4294967295"), "{}", errs[0].message);
+    }
+
+    /// cfg-21: a `title_justify`, `title_pad` or `title_color` with no
+    /// `title` has nothing to act on, and is said so rather than dropped.
+    #[test]
+    fn title_keys_without_a_title_are_reported() {
+        let schemas = schemas();
+        for (text, path) in [
+            ("[[row]]\ntitle_pad = 3\nmodules = [\"path\"]\n", "row[0].title_pad"),
+            ("[[row]]\ntitle_color = \"accent\"\nmodules = [\"path\"]\n", "row[0].title_color"),
+            (
+                "[box.a]\ntitle_justify = \"center\"\n[[row]]\nbox = \"a\"\nmodules = [\"path\"]\n",
+                "box.a.title_justify",
+            ),
+        ] {
+            let (_, errs) = parse(text, &schemas);
+            let problems: Vec<(&str, &str)> =
+                errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+            assert_eq!(problems, [(path, "has no effect without title")], "{text}");
+        }
+    }
+
     /// A stack is two levels deep and no deeper, and both caps hold.
     #[test]
     fn stacks_and_columns_are_bounded() {
@@ -1271,6 +1395,17 @@ mod tests {
         let (c, errs) = parse("hide_empty_lines = true\nhide_empty_rows = false\n", &schemas);
         assert_eq!(errs, Vec::new());
         assert!(!c.hide_empty_rows);
+        // cfg-17: an invalid new name leaves the alias standing, in either
+        // order, and is reported once.
+        for text in [
+            "hide_empty_lines = false\nhide_empty_rows = \"no\"\n",
+            "hide_empty_rows = \"no\"\nhide_empty_lines = false\n",
+        ] {
+            let (c, errs) = parse(text, &schemas);
+            let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+            assert_eq!(paths, ["hide_empty_rows"], "{text}");
+            assert!(!c.hide_empty_rows, "{text}");
+        }
         let (_, errs) = parse("[[row]]\nmodules = [\"nope\"]\n", &schemas);
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert_eq!(errs[0].path, "row[0].modules[0]");

@@ -366,6 +366,9 @@ struct RawConfig {
     /// The file wrote the rows as `[[line]]`: every error under a row points
     /// at the name the user typed.
     rows_alias: bool,
+    /// The command line's preset replaced the file's rows (`preview
+    /// --preset`), so no `[box.<name>]` of the file is expected to be joined.
+    rows_replaced: bool,
     /// `[box.<name>]` tables, kept raw until the theme exists to resolve
     /// their colours (as `[modules.text.<name>]` are).
     boxes: BTreeMap<String, toml::Table>,
@@ -423,6 +426,9 @@ impl RawConfig {
         // order between two arrays of tables, so a file carries one or the
         // other (SPEC § 4.3).
         let (mut rows, mut alias): (Option<Vec<RawRow>>, Option<Vec<RawRow>>) = (None, None);
+        // The same for the two switch names, so a bad value under the new
+        // one never erases a good alias written before it.
+        let (mut hide_rows, mut hide_lines): (Option<bool>, Option<bool>) = (None, None);
         for (key, value) in table {
             match key.as_str() {
                 "preset" => raw.preset = enum_field(&key, &value, errors),
@@ -438,11 +444,8 @@ impl RawConfig {
                 // `hide_empty_lines` is the permanent alias of
                 // `hide_empty_rows` (SPEC § 4.3); the new name wins when a
                 // file carries both.
-                "hide_empty_rows" => raw.hide_empty_rows = field(&key, value, errors),
-                "hide_empty_lines" => {
-                    let alias = field(&key, value, errors);
-                    raw.hide_empty_rows = raw.hide_empty_rows.or(alias);
-                }
+                "hide_empty_rows" => hide_rows = field(&key, value, errors),
+                "hide_empty_lines" => hide_lines = field(&key, value, errors),
                 "overflow" => raw.overflow = enum_field(&key, &value, errors),
                 "ticker_step" => raw.ticker_step = field(&key, value, errors),
                 "ticker_gap" => raw.ticker_gap = field(&key, value, errors),
@@ -500,6 +503,7 @@ impl RawConfig {
                 )),
             }
         }
+        raw.hide_empty_rows = hide_rows.or(hide_lines);
         match (rows, alias) {
             (Some(rows), None) => raw.row = rows,
             (None, Some(alias)) => {
@@ -653,7 +657,7 @@ fn resolve(raw: &RawConfig, schemas: &[ModuleSchema], errors: &mut Vec<ConfigErr
     };
     // A box nothing joins draws nothing: said once, here, rather than left
     // for the user to wonder about on screen.
-    for name in boxes.keys() {
+    for name in boxes.keys().filter(|_| !raw.rows_replaced) {
         if !rows.iter().any(|r| rows::joins_box(r, name)) {
             errors.push(problem(
                 &format!("box.{name}"),
@@ -1413,6 +1417,28 @@ x = 1
         // Nothing in the resolved config carries a control character.
         let shown = crate::docs::config_toml(&c, false);
         assert!(!shown.contains('\u{1b}') && !shown.contains('\u{7}'), "{shown}");
+
+        // cfg-11: the row, inner-row and box titles and the box glyphs too.
+        let text = concat!(
+            "[frame]\nstyle = \"custom\"\nside = \"\\u001b[31m|\\u001b[0m\"\n",
+            "top_left = \"\\u001b]0;x\\u0007+\"\n",
+            "[box.a]\ntitle = \"\\u001b]0;x\\u0007B\\u202e\"\n",
+            "[[row]]\ntitle = \"\\u001b[2JR\\u200e\"\nmodules = [\"model\"]\n",
+            "[[row]]\nbox = \"a\"\nmodules = [\"model\"]\n",
+            "[[row]]\n[[row.col]]\n[[row.col.row]]\ntitle = \"\\u001bP dcs \\u001b\\\\I\"\n",
+            "modules = [\"model\"]\n",
+        );
+        let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        let title = |t: Option<&TitleCfg>| t.map_or_default(|t| t.text.clone());
+        assert_eq!(title(c.boxes["a"].title.as_ref()), "B");
+        assert_eq!(title(c.rows[0].title.as_ref()), "R");
+        assert_eq!(title(c.rows[2].cols[0].rows[0].title.as_ref()), "I");
+        assert_eq!((c.frame.chars.side.as_str(), c.frame.chars.top_left.as_str()), ("|", "+"));
+        let shown = crate::docs::config_toml(&c, false);
+        for c in ['\u{1b}', '\u{7}', '\u{202e}', '\u{200e}'] {
+            assert!(!shown.contains(c), "{c:?} in {shown}");
+        }
     }
 
     /// SPEC § 4 `[format]`: each key is reported and defaulted on its own,

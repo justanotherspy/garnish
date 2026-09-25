@@ -849,9 +849,14 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   `hide_empty_lines = false` restores today's behaviour for the accidental
   case too. A `[[line]]` with no keys is a spacer as well; a `modules` that
   is not a list (`modules = "clock"`) is reported and the row is an
-  ordinary empty line, dropped like any other, never a spacer. An unknown
+  ordinary empty line, dropped like any other, never a spacer, and so is a
+  row whose `col`, or a column whose `row`, is a table where the array of
+  tables belongs (`[row.col]` with one bracket; the row keeps its own
+  `modules`: 2026-09-25, it had become a permanent blank rule). An unknown
   id on a line is reported and removed, so `config show` writes only ids
-  that render. With `stale_style = "hide"` a line of only cached modules can
+  that render, and leaves out a row (or a stack's row) that its removal
+  emptied wherever `hide_empty_rows` drops it, since `modules = []` would
+  make it a spacer that is always drawn. With `stale_style = "hide"` a line of only cached modules can
   come and go as its values fall overdue and refresh; `hide_when_empty =
   false` on one of them pins the row.
 - **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
@@ -1152,7 +1157,10 @@ color = "accent"               # role or literal for the box's glyphs; default t
   it. On a multi-line row the title goes into the first line. On a
   `box = true` row the `title*` keys title that anonymous box (the one
   way to title a one-row box); a row inside a named box gets no title
-  of its own (the box has one) and the key is reported and ignored. A
+  of its own (the box has one) and the key is reported and ignored. The
+  other three keys decorate a title, so without `title` each is reported
+  as having no effect (2026-09-25: they were dropped in silence, and
+  `setup` lists them once a title is set). A
   title wider than its space is cut with `…` and never widens
   the line. A `[[row]]` with only a `title` is a titled spacer
   (`├─ Repository ────┤`), always kept (§ 4.1).
@@ -1176,7 +1184,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   on a row boxes that row alone with no title, so three adjacent
   `box = true` rows are three boxes. Boxes never nest: a row inside a
   boxed column may not carry `box`, and a column may not carry `box` on
-  a row that has one; both are reported and the inner box ignored. The
+  a row that has one, nor may a row of that column's stack (2026-09-25:
+  that one drew a box inside a box with `config check` saying ok); each
+  is reported and the inner box ignored. The
   three ways read the same wherever the rows are: adjacent rows of a
   stack naming one box form one box in that column, as adjacent
   `[[row]]`s do. A name reused for a non-adjacent run is reported and
@@ -1236,11 +1246,13 @@ color = "accent"               # role or literal for the box's glyphs; default t
   read as an error.
 - **Validation.** `config check` reports: `justify`/`valign` outside
   their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
-  count (≤ 1024); `gap` above 16; more than 16 columns on a row or 16
-  inner rows in a column; `title_pad` above 64; `box` naming no
+  count (≤ 1024); a `gap` or `title_pad` that is not an integer from 0 to
+  its cap (16, 64), named with that range; more than 16 columns on a row
+  or 16 inner rows in a column; `box` naming no
   `[box.<name>]`; a row with both `modules` and `[[row.col]]` (the
   columns win); nesting in either direction; a non-adjacent reuse; a
-  title on a row inside a named box; `[[line]]` and `[[row]]` both
+  title on a row inside a named box; `title_justify`, `title_pad` or
+  `title_color` without a `title`; `[[line]]` and `[[row]]` both
   present in one file (the arrays cannot be ordered against each other;
   the file must use one name). `config show` writes a one-column row in
   the plain `[[row]]` form, writes `[[row.col]]`, `[[row.col.row]]` and
@@ -1589,7 +1601,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (`$CLAUDE_CONFIG_DIR/skills/` when that is set, § 2.3; or `D`); `install` runs this too unless `--no-skills` |
-| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain); a preview is not a tick, so it never reads the cache or spawns a worker (§ 14) |
+| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain); a preview is not a tick, so it never reads the cache or spawns a worker (§ 14); `--preset` replaces the file's rows, so their problems (under either array name) and whether a `[box.<name>]` is joined are not reported (2026-09-25: a valid file ended in `box.x: no row or column joins this box`) |
 | `garnish docs --out DIR` | regenerate docs from schemas; a maintainer's tool, hidden from `--help` and with no default directory, since the pages replace same-named files there (2026-09-25 review: run in a project of one's own it replaced that project's `docs/README.md`); `make docs` goes through the docs-sync test |
 | `garnish modules` | list module ids + summaries |
 | `garnish presets` | list the gallery presets (§ 12): name, summary, declared width, requirement |

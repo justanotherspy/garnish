@@ -8,22 +8,21 @@ use super::{ConfigError, MAX_TEXT_CHARS, Vocab};
 use crate::ansi::Color;
 use crate::theme::{Role, Theme};
 
-/// A non-negative count with a ceiling: above it the key is reported and
-/// left unset, so its default applies (the pattern of
-/// [`super::schema::OptSpec`]'s `max`, for the layout keys the schemas do
-/// not own).
+/// A count from 0 to `max`: anything else (another type, a negative number,
+/// one above the ceiling) is reported with the range and left unset, so
+/// its default applies (the pattern of [`super::schema::OptSpec`]'s `max`,
+/// for the layout keys the schemas do not own).
 pub(super) fn bounded_count(
     path: &str,
-    value: toml::Value,
+    value: &toml::Value,
     max: usize,
     errors: &mut Vec<ConfigError>,
 ) -> Option<usize> {
-    let n = field::<usize>(path, value, errors)?;
-    if n > max {
-        errors.push(problem(path, &format!("must be at most {max}")));
-        return None;
+    let n = value.as_integer().and_then(|n| usize::try_from(n).ok()).filter(|n| *n <= max);
+    if n.is_none() {
+        errors.push(problem(path, &format!("expected an integer 0–{max}")));
     }
-    Some(n)
+    n
 }
 
 /// A config string that reaches a row: reduced to plain text and capped, as
@@ -55,8 +54,9 @@ pub(super) fn field<T: serde::de::DeserializeOwned>(
             let message = e
                 .message()
                 .replace("expected u16", "expected an integer 0–65535")
-                .replace("expected u32", "expected a non-negative integer")
+                .replace("expected u32", "expected an integer 0–4294967295")
                 .replace("expected u64", "expected a non-negative integer")
+                .replace("expected usize", "expected a non-negative integer")
                 .replace("expected f64", "expected a number");
             errors.push(problem(path, &message));
             None

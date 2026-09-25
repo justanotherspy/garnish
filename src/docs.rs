@@ -311,11 +311,15 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
     comment(out, annotated, "[[row.col]]");
     comment(out, annotated, "width = \"1fr\"        # \"<n>fr\" | \"auto\" | a cell count");
     comment(out, annotated, "modules = [\"path\", \"branch\"]");
+    // A row left with no ids by a reported mistake renders as an empty row
+    // that `hide_empty_rows` drops; written back as `modules = []` it would
+    // become a spacer that is always drawn, so it is left out, at either
+    // level. Where the switch is off the empty row is kept, and a spacer is
+    // the same empty row, so it is written.
+    let dropped =
+        |row: &config::RowCfg| cfg.hide_empty_rows && !row.spacer && row.cols.iter().all(emptied);
     for row in &cfg.rows {
-        // A row left with no ids by a reported mistake renders as an empty
-        // row that `hide_empty_rows` drops; written back as `modules = []`
-        // it would become a spacer that is always drawn, so it is left out.
-        if row.cols.iter().all(ColCfg::is_empty) && !row.spacer {
+        if dropped(row) {
             continue;
         }
         let _ = writeln!(out, "[[row]]");
@@ -346,10 +350,14 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
                         let _ = writeln!(out, "valign = {}", toml_string(col.valign.name()));
                     }
                     write_box_ref(out, col.boxed.as_ref());
-                    if col.rows.is_empty() {
+                    // A stack every row of which is left out is written as
+                    // the empty column it parses back to.
+                    let inner_rows: Vec<&config::RowCfg> =
+                        col.rows.iter().filter(|r| !dropped(r)).collect();
+                    if inner_rows.is_empty() {
                         write_groups(out, col);
                     }
-                    for inner in &col.rows {
+                    for inner in inner_rows {
                         let _ = writeln!(out, "[[row.col.row]]");
                         if let Some(sep) = &inner.separator {
                             let _ = writeln!(out, "separator = {}", toml_string(sep));
@@ -369,6 +377,15 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
     }
     let _ = writeln!(out);
     write_boxes(out, cfg, annotated);
+}
+
+/// Whether a column renders nothing but through a reported mistake: no ids
+/// of its own, and every row of its stack emptied the same way (a spacer
+/// in it is content).
+fn emptied(col: &ColCfg) -> bool {
+    col.left.is_empty()
+        && col.right.is_empty()
+        && col.rows.iter().all(|r| !r.spacer && r.cols.iter().all(emptied))
 }
 
 /// The `modules` / `right` pair of one column.
@@ -1617,6 +1634,41 @@ mod tests {
         // `init` leaves `animate` to Claude Code's prefersReducedMotion (SPEC § 4.2).
         assert_eq!(from_init.animate, None);
         assert!(config_toml(&cfg, true).contains("\n# animate = true\n"));
+    }
+
+    /// cfg-03, sch-07: a row or an inner row emptied by a reported id is
+    /// written back so it renders as it did: left out where
+    /// `hide_empty_rows` drops it, `modules = []` (a spacer, drawn as the
+    /// same empty row) where it keeps it.
+    #[test]
+    fn config_show_writes_an_emptied_row_as_it_renders() {
+        let payload = fixture("subscription-full");
+        let render = |c: &Config| render_plain_at(&payload, c, Some(80), &Clock::fixed());
+        // The column of the third case loses its only inner row: it comes
+        // back as a bare column that keeps its share, but the layout draws
+        // an emptied stack as spaces and a bare column as the rule, and no
+        // config without a mistake spells a stack that renders nothing, so
+        // that case is held to the fixed point alone.
+        let stack_emptied = "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"nope\"]\n[[row.col]]\nmodules = [\"clock\"]\n";
+        for hide in [true, false] {
+            for body in [
+                "[[row]]\nmodules = [\"nope\"]\n[[row]]\nmodules = [\"clock\"]\n",
+                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"nope\"]\n[[row.col.row]]\nmodules = [\"clock\"]\n",
+                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"nope\"]\n[[row]]\nmodules = [\"clock\"]\n",
+                stack_emptied,
+            ] {
+                let text = format!("hide_empty_rows = {hide}\n{body}");
+                let (cfg, errs) = config::parse(&text, &SCHEMAS);
+                assert_eq!(errs.len(), 1, "{text}: {errs:?}");
+                let shown = config_toml(&cfg, false);
+                let (again, errs) = config::parse(&shown, &SCHEMAS);
+                assert_eq!(errs, Vec::new(), "{shown}");
+                if !(hide && body == stack_emptied) {
+                    assert_eq!(render(&again), render(&cfg), "{text}\n---\n{shown}");
+                }
+                assert_eq!(config_toml(&again, false), shown, "a fixed point");
+            }
+        }
     }
 
     /// sch-10: the reference's default column is the config an empty file

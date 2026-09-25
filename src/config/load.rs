@@ -172,11 +172,16 @@ fn resolve_table(
     let mut errors = Vec::new();
     let mut raw = RawConfig::from_table(table, &mut errors);
     if overlay.preset.is_some() {
-        // The preset's rows replace the file's, so their problems are moot.
-        let key = format!("{}[", raw.rows_key());
+        // The preset's rows replace the file's, so their problems are moot,
+        // under either array name, and so is a box only they could join.
         raw.preset = overlay.preset;
         raw.row.clear();
-        errors.retain(|e| !e.path.starts_with(&key));
+        raw.rows_replaced = true;
+        errors.retain(|e| {
+            !["row", "line"].iter().any(|key| {
+                e.path == *key || e.path.strip_prefix(key).is_some_and(|rest| rest.starts_with('['))
+            })
+        });
     }
     raw.icons = overlay.icons.or(raw.icons);
     raw.theme = overlay.theme.clone().or(raw.theme);
@@ -218,6 +223,19 @@ mod tests {
         let (c, errs) = parse_with("[[line]]\nmodules = [3]\n", &schemas(), &overlay);
         assert_eq!(errs, Vec::new(), "the overlay replaces the lines, so their problems are moot");
         assert_eq!(c.rows.len(), 1);
+        // cfg-09: nor does a box the file's rows joined read as unused, and
+        // a file carrying both arrays loses both, with their "not both".
+        for text in [
+            "[box.a]\n[[row]]\nbox = \"a\"\nmodules = [\"path\"]\n",
+            "[[row]]\nmodules = [\"path\"]\n[[line]]\nmodules = [3]\n",
+        ] {
+            let (_, errs) = parse_with(text, &schemas(), &overlay);
+            assert_eq!(errs, Vec::new(), "{text}");
+        }
+        // A box's own mistakes are the file's and still reported.
+        let (_, errs) = parse_with("[box.a]\nfill = 1\n", &schemas(), &overlay);
+        let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["box.a.fill"]);
     }
 
     #[test]
