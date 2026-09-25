@@ -321,6 +321,10 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
     // the same empty row, so it is written.
     let dropped =
         |row: &config::RowCfg| cfg.hide_empty_rows && !row.spacer && row.cols.iter().all(emptied);
+    // The boxes the written rows and columns join: a box none of them
+    // names (its rows emptied, or joined by a nested-box mistake the
+    // parser dropped) would read back as a box nothing joins.
+    let mut named = Vec::new();
     for row in &cfg.rows {
         if dropped(row) {
             continue;
@@ -333,7 +337,7 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
             let _ = writeln!(out, "separator = {}", toml_string(sep));
         }
         write_title(out, row.title.as_ref());
-        write_box_ref(out, row.boxed.as_ref());
+        write_box_ref(out, row.boxed.as_ref(), &mut named);
         if row.blank {
             let _ = writeln!(out, "blank = true");
         }
@@ -352,7 +356,7 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
                     if col.valign != config::VAlign::default() {
                         let _ = writeln!(out, "valign = {}", toml_string(col.valign.name()));
                     }
-                    write_box_ref(out, col.boxed.as_ref());
+                    write_box_ref(out, col.boxed.as_ref(), &mut named);
                     // A stack every row of which is left out is written as
                     // the empty column it parses back to.
                     let inner_rows: Vec<&config::RowCfg> =
@@ -366,7 +370,7 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
                             let _ = writeln!(out, "separator = {}", toml_string(sep));
                         }
                         write_title(out, inner.title.as_ref());
-                        write_box_ref(out, inner.boxed.as_ref());
+                        write_box_ref(out, inner.boxed.as_ref(), &mut named);
                         if inner.blank {
                             let _ = writeln!(out, "blank = true");
                         }
@@ -379,7 +383,7 @@ fn write_rows(out: &mut String, cfg: &Config, annotated: bool) {
         }
     }
     let _ = writeln!(out);
-    write_boxes(out, cfg, annotated);
+    write_boxes(out, cfg, annotated, &named);
 }
 
 /// Whether a column renders nothing but through a reported mistake: no ids
@@ -414,11 +418,16 @@ fn write_title(out: &mut String, title: Option<&config::TitleCfg>) {
     }
 }
 
-/// `box = "<name>"` or `box = true`.
-fn write_box_ref(out: &mut String, boxed: Option<&config::BoxRef>) {
+/// `box = "<name>"` or `box = true`; a name goes on `named` too.
+fn write_box_ref<'a>(
+    out: &mut String,
+    boxed: Option<&'a config::BoxRef>,
+    named: &mut Vec<&'a str>,
+) {
     match boxed {
         Some(config::BoxRef::Named(name)) => {
             let _ = writeln!(out, "box = {}", toml_string(name));
+            named.push(name);
         }
         Some(config::BoxRef::Anon) => {
             let _ = writeln!(out, "box = true");
@@ -427,10 +436,13 @@ fn write_box_ref(out: &mut String, boxed: Option<&config::BoxRef>) {
     }
 }
 
-/// The `[box.<name>]` tables (SPEC § 4.3), or, in an annotated file without
-/// any, one commented example so boxes are discoverable from `config init`.
-fn write_boxes(out: &mut String, cfg: &Config, annotated: bool) {
-    if cfg.boxes.is_empty() {
+/// The `[box.<name>]` tables (SPEC § 4.3) that a written row or column
+/// `named`, or, in an annotated file without any, one commented example so
+/// boxes are discoverable from `config init`.
+fn write_boxes(out: &mut String, cfg: &Config, annotated: bool, named: &[&str]) {
+    let boxes: Vec<_> =
+        cfg.boxes.iter().filter(|(name, _)| named.contains(&name.as_str())).collect();
+    if boxes.is_empty() {
         if annotated {
             let _ = writeln!(out, "# A box frames a run of adjacent rows, or a whole column:");
             let _ = writeln!(out, "# [box.repo]");
@@ -447,7 +459,7 @@ fn write_boxes(out: &mut String, cfg: &Config, annotated: bool) {
         }
         return;
     }
-    for (name, b) in &cfg.boxes {
+    for (name, b) in boxes {
         let _ = writeln!(out, "[box.{name}]");
         write_title(out, b.title.as_ref());
         if let Some(style) = b.style {
@@ -1712,6 +1724,32 @@ mod tests {
                 }
                 assert_eq!(config_toml(&again, false), shown, "a fixed point");
             }
+        }
+    }
+
+    /// `config show` writes a `[box.<name>]` table only when a row or a
+    /// column it writes names the box. A box every row of which was
+    /// emptied by a reported id, or whose only row was a nested-box
+    /// mistake, came back with no row joining it, and the shown file
+    /// failed `config check` with a problem of its own.
+    #[test]
+    fn config_show_writes_only_the_boxes_its_rows_name() {
+        let payload = fixture("subscription-full");
+        let render = |c: &Config| render_plain_at(&payload, c, Some(80), &Clock::fixed());
+        let emptied = "[box.a]\ntitle = \"A\"\n[[row]]\nbox = \"a\"\nmodules = [\"nope\"]\n[[row]]\nbox = \"a\"\nmodules = [\"nada\"]\n[[row]]\nmodules = [\"model\"]\n";
+        let nested = "[box.b]\ntitle = \"B\"\n[box.c]\ntitle = \"C\"\n[[row]]\nbox = \"b\"\n[[row.col]]\n[[row.col.row]]\nbox = \"c\"\nmodules = [\"model\"]\n[[row.col]]\nmodules = [\"context\"]\n";
+        for (text, kept, dropped) in
+            [(emptied, None, "[box.a]"), (nested, Some("[box.b]"), "[box.c]")]
+        {
+            let (cfg, errs) = config::parse(text, &SCHEMAS);
+            assert!(!errs.is_empty(), "{text}");
+            let shown = config_toml(&cfg, false);
+            assert!(!shown.contains(dropped), "{shown}");
+            assert!(kept.is_none_or(|k| shown.contains(k)), "{shown}");
+            let (again, errs) = config::parse(&shown, &SCHEMAS);
+            assert_eq!(errs, Vec::new(), "{shown}");
+            assert_eq!(render(&again), render(&cfg), "{text}\n---\n{shown}");
+            assert_eq!(config_toml(&again, false), shown, "a fixed point");
         }
     }
 

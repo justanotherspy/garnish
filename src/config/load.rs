@@ -74,17 +74,58 @@ pub fn default_path() -> Option<PathBuf> {
     Some(config_home()?.join("garnish").join("garnish.toml"))
 }
 
-/// The file a command that writes a config writes: [`locate`], else
-/// [`default_path`].
+/// Where a command that writes a config writes it ([`write_target`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteTarget {
+    /// This file.
+    File(PathBuf),
+    /// Nothing names the file, and there is no home directory to put it
+    /// under (SPEC § 5: never guess the current directory).
+    NoHome,
+    /// The garnish `statusLine.command` of `settings` passes `--config` a
+    /// value that stands for no one file garnish can find (a relative
+    /// path, or an expansion it does not follow): `word`, as written.
+    Unresolved {
+        /// The settings file.
+        settings: PathBuf,
+        /// The value, as the command spells it.
+        word: String,
+    },
+}
+
+/// The file a command that writes a config writes (SPEC § 4).
 ///
-/// `config init`, `setup` and `install`'s default config all go there;
-/// `None` without a home and without `--config` or `GARNISH_CONFIG` (SPEC
-/// § 5: never guess the current directory). Writing the default path while `~/.garnish.toml` is the config would
-/// create a file that [`locate`] prefers, and the user's config would stop
-/// applying without a word.
+/// The one named explicitly (`flag`, else `GARNISH_CONFIG`); else the one
+/// the garnish `statusLine.command` of `settings` (the user settings file
+/// when `None`) passes with `--config`, since that is the file its ticks
+/// read; else [`locate`]'s; else [`default_path`]. `config init`, `config
+/// path`, `setup` and `install`'s default config all go through here.
+///
+/// A default file written while the command names another would never be
+/// read, and one written at the default path while `~/.garnish.toml` is
+/// the config would be preferred to it by [`locate`]: either way the
+/// user's config would stop applying without a word.
 #[must_use]
-pub fn write_target(explicit: Option<&Path>) -> Option<PathBuf> {
-    locate(explicit).or_else(default_path)
+pub fn write_target(flag: Option<&Path>, settings: Option<&Path>) -> WriteTarget {
+    if let Some(p) = explicit(flag) {
+        return WriteTarget::File(p);
+    }
+    let settings = settings.map(Path::to_path_buf).or_else(crate::install::default_settings_path);
+    if let Some(settings) = settings {
+        let command = match crate::claude_settings::read_file(&settings) {
+            crate::claude_settings::FileState::Keys(keys) => keys.status_line_command,
+            _ => None,
+        };
+        let home = crate::claude_settings::home_dir();
+        match command.and_then(|c| crate::install::command_config(&c, home.as_deref())) {
+            Some(crate::install::CommandConfig::File(p)) => return WriteTarget::File(p),
+            Some(crate::install::CommandConfig::Unresolved(word)) => {
+                return WriteTarget::Unresolved { settings, word };
+            }
+            None => {}
+        }
+    }
+    locate(None).or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported

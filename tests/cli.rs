@@ -821,9 +821,45 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// SPEC § 5: an array where an object belongs is absent, like any other
+/// wrong type. serde read a struct from an array by position, so
+/// `rate_limits: []` switched the line to subscription mode, which hides
+/// the cost, and `model: [id, name]` showed the second entry as the name.
+#[test]
+fn an_array_where_an_object_belongs_loses_only_that_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let config = home.join("g.toml");
+    let rows =
+        "[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [\"model\", \"cost\"]\n";
+    std::fs::write(&config, rows).unwrap();
+    let plain = [("NO_COLOR", "1")];
+    let line = |payload: &str| tick(&config, home, payload, &plain);
+    let cost = r#""cost": {"total_cost_usd": 1.5}"#;
+    let base = line(&format!(r#"{{"model": {{"display_name": "Opus"}}, {cost}}}"#));
+    assert!(base.contains("Opus") && base.contains("1.50"), "{base}");
+    let limits =
+        line(&format!(r#"{{"model": {{"display_name": "Opus"}}, {cost}, "rate_limits": []}}"#));
+    assert_eq!(limits, base, "rate_limits: [] is no subscription");
+    let model = line(&format!(r#"{{"model": ["claude-x", "Sonnet"], {cost}}}"#));
+    assert!(!model.contains("Sonnet") && model.contains("1.50"), "{model}");
+}
+
 /// One run of the binary with `args` and a payload piped in, as the
 /// harness runs `statusLine.command`: stdout and the exit code.
 fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<i32>) {
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    piped_with(args, home, extra, payload, Stdio::piped())
+}
+
+/// [`piped`] with a payload and a stderr of the test's own.
+fn piped_with(
+    args: &[&str],
+    home: &Path,
+    extra: &[(&str, &str)],
+    payload: &str,
+    stderr: Stdio,
+) -> (String, Option<i32>) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
     cmd.args(args)
         .current_dir(home)
@@ -837,12 +873,11 @@ fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<
         .env_remove("CLAUDE_CONFIG_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(stderr);
     for (k, v) in extra {
         cmd.env(k, v);
     }
     let mut child = cmd.spawn().unwrap();
-    let payload = include_str!("fixtures/payloads/subscription-full.json");
     // A run refused before it reads stdin may have exited already: the
     // write then fails with a broken pipe, which is not the test's concern.
     let _ = child.stdin.take().unwrap().write_all(payload.as_bytes());
@@ -867,6 +902,12 @@ fn a_bad_flag_or_a_panic_on_the_render_path_is_a_warning_row() {
     assert!(code == Some(0) && out.starts_with("⚠ garnish: "), "{out}");
     let (out, code) = piped(&["config", "--no-such-flag"], home, &[]);
     assert!(code == Some(2) && out.is_empty(), "{out}");
+    // `render` names the render path itself, not another command.
+    let (out, code) = piped(&["render", "--bogus"], home, &[]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.starts_with("⚠ garnish: ") && out.contains("--bogus"), "{out}");
+    let (out, code) = piped(&["render", "--bogus"], home, &[("GARNISH_STDIN_TTY", "1")]);
+    assert!(code == Some(2) && out.is_empty(), "{out}");
     let (out, code) = piped(&["--version"], home, &[]);
     assert!(code == Some(0) && out.starts_with("garnish "), "{out}");
     // At a terminal a typo is clap's error as usual.
@@ -877,6 +918,36 @@ fn a_bad_flag_or_a_panic_on_the_render_path_is_a_warning_row() {
     assert_eq!(out, "⚠ garnish: internal error\n");
     let (out, code) = piped(&["render"], home, &[("GARNISH_TEST_PANIC", "1")]);
     assert_eq!((out.as_str(), code), ("⚠ garnish: internal error\n", Some(0)));
+}
+
+/// SPEC § 5: nothing the render path writes to stderr can cost the row.
+/// `eprintln!` panics when the write fails, so with a stderr nobody reads
+/// (a pipe whose reader is gone) the panic hook's own first line panicked
+/// again and the tick aborted with nothing on stdout, which clears the
+/// status line; the notes for a bad payload, a bad flag, a `TZ` naming no
+/// zone and an unparseable `GARNISH_NOW` did the same.
+#[test]
+fn a_stderr_nobody_reads_never_costs_the_row() {
+    // What it is, the arguments, the payload, the environment, how stdout starts.
+    type Case<'a> = (&'a str, &'a [&'a str], &'a str, &'a [(&'a str, &'a str)], &'a str);
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let good = include_str!("fixtures/payloads/subscription-full.json");
+    let cases: [Case<'_>; 6] = [
+        ("panic", &[], good, &[("GARNISH_TEST_PANIC", "1")], "⚠ garnish: internal error\n"),
+        ("bad payload", &[], "[1]", &[], "⚠ garnish: bad payload\n"),
+        ("bad flag", &["--confg"], good, &[], "⚠ garnish: "),
+        ("render, bad flag", &["render", "--bogus"], good, &[], "⚠ garnish: "),
+        ("unknown TZ", &[], good, &[("TZ", "Bogus/Zone")], ""),
+        ("bad GARNISH_NOW", &[], good, &[("GARNISH_NOW", "soon")], ""),
+    ];
+    for (label, args, payload, extra, starts) in cases {
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let (out, code) = piped_with(args, home, extra, payload, Stdio::from(writer));
+        assert_eq!(code, Some(0), "{label}: {out}");
+        assert!(out.starts_with(starts) && !out.trim().is_empty(), "{label}: {out:?}");
+    }
 }
 
 /// SPEC § 9: `GARNISH_MANAGED_SETTINGS` names the managed settings file,
@@ -1203,6 +1274,111 @@ fn install_passes_an_explicit_config_and_a_reinstall_keeps_it() {
         &[("GARNISH_CONFIG", work.to_str().unwrap())],
     );
     assert!(ok && out.contains("\"command\": \"garnish --config '"), "{out}");
+}
+
+/// SPEC § 7: a reinstall keeps an environment prefix (`NAME=value` words,
+/// after a leading `env` or not) with the arguments. A command carrying
+/// one read as not running garnish, and a reinstall reset it to the bare
+/// program, which reads another config.
+#[test]
+fn a_reinstall_keeps_an_environment_prefix_and_the_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let work = home.join("work.toml");
+    let marker = "[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"WORKFILE\"\n";
+    std::fs::write(&work, marker).unwrap();
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    for prefix in ["GARNISH_ANIMATE=0 ", "env GARNISH_ANIMATE=0 "] {
+        let old = format!("{prefix}/old/bin/garnish --config {}", work.display());
+        let status = serde_json::json!({"statusLine": {"type": "command", "command": old}});
+        std::fs::write(&settings, status.to_string()).unwrap();
+        let (out, err, ok) =
+            run(&["install", "--no-skills", "--no-config", "--absolute"], home, &[]);
+        assert!(ok, "{out}{err}");
+        let text = std::fs::read_to_string(&settings).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let command = v["statusLine"]["command"].as_str().unwrap();
+        assert!(command.starts_with(prefix) && !command.contains("/old/bin/"), "{command}");
+        assert!(command.ends_with(&format!(" --config {}", work.display())), "{command}");
+        assert!(sh_tick(command, home).contains("WORKFILE"), "{command}");
+    }
+}
+
+/// SPEC § 4: without `--config` or `GARNISH_CONFIG`, the config a garnish
+/// `statusLine.command` passes with `--config` is the file its ticks
+/// read, and so the file every command that writes a config writes.
+/// `install` kept that `--config` but wrote a default config the command
+/// never read and checked its padding note against that one, `setup
+/// --preset P --install` wrote P where the tick does not look, and `config
+/// path` named the unread file too.
+#[test]
+fn the_config_a_command_passes_is_the_config_the_writing_commands_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let xdg = home.join(".config/garnish/garnish.toml");
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let hook = |command: &str| {
+        let status = serde_json::json!({"statusLine": {"type": "command", "command": command, "padding": 1}});
+        std::fs::write(&settings, status.to_string()).unwrap();
+    };
+    let command = || -> String {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        v["statusLine"]["command"].as_str().unwrap().to_owned()
+    };
+    let work = home.join("work.toml");
+    let marker =
+        "padding = 4\n[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"OLDWORK\"\n";
+    std::fs::write(&work, marker).unwrap();
+    hook(&format!("garnish --config {}", work.display()));
+    // `install` keeps the file, and the padding it notes is that file's.
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok, "{out}{err}");
+    assert!(!xdg.exists(), "a default config the command never reads:\n{out}");
+    assert!(err.contains("work.toml") && err.contains("set `padding = 2`"), "{err}");
+    assert!(command().ends_with(&format!(" --config {}", work.display())), "{}", command());
+    // `config path` names it and `config init` will not replace it.
+    let (out, _, ok) = run(&["config", "path"], home, &[]);
+    assert!(ok && out.trim_end() == work.to_str().unwrap(), "{out}");
+    let (_, err, ok) = run(&["config", "init"], home, &[]);
+    assert!(!ok && err.contains("work.toml exists"), "{err}");
+    // `setup --preset P --install` writes P there, and the tick reads it.
+    let (out, err, ok) = run(&["setup", "--preset", "minimal", "--install"], home, &[]);
+    assert!(ok && out.contains("work.toml (backup: "), "{out}{err}");
+    assert!(std::fs::read_to_string(&work).unwrap().contains("preset = \"minimal\""));
+    // (`setup` writes the bare program word, which is not on the test's PATH.)
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && err.contains("work.toml already exists"), "{out}{err}");
+    let tick = sh_tick(&command(), home);
+    assert!(!tick.contains("OLDWORK") && !tick.contains('⚠') && !tick.is_empty(), "{tick}");
+    assert!(!xdg.exists());
+    // A file the command names that is not there yet is where the default
+    // config goes, a home-relative one as the shell expands it.
+    let fresh = home.join("cfg").join("fresh.toml");
+    hook("GARNISH_ANIMATE=0 garnish --config ~/cfg/fresh.toml");
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && out.contains(&format!("default config to {}", fresh.display())), "{out}{err}");
+    assert!(command().ends_with(" --config ~/cfg/fresh.toml"), "{}", command());
+    let tick = sh_tick(&command(), home);
+    assert!(!tick.contains('⚠') && !tick.is_empty(), "{tick}");
+    assert!(!xdg.exists());
+    // A value that names no one file (the harness resolves a relative one
+    // in whatever directory it runs the command from): `install` writes no
+    // default config and says why; the commands that need the file refuse.
+    hook("garnish --config rel.toml");
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && !out.contains("default config") && err.contains("rel.toml"), "{out}{err}");
+    for args in [&["config", "path"][..], &["config", "init"], &["setup", "--preset", "minimal"]] {
+        let (out, err, ok) = run(args, home, &[]);
+        assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
+        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
+    }
+    assert!(!xdg.exists() && !home.join("rel.toml").exists());
+    // A config named explicitly still wins over the command's.
+    let (out, _, ok) = run(&["config", "path"], home, &[("GARNISH_CONFIG", "/elsewhere.toml")]);
+    assert!(ok && out.trim_end() == "/elsewhere.toml", "{out}");
 }
 
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,

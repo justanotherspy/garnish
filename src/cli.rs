@@ -314,22 +314,23 @@ fn parse_failure(e: &clap::Error) -> Result<()> {
         e.exit();
     }
     let text = e.render().to_string();
-    eprint!("{text}");
     let first = text.lines().next().unwrap_or_default();
     let first = first.strip_prefix("error: ").unwrap_or(first);
-    let mut stdout = std::io::stdout().lock();
-    writeln!(stdout, "⚠ garnish: {}", crate::ansi::plain_text(first))?;
-    Ok(())
+    let row = writeln!(std::io::stdout().lock(), "⚠ garnish: {}", crate::ansi::plain_text(first));
+    crate::debug::stderr_line(text.trim_end());
+    Ok(row?)
 }
 
-/// Whether the command line names a subcommand, so it is not the render
-/// path whatever else is wrong with it.
+/// Whether the command line names a subcommand other than `render`, so it
+/// is not the render path whatever else is wrong with it. `render` is the
+/// render path spelled out, for a settings file that wants a subcommand.
 fn names_a_subcommand() -> bool {
     use clap::CommandFactory as _;
     let command = Cli::command();
-    std::env::args_os()
-        .skip(1)
-        .any(|arg| command.get_subcommands().any(|s| arg.as_os_str() == s.get_name()))
+    let other = |arg: &std::ffi::OsStr| {
+        command.get_subcommands().any(|s| s.get_name() != "render" && arg == s.get_name())
+    };
+    std::env::args_os().skip(1).any(|arg| other(&arg))
 }
 
 /// Debug builds only: set, a tick panics before it renders, so the
@@ -339,15 +340,18 @@ pub const TEST_PANIC_ENV: &str = "GARNISH_TEST_PANIC";
 /// Make a panic on the render path what SPEC § 5 promises: a `⚠ garnish:
 /// internal error` row and exit 0, since a non-zero exit clears the status
 /// line. The release build aborts on a panic, after this hook has run.
+///
+/// The row goes out before the note on stderr, and neither write may fail
+/// the hook: a panic inside it aborts the process with nothing printed.
 // A panic hook cannot return to the program, and an abort or an unwind
 // both exit non-zero: `exit(0)` is the one way to keep the status line.
 #[allow(clippy::exit)]
 fn render_panics_as_a_row() {
     std::panic::set_hook(Box::new(|info| {
-        eprintln!("garnish: {info}");
         let mut stdout = std::io::stdout();
         let _ = stdout.write_all("⚠ garnish: internal error\n".as_bytes());
         let _ = stdout.flush();
+        crate::debug::stderr_line(&format!("garnish: {info}"));
         std::process::exit(0);
     }));
 }
@@ -476,7 +480,7 @@ fn render_stdin(config_path: Option<&Path>) {
     let input = match std::io::stdin().read_to_end(&mut bytes) {
         Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(e) => {
-            eprintln!("garnish: reading stdin: {e}");
+            crate::debug::stderr_line(&format!("garnish: reading stdin: {e}"));
             String::new()
         }
     };
@@ -700,12 +704,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     match action {
         ConfigAction::Path => {
-            let Some(p) = config::write_target(config_path) else {
-                return Err(refusal(Refusal::NoHome {
-                    flag: "--config <FILE>",
-                    what: "the config is",
-                }));
-            };
+            let p = target_or_quiet(config_path, "the config is")?;
             writeln!(stdout, "{}", p.display())?;
         }
         ConfigAction::Check => {
@@ -778,15 +777,26 @@ pub fn preset_text(preset: &str) -> Result<String> {
 }
 
 /// Where the config a command writes goes ([`config::write_target`]: the
-/// file the tick reads, else the default location), or a [`Quiet`] refusal
-/// without a home directory.
+/// file the tick reads, else the default location), or a [`Quiet`] refusal.
 ///
 /// # Errors
-/// [`Quiet`] after the one-line note, without a home.
+/// [`Quiet`] after the one-line note, without a home or when the
+/// `statusLine.command` passes a `--config` that names no one file.
 pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
-    config::write_target(explicit).ok_or_else(|| {
-        refusal(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" })
-    })
+    target_or_quiet(explicit, "the config goes")
+}
+
+/// [`config_target_or_quiet`], with `what` finishing the no-home note.
+fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBuf> {
+    match config::write_target(explicit, None) {
+        config::WriteTarget::File(path) => Ok(path),
+        config::WriteTarget::NoHome => {
+            Err(refusal(Refusal::NoHome { flag: "--config <FILE>", what }))
+        }
+        config::WriteTarget::Unresolved { settings, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, word }))
+        }
+    }
 }
 
 #[cfg(test)]

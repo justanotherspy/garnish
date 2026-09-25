@@ -103,7 +103,7 @@ impl App {
                     "                the file will be created".to_owned()
                 }));
                 match &steps.config {
-                    ConfigStep::Skipped => {}
+                    ConfigStep::Skipped | ConfigStep::Unresolved(_) => {}
                     ConfigStep::Exists { path, .. } => {
                         lines.push(Line::from(format!(
                             "config          {} (kept)",

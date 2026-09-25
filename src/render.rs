@@ -46,7 +46,7 @@ pub fn render(req: &Request<'_>) -> String {
             // which names the line, the column and what it expected, is what
             // a Claude Code release that changed the payload needs.
             let note = format!("garnish: bad payload: {e}");
-            eprintln!("{note}");
+            crate::debug::stderr_line(&note);
             crate::debug::log(&note);
             return "⚠ garnish: bad payload\n".to_owned();
         }
