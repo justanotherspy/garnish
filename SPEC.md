@@ -1420,10 +1420,15 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   probe. (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid
   reuse; the 60 s / 30 s age limit above already bounds a lock's life
   whatever its pid, so nothing was added.)
-- Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
-  `process_group(0)`, spawned without wait. On Linux the tick takes the lock
-  and passes `--lock-held`; elsewhere the worker takes it itself.
-  `GARNISH_NO_SPAWN=1` logs intended spawns to `<root>/spawns.log` instead.
+- Worker: `garnish [--config C] refresh --module M --session S --cwd D`,
+  null stdio, `process_group(0)`, spawned without wait. `--config` names the
+  file the tick loaded (absolute), when it loaded one, so the worker reads
+  the same options: a `--config` on the status line command is not in the
+  environment the worker inherits, and it used to re-resolve the config
+  and take `sync.fetch_interval` from another file (review 2026-09-25).
+  On Linux the tick takes the lock and passes `--lock-held`; elsewhere the
+  worker takes it itself. `GARNISH_NO_SPAWN=1` logs intended spawns to
+  `<root>/spawns.log` instead.
 - `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
 - GC: bounded sweep when a session dir is first created (session and repo
   dirs idle > 24 h by wall-clock mtime, ≤ 50 per sweep; temp/stale/adopt
@@ -1517,7 +1522,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | command | purpose |
 |---|---|
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
-| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
+| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help`; the tick passes its own `--config` ahead of it (§ 6) |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |

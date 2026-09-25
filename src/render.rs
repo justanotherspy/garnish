@@ -57,7 +57,8 @@ pub fn render_loaded(
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
     let painter = Painter { mode, links: mode != ColorMode::Never, dim };
-    let clock = Clock { workers, ..Clock::from_env() };
+    let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
+    let clock = Clock { workers, config_file, ..Clock::from_env() };
     let mut lines = render_lines_at(payload, config, columns, &clock);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
@@ -146,6 +147,9 @@ pub struct Clock {
     /// and `voice`, SPEC § 3.8) seeds them here and still reads no file.
     /// `None` reads the chain, or nothing under `settings = false`.
     pub settings_keys: Option<Vec<crate::claude_settings::FileKeys>>,
+    /// The config file this render loaded, absolute, handed to the workers
+    /// it spawns (SPEC § 6); `None` when it loaded none.
+    pub config_file: Option<std::path::PathBuf>,
 }
 
 impl Clock {
@@ -165,6 +169,7 @@ impl Clock {
             cache: None,
             workers: true,
             settings_keys: None,
+            config_file: None,
         }
     }
 
@@ -186,6 +191,7 @@ impl Clock {
             cache: None,
             workers: false,
             settings_keys: None,
+            config_file: None,
         }
     }
 
@@ -283,6 +289,7 @@ pub fn render_tree_at(
         // A refused root (SPEC § 6) is no cache at all: render as a pinned
         // tick does, never spawning a worker that could not write.
         workers: clock.workers && cache.refused().is_none(),
+        config_file: clock.config_file.clone(),
     };
     // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
     // `animate` decides, else Claude Code's prefersReducedMotion freezes,

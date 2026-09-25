@@ -675,6 +675,34 @@ fn worker_branches_sharing_an_upstream_do_not_share_counts() {
     assert!(!out.contains('⇡') && !out.contains('⟳'), "{out}");
 }
 
+/// SPEC § 7: `--config` is global, so a status line command
+/// `garnish --config ~/work.toml` renders with that file, and its workers
+/// must read it too. They were spawned without it and re-resolved the
+/// config from the environment, so `sync.fetch_interval` came from another
+/// file: set only in the `--config` one, no fetch ever ran.
+#[test]
+fn worker_reads_the_config_file_its_tick_read() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let own = env.work.parent().unwrap().join("own.toml");
+    std::fs::write(
+        &own,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\nfetch_interval = 1\n",
+    )
+    .unwrap();
+    let own_arg = own.to_str().unwrap();
+    let (_, err, ok) = garnish(&env, &["--config", own_arg], Some(&payload(&env.work)), &[]);
+    assert!(ok, "{err}");
+    let s = spawns(&env);
+    assert_eq!(s.len(), 1, "{s:?}");
+    assert!(s[0].starts_with(&format!("--config {own_arg} refresh --module sync ")), "{s:?}");
+    // Run the logged line as the worker would be run: it fetches.
+    let args: Vec<&str> = s[0].split(' ').collect();
+    let (_, err, ok) = garnish(&env, &args, None, &[]);
+    assert!(ok, "{err}");
+    assert!(sync_entry(&env).contains("fetch_attempt="), "{}", sync_entry(&env));
+}
+
 /// Run the workers `modules` as their logged spawns would (on Linux the
 /// tick handed each its lock).
 fn run_workers(env: &Env, modules: &[&str]) {

@@ -230,6 +230,9 @@ pub struct Ctx<'a> {
     /// so a pinned render never touches a cache directory (SPEC § 9); a
     /// cached module then renders as if its worker had not run yet.
     pub workers: bool,
+    /// The config file the tick loaded (absolute), passed to every worker
+    /// it spawns so both read the same options (`Clock.config_file`).
+    pub config_file: Option<std::path::PathBuf>,
 }
 
 impl Ctx<'_> {
@@ -425,6 +428,7 @@ impl Ctx<'_> {
             module: cfg.id.to_owned(),
             session: self.session_id().to_owned(),
             cwd: std::path::PathBuf::from(self.payload.current_dir().unwrap_or(".")),
+            config: self.config_file.clone(),
         };
         if cfg!(target_os = "linux") {
             match self.cache.lock(scope, cfg.id) {
@@ -1085,6 +1089,7 @@ mod tests {
             settings_files: Vec::new(),
             settings: std::cell::OnceCell::new(),
             workers: false,
+            config_file: None,
         };
         let plain = detail(&ctx, cfg, " 8m20s", "12%", "share");
         assert_eq!(plain.len(), 1);
