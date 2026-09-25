@@ -681,19 +681,38 @@ fn config_show_round_trips_every_fixture_and_preset() {
 fn writing_commands_refuse_to_guess_a_home_directory() {
     // With HOME unset the defaults fell back to the current directory, so
     // `install` dropped .claude/ and garnish/ into whatever repo it ran from.
+    // Every command SPEC § 5 names refuses, with HOME unset and with it set
+    // but empty (the shell's "unset", `claude_settings::home_dir`), naming
+    // the flag that says where instead.
     let dir = tempfile::tempdir().unwrap();
-    for args in [&["install", "--dry-run"][..], &["config", "init"]] {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
-        cmd.args(args)
-            .current_dir(dir.path())
-            .env_remove("HOME")
-            .env_remove("XDG_CONFIG_HOME")
-            .env("GARNISH_MANAGED_SETTINGS", "")
-            .env_remove("GARNISH_CONFIG");
-        let out = cmd.output().unwrap();
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert!(!out.status.success(), "{args:?}: {err}");
-        assert!(err.contains("HOME") && !err.contains("Location:"), "{args:?}: {err}");
+    let commands: [(&[&str], &str); 5] = [
+        (&["install", "--dry-run"], "--settings"),
+        (&["config", "init"], "--config"),
+        (&["config", "path"], "--config"),
+        (&["skills", "install"], "--dir"),
+        (&["setup", "--preset", "compact"], "--config"),
+    ];
+    for empty in [false, true] {
+        for (args, flag) in commands {
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+            cmd.args(args)
+                .current_dir(dir.path())
+                .env("GARNISH_MANAGED_SETTINGS", "")
+                .env_remove("GARNISH_CONFIG")
+                .env_remove("CLAUDE_CONFIG_DIR");
+            if empty {
+                cmd.env("HOME", "").env("XDG_CONFIG_HOME", "");
+            } else {
+                cmd.env_remove("HOME").env_remove("XDG_CONFIG_HOME");
+            }
+            let out = cmd.output().unwrap();
+            let err = String::from_utf8_lossy(&out.stderr);
+            let what = format!("{args:?} (HOME empty: {empty})");
+            assert_eq!(out.status.code(), Some(1), "{what}: {err}");
+            assert_eq!(err.lines().count(), 1, "{what}: {err}");
+            assert!(err.contains("HOME") && err.contains(flag), "{what}: {err}");
+            assert!(!err.contains("Location:"), "{what}: {err}");
+        }
     }
     assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "nothing written");
     // Neither does an explicit settings file make `install` guess the config
