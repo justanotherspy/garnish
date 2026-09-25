@@ -241,9 +241,13 @@ impl Module for LinesModule {
         let mut segs: Vec<Segment> = lead(cfg, "lines");
         segs.extend(added_removed(cfg, "", added, removed));
         if cfg.bool("show_net") {
-            let net = i128::from(added).saturating_sub(i128::from(removed));
-            let sign = if net >= 0 { "+" } else { "" };
-            segs.extend(super::detail(ctx, cfg, "", &format!("{sign}{net}"), "net"));
+            // Signed with the counts' own glyphs, so the row has one minus.
+            let (glyph, net) = if added >= removed {
+                (cfg.icon("added"), added.saturating_sub(removed))
+            } else {
+                (cfg.icon("removed"), removed.saturating_sub(added))
+            };
+            segs.extend(super::detail(ctx, cfg, "", &format!("{glyph}{net}"), "net"));
         }
         Rendered::fresh(segs).measured(super::Measure::Count(added.saturating_add(removed)))
     }
@@ -303,6 +307,40 @@ mod tests {
         strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
             .trim_end()
             .to_owned()
+    }
+
+    /// `lines` alone on an unframed line with the net delta on.
+    fn lines_row(added: u64, removed: u64, icons: &str, extra: &str) -> String {
+        let payload = crate::payload::Payload::parse(&format!(
+            "{{\"session_id\": \"s\", \"cost\": {{\"total_lines_added\": {added}, \"total_lines_removed\": {removed}}}}}"
+        ))
+        .unwrap();
+        let text = format!(
+            "icons = \"{icons}\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"lines\"]\n[modules.lines]\nshow_net = true\n{extra}"
+        );
+        let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+            .trim_end()
+            .to_owned()
+    }
+
+    /// The net delta is signed with the module's own glyphs, as the two
+    /// counts are: it printed Rust's ASCII `-` beside the set's `−`
+    /// (`+156 −200 (-44)`), and an `added`/`removed` override never
+    /// reached it. A zero net reads as nothing removed, `+0`.
+    #[test]
+    fn the_net_delta_takes_the_modules_glyphs() {
+        assert_eq!(lines_row(156, 200, "unicode", ""), "Δ +156 −200 (−44)");
+        assert_eq!(lines_row(156, 23, "unicode", ""), "Δ +156 −23 (+133)");
+        assert_eq!(lines_row(7, 7, "unicode", ""), "Δ +7 −7 (+0)");
+        assert_eq!(lines_row(156, 200, "ascii", ""), "+156 -200 (-44)");
+        let arrows = "[modules.lines.icons]\nadded = \"▲\"\nremoved = \"▼\"\n";
+        assert_eq!(lines_row(1, 3, "unicode", arrows), "Δ ▲1 ▼3 (▼2)");
+        assert_eq!(
+            lines_row(u64::MAX, 0, "unicode", "").split(' ').next_back(),
+            Some("(+18446744073709551615)")
+        );
     }
 
     /// SPEC § 3.8: the payload's version, one `v` in front whatever the
