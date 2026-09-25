@@ -365,6 +365,52 @@ mod tests {
         assert_eq!(c.frame.chars.side, "", "an invisible box has no side glyph");
     }
 
+    /// frm-12: `FrameChars::named` is the form's, its suggestions' and
+    /// `config show`'s glyph table, so it names every glyph key the parser
+    /// takes and nothing else, and each key reads the field the parser sets.
+    #[test]
+    fn the_named_glyphs_are_the_parsers_glyph_keys() {
+        let schemas = schemas();
+        let named: Vec<&str> =
+            FrameChars::for_style(FrameStyle::Custom).named().iter().map(|g| g.key).collect();
+        let not_glyphs = [
+            "style",
+            "fill",
+            "separator_color",
+            "fill_pattern",
+            "fill_step",
+            "fill_direction",
+            "separator_frames",
+            "separator_step",
+        ];
+        let mut expected: Vec<&str> =
+            FRAME_KEYS.iter().copied().filter(|k| !not_glyphs.contains(k)).collect();
+        let mut sorted = named.clone();
+        expected.sort_unstable();
+        sorted.sort_unstable();
+        assert_eq!(sorted, expected);
+        // One distinct one-cell glyph per key: each comes back under its key.
+        let glyphs = "abcdefghijklmnop";
+        let body = named
+            .iter()
+            .zip(glyphs.chars())
+            .map(|(key, glyph)| format!("{key} = \"{glyph}\""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (c, errs) = parse(&format!("[frame]\nstyle = \"custom\"\n{body}"), &schemas);
+        assert_eq!(errs, Vec::new());
+        for (g, glyph) in c.frame.chars.named().iter().zip(glyphs.chars()) {
+            assert_eq!(g.value, glyph.to_string(), "{}", g.key);
+            assert!(!g.doc.is_empty(), "{}", g.key);
+        }
+        // A one-cell glyph is one the parser refuses wider.
+        for g in c.frame.chars.named() {
+            let (_, errs) =
+                parse(&format!("[frame]\nstyle = \"custom\"\n{} = \"ab\"\n", g.key), &schemas);
+            assert_eq!(g.one_cell, !errs.is_empty(), "{}: {errs:?}", g.key);
+        }
+    }
+
     /// SPEC § 4.2: a rule pattern is one-cell glyphs, separator frames share
     /// one width; bad values are reported and the static frame stays.
     #[test]

@@ -237,42 +237,17 @@ fn write_frame(out: &mut String, cfg: &Config, annotated: bool) {
         "Every separator's colour: muted | inherit (the colour of the module before it) | a role or literal",
     );
     let _ = writeln!(out, "separator_color = {}", toml_string(cfg.frame.separator_color.spec()));
+    // The separator is written above, with its own comment.
+    let glyphs = cfg.frame.chars.named().into_iter().filter(|g| g.key != "separator");
     if cfg.frame.style == FrameStyle::Custom || !annotated {
-        let ch = &cfg.frame.chars;
-        for (key, value) in [
-            ("first", &ch.first),
-            ("middle", &ch.middle),
-            ("last", &ch.last),
-            ("single", &ch.single),
-            ("fill_char", &ch.fill),
-            ("right_first", &ch.right_first),
-            ("right_middle", &ch.right_middle),
-            ("right_last", &ch.right_last),
-            ("right_single", &ch.right_single),
-            ("pad", &ch.pad),
-        ] {
-            let _ = writeln!(out, "{key} = {}", toml_string(value));
-        }
-        // The box glyphs (SPEC § 4.3) only exist for a style with a box
-        // shape; an empty one is `none`'s invisible box, and writing it
-        // back would make `config show` disagree with itself.
-        for (key, value) in [
-            ("top_left", &ch.top_left),
-            ("top_right", &ch.top_right),
-            ("bottom_left", &ch.bottom_left),
-            ("bottom_right", &ch.bottom_right),
-            ("side", &ch.side),
-        ] {
-            if !value.is_empty() {
-                let _ = writeln!(out, "{key} = {}", toml_string(value));
-            }
+        // An empty one-cell glyph is a style without it (`none`'s invisible
+        // box); the parser refuses `""` there, so it is not written back.
+        for g in glyphs.filter(|g| !(g.one_cell && g.value.is_empty())) {
+            let _ = writeln!(out, "{} = {}", g.key, toml_string(g.value));
         }
     } else {
-        comment(
-            out,
-            annotated,
-            "For style = \"custom\": first middle last single fill_char right_first right_middle right_last right_single pad, and the box glyphs top_left top_right bottom_left bottom_right side",
-        );
+        let keys: Vec<&str> = glyphs.map(|g| g.key).collect();
+        comment(out, annotated, &format!("For style = \"custom\": {}", keys.join(" ")));
     }
     comment(
         out,
