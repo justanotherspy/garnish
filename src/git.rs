@@ -1652,8 +1652,11 @@ mod tests {
         let linked = discover(&wt).unwrap();
         let own = linked.git_dir.join("FETCH_HEAD");
         assert!(own.exists());
-        let now = crate::time::now_secs();
-        let age_of = |s: Option<i64>| s.and_then(|t| age(t, now));
+        // The clock is read at each check, after the fetch it measures: a
+        // `now` taken before the second fetch put that fetch in the future
+        // whenever a second boundary fell between them, and a future stamp
+        // has no age by design.
+        let age_of = |s: Option<i64>| s.and_then(|t| age(t, crate::time::now_secs()));
         assert!(age_of(fetch_stamps(&linked).success).is_some_and(|a| a < 60));
         let three_days = std::time::SystemTime::now() - Duration::from_hours(72);
         std::fs::File::options().write(true).open(&own).unwrap().set_modified(three_days).unwrap();
