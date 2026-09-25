@@ -1400,7 +1400,12 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   count only when they name a git directory by git's test (a `HEAD`, an
   `objects/` and a `refs/`), since the containment is relative to them
   (review 2026-09-25: `commondir: ~/.ssh` rendered a key's first line as
-  the SHA). Reftable repos report no
+  the SHA). The upstream comes from `.git/config`, read up to 1 MiB (a
+  byte that is not UTF-8 costs only what it touches) and parsed as git
+  parses it: quoted values, the escapes, `;`/`#` comments, section and key
+  names in any case, the first `merge` and the last `remote` (git quotes a
+  value holding `#`, so `fix/#12` used to read as a tracking ref with
+  quotes in it and `sync` showed `✗`). Reftable repos report no
   head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
   worker only through `git::run_program` (pipes drained on threads, kill on
   timeout: 2 s for local commands, 20 s for `fetch`, `GIT_TERMINAL_PROMPT=0`).

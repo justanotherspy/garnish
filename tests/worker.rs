@@ -459,6 +459,31 @@ fn worker_behind_diverged_and_no_upstream_render() {
     assert!(sync_entry(&env).contains("no upstream"), "{}", sync_entry(&env));
 }
 
+/// git quotes a config value holding `#` or `;`, so the upstream of a
+/// branch pushed with `git push -u origin fix/#12` is stored as
+/// `merge = "refs/heads/fix/#12"`. Read raw, the quotes went into the
+/// tracking ref, the worker's `rev-list` failed, and `sync` showed `✗` for
+/// good on a perfectly ordinary branch.
+#[test]
+fn worker_a_quoted_upstream_counts_like_any_other() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    git(&env.work, &["checkout", "-q", "-b", "fix/#12"]);
+    git(&env.work, &["push", "-q", "-u", "origin", "fix/#12"]);
+    std::fs::write(env.work.join("c.txt"), "c\n").unwrap();
+    git(&env.work, &["add", "."]);
+    git(&env.work, &["commit", "-q", "-m", "three"]);
+    let w = env.work.to_str().unwrap().to_owned();
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(&env, refresh, None, &[]);
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains("upstream=refs/remotes/origin/fix/#12\n"), "{entry}");
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains("⇡1") && out.contains("origin/fix/#12"), "{out}");
+    assert!(!out.contains('✗') && !out.contains('"'), "{out}");
+}
+
 /// SPEC § 6: `fetch_interval` runs `git fetch` in the worker, once per
 /// interval, so a commit pushed elsewhere shows as `behind` without any
 /// fetch by hand.

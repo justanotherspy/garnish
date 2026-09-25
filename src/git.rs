@@ -315,31 +315,39 @@ pub fn head_commit(dirs: &Dirs, head: &Head) -> Option<String> {
     }
 }
 
+/// Bytes of `.git/config` read. git writes the file and it grows with every
+/// tracked branch and submodule, so the cap is generous where a ref's is
+/// tight; a cut or a stray byte that is not UTF-8 loses what it touches,
+/// never the whole file.
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+
 /// The upstream of a branch: `(remote, remote-tracking ref)` such as
 /// `("origin", "refs/remotes/origin/main")`.
+///
+/// The tracking ref assumes the remote's default fetch refspec
+/// (`refs/heads/*:refs/remotes/<remote>/*`), as `git clone` writes it.
 #[must_use]
 pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
     // Through the same contained, bounded reader as every ref: `config` sits
     // under the git directory and is as symlinkable as `HEAD` is.
-    let text = read_ref_file(&dirs.common_dir, "config")?;
-    let mut in_section = false;
+    let bytes = read_ref_bytes(&dirs.common_dir, "config", MAX_CONFIG_BYTES)?;
+    upstream_in(&String::from_utf8_lossy(&bytes), branch)
+}
+
+/// [`upstream`] over the text of a config file: `branch.<name>.remote`
+/// (the last one, as git keeps it) and `branch.<name>.merge` (the first,
+/// which is what `@{upstream}` follows).
+fn upstream_in(text: &str, branch: &str) -> Option<(String, String)> {
     let mut remote: Option<String> = None;
     let mut merge: Option<String> = None;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            in_section = line == format!("[branch \"{branch}\"]");
-            continue;
-        }
-        if !in_section {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            match k.trim() {
-                "remote" => remote = Some(v.trim().to_owned()),
-                "merge" => merge = Some(v.trim().to_owned()),
-                _ => {}
-            }
+    let wanted = |section: &str, sub: Option<&str>| {
+        section.eq_ignore_ascii_case("branch") && sub == Some(branch)
+    };
+    for entry in config_entries(text, wanted) {
+        match (entry.key.to_ascii_lowercase().as_str(), entry.value) {
+            ("remote", Some(v)) => remote = Some(v),
+            ("merge", Some(v)) if merge.is_none() => merge = Some(v),
+            _ => {}
         }
     }
     let remote = remote?;
@@ -349,6 +357,167 @@ pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
         return Some((remote, format!("refs/heads/{short}")));
     }
     Some((remote.clone(), format!("refs/remotes/{remote}/{short}")))
+}
+
+/// One `key = value` of a git config file.
+struct ConfigEntry {
+    /// The key, as written; git compares it without case.
+    key: String,
+    /// The value, unquoted and unescaped; `None` for a bare key.
+    value: Option<String>,
+}
+
+/// The entries of a git config text in the sections `wanted` accepts
+/// (given the section name as written and the subsection), in order,
+/// parsed as git parses them (config.c `get_base_var`, `get_value`,
+/// `parse_value`): a value may be quoted anywhere in it, knows the escapes
+/// `\"`, `\\`, `\t`, `\n`, `\b` and a backslash-newline continuation, ends
+/// at a `;` or `#` outside quotes, and loses its leading and trailing
+/// blanks. git refuses the whole file over one malformed line; here that
+/// line alone is skipped.
+fn config_entries(text: &str, wanted: impl Fn(&str, Option<&str>) -> bool) -> Vec<ConfigEntry> {
+    let mut out = Vec::new();
+    let mut chars = text.chars().peekable();
+    let mut in_wanted = false;
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => {}
+            '#' | ';' => skip_line(&mut chars),
+            '[' => {
+                if let Some((section, sub)) = config_header(&mut chars) {
+                    in_wanted = wanted(&section, sub.as_deref());
+                } else {
+                    in_wanted = false;
+                    skip_line(&mut chars);
+                }
+            }
+            c if c.is_ascii_alphabetic() => {
+                let mut key = String::from(c);
+                while let Some(k) = chars.next_if(|k| k.is_ascii_alphanumeric() || *k == '-') {
+                    key.push(k);
+                }
+                while chars.next_if(|b| matches!(b, ' ' | '\t' | '\r')).is_some() {}
+                let value = match chars.peek() {
+                    None | Some('\n') => Some(None),
+                    Some('=') => {
+                        chars.next();
+                        config_value(&mut chars).map(Some)
+                    }
+                    Some(_) => {
+                        skip_line(&mut chars);
+                        None
+                    }
+                };
+                if let Some(value) = value.filter(|_| in_wanted) {
+                    out.push(ConfigEntry { key, value });
+                }
+            }
+            _ => skip_line(&mut chars),
+        }
+    }
+    out
+}
+
+/// Consume through the end of the line.
+fn skip_line(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    for c in chars.by_ref() {
+        if c == '\n' {
+            break;
+        }
+    }
+}
+
+/// A section header after its `[`: `(section, subsection)`, with the old
+/// `[section.sub]` form's subsection lowercased as git does; `None` when
+/// malformed.
+fn config_header(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Option<(String, Option<String>)> {
+    let mut name = String::new();
+    loop {
+        match chars.next()? {
+            ']' => {
+                return Some(match name.split_once('.') {
+                    Some((s, sub)) => (s.to_owned(), Some(sub.to_ascii_lowercase())),
+                    None => (name, None),
+                });
+            }
+            c if c.is_whitespace() => break,
+            c if c.is_ascii_alphanumeric() || c == '-' || c == '.' => name.push(c),
+            _ => return None,
+        }
+    }
+    while chars.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
+    if chars.next()? != '"' {
+        return None;
+    }
+    let mut sub = String::new();
+    loop {
+        match chars.next()? {
+            '"' => break,
+            '\n' => return None,
+            '\\' => match chars.next()? {
+                '\n' => return None,
+                c => sub.push(c),
+            },
+            c => sub.push(c),
+        }
+    }
+    (chars.next()? == ']').then_some((name, Some(sub)))
+}
+
+/// A value after its `=`, through the end of its (possibly continued)
+/// line; `None` when malformed (an unknown escape, an open quote).
+fn config_value(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+    let mut value = String::new();
+    let mut quoted = false;
+    let mut comment = false;
+    // The length before a run of unquoted blanks, dropped if the run ends
+    // the value.
+    let mut trim_to: Option<usize> = None;
+    loop {
+        let c = match chars.next() {
+            None | Some('\n') => {
+                if quoted {
+                    return None;
+                }
+                if let Some(len) = trim_to {
+                    value.truncate(len);
+                }
+                return Some(value);
+            }
+            Some(c) => c,
+        };
+        if comment {
+            continue;
+        }
+        if c.is_whitespace() && !quoted {
+            if trim_to.is_none() {
+                trim_to = Some(value.len());
+            }
+            if !value.is_empty() {
+                value.push(c);
+            }
+            continue;
+        }
+        if !quoted && (c == ';' || c == '#') {
+            comment = true;
+            continue;
+        }
+        trim_to = None;
+        match c {
+            '\\' => match chars.next()? {
+                '\n' => {}
+                't' => value.push('\t'),
+                'b' => value.push('\u{8}'),
+                'n' => value.push('\n'),
+                e @ ('\\' | '"') => value.push(e),
+                _ => return None,
+            },
+            '"' => quoted = !quoted,
+            c => value.push(c),
+        }
+    }
 }
 
 /// Seconds between the last fetch (`FETCH_HEAD` mtime) and `now_epoch_secs`,
@@ -956,6 +1125,83 @@ mod tests {
         std::fs::create_dir_all(&fake).unwrap();
         std::fs::write(fake.join(".git"), format!("gitdir: {}\n", secret.display())).unwrap();
         assert_eq!(discover(&fake), None);
+    }
+
+    /// git writes a value holding `#` or `;` in double quotes, so `git push
+    /// -u origin fix/#12` stores `merge = "refs/heads/fix/#12"`; read raw,
+    /// the quotes made the tracking ref `refs/remotes/origin/"refs/…"` and
+    /// `sync` showed `✗` for good. A config past the old 64 KiB cap, or with
+    /// one byte that is not UTF-8, lost every upstream.
+    #[test]
+    fn upstream_reads_the_config_the_way_git_writes_it() {
+        let (_d, work) = repo();
+        git(&work, &["checkout", "-q", "-b", "fix/#12"]);
+        git(&work, &["push", "-q", "-u", "origin", "fix/#12"]);
+        let dirs = discover(&work).unwrap();
+        let config = std::fs::read_to_string(work.join(".git/config")).unwrap();
+        assert!(config.contains("\"refs/heads/fix/#12\""), "git quotes it: {config}");
+        assert_eq!(
+            upstream(&dirs, "fix/#12"),
+            Some(("origin".into(), "refs/remotes/origin/fix/#12".into()))
+        );
+        let main = Some(("origin".to_owned(), "refs/remotes/origin/main".to_owned()));
+        // Padded past 64 KiB with a comment of two-byte characters, ahead of
+        // every section, so the old cut fell inside one.
+        let pad = format!("# {}\n", "é".repeat(40 * 1024));
+        std::fs::write(work.join(".git/config"), format!("{pad}{config}")).unwrap();
+        assert_eq!(upstream(&dirs, "main"), main, "a long config");
+        // One Latin-1 byte in a comment.
+        let mut bytes = b"# caf\xe9\n".to_vec();
+        bytes.extend_from_slice(config.as_bytes());
+        std::fs::write(work.join(".git/config"), bytes).unwrap();
+        assert_eq!(upstream(&dirs, "main"), main, "a byte that is not UTF-8");
+    }
+
+    /// git's value syntax (config.c `parse_value`, `get_base_var`): quotes
+    /// anywhere, the four escapes, `;`/`#` comments outside quotes, trailing
+    /// blanks trimmed, section and key names in any case, an escaped
+    /// subsection, the old `[branch.name]` form, the first `merge` and the
+    /// last `remote`.
+    #[test]
+    fn the_config_parser_follows_git() {
+        let up = |text: &str, branch: &str| upstream_in(text, branch);
+        let origin = |r: &str| Some(("origin".to_owned(), format!("refs/remotes/origin/{r}")));
+        assert_eq!(
+            up("[branch \"a\"]\n\tremote = origin\n\tmerge = refs/heads/a ; why\n", "a"),
+            origin("a")
+        );
+        assert_eq!(
+            up("[Branch \"a\"]\n  Remote=origin\n  MERGE = \"refs/heads/a#1\"  # c\n", "a"),
+            origin("a#1")
+        );
+        assert_eq!(
+            up("[branch \"q\\\"t\"]\nremote = origin\nmerge = refs/heads/q\\\"t\n", "q\"t"),
+            origin("q\"t")
+        );
+        assert_eq!(
+            up("[branch.main]\nremote = origin\nmerge = refs/heads/main\n", "main"),
+            origin("main")
+        );
+        assert_eq!(up("[branch.Main]\nremote = origin\nmerge = refs/heads/x\n", "Main"), None);
+        assert_eq!(
+            up(
+                "[branch \"a\"]\nremote = up\nremote = origin\nmerge = refs/heads/one\nmerge = refs/heads/two\n",
+                "a"
+            ),
+            origin("one")
+        );
+        assert_eq!(up("[branch \"a\"] remote = origin\nmerge = refs/heads/a\n", "a"), origin("a"));
+        assert_eq!(
+            up("[branch \"a\"]\nremote = origin\nmerge = refs/heads/\\\na\n", "a"),
+            origin("a"),
+            "a continued line"
+        );
+        assert_eq!(up("[branch \"a\"]\nremote = origin\nmerge = \"refs/heads/a\n", "a"), None);
+        assert_eq!(up("[branch \"b\"]\nremote = origin\nmerge = refs/heads/b\n", "a"), None);
+        assert_eq!(
+            up("[branch \"a\"]\nremote = .\nmerge = refs/heads/main\n", "a"),
+            Some((".".to_owned(), "refs/heads/main".to_owned()))
+        );
     }
 
     /// The remote comes from the repository's own `.git/config`, so a name
