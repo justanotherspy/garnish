@@ -2,6 +2,8 @@
 //! [`now`], which honours `GARNISH_NOW` so tests and golden renders are
 //! deterministic.
 
+use std::path::Path;
+
 use jiff::{Timestamp, tz::TimeZone};
 use serde::Deserialize;
 
@@ -25,29 +27,79 @@ pub fn now() -> Timestamp {
     }
 }
 
-/// The local time zone, resolved without scanning the system zoneinfo
-/// database: `TZ` when set, else `/etc/localtime` read as `TZif`, else UTC.
+/// The local time zone: `TZ` when it names one ([`zone`]), else
+/// `/etc/localtime` read as `TZif`, else UTC.
 ///
-/// Reading one file is an order of magnitude cheaper than jiff's system
-/// zone discovery and is called once per tick.
+/// Called once per tick, so it reads one file where it can: jiff's own
+/// lookup builds its database first, a walk of the whole zoneinfo tree,
+/// and every tick is a new process. That database is consulted only for a
+/// `TZ` naming a zone no zoneinfo directory has a file for. A `TZ` that
+/// names nothing is reported on stderr once and the system zone is used.
 #[must_use]
 pub fn local_zone() -> TimeZone {
-    if let Ok(name) = std::env::var("TZ")
-        && !name.is_empty()
-    {
-        if let Ok(tz) = TimeZone::get(&name) {
-            return tz;
-        }
-        if let Ok(bytes) = std::fs::read(&name)
-            && let Ok(tz) = TimeZone::tzif("TZ", &bytes)
-        {
-            return tz;
-        }
-    }
-    std::fs::read("/etc/localtime")
+    std::env::var("TZ")
         .ok()
-        .and_then(|bytes| TimeZone::tzif("Local", &bytes).ok())
+        .filter(|v| !v.is_empty())
+        .and_then(|value| {
+            let tz = zone(&value);
+            if tz.is_none() {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    eprintln!("garnish: TZ={value:?} names no time zone; using the system zone");
+                });
+            }
+            tz
+        })
+        .or_else(|| read_tzif(Path::new("/etc/localtime"), "Local"))
         .unwrap_or(TimeZone::UTC)
+}
+
+/// Where a zone name's file is looked for after `TZDIR`: where tzdata
+/// installs on Linux, the BSDs and macOS (jiff's own search list).
+const ZONEINFO_DIRS: [&str; 3] =
+    ["/usr/share/zoneinfo", "/usr/share/lib/zoneinfo", "/etc/zoneinfo"];
+
+/// The most of a zone file read; a real one is a few KiB.
+const MAX_TZIF_BYTES: u64 = 256 * 1024;
+
+/// The zone a `TZ`-style value names: `TZ` itself and the `clock` module's
+/// `tz` option (SPEC § 3.4).
+///
+/// A POSIX rule (`JST-9`, `EST5EDT,M3.2.0,M11.1.0`) is that rule. Anything
+/// else, or anything after a leading `:`, is an absolute path to a `TZif`
+/// file or a zone name, read from its file under `TZDIR` or the standard
+/// zoneinfo directories, and only when no file has it from jiff's database
+/// (which matches names case-insensitively). `None` when nothing matches.
+#[must_use]
+pub fn zone(value: &str) -> Option<TimeZone> {
+    zone_in(value, crate::config::env_path("TZDIR").as_deref())
+}
+
+/// [`zone`] with `TZDIR` given.
+fn zone_in(value: &str, tzdir: Option<&Path>) -> Option<TimeZone> {
+    let (name, rule) = value.strip_prefix(':').map_or((value, true), |name| (name, false));
+    if rule && let Ok(tz) = TimeZone::posix(name) {
+        return Some(tz);
+    }
+    if Path::new(name).is_absolute() {
+        return read_tzif(Path::new(name), name);
+    }
+    // A name never climbs out of the directory it is looked up in, and a
+    // relative one is never read against the working directory.
+    if name.is_empty() || name.split('/').any(|part| part == "..") {
+        return None;
+    }
+    tzdir
+        .into_iter()
+        .chain(ZONEINFO_DIRS.iter().map(Path::new))
+        .find_map(|dir| read_tzif(&dir.join(name), name))
+        .or_else(|| TimeZone::get(name).ok())
+}
+
+/// The `TZif` file at `path`, a regular file of at most [`MAX_TZIF_BYTES`].
+fn read_tzif(path: &Path, name: &str) -> Option<TimeZone> {
+    let bytes = crate::claude_settings::read_regular(path, MAX_TZIF_BYTES).ok().flatten()?;
+    TimeZone::tzif(name, &bytes).ok()
 }
 
 /// Parse a `GARNISH_NOW` value: integer epoch seconds or an RFC 3339 string.
@@ -311,6 +363,77 @@ mod tests {
         assert_eq!(wall_clock(at(1_740_000_000), &TimeZone::UTC, Date), "Feb 19");
         // The date follows the zone across midnight like the weekday does.
         assert_eq!(wall_clock(at(1_740_787_200), &minus_five, Date), "Feb 28");
+    }
+
+    /// A `TZif` file of one fixed offset, the smallest shape the format has
+    /// (version 1: no transitions, one type), so the resolver's tests need
+    /// no zoneinfo on the machine.
+    fn fixed_tzif(offset_secs: i32, abbreviation: &str) -> Vec<u8> {
+        let mut out = b"TZif".to_vec();
+        out.extend([0_u8; 16]);
+        let chars = u32::try_from(abbreviation.len().saturating_add(1)).unwrap();
+        for count in [0_u32, 0, 0, 0, 1, chars] {
+            out.extend(count.to_be_bytes());
+        }
+        out.extend(offset_secs.to_be_bytes());
+        out.extend([0, 0]);
+        out.extend(abbreviation.as_bytes());
+        out.push(0);
+        out
+    }
+
+    fn offset_at(tz: &TimeZone, secs: i64) -> i32 {
+        tz.to_offset(Timestamp::from_second(secs).unwrap()).seconds()
+    }
+
+    /// 2025-07-01T00:00:00Z: summer in the north, so a DST rule is in force.
+    const JULY: i64 = 1_751_328_000;
+
+    /// SPEC § 3.4: `TZ` is a POSIX rule, a zone name read from its file, or
+    /// a path; `:` marks a name or path; a name never climbs out of the
+    /// zoneinfo directory and never resolves against the working directory.
+    #[test]
+    fn a_tz_value_resolves_as_a_rule_a_name_or_a_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Test")).unwrap();
+        std::fs::create_dir_all(dir.path().join("sub/Dir")).unwrap();
+        let file = dir.path().join("Test/Zone");
+        std::fs::write(&file, fixed_tzif(7_200, "TST")).unwrap();
+        let tzdir = Some(dir.path());
+        let offset = |value: &str| zone_in(value, tzdir).map(|tz| offset_at(&tz, JULY));
+        // POSIX rules, which no zoneinfo file names.
+        assert_eq!(offset("JST-9"), Some(9 * 3_600));
+        assert_eq!(offset("EST5EDT,M3.2.0,M11.1.0"), Some(-4 * 3_600));
+        assert_eq!(offset("<+0330>-3:30"), Some(12_600));
+        // A name, read from `TZDIR`, with or without the `:`.
+        assert_eq!(offset("Test/Zone"), Some(7_200));
+        assert_eq!(offset(":Test/Zone"), Some(7_200));
+        // A path, with or without the `:`.
+        let path = file.display().to_string();
+        assert_eq!(offset(&path), Some(7_200));
+        assert_eq!(offset(&format!(":{path}")), Some(7_200));
+        // Nothing: an unknown name, a name that climbs, a directory, an
+        // empty name, a `:` rule (the colon makes it a name), a relative
+        // name that is only a file in the working directory.
+        let sub = Some(dir.path().join("sub"));
+        assert_eq!(zone_in("../Test/Zone", sub.as_deref()).map(|_| ()), None);
+        for value in ["Not/AZone", "Dir", "sub/Dir", ":", ":JST-9", "Cargo.toml", "src/time.rs"] {
+            assert_eq!(offset(value), None, "{value:?}");
+        }
+    }
+
+    /// The system's own zone files are read the same way, and agree with
+    /// jiff's database lookup, where the machine has them.
+    #[test]
+    fn a_zone_name_reads_the_system_zoneinfo_file() {
+        if !Path::new("/usr/share/zoneinfo/Europe/Berlin").is_file() {
+            return;
+        }
+        let read = zone_in("Europe/Berlin", None).unwrap();
+        let db = TimeZone::get("Europe/Berlin").unwrap();
+        assert_eq!(offset_at(&read, JULY), 7_200);
+        assert_eq!(offset_at(&read, JULY), offset_at(&db, JULY));
+        assert_eq!(read.iana_name(), Some("Europe/Berlin"));
     }
 
     #[test]

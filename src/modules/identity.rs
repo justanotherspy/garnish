@@ -7,7 +7,7 @@ use crate::config::schema::{
 };
 use crate::icons::glyph;
 
-use super::util::cut_name;
+use super::util::{cut_name, first_chars};
 use super::{Ctx, Module, Rendered, badge, lead, seg};
 
 /// `session_name`: the custom or AI-generated session title.
@@ -62,7 +62,7 @@ impl Module for SessionNameModule {
         if cfg.bool("show_id")
             && let Some(id) = ctx.payload.session_id.as_deref()
         {
-            let short: String = id.chars().take(8).collect();
+            let short = first_chars(id, 8);
             segs.push(seg(cfg, format!(" {short}"), "id"));
         }
         Rendered::fresh(segs)
@@ -118,7 +118,7 @@ impl Module for VimModule {
         let text = if cfg.str("style") == "short" {
             match mode {
                 "VISUAL LINE" => "VL".to_owned(),
-                other => other.chars().take(1).collect(),
+                other => first_chars(other, 1),
             }
         } else {
             mode.to_owned()

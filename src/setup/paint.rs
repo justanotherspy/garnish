@@ -43,9 +43,6 @@ pub fn style(painter: &Painter, s: ansi::Style) -> Style {
     if s.dim {
         out = out.add_modifier(Modifier::DIM);
     }
-    if s.italic {
-        out = out.add_modifier(Modifier::ITALIC);
-    }
     if s.underline {
         out = out.add_modifier(Modifier::UNDERLINED);
     }

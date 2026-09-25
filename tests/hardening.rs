@@ -56,7 +56,7 @@ fn hostile_stdin_never_blanks_the_line_or_fails() {
         ("truncated", &PAYLOAD.as_bytes()[..PAYLOAD.len() / 2]),
         ("non-utf8", b"\xff\xfe{}"),
         ("null-object", b"null"),
-        ("huge-number", br#"{"cost":{"total_duration_ms":1e400}}"#),
+        ("out-of-range", br#"{"cost":{"total_duration_ms":1e400}}"#),
         ("deep", br#"{"a":{"b":{"c":{"d":{"e":1}}}}}"#),
     ] {
         let (out, _, ok) = tick(input, &[], dir.path());
@@ -72,6 +72,53 @@ fn hostile_stdin_never_blanks_the_line_or_fails() {
     let (out, _, _) =
         tick("{\"model\":{\"display_name\":\"Op\u{fffd}s\"}}".as_bytes(), &[], dir.path());
     assert!(out.contains("Op\u{fffd}s"), "{out}");
+}
+
+/// SPEC § 5: a payload field of the wrong type is absent, alone. One badge's
+/// field changing type in a Claude Code release used to blank every row
+/// behind `⚠ garnish: bad payload`.
+#[test]
+fn a_wrong_typed_payload_field_loses_only_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = r#""session_id":"s","model":{"display_name":"Opus"}"#;
+    let well_typed = format!(r#"{{{base},"workspace":{{"added_dirs":["/a"]}},"cost":{{}}}}"#);
+    let (good, _, ok) = tick(well_typed.as_bytes(), &[], dir.path());
+    assert!(ok && good.contains("Opus"), "{good}");
+    let drifted = format!(
+        r#"{{{base},"pr":{{"number":true}},"thinking":true,"effort":"high","session_name":7,"exceeds_200k_tokens":"false","workspace":{{"added_dirs":["/a",null]}},"cost":{{"total_cost_usd":{{}}}}}}"#
+    );
+    let (out, err, ok) = tick(drifted.as_bytes(), &[], dir.path());
+    assert!(ok, "{out}{err}");
+    assert!(out.contains("Opus") && !out.contains("bad payload"), "{out}");
+    assert_eq!(out, good, "the drifted fields are absent, the rest renders as before");
+}
+
+/// An empty `workspace.current_dir` is no directory: `cwd` still names the
+/// path (and the repository and settings chain behind it), where the empty
+/// string used to win and blank the path row.
+#[test]
+fn an_empty_current_dir_never_shadows_cwd() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload =
+        br#"{"session_id":"s","cwd":"/nowhere/projects/garnish","workspace":{"current_dir":""}}"#;
+    let (out, _, ok) = tick(payload, &[], dir.path());
+    assert!(ok && out.contains("projects/garnish"), "{out}");
+}
+
+/// An absurd number is a number, printed bounded: `1e300` dollars used to
+/// print about 300 digits and a `"inf"` string `$infk` (SPEC § 5).
+#[test]
+fn an_absurd_payload_number_prints_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let (plain, _, _) = tick(br#"{"session_id":"s","cost":{"total_cost_usd":1}}"#, &[], dir.path());
+    for (usd, shown) in [("1e300", "$100.0k"), ("\"inf\"", "$0.00"), ("\"NaN\"", "$0.00")] {
+        let payload = format!(r#"{{"session_id":"s","cost":{{"total_cost_usd":{usd}}}}}"#);
+        let (out, err, ok) = tick(payload.as_bytes(), &[], dir.path());
+        assert!(ok, "{usd}: {out}{err}");
+        assert!(!out.contains("bad payload") && !out.contains("inf"), "{usd}: {out}");
+        assert!(out.contains(shown), "{usd}: {out}");
+        assert_eq!(out.lines().count(), plain.lines().count(), "{usd}: {out}");
+    }
 }
 
 #[test]
@@ -105,8 +152,13 @@ fn hostile_environment_is_tolerated() {
     assert!(ok, "exit status\n{out}\n{err}");
     assert_eq!(out.lines().count(), 4, "{out}\n{err}");
     assert!(err.contains("GARNISH_NOW"), "{err}");
-    let (out, _, ok) = tick(PAYLOAD.as_bytes(), &[("HOME", ""), ("TZ", "Not/AZone")], dir.path());
+    let (out, err, ok) = tick(PAYLOAD.as_bytes(), &[("HOME", ""), ("TZ", "Not/AZone")], dir.path());
     assert!(ok && out.lines().count() == 4, "{out}");
+    assert!(err.contains("TZ=\"Not/AZone\" names no time zone"), "{err}");
+    // A POSIX rule is a zone (SPEC § 3.4); it used to fall through to
+    // `/etc/localtime`, UTC in most containers, without a word.
+    let (out, err, ok) = tick(PAYLOAD.as_bytes(), &[("TZ", "JST-9")], dir.path());
+    assert!(ok && out.contains("01:00:00") && !err.contains("TZ="), "{out}{err}");
 }
 
 /// SPEC § 5: the tick prints and exits 0 whatever the repository holds. A

@@ -538,9 +538,6 @@ pub const MAX_FR: u32 = 64;
 pub const MAX_DECIMALS: usize = 8;
 
 /// The fully resolved configuration.
-// Four independent switches that mirror config keys one to one; a bitset
-// would only obscure the mapping.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// Top-level preset.
@@ -2121,7 +2118,7 @@ pub(crate) fn is_bare_key(name: &str) -> bool {
 
 /// The `[modules.text.<name>]` tables (SPEC § 3.7): each is validated against
 /// the text schema under its own path. [`TEXT_REJECTED_KEYS`] do not apply to
-/// text modules, `step` must be positive, `color` is the shorthand
+/// text modules, `step` must lie in [`STEP_RANGE`], `color` is the shorthand
 /// for `colors.text` (an explicit `colors.text` wins), and `text` and `gap`
 /// are reduced to plain text so a scrolled window can never cut an escape
 /// sequence.

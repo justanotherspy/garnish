@@ -805,15 +805,14 @@ mod tests {
         assert_eq!(display_width(rows[1]), 56);
     }
 
-    /// SPEC § 3.7: a text module is a fixed-width box; short text is
-    /// justified, long text clipped or scrolled by the clock, the scroller
-    /// frozen at frame 0 without animation, and the common decorations apply.
+    /// SPEC § 5: the payload's own strings (session name, model, agent,
+    /// output style, directories, PR URL) never add a row and never put an
+    /// escape of their own on one.
     #[test]
     fn hostile_payload_strings_never_add_a_row_or_an_escape() {
-        // Whole-stack review: the payload's own strings (session name,
-        // model, agent, output style, directories, PR URL) reached the row
-        // raw. A `\n` split the frame, an escape passed `--color never`, a
-        // cut could split the sequence. Segments are plain by construction.
+        // Whole-stack review: those strings reached the row raw. A `\n`
+        // split the frame, an escape passed `--color never`, a cut could
+        // split the sequence. Segments are plain by construction.
         // Built with serde so the escapes arrive as JSON escapes, the way
         // any serializer emits them (a raw ESC byte is not valid JSON).
         let dir = "/home/dev/pro\x1b[2Jjects/de\u{202e}mo";
@@ -850,6 +849,46 @@ mod tests {
         for seq in out.split('\x1b').skip(1) {
             assert!(seq.starts_with('[') && seq.contains('m'), "{seq:?} is not SGR");
         }
+    }
+
+    /// SPEC § 3.4: the clock's `tz` is read the way `TZ` is, a POSIX rule
+    /// included; one that names nothing is the tick's zone.
+    #[test]
+    fn the_clock_tz_reads_like_tz() {
+        let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let clock_at = |tz: &str| {
+            let text = format!(
+                "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"clock\"]\n[modules.clock]\nspinner = false\ntz = {tz:?}\n"
+            );
+            let (config, errs) = config::parse(&text, &SCHEMAS);
+            assert_eq!(errs, Vec::new());
+            render_plain_at(&payload, &config, Some(40), &Clock::fixed()).trim().to_owned()
+        };
+        assert_eq!(clock_at("JST-9"), "01:00:00");
+        assert_eq!(clock_at("<-0330>3:30"), "12:30:00");
+        assert_eq!(clock_at("Not/AZone"), "16:00:00");
+        assert_eq!(clock_at(""), "16:00:00");
+    }
+
+    /// SPEC § 5: `max_length` counts the text the row shows. A bold session
+    /// name lost cells to the escapes' bytes, and a cut inside a sequence
+    /// left it open, so the row's plain-text pass swallowed the ellipsis.
+    #[test]
+    fn max_length_counts_the_text_the_row_shows() {
+        let row = |name: &str, table: &str| {
+            let json = serde_json::json!({"session_id": "s", "session_name": name}).to_string();
+            let text = format!(
+                "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"session_name\"]\n[modules.session_name]\n{table}"
+            );
+            render_plain(&Payload::parse(&json).unwrap(), &loaded(&text), Some(80))
+        };
+        let bold = format!("\x1b[1m{}\x1b[0m", "a".repeat(30));
+        let out = row(&bold, "");
+        assert!(out.contains(&"a".repeat(30)) && !out.contains('…'), "{out}");
+        let out = row("ab\x1b[31mcdefgh", "max_length = 5\n");
+        assert!(out.contains("abcd…"), "{out}");
+        let out = row("\x1b]0;title\x07abcdefgh", "max_length = 5\n");
+        assert!(out.contains("abcd…"), "{out}");
     }
 
     #[test]
@@ -941,6 +980,9 @@ mod tests {
         );
     }
 
+    /// SPEC § 3.7: a text module is a fixed-width box; short text is
+    /// justified, long text clipped or scrolled by the clock, the scroller
+    /// frozen at frame 0 without animation, and the common decorations apply.
     #[test]
     fn text_modules_render_as_fixed_width_boxes() {
         let payload = fixture("subscription-full");

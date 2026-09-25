@@ -5,6 +5,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use garnish::ansi::{ColorMode, Painter};
 use garnish::config::{self, Overlay};
 use garnish::modules::{Ctx, SCHEMAS};
 use garnish::payload::Payload;
@@ -14,6 +15,18 @@ const PAYLOAD: &str = garnish::fixtures::FIXTURES[0].text;
 
 fn parse_payload(c: &mut Criterion) {
     c.bench_function("parse_payload", |b| b.iter(|| Payload::parse(black_box(PAYLOAD))));
+}
+
+/// A branch name as long as a hostile `.git/HEAD` can make one
+/// (`git::MAX_REF_BYTES`) cut to the default `max_length`: the cut reads
+/// only the clusters it keeps.
+fn cut_name_hostile(c: &mut Criterion) {
+    let name = "a".repeat(65_536);
+    c.bench_function("cut_name_hostile", |b| {
+        b.iter(|| {
+            garnish::modules::util::cut_name(black_box(&name), 40, garnish::icons::IconSet::Unicode)
+        });
+    });
 }
 
 fn resolve_config(c: &mut Criterion) {
@@ -118,6 +131,13 @@ fn tick_in_process(c: &mut Criterion) {
     c.bench_function("tick_in_process_default", |b| {
         b.iter(|| render_lines_at(black_box(&payload), &cfg, Some(120), &clock));
     });
+    // The rows above turned into escape sequences, which `render_lines_at`
+    // leaves to the caller: every segment of every row is painted.
+    let lines = render_lines_at(&payload, &cfg, Some(120), &clock);
+    let painter = Painter { mode: ColorMode::TrueColor, links: true, dim: false };
+    c.bench_function("paint_default", |b| {
+        b.iter(|| black_box(&lines).iter().map(|l| painter.paint(l).len()).sum::<usize>());
+    });
     // `max_width` on every module: the cap measures and cuts each decorated
     // module before alignment, which the default tick skips entirely.
     let (capped, _) = config::parse(
@@ -173,6 +193,7 @@ fn tick_in_process_layout(c: &mut Criterion) {
 criterion_group!(
     benches,
     parse_payload,
+    cut_name_hostile,
     resolve_config,
     render_modules,
     tick_in_process,

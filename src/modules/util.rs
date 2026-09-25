@@ -1,4 +1,5 @@
-//! Shared rendering helpers: smooth bars, percent formatting.
+//! Shared rendering helpers: smooth bars, name cuts, short hashes, token
+//! and dollar formatting. Percentages print through `config::format`.
 
 use crate::ansi::{Color, Segment, Style};
 use crate::icons::IconSet;
@@ -87,24 +88,11 @@ pub fn bar(
 /// explicit override still wins.
 pub const BAR_STYLES: &[&str] = &["blocks", "line"];
 
-/// Format a percentage with no decimals, e.g. `42%`.
-#[must_use]
-pub fn percent(p: f64) -> String {
-    format!("{}%", crate::num::round_to_u64(crate::num::clamp_percent(p)))
-}
-
-/// Format a percentage allowing values above 100 (spend limits).
-#[must_use]
-pub fn percent_unclamped(p: f64) -> String {
-    if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
-}
-
-/// Format dollars: `$0.42`, `$12.35`, `$1.2k`.
+/// Format dollars: `$0.42`, `$12.35`, `$1.2k`; the amount is bounded like
+/// every printed one ([`crate::num::shown_amount`]).
 #[must_use]
 pub fn dollars(usd: f64, decimals: usize) -> String {
-    // NaN and anything at or below zero are nothing (a negative zero would
-    // print its sign).
-    let usd = if usd.is_nan() || usd <= 0.0 { 0.0 } else { usd };
+    let usd = crate::num::shown_amount(usd);
     if usd >= 1000.0 {
         return format!("${:.1}k", usd / 1000.0);
     }
@@ -122,36 +110,35 @@ pub fn dollars(usd: f64, decimals: usize) -> String {
 /// cuts in, so a flag, a skin tone or a combining mark is never split in
 /// half. The ellipsis is counted into the budget and is itself cut when
 /// `max` is smaller than it, so the result is never wider than asked.
+///
+/// The name is reduced to plain text first ([`crate::ansi::plain_text`]):
+/// a payload or ref string may carry escape sequences, and the cut must
+/// count, and land in, the text the row shows (SPEC § 5).
 #[must_use]
 pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
-    if max == 0 {
-        return name.to_owned();
-    }
-    // A cluster is at least one char, so a name with no more chars than the
-    // budget cannot need cutting and never reaches `clusters`, which
-    // allocates a `String` per grapheme. That only covers the short names;
-    // the long ones are bounded at the source instead (`git::MAX_REF_BYTES`
-    // caps what `.git/HEAD` can make a branch name in a checkout garnish did
-    // not create), because there is no cheap way to count clusters without
-    // building them.
-    if name.chars().take(max.saturating_add(1)).count() <= max {
-        return name.to_owned();
-    }
-    let clusters = crate::ansi::clusters(name);
-    if clusters.len() <= max {
-        return name.to_owned();
+    let name = crate::ansi::plain_cow(name);
+    if max == 0 || crate::ansi::clusters(&name).nth(max).is_none() {
+        return name.into_owned();
     }
     let ellipsis: String = icons.ellipsis().chars().take(max).collect();
     let mut out: String =
-        clusters.into_iter().take(max.saturating_sub(ellipsis.chars().count())).collect();
+        crate::ansi::clusters(&name).take(max.saturating_sub(ellipsis.chars().count())).collect();
     out.push_str(&ellipsis);
     out
+}
+
+/// The first `n` characters of `text` as the row shows it: reduced to
+/// plain text first, like [`cut_name`], so an escape sequence's bytes are
+/// never what is kept.
+#[must_use]
+pub fn first_chars(text: &str, n: usize) -> String {
+    crate::ansi::plain_cow(text).chars().take(n).collect()
 }
 
 /// The first seven characters of a commit hash, as git abbreviates one.
 #[must_use]
 pub fn short_sha(sha: &str) -> String {
-    sha.chars().take(7).collect()
+    first_chars(sha, 7)
 }
 
 /// Format a token count compactly: `12k`, `1.0M`, `200k`.
@@ -199,7 +186,7 @@ mod tests {
             for max in 1..8_usize {
                 let cut = cut_name("🇺🇸abcdef", max, icons);
                 assert!(
-                    crate::ansi::clusters(&cut).len() <= max,
+                    crate::ansi::clusters(&cut).count() <= max,
                     "{} max={max}: {cut:?}",
                     icons.name()
                 );
@@ -207,11 +194,30 @@ mod tests {
         }
     }
 
+    /// SPEC § 5: a cut measures the text the row will show. An escape
+    /// sequence's printable bytes used to count against `max_length`, and a
+    /// cut inside one left it open, so the row's plain-text pass swallowed
+    /// the ellipsis with it (or, for an OSC, the whole name).
+    #[test]
+    fn a_cut_measures_the_plain_text() {
+        use IconSet::{Ascii, Unicode};
+        assert_eq!(cut_name("ab\x1b[31mcdefgh", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("abc\x1b[31mdefghijklmnop", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("\x1b]0;title\x07abcdef", 5, Ascii), "abc..");
+        let bold = format!("\x1b[1m{}\x1b[0m", "a".repeat(30));
+        assert_eq!(cut_name(&bold, 32, Unicode), "a".repeat(30), "fits once plain");
+        assert_eq!(cut_name("a\u{202e}b\u{200b}c", 3, Unicode), "abc");
+        assert_eq!(cut_name("a\nb", 0, Unicode), "ab", "plain even when uncut");
+        let segs = [Segment::plain(cut_name("ab\x1b[31mcdefgh", 5, Unicode))];
+        assert_eq!(text(&segs), "abcd…");
+    }
+
     #[test]
     fn short_sha_abbreviates_like_git() {
         assert_eq!(short_sha("0123456789abcdef"), "0123456");
         assert_eq!(short_sha("abc"), "abc");
         assert_eq!(short_sha(""), "");
+        assert_eq!(short_sha("\x1b[31m0123456789"), "0123456", "plain text first");
     }
 
     #[test]
@@ -328,9 +334,6 @@ mod tests {
 
     #[test]
     fn formatting_helpers() {
-        assert_eq!(percent(41.6), "42%");
-        assert_eq!(percent(140.0), "100%");
-        assert_eq!(percent_unclamped(112.4), "112%");
         assert_eq!(dollars(1.2345, 2), "$1.23");
         assert_eq!(dollars(0.0, 2), "$0.00");
         assert_eq!(dollars(-0.0, 2), "$0.00");

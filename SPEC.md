@@ -227,6 +227,12 @@ says which (§ 7).
 Auth-mode rule: `rate_limits` present ⇒ subscription (show limits); absent ⇒
 API key/gateway (show `cost`).
 
+garnish does not model `prompt_id`, `transcript_path` or
+`context_window.remaining_percentage` (no module will read a prompt id or
+the transcript, and the remainder is `100 − used_percentage`); the other
+fields no module reads yet are parsed and say so in `payload.rs`. An empty
+`cwd` or `workspace.current_dir` is no directory: the other one is used.
+
 ### 2.3 Autocompact threshold (approximation)
 
 Not in the payload. From the 2.1.260 binary (unchanged in 2.1.261 and
@@ -501,6 +507,20 @@ passed prints none of them.
 cache-read share from `current_usage`; `prompt_cache` absent → `–`.
 Spinner frame = `now_secs mod frames.len()` (stateless).
 
+The tick's local zone (the `clock`'s, and the absolute reset times' of
+§ 3.3) is `TZ` when it names a zone, else `/etc/localtime`, else UTC. `TZ`,
+and the `clock`'s own `tz`, are read the way the C library reads `TZ`: a
+POSIX rule (`JST-9`, `EST5EDT,M3.2.0,M11.1.0`) is that rule; anything else,
+or anything after a leading `:`, is an absolute path to a TZif file or a
+zone name, whose file is read from `TZDIR`, `/usr/share/zoneinfo`,
+`/usr/share/lib/zoneinfo` or `/etc/zoneinfo`. A name holding a `..`
+component or naming no file matches nothing, and a relative one is never
+read against the working directory. Only a name no directory has a file for
+goes to jiff's database, whose first use walks the whole zoneinfo tree; a
+`TZ` that names nothing is reported once on stderr. (Decided 2026-09-25: a
+POSIX rule fell through to `/etc/localtime`, UTC in most containers,
+without a word, and a zone name paid that walk on every tick.)
+
 ### 3.5 Session-identity group
 
 | id | shows | minimal | default | full | refresh |
@@ -568,7 +588,12 @@ color = "muted"
   then itself, so it flows continuously. Both are stateless: the offset is
   `floor(now_secs × step) mod period`, where the period is the text width
   for `scroll` and text plus gap for `scroll-wrap`, so a frozen clock
-  freezes the scroll and a cancelled tick loses nothing. Text modules have
+  freezes the scroll and a cancelled tick loses nothing. The width is
+  counted cluster by cluster, as the scroller advances (`ansi::scroll_period`):
+  a ligature `unicode-width` measures as one cell (Arabic `لا`) is two
+  clusters, and a period counted in display cells wrapped a cell early
+  (2026-09-25; the line ticker and the setup preview's placement map count
+  the same way). Text modules have
   no `preset` and no `refresh`; `config check` rejects both.
 - **Shared primitive.** The same scroller implements line-level
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
@@ -584,8 +609,8 @@ color = "muted"
   screen.
 - **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
   reference gets one page for it; `config check` validates `justify`,
-  `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
-  table.
+  `overflow`, `step` (0.001–1000, like every `*_step`, § 5) and that every
+  `text.<name>` on a line has a table.
 
 ### 3.8 Harness identity and settings badges (PLAN Phase 23)
 
@@ -1310,7 +1335,14 @@ without an error report.
   look like a different program. Implemented in PLAN Phase 14: the file is
   read as a plain TOML table and each key is converted on its own; value
   errors carry the TOML path, syntax errors the line.)
-- malformed stdin → `⚠ garnish: bad payload`;
+- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`;
+  any JSON object renders. A known field of the wrong type is absent, alone,
+  and so is a list entry that is not a string and a numeric string that is
+  not finite (`inf`, `NaN`). (Decided 2026-09-25: a type change on one
+  field, which only one badge might read, used to blank every row.) A
+  number too large to print sensibly is printed at a bound instead: a
+  percentage past 100 (`spend`) and a cost stop at 99 999
+  (`num::MAX_SHOWN`), and the bands compare the bounded number;
 - internal error → `⚠ garnish: <msg>`.
 - **A file that fails to parse is never rewritten by any command** (PLAN
   Phase 19 for `install` and `config init --force`, Phase 22 for `setup`;
@@ -1325,8 +1357,9 @@ without an error report.
   it that is never overwritten, via a temp file in the same directory and
   a `rename`; `config init` names the backup it kept.
 - **Nothing but text reaches a row.** Every string that becomes part of a
-  row is reduced to plain text: escape sequences (CSI, OSC, and the string
-  sequences DCS/SOS/PM/APC with their payloads), control characters and the
+  row is reduced to plain text: escape sequences (CSI, OSC, the string
+  sequences DCS/SOS/PM/APC with their payloads, and nF sequences such as the
+  `ESC ( B` of `tput sgr0` with their final byte), control characters and the
   bidi and zero-width format characters (bidi marks, embeddings and
   isolates, zero-width space and non-joiner, word joiner, the BOM; ZWJ and
   the emoji variation selector stay) are removed.
@@ -1335,7 +1368,12 @@ without an error report.
   row and box `title`) are reduced at
   config time, so width arithmetic sees the real cells; everything else (the
   payload's names and paths, git output, cache entries, the `⚠` line) is
-  reduced by the `Segment` constructors, the one way onto a row. Colour and
+  reduced by the `Segment` constructors, the one way onto a row. A module
+  that measures or cuts such a string first (`max_length`, the fish path's
+  initials, a short sha or session id) reduces it before, so it counts the
+  cells the row shows and never cuts inside a sequence (2026-09-25: a bold
+  session name lost two cells to the escape's bytes, and a cut inside one
+  swallowed the ellipsis). Colour and
   OSC 8 links are added by the painter alone, and a link is emitted only for
   an `http(s)://` URL of printable ASCII. (Whole-stack review, 2026-09-06:
   a `\n` in a session name added a row, an escape passed `--color never`,
