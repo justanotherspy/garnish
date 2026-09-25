@@ -121,20 +121,46 @@ impl Color {
 /// as `rgb(135,135,175)`, a light blue-grey, instead of `rgb(95,95,135)`.
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
-/// Approximate an RGB color with the 6×6×6 cube of the 256-color palette.
+/// Approximate an RGB color with the 256-color palette: the nearest level of
+/// the 6×6×6 cube per channel, and where that answer is a gray, the nearer
+/// of it and the 24-step grayscale ramp (232..=255, `8 + 10 i`).
+///
+/// The ramp is only a candidate where the cube has nothing but a gray to
+/// offer: a colour the cube keeps a hue for (`#6c7086` → 60) stays in the
+/// cube, while a dark near-gray (every built-in `frame` role) is no longer
+/// lightened to the cube's 95.
 fn rgb_to_256(r: u8, g: u8, b: u8) -> u8 {
-    let q = |c: u8| -> u8 {
+    let level_of = |channel: u8| -> u8 {
         let nearest = CUBE_LEVELS
             .iter()
             .enumerate()
-            .min_by_key(|(_, level)| u16::from(c).abs_diff(u16::from(**level)))
-            .map_or(0, |(i, _)| i);
+            .min_by_key(|(_, level)| u16::from(channel).abs_diff(u16::from(**level)))
+            .map_or(0, |(index, _)| index);
         u8::try_from(nearest).unwrap_or(5)
     };
-    16_u8
-        .saturating_add(q(r).saturating_mul(36))
-        .saturating_add(q(g).saturating_mul(6))
-        .saturating_add(q(b))
+    let (red, green, blue) = (level_of(r), level_of(g), level_of(b));
+    let cube = 16_u8
+        .saturating_add(red.saturating_mul(36))
+        .saturating_add(green.saturating_mul(6))
+        .saturating_add(blue);
+    if red != green || green != blue {
+        return cube;
+    }
+    let gray = CUBE_LEVELS.get(usize::from(red)).copied().unwrap_or(0);
+    let ramp = (0..24_u8)
+        .map(|step| (distance([r, g, b], 8_u8.saturating_add(step.saturating_mul(10))), step))
+        .min();
+    match ramp {
+        Some((nearest, step)) if nearest < distance([r, g, b], gray) => 232_u8.saturating_add(step),
+        _ => cube,
+    }
+}
+
+/// Squared distance from a colour to the gray of one level.
+fn distance(rgb: [u8; 3], level: u8) -> u32 {
+    rgb.into_iter()
+        .map(|c| u32::from(c.abs_diff(level)))
+        .fold(0, |sum, d| sum.saturating_add(d.saturating_mul(d)))
 }
 
 /// How colors are emitted.
@@ -1017,10 +1043,20 @@ mod tests {
             let index = u8::try_from(16 + i * 36 + i * 6 + i).unwrap();
             assert_eq!(rgb_to_256(level, level, level), index, "level {level}");
         }
-        // The `garnish` palette's muted and frame roles, which an even
-        // split sent to 103 and 102 (both `rgb(135,135,…)`).
+        // The `garnish` palette's muted role, which an even split sent to
+        // 103 (`rgb(135,135,175)`): the cube keeps its blue.
         assert_eq!(rgb_to_256(0x6c, 0x70, 0x86), 60);
-        assert_eq!(rgb_to_256(0x58, 0x5b, 0x70), 59);
+        // A colour the cube can only answer with a gray takes the nearer of
+        // that gray and the 24-step ramp: every built-in `frame` role is a
+        // dark near-gray the cube lightened to 95 (59), where the ramp has
+        // 78 (239) or, for the `garnish` frame, 98 (241).
+        assert_eq!(rgb_to_256(0x58, 0x5b, 0x70), 241);
+        assert_eq!(rgb_to_256(0x44, 0x47, 0x5a), 239, "dracula");
+        assert_eq!(rgb_to_256(0x3b, 0x42, 0x61), 239, "tokyonight");
+        assert_eq!(rgb_to_256(0x45, 0x47, 0x5a), 239, "catppuccin");
+        assert_eq!(rgb_to_256(0x80, 0x80, 0x80), 244);
+        assert_eq!(rgb_to_256(3, 3, 3), 16, "black is nearer than the ramp's 8");
+        assert_eq!(rgb_to_256(250, 250, 250), 231, "white is nearer than the ramp's 238");
         // 115 is the midpoint of 95 and 135; 116 rounds up.
         assert_eq!(rgb_to_256(115, 0, 0), 16 + 36);
         assert_eq!(rgb_to_256(116, 0, 0), 16 + 2 * 36);
