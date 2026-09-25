@@ -18,7 +18,10 @@ use crate::git::{self, Head};
 use crate::icons::glyph;
 
 use super::util::{cut_name, short_sha};
-use super::{Ctx, Freshness, Module, RefreshCtx, Rendered, badge, glyph_prefix, lead, seg};
+use super::{
+    Ctx, Freshness, IconShown, Module, RefreshCtx, Rendered, badge, glyph_prefix, lead, seg,
+    show_icon_opt,
+};
 
 /// How long the worker lets a local git command run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -160,8 +163,7 @@ impl Module for PathModule {
             ],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the folder icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the folder icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "depth",
                     Kind::Int,
@@ -260,8 +262,7 @@ impl Module for WorktreeModule {
             ],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_original",
                     Kind::Bool,
@@ -326,8 +327,7 @@ impl Module for PrModule {
             sources: &["pr.number", "pr.url", "pr.review_state", "pr.kind"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the PR icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the PR icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_state",
                     Kind::Bool,
@@ -445,8 +445,7 @@ impl Module for BranchModule {
             sources: &["worktree.branch", ".git/HEAD", "git diff-index and diff-files (worker)"],
             refresh: 5,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the branch icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the branch icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_sha",
                     Kind::Bool,

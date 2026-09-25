@@ -678,10 +678,11 @@ fn render_group(
                 _ => rendered,
             };
             // The `hide` list (SPEC § 3) reads the measure the module
-            // attached; a hidden module rendered nothing, never a `–`. Its
-            // place after the stale mapping is not load-bearing: no cached
-            // module attaches a measure, so a stale or failed render never
-            // meets a rule.
+            // attached; a hidden module rendered nothing, never a `–`. It
+            // runs after the stale mapping on purpose: `sync` measures the
+            // counts of its cache entry, and under `stale_style = "hide"` an
+            // overdue one is already empty, measure and all, so it follows
+            // `hide_when_empty` like any empty render rather than `zero`.
             if modules::hidden_by(&rendered, &cfg.hide) {
                 return None;
             }

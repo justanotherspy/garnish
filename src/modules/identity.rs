@@ -7,8 +7,10 @@ use crate::config::schema::{
 };
 use crate::icons::glyph;
 
-use super::util::{cut_name, first_chars};
-use super::{Ctx, Module, Rendered, badge, lead, seg};
+use super::util::{
+    added_removed, added_removed_colors, added_removed_icons, cut_name, first_chars,
+};
+use super::{Ctx, IconShown, Module, Rendered, badge, lead, seg, show_icon_opt};
 
 /// `session_name`: the custom or AI-generated session title.
 pub struct SessionNameModule;
@@ -23,8 +25,7 @@ impl Module for SessionNameModule {
             sources: &["session_name", "session_id"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_id",
                     Kind::Bool,
@@ -89,8 +90,7 @@ impl Module for VimModule {
                     Value::Str("badge".into()),
                 )
                 .minimal(Value::Str("short".into())),
-                OptSpec::new("show_icon", Kind::Bool, "Show the vim icon.", Value::Bool(false))
-                    .full(Value::Bool(true)),
+                show_icon_opt("Show the vim icon.", IconShown::OnlyFull),
             ],
             icons: vec![IconSpec {
                 key: "vim",
@@ -142,8 +142,7 @@ impl Module for AgentModule {
             sources: &["agent.name", "thinking.enabled"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_thinking",
                     Kind::Bool,
@@ -194,6 +193,8 @@ pub struct LinesModule;
 
 impl Module for LinesModule {
     fn schema(&self) -> ModuleSchema {
+        let [added, removed] = added_removed_icons();
+        let [added_color, removed_color] = added_removed_colors();
         ModuleSchema {
             id: "lines",
             measure: Some(MeasureKind::Count),
@@ -202,8 +203,7 @@ impl Module for LinesModule {
             sources: &["cost.total_lines_added", "cost.total_lines_removed"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new("show_net", Kind::Bool, "Append the net change.", Value::Bool(false))
                     .full(Value::Bool(true)),
                 OptSpec::new(
@@ -219,17 +219,13 @@ impl Module for LinesModule {
                     doc: "Diff icon.",
                     glyph: glyph("\u{f440}", "Δ", "📝", ""),
                 },
-                IconSpec { key: "added", doc: "Added glyph.", glyph: glyph("+", "+", "+", "+") },
-                IconSpec {
-                    key: "removed",
-                    doc: "Removed glyph.",
-                    glyph: glyph("−", "−", "−", "-"),
-                },
+                added,
+                removed,
             ],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent2" },
-                ColorSpec { key: "added", doc: "Added count.", default: "ok" },
-                ColorSpec { key: "removed", doc: "Removed count.", default: "danger" },
+                added_color,
+                removed_color,
                 ColorSpec { key: "net", doc: "Net delta.", default: "muted" },
             ],
         }
@@ -243,8 +239,7 @@ impl Module for LinesModule {
             return Rendered::empty();
         }
         let mut segs: Vec<Segment> = lead(cfg, "lines");
-        segs.push(seg(cfg, format!("{}{added}", cfg.icon("added")), "added"));
-        segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
+        segs.extend(added_removed(cfg, "", added, removed));
         if cfg.bool("show_net") {
             let net = i128::from(added).saturating_sub(i128::from(removed));
             let sign = if net >= 0 { "+" } else { "" };
@@ -266,10 +261,7 @@ impl Module for VersionModule {
             doc: "The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and what shows an upgrade. Nothing shows when the payload carries no version, so `hide_when_empty = false` prints `–` as it does for any absent field.",
             sources: &["version"],
             refresh: 0,
-            opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(false))
-                    .full(Value::Bool(true)),
-            ],
+            opts: vec![show_icon_opt("Show the icon.", IconShown::OnlyFull)],
             icons: vec![IconSpec {
                 key: "version",
                 doc: "Version icon.",

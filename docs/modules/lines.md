@@ -51,8 +51,8 @@ Lines added and removed this session.
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `lines` | `U+F440` | `Δ` | `📝` | `` | Diff icon. |
-| `added` | `+` | `+` | `+` | `+` | Added glyph. |
-| `removed` | `−` | `−` | `−` | `-` | Removed glyph. |
+| `added` | `+` | `+` | `+` | `+` | Lines-added glyph. |
+| `removed` | `−` | `−` | `−` | `-` | Lines-removed glyph. |
 
 Also try (`lines`: `U+F457` `U+F0CB` `Δ` `∆`).
 
@@ -66,6 +66,6 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent2` | Icon. |
-| `added` | `ok` | Added count. |
-| `removed` | `danger` | Removed count. |
+| `added` | `ok` | Lines added. |
+| `removed` | `danger` | Lines removed. |
 | `net` | `muted` | Net delta. |

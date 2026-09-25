@@ -42,6 +42,31 @@ pub fn durations_opt() -> OptSpec {
     )
 }
 
+/// In which presets a module shows its leading icon: the three shapes its
+/// `show_icon` option takes ([`show_icon_opt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconShown {
+    /// On, and off in `minimal`: nearly every module.
+    ExceptMinimal,
+    /// Off, and on in `full`: `vim` and `version`, whose value is the badge.
+    OnlyFull,
+    /// On in every preset: the settings badges, whose glyph is the value.
+    Always,
+}
+
+/// The `show_icon` option [`lead`] reads, in one of the [`IconShown`]
+/// shapes; `doc` says which icon, so each module's reference names its own.
+#[must_use]
+pub fn show_icon_opt(doc: &'static str, shown: IconShown) -> OptSpec {
+    let spec =
+        OptSpec::new("show_icon", Kind::Bool, doc, Value::Bool(shown != IconShown::OnlyFull));
+    match shown {
+        IconShown::ExceptMinimal => spec.minimal(Value::Bool(false)),
+        IconShown::OnlyFull => spec.full(Value::Bool(true)),
+        IconShown::Always => spec,
+    }
+}
+
 /// The kinds of number a module prints, each with a `[format]` style and a
 /// per-module override of the same name (SPEC § 4, Number formats).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,7 +263,8 @@ pub struct Ctx<'a> {
 
 impl Ctx<'_> {
     /// The keys of the settings chain, read on first use and shared by
-    /// every reader on the tick (the autocompact marker, reduced motion).
+    /// every reader on the tick (the autocompact marker, reduced motion,
+    /// the `sandbox` and `voice` badges).
     #[must_use]
     pub fn settings(&self) -> &[crate::claude_settings::FileKeys] {
         self.settings.get_or_init(|| crate::claude_settings::read_keys(&self.settings_chain))
@@ -274,13 +300,14 @@ impl Ctx<'_> {
     /// option unless that is `inherit`, then `[format] percent`.
     #[must_use]
     pub fn percent(&self, cfg: &ModuleCfg, p: f64) -> String {
-        self.percent_style(cfg).format(p, true)
+        self.percent_with(cfg, p, true)
     }
 
-    /// [`Ctx::percent`] for a number that may pass 100 (`spend`, SPEC § 3.3).
+    /// [`Ctx::percent`], held to `0..=100` only when `clamp` says so: `spend`
+    /// prints a number that may pass 100 (SPEC § 3.3).
     #[must_use]
-    pub fn percent_unclamped(&self, cfg: &ModuleCfg, p: f64) -> String {
-        self.percent_style(cfg).format(p, false)
+    pub fn percent_with(&self, cfg: &ModuleCfg, p: f64, clamp: bool) -> String {
+        self.percent_style(cfg).format(p, clamp)
     }
 
     /// The number [`Ctx::percent`] prints, as a number: what a band
@@ -289,13 +316,13 @@ impl Ctx<'_> {
     /// § 3, § 4).
     #[must_use]
     pub fn percent_shown(&self, cfg: &ModuleCfg, p: f64) -> f64 {
-        self.percent_style(cfg).shown(p, true)
+        self.percent_shown_with(cfg, p, true)
     }
 
-    /// [`Ctx::percent_shown`] for a number that may pass 100 (`spend`).
+    /// The number [`Ctx::percent_with`] prints, as a number.
     #[must_use]
-    pub fn percent_shown_unclamped(&self, cfg: &ModuleCfg, p: f64) -> f64 {
-        self.percent_style(cfg).shown(p, false)
+    pub fn percent_shown_with(&self, cfg: &ModuleCfg, p: f64, clamp: bool) -> f64 {
+        self.percent_style(cfg).shown(p, clamp)
     }
 
     fn percent_style(&self, cfg: &ModuleCfg) -> PercentStyle {
@@ -471,7 +498,9 @@ pub struct RefreshCtx<'a> {
 pub trait Module: Send + Sync {
     /// The module's configuration schema.
     fn schema(&self) -> ModuleSchema;
-    /// Render for one tick. Must be cheap: no I/O beyond reading cache files.
+    /// Render for one tick. Must be cheap: never a process, and no I/O
+    /// beyond small reads (a cache entry, the `.git` files the repo group
+    /// reads, the settings chain through [`Ctx::settings`], once a tick).
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered;
     /// Cache scope for this module given a session and working directory.
     /// Payload-only modules never call this.
@@ -587,48 +616,42 @@ pub fn seg(cfg: &ModuleCfg, text: impl Into<String>, color_key: &str) -> Segment
     Segment::styled(text, Style::fg(cfg.color(color_key)))
 }
 
-/// A styled icon segment (empty when the icon set has no glyph), followed by a space.
-#[must_use]
-pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
+/// The leading glyph in the `icon` colour followed by `after`, or nothing
+/// when `show_icon` is off or the glyph is blank: [`lead`] and
+/// [`lead_only`] differ only in `after`.
+fn leading(cfg: &ModuleCfg, icon_key: &str, after: &str) -> Vec<Segment> {
     let glyph = cfg.icon(icon_key);
-    if glyph.is_empty() {
-        Vec::new()
-    } else {
-        vec![Segment::styled(format!("{glyph} "), Style::fg(cfg.color(color_key)))]
+    if !cfg.bool("show_icon") || glyph.is_empty() {
+        return Vec::new();
     }
+    vec![Segment::styled(format!("{glyph}{after}"), Style::fg(cfg.color("icon")))]
 }
 
-/// A module's leading icon: its `show_icon` option and its `icon` colour,
-/// which is how every module with a leading icon opens.
+/// A module's leading icon: its `show_icon` option ([`show_icon_opt`]) and
+/// its `icon` colour, then the space before the value, which is how every
+/// module with a leading icon opens.
 ///
 /// The one place the option and the colour key are spelled, so a module
 /// cannot quietly ignore `show_icon` or reach for a different colour.
 #[must_use]
 pub fn lead(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
-    if cfg.bool("show_icon") { icon(cfg, icon_key, "icon") } else { Vec::new() }
+    leading(cfg, icon_key, " ")
 }
 
 /// The leading glyph as a module's whole value (`sandbox` and `voice`
 /// under `style = "glyph"`, SPEC § 3.8).
 ///
 /// [`lead`] without the space that separates an icon from the value after
-/// it, so the badge is one cell and `align = true` counts it as one. The
-/// `show_icon` rule stays [`lead`]'s.
+/// it, so the badge is one cell and `align = true` counts it as one.
 #[must_use]
 pub fn lead_only(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
-    lead(cfg, icon_key)
-        .into_iter()
-        .map(|segment| {
-            let bare = segment.text().trim_end().to_owned();
-            segment.with_text(bare)
-        })
-        .collect()
+    leading(cfg, icon_key, "")
 }
 
 /// A trailing badge: a space and the icon in its own colour, or nothing when
 /// the icon set (or an override) leaves that glyph empty.
 ///
-/// The twin of [`icon`] for a glyph that follows the value — the dirty
+/// The twin of [`lead`] for a glyph that follows the value — the dirty
 /// marker, the exceeds-200k mark, a review state. Without the empty check a
 /// dropped glyph leaves a lone space, which is a segment like any other: the
 /// module gains a cell and `align = true` shifts the whole column.
@@ -652,8 +675,7 @@ pub fn glyph_prefix(cfg: &ModuleCfg, icon_key: &str) -> String {
 }
 
 /// The segment with its style dimmed (an overdue or failed value).
-#[must_use]
-pub const fn dimmed(mut segment: Segment) -> Segment {
+const fn dimmed(mut segment: Segment) -> Segment {
     segment.style = segment.style.dimmed();
     segment
 }
@@ -711,11 +733,6 @@ pub fn decorate(
     theme: &Theme,
     stale_glyphs: (&str, &str),
 ) -> Vec<Segment> {
-    // A failed module with nothing of its own is the one case `hide_when_empty`
-    // must not swallow: hiding it reports a broken git as an ordinary empty
-    // row. An *overdue* one still hides, because its last value really was
-    // nothing (an in-sync `sync` renders no segments), and showing `– ⟳` for
-    // it would flicker a row in every idle pause.
     if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hides_empty() {
         return Vec::new();
     }
@@ -783,10 +800,9 @@ mod tests {
         assert_eq!(marked.len(), 1);
         assert_eq!(marked.first().map(Segment::text), Some(&*format!(" {}", cfg.icon("dirty"))));
         // The same rule as the leading icon, which has always had it.
-        assert_eq!(
-            icon(&module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n"), "folder", "icon"),
-            Vec::new()
-        );
+        let blank = module_cfg("path", "[modules.path.icons]\nfolder = \"\"\n");
+        assert_eq!(lead(&blank, "folder"), Vec::new());
+        assert_eq!(lead_only(&blank, "folder"), Vec::new());
         // The interpolated shape: glyph and its space, or nothing at all.
         let cfg = module_cfg("cache", "");
         assert_eq!(glyph_prefix(&cfg, "warm"), format!("{} ", cfg.icon("warm")));
@@ -1062,32 +1078,14 @@ mod tests {
     #[test]
     fn a_detail_is_one_segment_plain_and_two_dim() {
         let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
-        let theme = Theme::default();
+        // The pinned clock turns workers off, so the cache is never touched.
         let cache = Cache::at(std::env::temp_dir().join("garnish-detail-test"));
         let (config, _) = crate::config::parse("", &SCHEMAS);
+        let theme = config.theme.clone();
         let cfg = config.modules.get("api").unwrap();
-        let mut ctx = Ctx {
-            payload: &payload,
-            theme: &theme,
-            icons: IconSet::Unicode,
-            now: Timestamp::from_second(1_738_425_600).unwrap(),
-            width: 80,
-            cache: &cache,
-            tz: jiff::tz::TimeZone::UTC,
-            home: None,
-            settings_env: crate::claude_settings::Env::default(),
-            git: false,
-            stale_after: 5,
-            durations: crate::time::DurationStyle::Compact,
-            format: FormatCfg::default(),
-            animate: false,
-            dirs: std::cell::OnceCell::new(),
-            head: std::cell::OnceCell::new(),
-            settings_chain: Vec::new(),
-            settings: std::cell::OnceCell::new(),
-            workers: false,
-            config_file: None,
-        };
+        let clock = crate::render::Clock::fixed();
+        let mut ctx = crate::render::context(&payload, &config, &clock, &cache, 80);
+        assert_eq!(ctx.format, FormatCfg::default());
         let plain = detail(&ctx, cfg, " 8m20s", "12%", "share");
         assert_eq!(plain.len(), 1);
         assert_eq!(plain[0].text(), " 8m20s (12%)");
@@ -1116,7 +1114,8 @@ mod tests {
         assert_eq!(ctx.tokens(context, 128_400), "128400");
         assert_eq!(ctx.percent(context, 42.34), "42.3%");
         assert_eq!(ctx.percent(cfg, 42.34), "42%");
-        assert_eq!(ctx.percent_unclamped(cfg, 112.4), "112%");
+        assert_eq!(ctx.percent_with(cfg, 112.4, false), "112%");
+        assert_eq!(ctx.percent_with(cfg, 112.4, true), "100%");
         assert_eq!(ctx.dollars(config.modules.get("cost").unwrap(), 1.2345, 2), "$1");
         assert_eq!(ctx.dollars(cfg, 1.2345, 2), "$1.23");
     }

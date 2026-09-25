@@ -63,8 +63,8 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `context` | `U+F2DB` | `⊞` | `🧠` | `ctx:` | Context icon. |
-| `fill` | `█` | `█` | `█` | `#` | Filled cell. |
-| `empty` | `░` | `░` | `░` | `-` | Empty cell. |
+| `fill` | `█` | `█` | `█` | `#` | Filled bar cell. |
+| `empty` | `░` | `░` | `░` | `-` | Empty bar cell. |
 | `marker` | `▏` | `▏` | `▏` | `|` | Compaction marker. |
 | `compact` | `⤓` | `⤓` | `⤓` | `compact@` | Compaction label glyph. |
 | `exceeds` | `‼` | `‼` | `‼` | `!!` | Exceeds-200k indicator. |

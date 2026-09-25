@@ -3,13 +3,13 @@
 use crate::ansi::{Segment, Style};
 use crate::claude_settings::{self, DEFAULT_COMPACT_BUFFER};
 use crate::config::schema::{
-    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Rule, Value,
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
 };
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{BAR_STYLES, bar};
-use super::{Ctx, Module, Rendered, badge, lead, seg};
+use super::util::{band_colors_opt, bar, bar_empty_color, bar_icons, bar_opt, thresholds_opt};
+use super::{Ctx, IconShown, Module, Rendered, badge, lead, seg, show_icon_opt};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
 /// percentage means.
@@ -25,6 +25,7 @@ pub struct ContextModule;
 
 impl Module for ContextModule {
     fn schema(&self) -> ModuleSchema {
+        let [fill, empty] = bar_icons();
         ModuleSchema {
             id: "context",
             measure: Some(MeasureKind::Percent),
@@ -46,12 +47,8 @@ impl Module for ContextModule {
                     doc: "Context icon.",
                     glyph: glyph("\u{f2db}", "⊞", "🧠", "ctx:"),
                 },
-                IconSpec {
-                    key: "fill", doc: "Filled cell.", glyph: glyph("█", "█", "█", "#")
-                },
-                IconSpec {
-                    key: "empty", doc: "Empty cell.", glyph: glyph("░", "░", "░", "-")
-                },
+                fill,
+                empty,
                 IconSpec {
                     key: "marker",
                     doc: "Compaction marker.",
@@ -76,7 +73,7 @@ impl Module for ContextModule {
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent" },
                 ColorSpec { key: "percent", doc: "Percentage text.", default: "text" },
-                ColorSpec { key: "empty", doc: "Empty part of the bar.", default: "muted" },
+                bar_empty_color(),
                 ColorSpec { key: "marker", doc: "Compaction marker.", default: "warn" },
                 ColorSpec { key: "exceeds", doc: "Exceeds-200k indicator.", default: "danger" },
                 ColorSpec { key: "window", doc: "Window size tag.", default: "muted" },
@@ -166,33 +163,16 @@ fn opts() -> Vec<OptSpec> {
             .minimal(Value::Int(0))
             .full(Value::Int(30))
             .max(crate::config::MAX_CELLS),
-        OptSpec::new(
-            "bar",
-            Kind::Enum(BAR_STYLES),
-            "Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
-            Value::Str("blocks".into()),
-        ),
-        OptSpec::new("show_icon", Kind::Bool, "Show the context icon.", Value::Bool(true))
-            .minimal(Value::Bool(false)),
+        bar_opt(),
+        show_icon_opt("Show the context icon.", IconShown::ExceptMinimal),
         OptSpec::new(
             "show_percent",
             Kind::Bool,
             "Show the percentage after the bar.",
             Value::Bool(true),
         ),
-        OptSpec::new(
-            "thresholds",
-            Kind::NumList,
-            "Ascending percentages where the band color changes.",
-            Value::NumList(vec![50.0, 75.0, 90.0]),
-        )
-        .rule(Rule::Ascending),
-        OptSpec::new(
-            "band_colors",
-            Kind::ColorList,
-            "One color per band (roles or literal colors).",
-            Value::StrList(vec!["band1".into(), "band2".into(), "band3".into(), "band4".into()]),
-        ),
+        thresholds_opt(),
+        band_colors_opt(),
         OptSpec::new(
             "scale",
             Kind::Enum(SCALES),

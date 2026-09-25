@@ -45,10 +45,10 @@ Percentage of the applicable spend limit consumed (can exceed 100%) and a countd
 | `reset` | `countdown` \| `absolute` \| `both` | `"countdown"` | `"countdown"` | `"countdown"` | How the reset shows: `countdown` (`⏱27d8h`), `absolute` the local date the window resets on, since it is weeks away and a clock time alone would read as tonight (`⏱Mar 1`), or `both` (`27d8h (Mar 1)`); `show_reset = false` hides every form. |
 | `bar_width` | integer ≤ 1024 | `0` | `0` | `8` | Mini bar width in cells; 0 hides it. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
-| `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the color changes. |
+| `thresholds` | list of numbers | `[50, 75, 90]` | `[50, 75, 90]` | `[50, 75, 90]` | Ascending percentages where the band color changes. |
 | `durations` | `inherit` \| `compact` \| `fixed` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. |
 | `percent` | `inherit` \| `whole` \| `precise` | `"inherit"` | `"inherit"` | `"inherit"` | How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. |
-| `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band. |
+| `band_colors` | list of colors | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | `["band1", "band2", "band3", "band4"]` | One color per band (roles or literal colors). |
 
 ## Icons
 
@@ -57,9 +57,9 @@ Percentage of the applicable spend limit consumed (can exceed 100%) and a countd
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `window` | `U+F0D6` | `$` | `💳` | `spend` | Window icon. |
-| `reset` | `U+F017` | `⏱` | `⏰` | `reset` | Countdown glyph. |
-| `fill` | `█` | `█` | `█` | `#` | Bar filled cell. |
-| `empty` | `░` | `░` | `░` | `-` | Bar empty cell. |
+| `reset` | `U+F017` | `⏱` | `⏰` | `reset` | The reset's glyph, in every `reset` form. |
+| `fill` | `█` | `█` | `█` | `#` | Filled bar cell. |
+| `empty` | `░` | `░` | `░` | `-` | Empty bar cell. |
 
 Also try (`window`: `U+F250` `U+F133` `⏳` `≣` `⌛`; `fill`: `█` `━` `▓` `#` `=`; `empty`: `░` `─` `▒` `.` `-`).
 
@@ -73,5 +73,5 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent2` | Icon. |
-| `reset` | `muted` | Countdown. |
-| `empty` | `muted` | Bar empty part. |
+| `reset` | `muted` | The reset, in every `reset` form. |
+| `empty` | `muted` | Empty part of the bar. |

@@ -473,9 +473,9 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # context — Context icon.
 context = ""
-# fill — Filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Empty cell.
+# empty — Empty bar cell.
 empty = "░"
 # marker — Compaction marker.
 marker = "▏"
@@ -561,13 +561,13 @@ max_width = 0
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
-# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # durations = "inherit"
 # percent (`inherit` | `whole` | `precise`) — How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # percent = "inherit"
-# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 # pace (bool) — Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. [minimal=false default=false full=false]
 # pace = false
@@ -581,11 +581,11 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
-# reset — Countdown glyph.
+# reset — The reset's glyph, in every `reset` form.
 reset = ""
-# fill — Bar filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Bar empty cell.
+# empty — Empty bar cell.
 empty = "░"
 # ahead — Ahead-of-pace glyph.
 ahead = "⇡"
@@ -598,9 +598,9 @@ marker = "▏"
 [modules.limit5h.colors]
 # icon — Icon.
 icon = "accent2"
-# reset — Countdown.
+# reset — The reset, in every `reset` form.
 reset = "muted"
-# empty — Bar empty part.
+# empty — Empty part of the bar.
 empty = "muted"
 # ahead — Pace delta, ahead.
 ahead = "hot"
@@ -645,13 +645,13 @@ max_width = 0
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
-# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # durations = "inherit"
 # percent (`inherit` | `whole` | `precise`) — How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # percent = "inherit"
-# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 # pace (bool) — Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. [minimal=false default=false full=false]
 # pace = false
@@ -665,11 +665,11 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
-# reset — Countdown glyph.
+# reset — The reset's glyph, in every `reset` form.
 reset = ""
-# fill — Bar filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Bar empty cell.
+# empty — Empty bar cell.
 empty = "░"
 # ahead — Ahead-of-pace glyph.
 ahead = "⇡"
@@ -682,9 +682,9 @@ marker = "▏"
 [modules.limit7d.colors]
 # icon — Icon.
 icon = "accent2"
-# reset — Countdown.
+# reset — The reset, in every `reset` form.
 reset = "muted"
-# empty — Bar empty part.
+# empty — Empty part of the bar.
 empty = "muted"
 # ahead — Pace delta, ahead.
 ahead = "hot"
@@ -729,30 +729,30 @@ max_width = 0
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
-# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # durations = "inherit"
 # percent (`inherit` | `whole` | `precise`) — How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # percent = "inherit"
-# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.spend.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
-# reset — Countdown glyph.
+# reset — The reset's glyph, in every `reset` form.
 reset = ""
-# fill — Bar filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Bar empty cell.
+# empty — Empty bar cell.
 empty = "░"
 [modules.spend.colors]
 # icon — Icon.
 icon = "accent2"
-# reset — Countdown.
+# reset — The reset, in every `reset` form.
 reset = "muted"
-# empty — Bar empty part.
+# empty — Empty part of the bar.
 empty = "muted"
 
 # cost — Estimated session cost in USD.
@@ -1109,16 +1109,16 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # lines — Diff icon.
 lines = ""
-# added — Added glyph.
+# added — Lines-added glyph.
 added = "+"
-# removed — Removed glyph.
+# removed — Lines-removed glyph.
 removed = "−"
 [modules.lines.colors]
 # icon — Icon.
 icon = "accent2"
-# added — Added count.
+# added — Lines added.
 added = "ok"
-# removed — Removed count.
+# removed — Lines removed.
 removed = "danger"
 # net — Net delta.
 net = "muted"

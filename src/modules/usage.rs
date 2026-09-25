@@ -2,15 +2,18 @@
 
 use crate::ansi::{Segment, Style};
 use crate::config::schema::{
-    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Rule, Value,
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
 };
 use crate::icons::{Glyph, glyph};
 use crate::num::{clamp_percent, round_to_u64, u64_to_f64};
 use crate::payload::RateWindow;
 use crate::time::WallClock;
 
-use super::util::{BAR_STYLES, bar};
-use super::{Ctx, Module, Rendered, detail, glyph_prefix, lead, seg};
+use super::util::{
+    added_removed, added_removed_colors, added_removed_icons, band_colors_opt, bar,
+    bar_empty_color, bar_icons, bar_opt, thresholds_opt,
+};
+use super::{Ctx, IconShown, Module, Rendered, detail, glyph_prefix, lead, seg, show_icon_opt};
 
 /// Which rate-limit window a limit module shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,24 +204,21 @@ impl Module for LimitModule {
         // `spend` has no length and takes none of them.
         let windowed = self.0.length_secs().is_some();
         let mut opts = limit_opts(self.0, windowed);
+        let [fill, empty] = bar_icons();
         let mut icons = vec![
             IconSpec { key: "window", doc: "Window icon.", glyph: icon_glyph },
             IconSpec {
                 key: "reset",
-                doc: "Countdown glyph.",
+                doc: "The reset's glyph, in every `reset` form.",
                 glyph: glyph("\u{f017}", "⏱", "⏰", "reset"),
             },
-            IconSpec {
-                key: "fill", doc: "Bar filled cell.", glyph: glyph("█", "█", "█", "#")
-            },
-            IconSpec {
-                key: "empty", doc: "Bar empty cell.", glyph: glyph("░", "░", "░", "-")
-            },
+            fill,
+            empty,
         ];
         let mut colors = vec![
             ColorSpec { key: "icon", doc: "Icon.", default: "accent2" },
-            ColorSpec { key: "reset", doc: "Countdown.", default: "muted" },
-            ColorSpec { key: "empty", doc: "Bar empty part.", default: "muted" },
+            ColorSpec { key: "reset", doc: "The reset, in every `reset` form.", default: "muted" },
+            bar_empty_color(),
         ];
         if windowed {
             let (pace_opts, pace_icons, pace_colors) = pace_keys();
@@ -247,11 +247,8 @@ impl Module for LimitModule {
         // The band follows the number the row prints, which for `spend` may
         // pass 100 (SPEC § 3.3). Clamping it there capped the band at the
         // one holding 100, so a threshold above 100 could never be reached.
-        let shown = if self.0 == Window::Spend {
-            ctx.percent_shown_unclamped(cfg, used)
-        } else {
-            ctx.percent_shown(cfg, used)
-        };
+        let clamp = self.0 != Window::Spend;
+        let shown = ctx.percent_shown_with(cfg, used, clamp);
         // SPEC § 3.3: the pace is computed once, only when a switch wants it,
         // and only for a window whose length is known.
         let wants_pace = cfg.bool("pace")
@@ -290,11 +287,7 @@ impl Module for LimitModule {
             ));
             segs.push(Segment::plain(" "));
         }
-        let text = if self.0 == Window::Spend {
-            ctx.percent_unclamped(cfg, used)
-        } else {
-            ctx.percent(cfg, used)
-        };
+        let text = ctx.percent_with(cfg, used, clamp);
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
         if cfg.bool("pace")
             && let Some(p) = pace
@@ -325,8 +318,7 @@ impl Module for LimitModule {
 /// the elapsed form (SPEC § 3.3).
 fn limit_opts(window: Window, windowed: bool) -> Vec<OptSpec> {
     vec![
-        OptSpec::new("show_icon", Kind::Bool, "Show the window icon.", Value::Bool(true))
-            .minimal(Value::Bool(false)),
+        show_icon_opt("Show the window icon.", IconShown::ExceptMinimal),
         OptSpec::new(
             "show_reset",
             Kind::Bool,
@@ -343,27 +335,11 @@ fn limit_opts(window: Window, windowed: bool) -> Vec<OptSpec> {
         OptSpec::new("bar_width", Kind::Int, "Mini bar width in cells; 0 hides it.", Value::Int(0))
             .full(Value::Int(8))
             .max(crate::config::MAX_CELLS),
-        OptSpec::new(
-            "bar",
-            Kind::Enum(BAR_STYLES),
-            "Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
-            Value::Str("blocks".into()),
-        ),
-        OptSpec::new(
-            "thresholds",
-            Kind::NumList,
-            "Ascending percentages where the color changes.",
-            Value::NumList(vec![50.0, 75.0, 90.0]),
-        )
-        .rule(Rule::Ascending),
+        bar_opt(),
+        thresholds_opt(),
         super::durations_opt(),
         super::format_opt(super::NumberKind::Percent),
-        OptSpec::new(
-            "band_colors",
-            Kind::ColorList,
-            "One color per band.",
-            Value::StrList(vec!["band1".into(), "band2".into(), "band3".into(), "band4".into()]),
-        ),
+        band_colors_opt(),
     ]
 }
 
@@ -428,7 +404,8 @@ fn pace_keys() -> (Vec<OptSpec>, Vec<IconSpec>, Vec<ColorSpec>) {
 /// the `behind` colour; the number follows the module's percent style.
 fn pace_segment(ctx: &Ctx<'_>, cfg: &ModuleCfg, delta: f64) -> Segment {
     let text = ctx.percent(cfg, delta.abs());
-    let zero = text.chars().all(|c| matches!(c, '0' | '.' | '%'));
+    // Zero as printed, the rule every band and `hide` test follows.
+    let zero = ctx.percent_shown(cfg, delta.abs()) <= 0.0;
     let (icon_key, color_key) =
         if delta > 0.0 && !zero { ("ahead", "ahead") } else { ("behind", "behind") };
     let arrow = if zero { "" } else { cfg.icon(icon_key) };
@@ -464,6 +441,8 @@ pub struct CostModule;
 
 impl Module for CostModule {
     fn schema(&self) -> ModuleSchema {
+        let [added, removed] = added_removed_icons();
+        let [added_color, removed_color] = added_removed_colors();
         ModuleSchema {
             id: "cost",
             measure: Some(MeasureKind::Amount),
@@ -477,8 +456,7 @@ impl Module for CostModule {
             ],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the cost icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the cost icon.", IconShown::ExceptMinimal),
                 OptSpec::new("decimals", Kind::Int, "Decimal places.", Value::Int(2))
                     .max(crate::config::MAX_DECIMALS),
                 OptSpec::new(
@@ -500,22 +478,14 @@ impl Module for CostModule {
                 IconSpec {
                     key: "cost", doc: "Cost icon.", glyph: glyph("\u{f155}", "", "💵", "")
                 },
-                IconSpec {
-                    key: "added",
-                    doc: "Lines-added glyph.",
-                    glyph: glyph("+", "+", "+", "+"),
-                },
-                IconSpec {
-                    key: "removed",
-                    doc: "Lines-removed glyph.",
-                    glyph: glyph("−", "−", "−", "-"),
-                },
+                added,
+                removed,
             ],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "ok" },
                 ColorSpec { key: "amount", doc: "Amount.", default: "text" },
-                ColorSpec { key: "added", doc: "Lines added.", default: "ok" },
-                ColorSpec { key: "removed", doc: "Lines removed.", default: "danger" },
+                added_color,
+                removed_color,
             ],
         }
     }
@@ -535,8 +505,7 @@ impl Module for CostModule {
         if cfg.bool("show_lines") {
             let added = cost.total_lines_added.unwrap_or(0);
             let removed = cost.total_lines_removed.unwrap_or(0);
-            segs.push(seg(cfg, format!(" {}{added}", cfg.icon("added")), "added"));
-            segs.push(seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"));
+            segs.extend(added_removed(cfg, " ", added, removed));
         }
         // The amount as printed, so `zero` is what reads as zero (SPEC § 3).
         let shown = ctx.dollars_shown(cfg, usd, decimals);

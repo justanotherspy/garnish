@@ -1,8 +1,10 @@
-//! Shared rendering helpers: smooth bars, name cuts, short hashes, token
-//! and dollar formatting. Percentages print through `config::format`.
+//! Shared rendering helpers: smooth bars and the specs of the keys that
+//! draw them, the lines-changed pair, name cuts, short hashes, token and
+//! dollar formatting. Percentages print through `config::format`.
 
 use crate::ansi::{Color, Segment, Style};
-use crate::icons::IconSet;
+use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, OptSpec, Rule, Value};
+use crate::icons::{IconSet, glyph};
 use crate::num::{floor_to_u64, u64_to_usize, usize_to_f64};
 
 /// Eighth-block characters for sub-cell precision, from 1/8 to 7/8.
@@ -87,6 +89,95 @@ pub fn bar(
 /// `ModuleCfg::resolve` applies the shorthand to the `fill`/`empty` icons; an
 /// explicit override still wins.
 pub const BAR_STYLES: &[&str] = &["blocks", "line"];
+
+/// The `bar` option of every module that draws a [`bar`] (`context` and the
+/// limit modules), so its long doc is written once (the shape of
+/// [`super::durations_opt`]).
+#[must_use]
+pub fn bar_opt() -> OptSpec {
+    OptSpec::new(
+        "bar",
+        Kind::Enum(BAR_STYLES),
+        "Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
+        Value::Str("blocks".into()),
+    )
+}
+
+/// The `thresholds` option of a module whose percentage is banded: a band
+/// is the number of thresholds reached, so the list must ascend.
+#[must_use]
+pub fn thresholds_opt() -> OptSpec {
+    OptSpec::new(
+        "thresholds",
+        Kind::NumList,
+        "Ascending percentages where the band color changes.",
+        Value::NumList(vec![50.0, 75.0, 90.0]),
+    )
+    .rule(Rule::Ascending)
+}
+
+/// The `band_colors` option beside [`thresholds_opt`]: one colour per
+/// band, the theme's four band roles by default.
+#[must_use]
+pub fn band_colors_opt() -> OptSpec {
+    OptSpec::new(
+        "band_colors",
+        Kind::ColorList,
+        "One color per band (roles or literal colors).",
+        Value::StrList(vec!["band1".into(), "band2".into(), "band3".into(), "band4".into()]),
+    )
+}
+
+/// The `fill` and `empty` glyphs a [`bar`] repeats cell by cell. Their
+/// defaults are what `bar` smooths (`█`) and what the `bar = "line"`
+/// shorthand replaces, so every bar module declares the same two.
+#[must_use]
+pub const fn bar_icons() -> [IconSpec; 2] {
+    [
+        IconSpec { key: "fill", doc: "Filled bar cell.", glyph: glyph("█", "█", "█", "#") },
+        IconSpec { key: "empty", doc: "Empty bar cell.", glyph: glyph("░", "░", "░", "-") },
+    ]
+}
+
+/// The colour of a [`bar`]'s empty part (the filled part takes the band's).
+#[must_use]
+pub const fn bar_empty_color() -> ColorSpec {
+    ColorSpec { key: "empty", doc: "Empty part of the bar.", default: "muted" }
+}
+
+/// The `added` and `removed` glyphs of a module that prints lines changed
+/// ([`added_removed`]): `lines`, and `cost` under `show_lines`.
+#[must_use]
+pub const fn added_removed_icons() -> [IconSpec; 2] {
+    [
+        IconSpec { key: "added", doc: "Lines-added glyph.", glyph: glyph("+", "+", "+", "+") },
+        IconSpec {
+            key: "removed", doc: "Lines-removed glyph.", glyph: glyph("−", "−", "−", "-")
+        },
+    ]
+}
+
+/// The colours of [`added_removed_icons`]' two counts.
+#[must_use]
+pub const fn added_removed_colors() -> [ColorSpec; 2] {
+    [
+        ColorSpec { key: "added", doc: "Lines added.", default: "ok" },
+        ColorSpec { key: "removed", doc: "Lines removed.", default: "danger" },
+    ]
+}
+
+/// Lines added and removed, `+156 −23`, each count in its own colour.
+///
+/// The keys are those of [`added_removed_icons`] and
+/// [`added_removed_colors`]. `before` opens the first segment (the space
+/// after a value, or nothing after a leading icon).
+#[must_use]
+pub fn added_removed(cfg: &ModuleCfg, before: &str, added: u64, removed: u64) -> Vec<Segment> {
+    vec![
+        super::seg(cfg, format!("{before}{}{added}", cfg.icon("added")), "added"),
+        super::seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"),
+    ]
+}
 
 /// Format dollars: `$0.42`, `$12.35`, `$1.2k`; the amount is bounded like
 /// every printed one ([`crate::num::shown_amount`]).
@@ -330,6 +421,51 @@ mod tests {
 
     fn icon_pair(cfg: &crate::config::schema::ModuleCfg) -> (&str, &str) {
         (cfg.icon("fill"), cfg.icon("empty"))
+    }
+
+    /// A shared key is declared by its one spec wherever it appears: every
+    /// module with a bar has the whole bar vocabulary, docs included, and
+    /// every module with lines changed has the pair. Written out per module
+    /// the docs had drifted apart ("where the color changes" against
+    /// "where the band color changes").
+    #[test]
+    fn shared_keys_are_declared_by_their_one_spec() {
+        use crate::modules::{IconShown, SCHEMAS, show_icon_opt};
+        let mut bars = 0_usize;
+        let mut pairs = 0_usize;
+        for schema in SCHEMAS.iter() {
+            if schema.opt("bar").is_some() {
+                bars += 1;
+                assert_eq!(schema.opt("bar"), Some(&bar_opt()), "{}", schema.id);
+                assert_eq!(schema.opt("thresholds"), Some(&thresholds_opt()), "{}", schema.id);
+                assert_eq!(schema.opt("band_colors"), Some(&band_colors_opt()), "{}", schema.id);
+                let [fill, empty] = bar_icons();
+                assert_eq!(schema.icon("fill"), Some(&fill), "{}", schema.id);
+                assert_eq!(schema.icon("empty"), Some(&empty), "{}", schema.id);
+                assert_eq!(schema.color("empty"), Some(&bar_empty_color()), "{}", schema.id);
+            }
+            // `path`'s own `added` counts added directories; `removed` is
+            // the lines pair alone.
+            if schema.icon("removed").is_some() {
+                pairs += 1;
+                let [added, removed] = added_removed_icons();
+                let [added_color, removed_color] = added_removed_colors();
+                assert_eq!(schema.icon("added"), Some(&added), "{}", schema.id);
+                assert_eq!(schema.icon("removed"), Some(&removed), "{}", schema.id);
+                assert_eq!(schema.color("added"), Some(&added_color), "{}", schema.id);
+                assert_eq!(schema.color("removed"), Some(&removed_color), "{}", schema.id);
+            }
+            // `show_icon` keeps each module's doc; its shape is one of three.
+            if let Some(spec) = schema.opt("show_icon") {
+                let shapes = [IconShown::ExceptMinimal, IconShown::OnlyFull, IconShown::Always];
+                assert!(
+                    shapes.iter().any(|shown| *spec == show_icon_opt(spec.doc, *shown)),
+                    "{}: {spec:?}",
+                    schema.id
+                );
+            }
+        }
+        assert_eq!((bars, pairs), (4, 2), "context and the three limits; cost and lines");
     }
 
     #[test]

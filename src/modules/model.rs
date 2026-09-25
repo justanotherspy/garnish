@@ -5,7 +5,7 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, Rendered, badge, lead, seg};
+use super::{Ctx, IconShown, Module, Rendered, badge, lead, seg, show_icon_opt};
 
 /// `model`: display name, fast-mode and thinking glyphs, optionally the model id.
 pub struct ModelModule;
@@ -20,8 +20,7 @@ impl Module for ModelModule {
             sources: &["model.display_name", "model.id", "fast_mode", "thinking.enabled"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the model icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the model icon.", IconShown::ExceptMinimal),
                 OptSpec::new("show_id", Kind::Bool, "Append the raw model id.", Value::Bool(false))
                     .full(Value::Bool(true)),
                 OptSpec::new(
@@ -115,8 +114,7 @@ impl Module for EffortModule {
                 )
                 .minimal(Value::Str("word".into()))
                 .full(Value::Str("both".into())),
-                OptSpec::new("show_icon", Kind::Bool, "Show the effort icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the effort icon.", IconShown::ExceptMinimal),
             ],
             icons: vec![
                 IconSpec {
@@ -185,8 +183,7 @@ impl Module for StyleModule {
                     Value::Bool(true),
                 )
                 .full(Value::Bool(false)),
-                OptSpec::new("show_icon", Kind::Bool, "Show the style icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the style icon.", IconShown::ExceptMinimal),
             ],
             icons: vec![IconSpec {
                 key: "style",

@@ -8,7 +8,9 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::{Ctx, Module, Rendered, badge, detail, glyph_prefix, lead, seg};
+use super::{
+    Ctx, IconShown, Module, Rendered, badge, detail, glyph_prefix, lead, seg, show_icon_opt,
+};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -23,8 +25,7 @@ impl Module for SessionModule {
             sources: &["cost.total_duration_ms"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_start",
                     Kind::Bool,
@@ -79,8 +80,7 @@ impl Module for ApiModule {
             sources: &["cost.total_api_duration_ms", "cost.total_duration_ms"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_share",
                     Kind::Bool,
@@ -136,8 +136,7 @@ impl Module for CacheModule {
             sources: &["prompt_cache.*", "context_window.current_usage"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new("show_ttl", Kind::Bool, "Show the TTL badge.", Value::Bool(true))
                     .minimal(Value::Bool(false)),
                 OptSpec::new(

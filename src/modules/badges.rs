@@ -15,7 +15,7 @@ use crate::claude_settings::{self, FileKeys};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, RefreshCtx, Rendered, lead, lead_only, seg};
+use super::{Ctx, IconShown, Module, RefreshCtx, Rendered, lead, lead_only, seg, show_icon_opt};
 
 /// How a settings badge shows: the glyph alone, or the glyph and its word.
 const BADGE_STYLES: &[&str] = &["glyph", "word"];
@@ -48,7 +48,7 @@ fn badge_schema(
         sources,
         refresh: 0,
         opts: vec![
-            OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true)),
+            show_icon_opt("Show the icon.", IconShown::Always),
             OptSpec::new(
                 "style",
                 Kind::Enum(BADGE_STYLES),
@@ -146,8 +146,7 @@ impl Module for AccountModule {
             sources: &["~/.claude.json oauthAccount.emailAddress (worker)"],
             refresh: 600,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "style",
                     Kind::Enum(ACCOUNT_STYLES),
