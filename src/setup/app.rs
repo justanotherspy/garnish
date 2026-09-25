@@ -166,7 +166,6 @@ pub struct App {
     options: Options,
     home: Option<PathBuf>,
     quit: bool,
-    comments_note_shown: bool,
     no_color: bool,
 }
 
@@ -206,7 +205,6 @@ impl App {
             options,
             home,
             quit: false,
-            comments_note_shown: false,
             no_color,
         };
         if has_file {
@@ -226,6 +224,12 @@ impl App {
                     app.first_problem()
                 ),
                 Level::Warn,
+            );
+        } else if has_file && app.draft.loses_comments() {
+            // Said before anything is lost, and short enough for 80 columns.
+            app.say(
+                "this file has comments: s writes it without them (its backup keeps them)".into(),
+                Level::Info,
             );
         }
         app

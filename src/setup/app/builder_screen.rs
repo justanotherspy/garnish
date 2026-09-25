@@ -283,20 +283,21 @@ impl App {
             ));
             return;
         }
+        let rewrote = self.draft.loses_comments();
         match self.draft.save() {
             Ok(backup) => {
                 let path = self.draft.path().map_or_else(String::new, |p| self.shown(p));
-                let mut note =
-                    backup.map_or_else(String::new, |b| format!(" (backup: {})", self.shown(&b)));
-                if !self.comments_note_shown {
-                    self.comments_note_shown = true;
-                    if !note.is_empty() {
-                        note.push_str(
-                            "; a hand-written file's comments live on in the backup only",
-                        );
-                    }
-                }
-                self.say(format!("saved {path}{note}"), Level::Info);
+                // What the save dropped comes first: a line holding two
+                // paths is cut long before its end on an 80-column screen.
+                let line = match backup {
+                    Some(b) if rewrote => format!(
+                        "saved; the old file's comments live on in its backup only, {}",
+                        self.shown(&b)
+                    ),
+                    Some(b) => format!("saved {path} (backup: {})", self.shown(&b)),
+                    None => format!("saved {path}"),
+                };
+                self.say(line, Level::Info);
             }
             Err(e) => self.say(e, Level::Error),
         }

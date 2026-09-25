@@ -1896,8 +1896,11 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
 - **Saving.** Edits live in memory as the file's own table (see the
   differences above), and `s` writes it back (with the § 5 backup), so a
   hand-written file's ordering survives a save and its comments do not;
-  the status bar says so with the first save that keeps a backup, and the
-  backup keeps the original. Because the tick re-reads the config every second, a saved
+  the status bar says so on opening a file that has comments (a `#`
+  outside every string) and again, ahead of the backup's path, with the
+  save that drops them, and the backup keeps the original (2026-09-25
+  review: the one warning had come after two paths, past the right edge
+  of an 80-column screen). Because the tick re-reads the config every second, a saved
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,

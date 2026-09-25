@@ -76,6 +76,9 @@ pub struct Draft {
     path: Option<PathBuf>,
     stamp: Option<Stamp>,
     unreadable: Option<String>,
+    /// The file holds comments, which a save cannot write back: the backup
+    /// alone keeps them.
+    comments: bool,
 }
 
 impl Draft {
@@ -87,10 +90,14 @@ impl Draft {
         let mut draft = Self::from_text("");
         let Some(p) = path else { return draft };
         match std::fs::read_to_string(&p) {
-            Ok(text) => match config::syntax_error(&text) {
-                Some(problem) => draft.unreadable = Some(problem),
-                None => draft = Self::from_text(&text),
-            },
+            Ok(text) => {
+                if let Some(problem) = config::syntax_error(&text) {
+                    draft.unreadable = Some(problem);
+                } else {
+                    draft = Self::from_text(&text);
+                    draft.comments = has_comment(&text);
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => draft.unreadable = Some(format!("cannot read: {e}")),
         }
@@ -117,7 +124,14 @@ impl Draft {
         {
             table.insert("hide_empty_rows".to_owned(), v);
         }
-        Self { saved: table.clone(), table, path: None, stamp: None, unreadable: None }
+        Self {
+            saved: table.clone(),
+            table,
+            path: None,
+            stamp: None,
+            unreadable: None,
+            comments: false,
+        }
     }
 
     /// A draft for a preset: a built-in name gives `preset = "<name>"` with
@@ -162,6 +176,14 @@ impl Draft {
         if !was_dirty {
             self.saved = self.table.clone();
         }
+    }
+
+    /// Whether the next save drops comments the file holds (the backup
+    /// alone then keeps them): from opening such a file until its first
+    /// save.
+    #[must_use]
+    pub const fn loses_comments(&self) -> bool {
+        self.comments
     }
 
     /// Why the file on disk cannot be saved over: its TOML syntax error, or
@@ -347,6 +369,7 @@ impl Draft {
         let backup = crate::install::replace_file(&path, &text, existed)?;
         self.stamp = Stamp::of(&path);
         self.saved = self.table.clone();
+        self.comments = false;
         Ok(backup)
     }
 
@@ -387,6 +410,49 @@ impl Draft {
         }
         orphans
     }
+}
+
+/// Whether TOML text (text that parses) holds a comment: a `#` outside
+/// every kind of string.
+fn has_comment(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let at = |i: usize| chars.get(i).copied();
+    let mut i = 0_usize;
+    while let Some(c) = at(i) {
+        if c == '#' {
+            return true;
+        }
+        if c != '"' && c != '\'' {
+            i = i.saturating_add(1);
+            continue;
+        }
+        let triple = at(i.saturating_add(1)) == Some(c) && at(i.saturating_add(2)) == Some(c);
+        let quote = if triple { 3 } else { 1 };
+        i = i.saturating_add(quote);
+        loop {
+            match at(i) {
+                None => return false,
+                // Only a basic string escapes; `\"` is not its end.
+                Some('\\') if c == '"' => i = i.saturating_add(2),
+                Some(q)
+                    if q == c
+                        && (!triple
+                            || (at(i.saturating_add(1)) == Some(c)
+                                && at(i.saturating_add(2)) == Some(c))) =>
+                {
+                    i = i.saturating_add(quote);
+                    // A multi-line string may end in one or two quotes of
+                    // its own right before its closing three.
+                    while triple && at(i) == Some(c) {
+                        i = i.saturating_add(1);
+                    }
+                    break;
+                }
+                Some(_) => i = i.saturating_add(1),
+            }
+        }
+    }
+    false
 }
 
 /// The status line for the `[box.<name>]` tables
@@ -525,6 +591,34 @@ mod tests {
         assert_eq!(g.prune_orphan_boxes(), vec!["orphan".to_owned()]);
         assert!(g.get(&["box", "orphan"]).is_none() && g.get(&["box", "i"]).is_some());
         assert_eq!(g.prune_orphan_boxes(), Vec::<String>::new());
+    }
+
+    /// app-04: a comment is a `#` outside every kind of string, which is
+    /// what a save loses.
+    #[test]
+    fn comments_are_found_outside_strings_only() {
+        for (text, want) in [
+            ("# a comment\ntheme = \"nord\"\n", true),
+            ("theme = \"nord\" # after a value\n", true),
+            ("sep = \" # \"\n", false),
+            ("sep = ' # '\n", false),
+            ("\"key#1\" = 1\n", false),
+            ("t = \"\"\"a # b\"\"\"\n", false),
+            ("t = '''a # b'''\n", false),
+            ("t = \"\"\"a\"\"\"\" # c\n", true),
+            ("t = \"a\\\"#\"\n", false),
+            ("e = ''\nf = \"\" # c\n", true),
+            ("theme = \"nord\"\n", false),
+        ] {
+            assert_eq!(has_comment(text), want, "{text}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("garnish.toml");
+        std::fs::write(&path, "# mine\ntheme = \"nord\"\n").unwrap();
+        let mut d = Draft::open(Some(path));
+        assert!(d.loses_comments());
+        d.save().unwrap();
+        assert!(!d.loses_comments(), "the file has none left to lose");
     }
 
     /// app-03, frm-01: a `[box.<name>]` or a `[modules.text.<name>]` is

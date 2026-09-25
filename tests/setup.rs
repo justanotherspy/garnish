@@ -1051,6 +1051,31 @@ fn a_reported_key_is_unset_from_its_form() {
     assert!(app.draft().get(&["modules", "clock"]).is_none());
 }
 
+/// app-04: that a save drops a hand-written file's comments is said where
+/// an 80-column screen shows it: on opening, and at the front of the
+/// first save's line, not after two long paths.
+#[test]
+fn the_comment_warning_is_visible_on_an_80_column_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join(".config/garnish/garnish.toml");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "# my own line\n[[row]]\nmodules = [\"path\", \"clock\"]\n").unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.lines().nth(22).unwrap().contains("comments"), "on opening: {shot}");
+    keys(&mut app, "<right>xs");
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.lines().nth(22).unwrap().contains("comments"), "on saving: {shot}");
+    // The file is garnish's own layout now: the next save loses nothing.
+    keys(&mut app, "<right>xs");
+    assert!(!app.status().unwrap().contains("comments"), "{:?}", app.status());
+    // A file already in that layout says nothing on opening.
+    let mut again = for_test("", Some(file), home);
+    assert_eq!(again.status(), None);
+    assert!(!snapshot(&mut again, 80, 24).contains("comments"));
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
