@@ -1778,11 +1778,17 @@ per-module render cost.
   byte-identically before and after the model (a plain line is one
   column) and under either name (`[[line]]`, `[[row]]`); and the
   lines-per-row output tiles each line exactly (the placement map of
-  § 14 reads it). `tests/presets.rs` renders every preset without `…` at
-  its declared width at three instants (a preset that promises motion
-  must differ between two of them, and a line ticker must slide exactly
-  `ticker_step` cells, so a scrolled row carries nothing that counts
-  seconds).
+  § 14 reads it). `tests/presets.rs` renders every preset uncut at its
+  declared width at three instants: no `…`, no layout cut, and the same
+  modules and titles as 200 columns wider (a cut found by structure, since
+  the ascii set's `..` is also one of its glyphs). Each promise of motion
+  is checked on its own from the parsed config: a rule pattern, separator
+  frames, a module's icon frames and a scrolling text module must each
+  move, a line ticker must slide exactly `ticker_step` cells (so a
+  scrolled row carries nothing that counts seconds), and `animate =
+  false` must render the same at two ticks of one minute (2026-09-25
+  review: a whole-row diff let the travelling rule hide `animated-dots`'
+  blank model frames).
 - **Setup snapshots** (PLAN Phase 22): the `setup` screens are rendered
   into ratatui's `TestBackend` (80 × 24, 100 × 30 and 140 × 40) and
   compared with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1`
@@ -1870,8 +1876,11 @@ binary. Everything else is a **gallery preset**: a complete config file under
   and the `subscription-full` payload at its declared width into
   `docs/presets.md`: name, summary, requirements, the sample, and the file's
   contents in a collapsed block. `tests/docs_sync.rs` keeps it in sync;
-  `tests/presets.rs` checks that every file validates, renders without `…`
-  at its declared width, and has a unique name matching its filename.
+  `tests/presets.rs` checks that every file validates, renders uncut at
+  its declared width, moves where it promises to (§ 9), and has a name
+  matching its filename; a unit test holds `# needs:` to what the icon set
+  calls for (`nerd-font` for `nerd`, `emoji` for `emoji`, nothing
+  otherwise) and every icon frame list to two distinct, drawn frames.
 - **Choosing one.** `garnish config init --preset <gallery name>` writes the
   file (with the header stripped of tooling lines); `garnish presets`
   lists names and summaries. The four built-in names keep working (and a
