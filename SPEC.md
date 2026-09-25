@@ -1205,7 +1205,11 @@ color = "accent"               # role or literal for the box's glyphs; default t
   line carries the box's corners and sides at its ends instead, as the
   samples show. (Decided while building Phase 21: an earlier wording made
   a multi-line row one block for this, which would have repeated `╭─` on
-  every line of a tall row.) On a one-line row, `fill` draws the rule glyph (or the
+  every line of a tall row.) A `custom` frame's caps need not be one
+  width: a tall row is laid out to the room its widest pair leaves, and
+  a narrower or empty cap's spare cells go to the rule, so every line
+  fills the box (2026-09-25: an empty cap's went nowhere, and its line
+  came out short). On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is

@@ -1684,13 +1684,14 @@ impl Layout<'_> {
         if let Some(title) = title {
             self.place_title(&mut line, title, fill);
         }
-        if fill.draws() && !cap.is_empty() {
+        if fill.draws() {
             // The cap is padded from the content only: with no right group
             // the rule runs into it, as it always has. Any cell left over
             // (a later line of a tall row whose cap is narrower than the
-            // first's) goes to the rule, so every line is the same width.
+            // first's, or empty) goes to the rule, so every line is the
+            // same width.
             let used: usize = line.iter().map(Draft::cells).sum();
-            let padded = row_ends_in_content(row) && pad > 0;
+            let padded = !cap.is_empty() && row_ends_in_content(row) && pad > 0;
             let cap_total = display_width(cap).saturating_add(if padded { pad } else { 0 });
             let spare = self.width.saturating_sub(used).saturating_sub(cap_total);
             if spare > 0 {
@@ -1699,10 +1700,12 @@ impl Layout<'_> {
             if padded {
                 line.push(self.pad(pad));
             }
-            line.push(Draft::Done(Piece {
-                elem: Elem::Cap,
-                segs: vec![Segment::styled(cap, style)],
-            }));
+            if !cap.is_empty() {
+                line.push(Draft::Done(Piece {
+                    elem: Elem::Cap,
+                    segs: vec![Segment::styled(cap, style)],
+                }));
+            }
         }
         if !fill.draws() {
             // A packed row draws no filler at all, so the cells that only
@@ -2897,21 +2900,37 @@ mod tests {
     /// width. The row is laid out to the room the *widest* pair leaves;
     /// laying it out to the first line's, as it once was, left the taller
     /// caps hanging past the box and the row's own recut ate them into `…`.
+    /// A narrower cap's spare cells go to the rule, an empty cap's too: they
+    /// once went only before a cap, so a line whose right cap was empty
+    /// came out short of the box.
     #[test]
     fn a_tall_row_under_uneven_custom_caps_fits_every_line() {
-        for width in [24_usize, 40, 80] {
+        let uneven = FrameChars {
+            first: "<".to_owned(),
+            middle: "<<<".to_owned(),
+            last: "<<<<<".to_owned(),
+            single: "<".to_owned(),
+            right_first: ">".to_owned(),
+            right_middle: ">>>".to_owned(),
+            right_last: ">>>>>".to_owned(),
+            right_single: ">".to_owned(),
+            ..FrameChars::for_style(FrameStyle::Rounded)
+        };
+        let emptied = FrameChars {
+            right_first: "你".to_owned(),
+            right_middle: String::new(),
+            right_last: String::new(),
+            ..uneven.clone()
+        };
+        let cases = [
+            (uneven, [("<", ">"), ("<<<", ">>>"), ("<<<<<", ">>>>>")]),
+            (emptied, [("<", "你"), ("<<<", ""), ("<<<<<", "")]),
+        ];
+        for (width, (chars, ends)) in
+            [24_usize, 40, 80].into_iter().flat_map(|w| cases.clone().map(|c| (w, c)))
+        {
             let mut f = Fixture::new(FrameStyle::Custom, true, width);
-            f.chars = FrameChars {
-                first: "<".to_owned(),
-                middle: "<<<".to_owned(),
-                last: "<<<<<".to_owned(),
-                single: "<".to_owned(),
-                right_first: ">".to_owned(),
-                right_middle: ">>>".to_owned(),
-                right_last: ">>>>>".to_owned(),
-                right_single: ">".to_owned(),
-                ..FrameChars::for_style(FrameStyle::Rounded)
-            };
+            f.chars = chars;
             let l = f.layout();
             let stack = Col {
                 width: Width::Fr(1),
@@ -2925,7 +2944,6 @@ mod tests {
                 ]),
             };
             let rows = vec![Row { cols: vec![stack], ..row(Vec::new(), 1) }];
-            let ends = [("<", ">"), ("<<<", ">>>"), ("<<<<<", ">>>>>")];
             for (line, (prefix, cap)) in l.lines(&rows).into_iter().flatten().zip(ends) {
                 let text = Painter::PLAIN.paint(&line.segments());
                 assert_eq!(line.width(), width, "{text:?}");
