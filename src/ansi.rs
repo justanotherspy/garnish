@@ -94,21 +94,19 @@ impl Color {
         }
     }
 
-    /// SGR parameters for this color as a foreground.
-    fn fg_params(self, mode: ColorMode) -> Option<String> {
-        match (self, mode) {
-            (Self::Default, _) | (_, ColorMode::Never) => None,
-            (Self::Ansi(n), _) => Some(if n < 8 {
-                format!("{}", 30_u8.saturating_add(n))
-            } else {
-                format!("{}", 90_u8.saturating_add(n.saturating_sub(8)))
-            }),
-            (Self::Indexed(n), _) => Some(format!("38;5;{n}")),
-            (Self::Rgb(r, g, b), ColorMode::TrueColor) => Some(format!("38;2;{r};{g};{b}")),
+    /// Write the SGR parameters for this color as a foreground onto `out`
+    /// (nothing for the default colour or under [`ColorMode::Never`]).
+    fn write_fg(self, mode: ColorMode, out: &mut String) {
+        let _ = match (self, mode) {
+            (Self::Default, _) | (_, ColorMode::Never) => Ok(()),
+            (Self::Ansi(n), _) if n < 8 => write!(out, "{}", 30_u8.saturating_add(n)),
+            (Self::Ansi(n), _) => write!(out, "{}", 90_u8.saturating_add(n.saturating_sub(8))),
+            (Self::Indexed(n), _) => write!(out, "38;5;{n}"),
+            (Self::Rgb(r, g, b), ColorMode::TrueColor) => write!(out, "38;2;{r};{g};{b}"),
             (Self::Rgb(r, g, b), ColorMode::Ansi256) => {
-                Some(format!("38;5;{}", rgb_to_256(r, g, b)))
+                write!(out, "38;5;{}", rgb_to_256(r, g, b))
             }
-        }
+        };
     }
 }
 
@@ -216,24 +214,32 @@ impl Style {
         Self { underline: on, ..self }
     }
 
-    fn sgr(self, mode: ColorMode) -> String {
+    /// Write this style's SGR sequence onto `out`, and say whether there was
+    /// one (so the painter knows to reset after the text). Written in
+    /// place: every painted segment of every tick comes through here.
+    fn write_sgr(self, mode: ColorMode, out: &mut String) -> bool {
         if mode == ColorMode::Never {
-            return String::new();
+            return false;
         }
-        let mut params: Vec<String> = Vec::new();
-        if self.bold {
-            params.push("1".into());
+        let mut open = false;
+        let mut param = |out: &mut String| {
+            out.push_str(if open { ";" } else { "\x1b[" });
+            open = true;
+        };
+        for (on, code) in [(self.bold, "1"), (self.dim, "2"), (self.underline, "4")] {
+            if on {
+                param(out);
+                out.push_str(code);
+            }
         }
-        if self.dim {
-            params.push("2".into());
+        if self.fg != Color::Default {
+            param(out);
+            self.fg.write_fg(mode, out);
         }
-        if self.underline {
-            params.push("4".into());
+        if open {
+            out.push('m');
         }
-        if let Some(fg) = self.fg.fg_params(mode) {
-            params.push(fg);
-        }
-        if params.is_empty() { String::new() } else { format!("\x1b[{}m", params.join(";")) }
+        open
     }
 }
 
@@ -621,15 +627,13 @@ impl Painter {
             if seg.text.is_empty() {
                 continue;
             }
-            let style = self.painted_style(seg.style);
-            let sgr = style.sgr(self.mode);
             let link = seg.link.as_deref().filter(|u| self.links_to(u));
             if let Some(url) = link {
                 let _ = write!(out, "\x1b]8;;{url}\x1b\\");
             }
-            out.push_str(&sgr);
+            let styled = self.painted_style(seg.style).write_sgr(self.mode, &mut out);
             out.push_str(&seg.text);
-            if !sgr.is_empty() {
+            if styled {
                 out.push_str("\x1b[0m");
             }
             if link.is_some() {
@@ -1007,6 +1011,60 @@ mod tests {
         let p256 = Painter { mode: ColorMode::Ansi256, links: false, dim: false };
         assert_eq!(p256.paint(&[seg]), "\x1b[1;38;5;16mPR\x1b[0m");
         assert_eq!(Painter::PLAIN.paint(&[Segment::styled("x", Style::PLAIN.dimmed())]), "x");
+    }
+
+    /// The SGR bytes written straight into the row are the ones the
+    /// parameter list used to be joined into, for every attribute and colour
+    /// combination under every mode.
+    #[test]
+    fn sgr_is_written_in_place_byte_for_byte() {
+        fn joined(style: Style, mode: ColorMode) -> String {
+            if mode == ColorMode::Never {
+                return String::new();
+            }
+            let mut params: Vec<String> = Vec::new();
+            for (on, code) in [(style.bold, "1"), (style.dim, "2"), (style.underline, "4")] {
+                if on {
+                    params.push(code.into());
+                }
+            }
+            match (style.fg, mode) {
+                (Color::Default, _) => {}
+                (Color::Ansi(n), _) if n < 8 => params.push(format!("{}", 30 + n)),
+                (Color::Ansi(n), _) => params.push(format!("{}", 90 + n - 8)),
+                (Color::Indexed(n), _) => params.push(format!("38;5;{n}")),
+                (Color::Rgb(r, g, b), ColorMode::TrueColor) => {
+                    params.push(format!("38;2;{r};{g};{b}"));
+                }
+                (Color::Rgb(r, g, b), _) => params.push(format!("38;5;{}", rgb_to_256(r, g, b))),
+            }
+            if params.is_empty() { String::new() } else { format!("\x1b[{}m", params.join(";")) }
+        }
+        let colors = [
+            Color::Default,
+            Color::Ansi(1),
+            Color::Ansi(12),
+            Color::Indexed(208),
+            Color::Rgb(1, 2, 3),
+            Color::Rgb(0x44, 0x47, 0x5a),
+        ];
+        for mode in [ColorMode::Never, ColorMode::Ansi256, ColorMode::TrueColor] {
+            for fg in colors {
+                for bits in 0..8_u8 {
+                    let style = Style {
+                        fg,
+                        bold: bits & 1 != 0,
+                        dim: bits & 2 != 0,
+                        underline: bits & 4 != 0,
+                    };
+                    let mut out = String::from("x");
+                    let styled = style.write_sgr(mode, &mut out);
+                    let want = joined(style, mode);
+                    assert_eq!(out, format!("x{want}"), "{style:?} {mode:?}");
+                    assert_eq!(styled, !want.is_empty());
+                }
+            }
+        }
     }
 
     /// SPEC § 2.1: `preview` paints every segment faint, plain runs

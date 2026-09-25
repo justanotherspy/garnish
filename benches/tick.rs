@@ -5,6 +5,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use garnish::ansi::{ColorMode, Painter};
 use garnish::config::{self, Overlay};
 use garnish::modules::{Ctx, SCHEMAS};
 use garnish::payload::Payload;
@@ -129,6 +130,13 @@ fn tick_in_process(c: &mut Criterion) {
         Clock { git: true, workers: true, cache: Some(bench_cache_dir()), ..Clock::fixed() };
     c.bench_function("tick_in_process_default", |b| {
         b.iter(|| render_lines_at(black_box(&payload), &cfg, Some(120), &clock));
+    });
+    // The rows above turned into escape sequences, which `render_lines_at`
+    // leaves to the caller: every segment of every row is painted.
+    let lines = render_lines_at(&payload, &cfg, Some(120), &clock);
+    let painter = Painter { mode: ColorMode::TrueColor, links: true, dim: false };
+    c.bench_function("paint_default", |b| {
+        b.iter(|| black_box(&lines).iter().map(|l| painter.paint(l).len()).sum::<usize>());
     });
     // `max_width` on every module: the cap measures and cuts each decorated
     // module before alignment, which the default tick skips entirely.
