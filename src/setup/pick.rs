@@ -191,7 +191,8 @@ impl Choose {
             .max(self.title.len().saturating_add(4))
             .saturating_add(6)
             .clamp(30, 70);
-        let height = matching.len().saturating_add(5).clamp(7, usize::from(area.height));
+        // Not `clamp`: it panics when the area is shorter than the minimum.
+        let height = matching.len().saturating_add(5).max(7).min(usize::from(area.height));
         let rect = centered(area, cells(width), cells(height));
         frame.render_widget(Clear, rect);
         let block =
@@ -624,6 +625,16 @@ mod tests {
         let out = c.handle(Key::Enter);
         assert!(matches!(out.push, Some(Layer::Input(_))), "custom opens an input");
         assert!(c.handle(Key::Esc).close);
+    }
+
+    /// frm-16: a list drawn into an area shorter than its seven-row
+    /// minimum is cut to the area, not a panic in `clamp`.
+    #[test]
+    fn a_list_draws_into_an_area_shorter_than_its_minimum() {
+        let items = vec![Choice::plain("a"), Choice::plain("b"), Choice::plain("c")];
+        let mut c = Choose::new("Pick", items, Target::AddModule);
+        let Ok(mut terminal) = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 5));
+        let Ok(_) = terminal.draw(|f| c.draw(f, f.area()));
     }
 
     #[test]
