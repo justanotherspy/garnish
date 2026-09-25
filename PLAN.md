@@ -147,8 +147,7 @@ Open items only; closed ones are in `WORKLOG.md`.
     matches exactly, which an unpacked archive cannot arrange under the
     pinned `checkStat`
   - setup: one `post_edit` step (pruning and the preset-row swap happen
-    per route today); the `(+N more)` and `path: message` formatting in
-    the setup app is still its own (x-10); SIGTERM leaves the terminal
+    per route today); SIGTERM leaves the terminal
     broken (documented; a fix needs a signal crate)
   - config: an emptied single-row stack round-trips through `config show`
     as a bare column, which draws rule where the stack drew spaces; a

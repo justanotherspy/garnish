@@ -78,7 +78,7 @@ impl App {
         // A problem at the key's own path is about this value, whether or
         // not the file already had one there.
         if let Some(p) = problems.iter().find(|p| p.path == path) {
-            return Err(format!("{}: {}", p.path, p.message));
+            return Err(p.to_string());
         }
         let swapped = self.swap_preset_rows(slot, &value);
         slot.set(&mut self.draft, value);
@@ -250,8 +250,7 @@ impl App {
         let before = (self.draft.clone(), self.builder.clone());
         let result = f(&mut self.builder, &mut self.draft).and_then(|out| {
             let (_, problems) = self.draft.resolved();
-            new_problem(&self.problems, &problems)
-                .map_or(Ok(out), |p| Err(format!("{}: {}", p.path, p.message)))
+            new_problem(&self.problems, &problems).map_or(Ok(out), |p| Err(p.to_string()))
         });
         // A refused edit leaves nothing behind, whichever step refused it.
         if result.is_err() {

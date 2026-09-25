@@ -71,6 +71,17 @@ impl std::fmt::Display for ConfigError {
     }
 }
 
+/// What a one-line summary naming the first of `count` problems ends in:
+/// ` (+N more)` for the rest, or nothing. The `⚠ config:` row and the
+/// setup screen's status line both summarise this way.
+#[must_use]
+pub fn more(count: usize) -> String {
+    match count.saturating_sub(1) {
+        0 => String::new(),
+        extra => format!(" (+{extra} more)"),
+    }
+}
+
 /// Stale-value styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StaleStyle {
@@ -1017,6 +1028,18 @@ format = "12h"
         // Both ends themselves are in range.
         let ends = format!("ticker_step = {}\n[frame]\nfill_step = {}", 0.001, 1000);
         assert_eq!(parse(&ends, &schemas()).1, Vec::new());
+    }
+
+    /// x-10: one owner for the summary's tail and for a problem's text, so
+    /// the setup screen says what the `⚠ config:` row says.
+    #[test]
+    fn a_summary_counts_the_rest_and_a_problem_prints_its_path_once() {
+        assert_eq!(
+            (more(0), more(1), more(3)),
+            (String::new(), String::new(), " (+2 more)".into())
+        );
+        let at = |path: &str| ConfigError { path: path.into(), message: "bad".into(), line: None };
+        assert_eq!((at("gap").to_string(), at("").to_string()), ("gap: bad".into(), "bad".into()));
     }
 
     /// SPEC § 5: every bad key is reported under its TOML path and falls back

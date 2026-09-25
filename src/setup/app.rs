@@ -307,9 +307,8 @@ impl App {
     }
 
     fn first_problem(&self) -> String {
-        let extra = self.problems.len().saturating_sub(1);
         self.problems.first().map_or_else(String::new, |p| {
-            if extra > 0 { format!("{p} (+{extra} more)") } else { p.to_string() }
+            format!("{p}{}", crate::config::more(self.problems.len()))
         })
     }
 
@@ -317,8 +316,7 @@ impl App {
     /// naming the first problem the edit introduced, if any.
     fn refresh(&mut self) -> Option<String> {
         let (config, problems) = self.draft.resolved();
-        let new =
-            new_problem(&self.problems, &problems).map(|p| format!("{}: {}", p.path, p.message));
+        let new = new_problem(&self.problems, &problems).map(ToString::to_string);
         self.config = config;
         self.problems = problems;
         self.builder.rebuild(&self.draft);
