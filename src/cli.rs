@@ -511,6 +511,13 @@ fn refresh(
     if targets.is_empty() {
         return Err(eyre!("unknown module {}", module.unwrap_or("?")));
     }
+    if let Some(entry) = targets.iter().find(|e| e.schema.refresh == 0) {
+        eprintln!(
+            "{} renders from the payload every tick; there is nothing to refresh",
+            entry.schema.id
+        );
+        return Err(Quiet.into());
+    }
     let results: Vec<Result<()>> = targets
         .par_iter()
         .map(|entry| {

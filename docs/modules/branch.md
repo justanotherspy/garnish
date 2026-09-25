@@ -33,7 +33,7 @@ The current branch read from the repository without spawning git (in a reftable 
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `5` | `5` | `5` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | integer ≥ 1 | `5` | `5` | `5` | Seconds a cached value lives before a background worker refreshes it. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |

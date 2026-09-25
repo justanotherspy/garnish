@@ -1,22 +1,22 @@
 p┌ [modules.path] ────────────────────────────────────────────────────────────┐i
 >│  enabled         true                        (true)                        │
  │  preset          default                     (default)                     │
-r│  refresh         0                           (0)                           │
 r│  hide            []                          ([])                          │
-r│  label                ┌ icons.folder ──────────────┐                       │
- │  prefix               │ |1  nerd                  │                       │
- │  suffix               │❒ |1  unicode               │                       │
- │  hide_when_empty true │📁|2  emoji                 │                       │
- │  max_width       0    │(blank)|0  ascii            │                       │
- │  show_icon       true │ |1  also try              │                       │
- │  depth           2    │ |1  also try              │                       │
- │  style           full │ |1  also try              │)                      │
- │  show_subpath    true │❏ |1  also try              │                       │
- │  show_added      false│custom…                     │                       │
- │  icons.folder    ❒    │                            │                       │
- │  icons.added     +    │type to filter: ▏           │                       │
- │  colors.icon     accen│↑↓ move  enter pick  esc bac│)                      │
- │  colors.base     text └────────────────────────────┘                       │
+r│  label                                       ("")                          │
+r│  prefix               ┌ icons.folder ──────────────┐                       │
+ │  suffix               │ |1  nerd                  │                       │
+ │  hide_when_empty true │❒ |1  unicode               │                       │
+ │  max_width       0    │📁|2  emoji                 │                       │
+ │  show_icon       true │(blank)|0  ascii            │                       │
+ │  depth           2    │ |1  also try              │                       │
+ │  style           full │ |1  also try              │)                      │
+ │  show_subpath    true │ |1  also try              │                       │
+ │  show_added      false│❏ |1  also try              │                       │
+ │  icons.folder    ❒    │custom…                     │                       │
+ │  icons.added     +    │                            │                       │
+ │  colors.icon     accen│type to filter: ▏           │)                      │
+ │  colors.base     text │↑↓ move  enter pick  esc bac│                       │
+ │  colors.subpath  muted└────────────────────────────┘                       │
  │Folder icon.                                                                │
  │                                                                            │
  │                                                                            │

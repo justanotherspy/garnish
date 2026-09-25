@@ -590,6 +590,37 @@ fn refresh_refuses_all_together_with_lock_held() {
     assert!(ok, "{err}");
 }
 
+/// mod-06: a payload-only module has nothing to refresh. `refresh --module`
+/// of one is refused on one line and writes no cache entry (it used to
+/// record a failed one that `doctor` listed until the sweep); an unknown id
+/// is still refused as unknown.
+#[test]
+fn refresh_refuses_a_payload_only_module_on_one_line() {
+    fn entries(dir: &Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .flat_map(|e| {
+                let path = e.path();
+                if path.is_dir() { entries(&path) } else { vec![path] }
+            })
+            .filter(|p| p.extension().is_some_and(|x| x == "cache"))
+            .collect()
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let (out, err, ok) =
+        run(&["refresh", "--module", "version", "--session", "s", "--cwd", cwd], dir.path(), &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("version") && err.contains("every tick"), "{err}");
+    assert_eq!(entries(&dir.path().join("cache")), Vec::<std::path::PathBuf>::new());
+    let (_, err, ok) =
+        run(&["refresh", "--module", "nope", "--session", "s", "--cwd", cwd], dir.path(), &[]);
+    assert!(!ok && err.contains("unknown module"), "{err}");
+}
+
 /// SPEC § 7: `preview <dir>` renders every `*.json` in the directory, in
 /// name order, each under a dim `── <name>` heading.
 #[test]

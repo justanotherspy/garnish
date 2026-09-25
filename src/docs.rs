@@ -553,14 +553,12 @@ fn write_modules(out: &mut String, cfg: &Config, annotated: bool) {
         let Some(m) = cfg.modules.get(schema.id) else { continue };
         comment(out, annotated, &format!("{} — {}", schema.id, schema.summary));
         let _ = writeln!(out, "[modules.{}]", schema.id);
-        comment(
-            out,
-            annotated,
-            &format!(
-                "preset: {}; refresh: seconds between refreshes (0 = every tick)",
-                bar::<Preset>()
-            ),
-        );
+        let refresh = if schema.refresh > 0 {
+            "seconds a cached value lives before a worker refreshes it (at least 1)"
+        } else {
+            "0, this module renders every tick"
+        };
+        comment(out, annotated, &format!("preset: {}; refresh: {refresh}", bar::<Preset>()));
         let _ = writeln!(out, "enabled = {}", m.enabled);
         // An annotated file leaves the module preset and option values as
         // comments so the top-level `preset` keeps driving them after `init`.
@@ -840,6 +838,17 @@ fn kind_column(opt: &OptSpec) -> String {
     }
 }
 
+/// The `refresh` row of a module page (SPEC § 3): seconds, at least one,
+/// for a cached module; `0` alone for one that renders every tick.
+fn refresh_row(schema: &ModuleSchema) -> String {
+    let (kind, r) = if schema.refresh > 0 {
+        ("integer ≥ 1".to_owned(), schema.refresh.to_string())
+    } else {
+        ("`0`".to_owned(), "0".to_owned())
+    };
+    format!("| `refresh` | {kind} | `{r}` | `{r}` | `{r}` | {} |", schema.refresh_doc())
+}
+
 /// The option, icon and color tables of a module page.
 fn module_reference(o: &mut String, schema: &ModuleSchema) {
     let _ = writeln!(o, "\n## Options\n\n`[modules.{}]`\n", schema.id);
@@ -853,11 +862,7 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
         "| `preset` | {} | — | — | — | Which preset the options below default to. |",
         vocab_cells::<Preset>()
     );
-    let _ = writeln!(
-        o,
-        "| `refresh` | integer | `{r}` | `{r}` | `{r}` | Seconds between background refreshes; 0 = every tick. |",
-        r = schema.refresh
-    );
+    let _ = writeln!(o, "{}", refresh_row(schema));
     let _ = writeln!(
         o,
         "| `hide` | list of {} | `[]` | `[]` | `[]` | {} |",
@@ -1352,7 +1357,7 @@ fn presets_section(o: &mut String) {
 
     let _ = writeln!(
         o,
-        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh`, `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
+        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh` (the seconds a cached module's value lives before its worker refreshes it; a module that renders from the payload every tick takes only `0`), `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
     );
 }
 
@@ -1669,6 +1674,27 @@ mod tests {
                 assert_eq!(config_toml(&again, false), shown, "a fixed point");
             }
         }
+    }
+
+    /// sch-03: the `refresh` row says what the key does for this module: a
+    /// cached one takes seconds, at least one; a payload-only one takes
+    /// nothing but 0, and the annotated file says the same.
+    #[test]
+    fn the_refresh_row_follows_whether_the_module_is_cached() {
+        let row = |id: &str| -> String {
+            let schema = SCHEMAS.iter().find(|s| s.id == id).unwrap();
+            let page = module_page(schema);
+            page.lines().find(|l| l.starts_with("| `refresh` |")).unwrap().to_owned()
+        };
+        let cached = row("sync");
+        assert!(cached.contains("integer ≥ 1") && cached.contains("`5`"), "{cached}");
+        assert!(cached.contains("worker"), "{cached}");
+        let payload = row("model");
+        assert!(!payload.contains("background"), "{payload}");
+        assert!(payload.contains("every tick") && payload.contains("reported"), "{payload}");
+        let init = config_toml(&config::parse("", &SCHEMAS).0, true);
+        let model = init.split("[modules.model]").nth(1).unwrap();
+        assert!(model.lines().nth(1).unwrap().contains("renders every tick"), "{model}");
     }
 
     /// sch-10: the reference's default column is the config an empty file

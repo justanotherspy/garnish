@@ -33,7 +33,7 @@ Shows while `sandbox.enabled` is `true` in Claude Code's settings chain (the fir
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |

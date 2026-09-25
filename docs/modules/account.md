@@ -33,7 +33,7 @@ The `oauthAccount.emailAddress` of `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `600` | `600` | `600` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | integer ≥ 1 | `600` | `600` | `600` | Seconds a cached value lives before a background worker refreshes it. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |

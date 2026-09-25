@@ -154,12 +154,10 @@ fn home_picker_and_builder_screens_match_their_goldens() {
     assert!(shot.contains("[modules.path]") && shot.contains("style"), "{shot}");
     check("module-form", &mut app, 140, 40);
     // Enter on an icon key opens the glyph picker: the four sets, then the
-    // suggestions, then a custom entry. Fourteen rows down from `enabled`:
-    // `preset`, `refresh`, `hide`, the five common keys, path's four options.
-    keys(
-        &mut app,
-        "<down><down><down><down><down><down><down><down><down><down><down><down><down><down>",
-    );
+    // suggestions, then a custom entry. Thirteen rows down from `enabled`,
+    // past `preset`, `hide`, the five common keys and path's five options
+    // (path renders every tick, so its form has no `refresh`).
+    keys(&mut app, &"<down>".repeat(13));
     keys(&mut app, "<enter>");
     let shot = check("glyph-picker", &mut app, 80, 24);
     assert!(shot.contains("icons.folder") && shot.contains("custom"), "{shot}");
@@ -1490,8 +1488,8 @@ fn b_joins_titled_and_boxed_rows_and_positional_forms_close_on_undo() {
     assert!(app.form_keys().is_none());
     keys(&mut app, "<right><enter>");
     let before = app.form_keys().unwrap();
-    // Seven down from `enabled` is `hide_when_empty`, a toggle.
-    keys(&mut app, "<down><down><down><down><down><down><down><enter>");
+    // Six down from `enabled` is `hide_when_empty`, a toggle.
+    keys(&mut app, &format!("{}<enter>", "<down>".repeat(6)));
     assert!(app.draft().get(&["modules", "path", "hide_when_empty"]).is_some());
     app.input(Input::Key(Key::Ctrl('z')));
     assert!(app.draft().get(&["modules", "path"]).is_none());

@@ -109,7 +109,7 @@ right = ["clock"]
 
 # path — Working directory, based on the repository root.
 [modules.path]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -153,7 +153,7 @@ added = "muted"
 
 # branch — Checked-out branch (or detached HEAD).
 [modules.branch]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: seconds a cached value lives before a worker refreshes it (at least 1)
 enabled = true
 # preset = "default"
 refresh = 5
@@ -199,7 +199,7 @@ dirty = "warn"
 
 # sync — Commits ahead/behind the upstream branch.
 [modules.sync]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: seconds a cached value lives before a worker refreshes it (at least 1)
 enabled = true
 # preset = "default"
 refresh = 5
@@ -249,7 +249,7 @@ stale = "muted"
 
 # worktree — Git worktree name.
 [modules.worktree]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -285,7 +285,7 @@ original = "muted"
 
 # pr — Open pull/merge request with review state, linked.
 [modules.pr]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -339,7 +339,7 @@ draft = "muted"
 
 # model — Model name, with fast-mode and thinking indicators.
 [modules.model]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -385,7 +385,7 @@ thinking = "accent2"
 
 # effort — Reasoning effort level as a five-step scale and/or word.
 [modules.effort]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -423,7 +423,7 @@ word = "text"
 
 # context — Context window usage bar with color bands and the auto-compaction marker.
 [modules.context]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -503,7 +503,7 @@ warn = "danger"
 
 # style — Output style name.
 [modules.style]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -535,7 +535,7 @@ name = "text"
 
 # limit5h — Five-hour rate limit usage and time until reset.
 [modules.limit5h]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -619,7 +619,7 @@ pace_critical = "danger"
 
 # limit7d — Seven-day rate limit usage and time until reset.
 [modules.limit7d]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -703,7 +703,7 @@ pace_critical = "danger"
 
 # spend — Spend-limit usage behind a Claude apps gateway.
 [modules.spend]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -757,7 +757,7 @@ empty = "muted"
 
 # cost — Estimated session cost in USD.
 [modules.cost]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -803,7 +803,7 @@ removed = "danger"
 
 # session — Session duration.
 [modules.session]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -839,7 +839,7 @@ start = "muted"
 
 # api — Time spent waiting for API responses.
 [modules.api]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -877,7 +877,7 @@ share = "muted"
 
 # cache — Prompt cache hit ratio, TTL and warmth.
 [modules.cache]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -933,7 +933,7 @@ detail = "muted"
 
 # clock — Local wall-clock time with a spinner.
 [modules.clock]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -975,7 +975,7 @@ date = "muted"
 
 # session_name — Session name.
 [modules.session_name]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1011,7 +1011,7 @@ id = "muted"
 
 # vim — Vim mode badge.
 [modules.vim]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1047,7 +1047,7 @@ visual = "warn"
 
 # agent — Agent name.
 [modules.agent]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1083,7 +1083,7 @@ thinking = "accent2"
 
 # lines — Lines added and removed this session.
 [modules.lines]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1125,7 +1125,7 @@ net = "muted"
 
 # version — The Claude Code version.
 [modules.version]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1155,7 +1155,7 @@ version = "muted"
 
 # sandbox — A badge while Bash sandboxing is on.
 [modules.sandbox]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1187,7 +1187,7 @@ word = "text"
 
 # voice — A badge while voice dictation is on.
 [modules.voice]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1219,7 +1219,7 @@ word = "text"
 
 # account — The claude.ai account the session is signed in with.
 [modules.account]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: seconds a cached value lives before a worker refreshes it (at least 1)
 enabled = true
 # preset = "default"
 refresh = 600

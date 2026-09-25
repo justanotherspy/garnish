@@ -953,7 +953,6 @@ separator = "  "
 [modules.path]
 preset = "full"
 depth = 3
-refresh = 9
 label = "in"
 [modules.path.icons]
 folder = ">"
@@ -975,7 +974,6 @@ format = "12h"
         let path = c.modules.get("path").unwrap();
         assert_eq!(path.preset, Preset::Full);
         assert_eq!(path.int("depth"), 3);
-        assert_eq!(path.refresh, 9);
         assert_eq!(path.label, "in");
         assert_eq!(path.icon("folder"), ">");
         assert_eq!(path.color("dir"), c.theme.role(Role::Danger));

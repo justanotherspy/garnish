@@ -7,7 +7,6 @@ row 2     model  context   │ cost
                                ┌ [modules.path] ────────────────────────────────────────────────────────────┐
                                │  enabled         true                        (true)                        │
                                │  preset          default                     (default)                     │
-                               │  refresh         0                           (0)                           │
                                │  hide            []                          ([])                          │
                                │  label                                       ("")                          │
                                │  prefix                                      ("")                          │
@@ -32,6 +31,7 @@ row 2     model  context   │ cost
                                │                                                                            │
                                │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
                                └────────────────────────────────────────────────────────────────────────────┘
+
 
 
 

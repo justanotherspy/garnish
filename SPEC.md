@@ -253,8 +253,12 @@ configurable (`modules.context.compact_buffer_tokens`).
 ## 3. Modules
 
 Every module has: `enabled` (bool), `preset` (`minimal|default|full`),
-`refresh` (seconds; `0` = payload-only, rendered every tick; `> 0` = cached with
-that TTL and refreshed by a worker), `icons.<key>`, `colors.<key>`, `label`,
+`refresh` (seconds a cached module's value lives before a worker
+refreshes it, at least 1; a payload-only module, rendered every tick,
+takes only `0`, and any other value is reported as having no effect,
+decided with Daniel 2026-09-25: the reference had documented it as
+switching such a module to a cached one, which nothing did),
+`icons.<key>`, `colors.<key>`, `label`,
 `prefix`, `suffix`, `hide_when_empty`, `hide` (a list of states, below),
 `max_width`. Option resolution: built-in default →
 icon-set default → module preset → top-level preset → explicit key.
@@ -1507,7 +1511,10 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   On Linux the tick takes the lock and passes `--lock-held`; elsewhere the
   worker takes it itself. `GARNISH_NO_SPAWN=1` logs intended spawns to
   `<root>/spawns.log` instead.
-- `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
+- `refresh` must be ≥ 1 for cached modules (`config check` rejects 0) and
+  0 for payload-only ones (§ 3). `refresh --module` on a payload-only
+  module is refused with one stderr line and exit 1, and writes no cache
+  entry (it used to write a failed one).
 - GC: bounded sweep when a worker writes a module's first entry in a scope,
   session or repo (session and repo dirs idle > 24 h by wall-clock mtime,
   ≤ 50 per sweep; temp/stale/adopt files older than 1 h), never on the
@@ -2028,8 +2035,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   drop the table (by its chip, by the line holding it, or by `space`
   making its row a spacer, one question for every module so left;
   2026-09-25 review: only the chip had asked). `Enter` on a module
-  opens its **editor**: one row per schema option (`preset`, `refresh`,
-  `hide`, `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
+  opens its **editor**: one row per schema option (`preset`, `refresh`
+  for a cached module or one whose file sets it, `hide`,
+  `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
   the module's own options, then `icons.*` for the active icon set and
   `colors.*`), showing the default, the current value and the doc string;
   enums cycle, booleans toggle, integers edit with their `max` shown (in

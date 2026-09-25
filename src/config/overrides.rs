@@ -124,10 +124,17 @@ pub(super) fn parse_overrides(
                 Some(p) => ov.preset = Some(p),
                 None => err(key, format!("expected one of {}", Preset::choices())),
             },
+            // A cached module's worker runs every `refresh` seconds; a
+            // payload-only one has no worker, so only `0` (what every
+            // `config init` writes) means anything there (SPEC § 3).
             "refresh" => match value.as_integer().and_then(|i| u64::try_from(i).ok()) {
                 Some(0) if schema.refresh > 0 => err(
                     key,
                     "this module is refreshed by a background worker; use at least 1 second".into(),
+                ),
+                Some(1..) if schema.refresh == 0 => err(
+                    key,
+                    "this module renders from the payload every tick; refresh has no effect".into(),
                 ),
                 Some(n) => ov.refresh = Some(n),
                 None => err(key, "expected a non-negative integer (seconds)".into()),
@@ -877,6 +884,33 @@ mod tests {
             let ctx = c.modules.get("context").unwrap();
             assert!(ctx.value("warn_at").is_none_or(|v| *v == Value::Float(0.0)), "{text}");
         }
+    }
+
+    /// cfg-05 (decided with Daniel, 2026-09-25: reject): a payload-only
+    /// module renders every tick, so a non-zero `refresh` has no effect and
+    /// is reported, the default standing in; `0` stays legal (every `config
+    /// init` has written it), and a cached module takes any whole second.
+    #[test]
+    fn refresh_is_for_cached_modules() {
+        let (c, errs) = parse("[modules.path]\nrefresh = 9\n", &schemas());
+        let problems: Vec<(&str, &str)> =
+            errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
+        assert_eq!(
+            problems,
+            [(
+                "modules.path.refresh",
+                "this module renders from the payload every tick; refresh has no effect"
+            )]
+        );
+        assert_eq!(c.modules.get("path").unwrap().refresh, 0);
+        assert_eq!(parse("[modules.path]\nrefresh = 0\n", &schemas()).1, Vec::new());
+        let mut cached = schemas();
+        cached[0].refresh = 5;
+        let (c, errs) = parse("[modules.path]\nrefresh = 9\n", &cached);
+        assert_eq!(errs, Vec::new());
+        assert_eq!(c.modules.get("path").unwrap().refresh, 9);
+        let (_, errs) = parse("[modules.path]\nrefresh = 0\n", &cached);
+        assert_eq!(errs.len(), 1, "{errs:?}");
     }
 
     /// cfg-12: values that parse but would misrender are reported under

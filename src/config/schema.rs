@@ -456,6 +456,19 @@ impl ModuleSchema {
         self.colors.iter().find(|c| c.key == key)
     }
 
+    /// What `refresh` does for this module (SPEC § 3), as the reference and
+    /// the `setup` form say it: a cached module's worker runs every
+    /// `refresh` seconds; a payload-only module has no worker, and the
+    /// parser reports any value but `0`.
+    #[must_use]
+    pub const fn refresh_doc(&self) -> &'static str {
+        if self.refresh > 0 {
+            "Seconds a cached value lives before a background worker refreshes it."
+        } else {
+            "This module renders from the payload every tick; any value but 0 is reported."
+        }
+    }
+
     /// The `hide` states this module accepts (SPEC § 3), from its measure:
     /// what the parser checks a list against, what the reference and the
     /// `setup` form print.

@@ -927,22 +927,23 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
                 config.preset.module_preset().name(),
             ),
         );
-        let min = i64::from(schema.refresh > 0);
-        fields.push(
-            Field::new(
-                "refresh",
-                "Seconds between background refreshes (0 = every tick, payload-only modules).",
-                SlotKind::Int { min, max: None },
-                slot("refresh"),
-            )
-            .valued(
+        // Only a cached module's worker reads `refresh`; a payload-only
+        // module lists it only while its table sets it, to unset.
+        let cached = schema.refresh > 0;
+        if cached || slot("refresh").get(draft).is_some() {
+            let kind = if cached {
+                SlotKind::Int { min: 1, max: None }
+            } else {
+                SlotKind::Int { min: 0, max: Some(0) }
+            };
+            fields.push(Field::new("refresh", schema.refresh_doc(), kind, slot("refresh")).valued(
                 draft,
                 Some(Value::Integer(
                     i64::try_from(cfg.map_or(schema.refresh, |c| c.refresh)).unwrap_or(0),
                 )),
                 &schema.refresh.to_string(),
-            ),
-        );
+            ));
+        }
     }
     // The states come from the schema's measure (SPEC § 3), as the parser's
     // check and the reference row do.
@@ -1883,6 +1884,21 @@ mod tests {
         }
         assert!(offenders.is_empty(), "entries the parser refuses:\n{}", offenders.join("\n"));
         assert!(tried > 1000, "{tried} entries tried");
+    }
+
+    /// cfg-05: the `refresh` row is for a cached module, whose worker it
+    /// paces, and for any module whose table sets it, so `d` can unset a
+    /// value the parser reports.
+    #[test]
+    fn the_refresh_row_is_offered_where_it_does_something() {
+        let row = |text: &str, id: &str| {
+            let (form, _) = built(text, &FormKind::Module(id.into()));
+            form.fields.iter().find(|f| f.key == "refresh").cloned()
+        };
+        let branch = row("", "branch").expect("a cached module has the row");
+        assert_eq!(branch.kind, SlotKind::Int { min: 1, max: None });
+        assert!(row("", "context").is_none(), "a payload-only module has none");
+        assert!(row("[modules.context]\nrefresh = 5\n", "context").is_some_and(|f| f.set));
     }
 
     /// cfg-14, frm-12: an enum row offers exactly the parser's words, in
