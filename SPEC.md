@@ -281,7 +281,10 @@ switching such a module to a cached one, which nothing did),
 `icons.<key>`, `colors.<key>`, `label`,
 `prefix`, `suffix`, `hide_when_empty`, `hide` (a list of states, below),
 `max_width`. Option resolution: built-in default →
-icon-set default → module preset → top-level preset → explicit key.
+icon-set default → the module preset the top-level `preset` implies →
+the module's own `preset` → explicit key (2026-09-25 review: this read
+as the top-level preset overriding the module's, the reverse of what the
+resolver does).
 
 `max_width` (PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps one module's
 rendered width: `0` (default) is unlimited, otherwise the decorated module
@@ -973,7 +976,7 @@ separator_step   = 1
 spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]  # already a spinner; same rule
 
 [modules.branch.icons]
-branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
+branch_frames = ["⎇", "⑂"]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
 ```
 
 - **Animated rule.** `fill_pattern` is a string of one-cell glyphs repeated
@@ -1294,8 +1297,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the one-cell pad of a box under a frame with none is a space. Inside a
   box, a lone group keeps no fill cell and no pad on a side that faces the
   box's own side, whose pad already keeps it off the side (2026-09-25: a
-  module up to two cells narrower than the interior was cut); between two
-  columns it keeps both, which is what separates them with `gap = 0`. A title right after a cap drops its own leading pad
+  module up to two cells narrower than the interior was cut). Between two
+  columns in a box without a rule it keeps both only at `gap = 0`, where
+  nothing else separates them; with a gap, the gap's spaces do (decided
+  with Daniel 2026-09-25: the reservation cut a centred module at
+  `gap = 2`). Under a rule, inside a box or out, both stay: the column's
+  own rule would otherwise run into its text. A title right after a cap drops its own leading pad
   for the same reason (`├─ Repository ──┤`, not `├─  Repository`), and the
   cell goes back to the rule. A box's own top and bottom rules are static:
   `fill_pattern` belongs to the frame, and a travelling box edge would
@@ -1773,11 +1780,17 @@ per-module render cost.
   byte-identically before and after the model (a plain line is one
   column) and under either name (`[[line]]`, `[[row]]`); and the
   lines-per-row output tiles each line exactly (the placement map of
-  § 14 reads it). `tests/presets.rs` renders every preset without `…` at
-  its declared width at three instants (a preset that promises motion
-  must differ between two of them, and a line ticker must slide exactly
-  `ticker_step` cells, so a scrolled row carries nothing that counts
-  seconds).
+  § 14 reads it). `tests/presets.rs` renders every preset uncut at its
+  declared width at three instants: no `…`, no layout cut, and the same
+  modules and titles as 200 columns wider (a cut found by structure, since
+  the ascii set's `..` is also one of its glyphs). Each promise of motion
+  is checked on its own from the parsed config: a rule pattern, separator
+  frames, a module's icon frames and a scrolling text module must each
+  move, a line ticker must slide exactly `ticker_step` cells (so a
+  scrolled row carries nothing that counts seconds), and `animate =
+  false` must render the same at two ticks of one minute (2026-09-25
+  review: a whole-row diff let the travelling rule hide `animated-dots`'
+  blank model frames).
 - **Setup snapshots** (PLAN Phase 22): the `setup` screens are rendered
   into ratatui's `TestBackend` (80 × 24, 100 × 30 and 140 × 40) and
   compared with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1`
@@ -1865,8 +1878,11 @@ binary. Everything else is a **gallery preset**: a complete config file under
   and the `subscription-full` payload at its declared width into
   `docs/presets.md`: name, summary, requirements, the sample, and the file's
   contents in a collapsed block. `tests/docs_sync.rs` keeps it in sync;
-  `tests/presets.rs` checks that every file validates, renders without `…`
-  at its declared width, and has a unique name matching its filename.
+  `tests/presets.rs` checks that every file validates, renders uncut at
+  its declared width, moves where it promises to (§ 9), and has a name
+  matching its filename; a unit test holds `# needs:` to what the icon set
+  calls for (`nerd-font` for `nerd`, `emoji` for `emoji`, nothing
+  otherwise) and every icon frame list to two distinct, drawn frames.
 - **Choosing one.** `garnish config init --preset <gallery name>` writes the
   file (with the header stripped of tooling lines); `garnish presets`
   lists names and summaries. The four built-in names keep working (and a

@@ -6,7 +6,7 @@ Vim mode badge.
 
 **Sources:** `vim.mode`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -49,7 +49,7 @@ Vim mode badge.
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `vim` | `U+E62B` | `` | `` | `` | Vim icon. |
+| `vim` | `U+E62B` | — | — | — | Vim icon. |
 
 Also try (`vim`: `U+E7C5` `U+F120` `V`).
 

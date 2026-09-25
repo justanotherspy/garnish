@@ -6,7 +6,7 @@ Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-
 
 **Sources:** `prompt_cache.*`, `context_window.current_usage`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

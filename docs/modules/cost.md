@@ -6,7 +6,7 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 
 **Sources:** `cost.total_cost_usd`, `cost.total_lines_added`, `cost.total_lines_removed`, `rate_limits`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -52,7 +52,7 @@ Shows `cost.total_cost_usd`. By default it is hidden for subscription sessions (
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `cost` | `U+F155` | `` | `💵` | `` | Cost icon. |
+| `cost` | `U+F155` | — | `💵` | — | Cost icon. |
 | `added` | `+` | `+` | `+` | `+` | Lines-added glyph. |
 | `removed` | `−` | `−` | `−` | `-` | Lines-removed glyph. |
 

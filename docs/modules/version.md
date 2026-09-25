@@ -6,7 +6,7 @@ The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and 
 
 **Sources:** `version`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -48,7 +48,9 @@ The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and 
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `version` | `U+F02C` | `⊛` | `📦` | `` | Version icon. |
+| `version` | `U+F02C` | `⊛` | `📦` | — | Version icon. |
+
+Also try (`version`: `U+F02C` `U+F02B` `U+F1B2` `⊛` `#` `v`).
 
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 

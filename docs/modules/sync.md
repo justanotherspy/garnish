@@ -12,18 +12,20 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 
 | preset | render |
 |---|---|
-| `minimal` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `default` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `full` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `minimal` | — |
+| `default` | — |
+| `full` | — |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `unicode` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `emoji` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `ascii` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `nerd` | — |
+| `unicode` | — |
+| `emoji` | — |
+| `ascii` | — |
+
+Nothing to show above (—): the counts come from a git repository with an upstream, which a sample never reads. In one, the default preset prints for example `⇡2 ⇣1` with unicode icons: two commits to push, one to pull.
 
 ## Options
 

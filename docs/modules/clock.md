@@ -6,7 +6,7 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 
 **Sources:** `wall clock`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -53,7 +53,7 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `spinner` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛` | `|/-\` | Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width. |
+| `spinner` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛` | `\|/-\` | Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width. |
 
 Also try (`spinner`: `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` `|/-\` `▁▃▅▇█▇▅▃` `⣾⣽⣻⢿⡿⣟⣯⣷` `⠁⠂⠄⡀⢀⠠⠐⠈`).
 

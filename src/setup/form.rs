@@ -690,27 +690,9 @@ impl Suggestions {
             }
         };
         for style in FrameStyle::ALL {
-            let c = crate::frame::FrameChars::for_style(style);
-            for (key, value) in [
-                ("separator", &c.separator),
-                ("pad", &c.pad),
-                ("fill_char", &c.fill),
-                ("first", &c.first),
-                ("middle", &c.middle),
-                ("last", &c.last),
-                ("single", &c.single),
-                ("right_first", &c.right_first),
-                ("right_middle", &c.right_middle),
-                ("right_last", &c.right_last),
-                ("right_single", &c.right_single),
-                ("top_left", &c.top_left),
-                ("top_right", &c.top_right),
-                ("bottom_left", &c.bottom_left),
-                ("bottom_right", &c.bottom_right),
-                ("side", &c.side),
-            ] {
-                if !value.is_empty() {
-                    add(key, value);
+            for glyph in crate::frame::FrameChars::for_style(style).named() {
+                if !glyph.value.is_empty() {
+                    add(glyph.key, glyph.value);
                 }
             }
         }
@@ -1392,7 +1374,6 @@ fn frame_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Fiel
 
 fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let s = |key: &str| Slot::table(&["frame"], key);
-    let c = &config.frame.chars;
     let mut fields = vec![
         Field::new(
             "style",
@@ -1413,27 +1394,11 @@ fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Ve
         )
         .valued(draft, Some(Value::Boolean(config.frame.fill)), "true"),
     ];
-    for (key, value, doc) in [
-        ("separator", &c.separator, "Default separator between modules."),
-        ("pad", &c.pad, "Text between a cap and the content."),
-        ("fill_char", &c.fill, "The rule glyph, one cell."),
-        ("first", &c.first, "Left cap of the first line (custom style)."),
-        ("middle", &c.middle, "Left cap of middle lines."),
-        ("last", &c.last, "Left cap of the last line."),
-        ("single", &c.single, "Left cap of a lone line."),
-        ("right_first", &c.right_first, "Right cap of the first line."),
-        ("right_middle", &c.right_middle, "Right cap of middle lines."),
-        ("right_last", &c.right_last, "Right cap of the last line."),
-        ("right_single", &c.right_single, "Right cap of a lone line."),
-        ("top_left", &c.top_left, "A box's top-left corner, one cell."),
-        ("top_right", &c.top_right, "A box's top-right corner."),
-        ("bottom_left", &c.bottom_left, "A box's bottom-left corner."),
-        ("bottom_right", &c.bottom_right, "A box's bottom-right corner."),
-        ("side", &c.side, "A box's side glyph."),
-    ] {
+    for glyph in config.frame.chars.named() {
+        let key = glyph.key;
         fields.push(
-            Field::new(key, doc, SlotKind::Str, s(key))
-                .valued(draft, Some(string(value)), "the style's")
+            Field::new(key, glyph.doc, SlotKind::Str, s(key))
+                .valued(draft, Some(string(glyph.value)), "the style's")
                 .with_choices(hints.choices(key)),
         );
         if key == "separator" {

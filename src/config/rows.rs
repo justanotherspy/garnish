@@ -46,7 +46,8 @@ pub struct RowCfg {
     /// The file wrote `[[row.col]]` tables, so `config show` writes them
     /// back instead of the plain one-column form.
     pub explicit_cols: bool,
-    /// Empty cells between columns (SPEC § 4.3); nothing on a one-column row.
+    /// Cells between two drawn columns (SPEC § 4.3): the rule on a one-line
+    /// row under a rule, spaces otherwise; nothing on a one-column row.
     pub gap: usize,
     /// Separator override for this row.
     pub separator: Option<String>,

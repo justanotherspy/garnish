@@ -6,7 +6,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 
 **Sources:** `context_window.used_percentage`, `context_window.context_window_size`, `exceeds_200k_tokens`, `~/.claude/settings.json autoCompactWindow/autoCompactEnabled`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -65,7 +65,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | `context` | `U+F2DB` | `⊞` | `🧠` | `ctx:` | Context icon. |
 | `fill` | `█` | `█` | `█` | `#` | Filled cell. |
 | `empty` | `░` | `░` | `░` | `-` | Empty cell. |
-| `marker` | `▏` | `▏` | `▏` | `|` | Compaction marker. |
+| `marker` | `▏` | `▏` | `▏` | `\|` | Compaction marker. |
 | `compact` | `⤓` | `⤓` | `⤓` | `compact@` | Compaction label glyph. |
 | `exceeds` | `‼` | `‼` | `‼` | `!!` | Exceeds-200k indicator. |
 | `warn` | `U+F071` | `⚠` | `⚠` | `!` | Warning badge. |

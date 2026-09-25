@@ -143,7 +143,8 @@ impl Line {
 pub struct Row<'a> {
     /// The row's columns, left to right; never empty.
     pub cols: Vec<Col<'a>>,
-    /// Empty cells between columns.
+    /// Cells between two drawn columns: the rule on a one-line row under a
+    /// rule, spaces otherwise.
     pub gap: usize,
     /// The separator between this row's modules.
     pub separator: &'a str,
@@ -522,6 +523,10 @@ impl Layout<'_> {
     ) -> Vec<Vec<Draft>> {
         let widths = self.share(row, width, fill);
         let gap = row.gap;
+        // Inside a box the gap is spaces, and they alone keep two columns
+        // apart; only at `gap = 0` does a side facing a neighbour need a
+        // fill cell and a pad of its own (SPEC § 4.3).
+        let spaced = fill == Fill::Spaces && gap > 0;
         let last = row.cols.len().saturating_sub(1);
         let cols: Vec<Vec<Vec<Draft>>> = row
             .cols
@@ -538,7 +543,10 @@ impl Layout<'_> {
                         if j == last { r.max(outer_r) } else { r },
                     ),
                     trailing: inherit.trailing && j == last,
-                    sides: (inherit.sides.0 && j == 0, inherit.sides.1 && j == last),
+                    sides: (
+                        if j == 0 { inherit.sides.0 } else { spaced },
+                        if j == last { inherit.sides.1 } else { spaced },
+                    ),
                 };
                 self.col_lines(col, *w, height, row, fill, fit)
             })
@@ -1146,8 +1154,8 @@ impl Layout<'_> {
 
         // A lone group: the rule on one side, or both when it is centred.
         // A side facing the rule or a neighbour keeps a cell of fill and a
-        // pad; inside a box, a side against the box's own side needs
-        // neither, the box's pad already keeps the text off it.
+        // pad; inside a box, a side that already stands clear needs
+        // neither (`Fit::sides`).
         let (fills_left, fills_right) = match justify {
             Justify::Left => (false, true),
             Justify::Right => (true, false),
@@ -1283,9 +1291,10 @@ struct Fit {
     /// share whatever `truncate` says, or it would spill into a neighbour
     /// (SPEC § 4.3).
     trailing: bool,
-    /// Whether each end of the column lies against a box's side, whose pad
-    /// already keeps the text off it: a lone group there needs no fill cell
-    /// and no pad of its own.
+    /// Whether each end of the column already stands clear of what is
+    /// beside it inside a box: the box's side, whose pad keeps the text off
+    /// it, or a gap of one space or more. A lone group there needs no fill
+    /// cell and no pad of its own.
     sides: (bool, bool),
 }
 
@@ -2694,6 +2703,45 @@ mod tests {
         let body = lines.first().and_then(|r| r.get(1)).map_or_default(show);
         assert!(!body.contains("…a"), "the columns touch: {body}");
         assert!(body.ends_with("… │"), "the last column fills to the box's pad: {body}");
+    }
+
+    /// SPEC § 4.3 Pads (decided with Daniel 2026-09-25): inside a box the
+    /// gap's spaces keep two columns apart, so a side facing a neighbour
+    /// keeps a fill cell and a pad only at `gap = 0`. They were reserved at
+    /// every gap, and the `box-columns` golden cut `context` to `4…` at
+    /// `gap = 2`.
+    #[test]
+    fn inside_a_box_a_gap_is_what_keeps_two_columns_apart() {
+        // 34 cells: two sides and two pads leave an interior of 30.
+        let f = Fixture::new(FrameStyle::Rounded, true, 34);
+        let l = f.layout();
+        let body = |gap: usize, texts: [&str; 3]| -> String {
+            let cols = [Justify::Left, Justify::Center, Justify::Right]
+                .into_iter()
+                .zip(texts)
+                .map(|(justify, text)| Col { justify, ..col(Width::Fr(1), text) })
+                .collect();
+            let r = Row { boxed: Some(&BoxRef::Anon), ..row(cols, gap) };
+            let lines = l.lines(std::slice::from_ref(&r));
+            lines.first().and_then(|r| r.get(1)).map_or_default(show)
+        };
+        // Shares of 9, 9 and 8 at `gap = 2`, of 10, 9 and 9 at `gap = 1`:
+        // each text fills its column exactly and stands uncut.
+        assert_eq!(
+            body(2, ["aaaaaaaaa", "bbbbbbbbb", "cccccccc"]),
+            "│ aaaaaaaaa  bbbbbbbbb  cccccccc │"
+        );
+        assert_eq!(
+            body(1, ["aaaaaaaaaa", "bbbbbbbbb", "ccccccccc"]),
+            "│ aaaaaaaaaa bbbbbbbbb ccccccccc │"
+        );
+        // At `gap = 0` nothing else separates them: each keeps its cell and
+        // pad on the sides that face a neighbour, and is cut to make room.
+        let touching = body(0, ["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"]);
+        assert_eq!(display_width(&touching), 34, "{touching}");
+        for joined in ["ab", "bc", "…b", "…c"] {
+            assert!(!touching.contains(joined), "{joined}: {touching}");
+        }
     }
 
     /// SPEC § 4.3: on a multi-line row gap cells and padding lines are

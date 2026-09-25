@@ -26,6 +26,8 @@ mod read;
 mod rows;
 mod vocab;
 
+#[cfg(test)]
+pub(crate) use frame::FRAME_KEYS;
 pub use frame::{FillDirection, FrameCfg, SeparatorColor};
 pub use load::{
     CONFIG_ENV, default_path, explicit, load, load_with, locate, parse, parse_table, parse_with,

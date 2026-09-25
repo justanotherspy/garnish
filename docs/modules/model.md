@@ -6,7 +6,7 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 
 **Sources:** `model.display_name`, `model.id`, `fast_mode`, `thinking.enabled`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -51,7 +51,7 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `model` | `U+EB08` | `❖` | `🤖` | `` | Model icon. |
+| `model` | `U+EB08` | `❖` | `🤖` | — | Model icon. |
 | `fast` | `U+F0E7` | `⚡` | `⚡` | `!` | Fast mode. |
 | `thinking` | `U+F0EB` | `⋯` | `💭` | `~` | Extended thinking. |
 

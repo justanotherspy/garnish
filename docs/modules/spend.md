@@ -6,7 +6,7 @@ Percentage of the applicable spend limit consumed (can exceed 100%) and a countd
 
 **Sources:** `rate_limits.spend_limit.used_percentage`, `rate_limits.spend_limit.resets_at`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

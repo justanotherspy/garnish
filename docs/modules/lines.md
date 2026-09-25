@@ -6,7 +6,7 @@ Lines added and removed this session.
 
 **Sources:** `cost.total_lines_added`, `cost.total_lines_removed`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -50,7 +50,7 @@ Lines added and removed this session.
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `lines` | `U+F440` | `Δ` | `📝` | `` | Diff icon. |
+| `lines` | `U+F440` | `Δ` | `📝` | — | Diff icon. |
 | `added` | `+` | `+` | `+` | `+` | Added glyph. |
 | `removed` | `−` | `−` | `−` | `-` | Removed glyph. |
 

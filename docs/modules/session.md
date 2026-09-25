@@ -6,7 +6,7 @@ Wall-clock time since the session started (`cost.total_duration_ms`; resets on `
 
 **Sources:** `cost.total_duration_ms`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

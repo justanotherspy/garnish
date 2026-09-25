@@ -5,9 +5,9 @@
 
 # Everything that moves here is a pure function of the clock (SPEC § 4.2):
 # the `·  ` pattern drifts toward the right cap one cell per second, the
-# separator pulses through three weights, and the model icon cycles through
-# four moon phases. Set `animate = false` (or `GARNISH_ANIMATE=0`) to freeze
-# it all at frame 0.
+# separator pulses through three weights, and the model icon turns a
+# half-filled circle through its four quarters (◐ ◓ ◑ ◒). Set
+# `animate = false` (or `GARNISH_ANIMATE=0`) to freeze it all at frame 0.
 
 preset = "compact"
 icons  = "nerd"
@@ -26,5 +26,6 @@ right   = ["clock"]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
+# Escapes rather than the glyphs themselves, so no editor can drop them.
 [modules.model.icons]
-model_frames = ["", "", "", ""]
+model_frames = ["\U000025D0", "\U000025D3", "\U000025D1", "\U000025D2"]

@@ -941,8 +941,12 @@ mod tests {
         let cfg = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &o);
         assert!(cfg.hides_empty());
         assert_eq!(cfg.common("hide"), Some(Value::StrList(vec!["empty".into(), "zero".into()])));
-        let none = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &o);
-        assert_eq!(none.hide, vec![HideRule::Empty, HideRule::Zero]);
+        assert_eq!(cfg.hide, vec![HideRule::Empty, HideRule::Zero]);
+        // Unset, the list is empty and `empty` comes from the flag alone.
+        let unset = Overrides::default();
+        let none = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &unset);
+        assert!(none.hide.is_empty() && none.hides_empty(), "{:?}", none.hide);
+        assert_eq!(none.common("hide"), Some(Value::StrList(Vec::new())));
     }
 
     #[test]

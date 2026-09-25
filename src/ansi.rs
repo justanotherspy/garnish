@@ -414,8 +414,7 @@ pub fn scroll_period(segments: &[Segment], gap: &str, wrap: bool) -> usize {
 
 /// The cells of text [`truncate`] keeps when it cuts to `max_width`: what
 /// the ellipsis, itself cut to fit, leaves.
-#[must_use]
-pub fn kept_width(max_width: usize, ellipsis: &str) -> usize {
+fn kept_width(max_width: usize, ellipsis: &str) -> usize {
     max_width.saturating_sub(display_width(fit(ellipsis, max_width)))
 }
 

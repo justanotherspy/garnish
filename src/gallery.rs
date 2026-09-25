@@ -58,13 +58,14 @@ pub struct Preset {
     /// Kebab-case name, equal to the file stem.
     pub name: &'static str,
     /// One-line summary.
-    pub summary: String,
+    pub summary: &'static str,
     /// The terminal width the sample is rendered at.
     pub columns: usize,
-    /// `nerd-font`, `emoji`, or nothing.
-    pub needs: Option<String>,
+    /// `nerd-font`, `emoji`, or nothing (SPEC § 12), agreeing with the
+    /// preset's `icons`.
+    pub needs: Option<&'static str>,
     /// GitHub handle of the contributor, when given.
-    pub author: Option<String>,
+    pub author: Option<&'static str>,
     /// The whole file, header included.
     pub source: &'static str,
 }
@@ -75,12 +76,12 @@ pub static PRESETS: LazyLock<Vec<Preset>> = LazyLock::new(|| {
         .iter()
         .map(|(name, source)| Preset {
             name,
-            summary: header(source, "summary").unwrap_or("").to_owned(),
+            summary: header(source, "summary").unwrap_or(""),
             columns: header(source, "columns")
                 .and_then(|c| c.parse().ok())
                 .unwrap_or(DEFAULT_COLUMNS),
-            needs: header(source, "needs").map(str::to_owned),
-            author: header(source, "author").map(str::to_owned),
+            needs: header(source, "needs"),
+            author: header(source, "author"),
             source,
         })
         .collect()
@@ -211,6 +212,52 @@ mod tests {
         let text = "# name: x\n# summary: s\n# columns: 80\n\n# needs: a wide terminal, really\npreset = \"minimal\"\n";
         assert_eq!(body(text), "# needs: a wide terminal, really\npreset = \"minimal\"\n");
         assert_eq!(header(text, "needs"), None);
-        assert_eq!(find("motd-ticker").unwrap().needs.as_deref(), Some("nerd-font"));
+        assert_eq!(find("motd-ticker").unwrap().needs, Some("nerd-font"));
+    }
+
+    /// sch-16: `# needs:` is one of the words SPEC § 12 allows, and the one
+    /// the preset's icon set calls for, since the picker, `garnish presets`
+    /// and the gallery page print it as a warning.
+    #[test]
+    fn needs_names_what_the_icon_set_needs() {
+        use crate::icons::IconSet;
+        for preset in PRESETS.iter() {
+            let (cfg, _) = config::parse(&body(preset.source), &SCHEMAS);
+            let want = match cfg.icons {
+                IconSet::Nerd => Some("nerd-font"),
+                IconSet::Emoji => Some("emoji"),
+                IconSet::Unicode | IconSet::Ascii => None,
+            };
+            assert_eq!(preset.needs, want, "{}: icons = {:?}", preset.name, cfg.icons);
+        }
+    }
+
+    /// sch-01: an icon's `<key>_frames` in a preset is a promise of motion,
+    /// so it holds two frames that differ, and an empty frame only where
+    /// blanking the glyph is how it is turned off. The config cannot refuse
+    /// an all-blank list (a file on disk may carry one, CLAUDE.md §
+    /// Conventions), so the gallery is held to it here; `animated-dots`
+    /// shipped four empty moon frames that an editor had dropped.
+    #[test]
+    fn every_icon_frame_list_in_the_gallery_moves_and_draws() {
+        for preset in PRESETS.iter() {
+            let (cfg, _) = config::parse(&body(preset.source), &SCHEMAS);
+            for (id, m) in &cfg.modules {
+                let schema = SCHEMAS.iter().find(|s| s.id == *id).unwrap();
+                for (key, frames) in m.all_icon_frames() {
+                    let spec = schema.icons.iter().find(|i| i.key == *key).unwrap();
+                    let at = format!("{}: modules.{id}.icons.{key}_frames", preset.name);
+                    let distinct: std::collections::BTreeSet<&String> = frames.iter().collect();
+                    assert!(distinct.len() >= 2, "{at}: {frames:?} does not move");
+                    assert!(
+                        spec.may_be_blank() || frames.iter().all(|f| !f.is_empty()),
+                        "{at}: {frames:?} draws nothing in a frame"
+                    );
+                }
+            }
+            for (name, m) in &cfg.texts {
+                assert!(m.all_icon_frames().is_empty(), "{}: text.{name}", preset.name);
+            }
+        }
     }
 }

@@ -6,7 +6,7 @@ Time spent waiting for API responses.
 
 **Sources:** `cost.total_api_duration_ms`, `cost.total_duration_ms`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

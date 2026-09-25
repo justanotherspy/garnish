@@ -6,7 +6,7 @@ Shows while `sandbox.enabled` is `true` in Claude Code's settings chain (the fir
 
 **Sources:** `.claude/settings.json sandbox.enabled (the settings chain)`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -50,6 +50,8 @@ Shows while `sandbox.enabled` is `true` in Claude Code's settings chain (the fir
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `sandbox` | `U+F023` | `⊡` | `🔒` | `[]` | Sandbox glyph. |
+
+Also try (`sandbox`: `U+F023` `U+F132` `U+F1B2` `⊡` `⊠` `[]`).
 
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 

@@ -6,7 +6,7 @@ Agent name.
 
 **Sources:** `agent.name`, `thinking.enabled`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
