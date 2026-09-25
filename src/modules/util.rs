@@ -121,22 +121,35 @@ pub fn dollars(usd: f64, decimals: usize) -> String {
 /// cuts in, so a flag, a skin tone or a combining mark is never split in
 /// half. The ellipsis is counted into the budget and is itself cut when
 /// `max` is smaller than it, so the result is never wider than asked.
+///
+/// The name is reduced to plain text first ([`crate::ansi::plain_text`]):
+/// a payload or ref string may carry escape sequences, and the cut must
+/// count, and land in, the text the row shows (SPEC § 5).
 #[must_use]
 pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
-    if max == 0 || crate::ansi::clusters(name).nth(max).is_none() {
-        return name.to_owned();
+    let name = crate::ansi::plain_cow(name);
+    if max == 0 || crate::ansi::clusters(&name).nth(max).is_none() {
+        return name.into_owned();
     }
     let ellipsis: String = icons.ellipsis().chars().take(max).collect();
     let mut out: String =
-        crate::ansi::clusters(name).take(max.saturating_sub(ellipsis.chars().count())).collect();
+        crate::ansi::clusters(&name).take(max.saturating_sub(ellipsis.chars().count())).collect();
     out.push_str(&ellipsis);
     out
+}
+
+/// The first `n` characters of `text` as the row shows it: reduced to
+/// plain text first, like [`cut_name`], so an escape sequence's bytes are
+/// never what is kept.
+#[must_use]
+pub fn first_chars(text: &str, n: usize) -> String {
+    crate::ansi::plain_cow(text).chars().take(n).collect()
 }
 
 /// The first seven characters of a commit hash, as git abbreviates one.
 #[must_use]
 pub fn short_sha(sha: &str) -> String {
-    sha.chars().take(7).collect()
+    first_chars(sha, 7)
 }
 
 /// Format a token count compactly: `12k`, `1.0M`, `200k`.
@@ -192,11 +205,30 @@ mod tests {
         }
     }
 
+    /// SPEC § 5: a cut measures the text the row will show. An escape
+    /// sequence's printable bytes used to count against `max_length`, and a
+    /// cut inside one left it open, so the row's plain-text pass swallowed
+    /// the ellipsis with it (or, for an OSC, the whole name).
+    #[test]
+    fn a_cut_measures_the_plain_text() {
+        use IconSet::{Ascii, Unicode};
+        assert_eq!(cut_name("ab\x1b[31mcdefgh", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("abc\x1b[31mdefghijklmnop", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("\x1b]0;title\x07abcdef", 5, Ascii), "abc..");
+        let bold = format!("\x1b[1m{}\x1b[0m", "a".repeat(30));
+        assert_eq!(cut_name(&bold, 32, Unicode), "a".repeat(30), "fits once plain");
+        assert_eq!(cut_name("a\u{202e}b\u{200b}c", 3, Unicode), "abc");
+        assert_eq!(cut_name("a\nb", 0, Unicode), "ab", "plain even when uncut");
+        let segs = [Segment::plain(cut_name("ab\x1b[31mcdefgh", 5, Unicode))];
+        assert_eq!(text(&segs), "abcd…");
+    }
+
     #[test]
     fn short_sha_abbreviates_like_git() {
         assert_eq!(short_sha("0123456789abcdef"), "0123456");
         assert_eq!(short_sha("abc"), "abc");
         assert_eq!(short_sha(""), "");
+        assert_eq!(short_sha("\x1b[31m0123456789"), "0123456", "plain text first");
     }
 
     #[test]

@@ -1348,7 +1348,12 @@ without an error report.
   row and box `title`) are reduced at
   config time, so width arithmetic sees the real cells; everything else (the
   payload's names and paths, git output, cache entries, the `⚠` line) is
-  reduced by the `Segment` constructors, the one way onto a row. Colour and
+  reduced by the `Segment` constructors, the one way onto a row. A module
+  that measures or cuts such a string first (`max_length`, the fish path's
+  initials, a short sha or session id) reduces it before, so it counts the
+  cells the row shows and never cuts inside a sequence (2026-09-25: a bold
+  session name lost two cells to the escape's bytes, and a cut inside one
+  swallowed the ellipsis). Colour and
   OSC 8 links are added by the painter alone, and a link is emitted only for
   an `http(s)://` URL of printable ASCII. (Whole-stack review, 2026-09-06:
   a `\n` in a session name added a row, an escape passed `--color never`,

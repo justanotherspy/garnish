@@ -852,6 +852,27 @@ mod tests {
         }
     }
 
+    /// SPEC § 5: `max_length` counts the text the row shows. A bold session
+    /// name lost cells to the escapes' bytes, and a cut inside a sequence
+    /// left it open, so the row's plain-text pass swallowed the ellipsis.
+    #[test]
+    fn max_length_counts_the_text_the_row_shows() {
+        let row = |name: &str, table: &str| {
+            let json = serde_json::json!({"session_id": "s", "session_name": name}).to_string();
+            let text = format!(
+                "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"session_name\"]\n[modules.session_name]\n{table}"
+            );
+            render_plain(&Payload::parse(&json).unwrap(), &loaded(&text), Some(80))
+        };
+        let bold = format!("\x1b[1m{}\x1b[0m", "a".repeat(30));
+        let out = row(&bold, "");
+        assert!(out.contains(&"a".repeat(30)) && !out.contains('…'), "{out}");
+        let out = row("ab\x1b[31mcdefgh", "max_length = 5\n");
+        assert!(out.contains("abcd…"), "{out}");
+        let out = row("\x1b]0;title\x07abcdefgh", "max_length = 5\n");
+        assert!(out.contains("abcd…"), "{out}");
+    }
+
     #[test]
     fn pathological_sizes_render_inside_the_box() {
         // Whole-stack review: `width = i64::MAX` aborted the tick with an

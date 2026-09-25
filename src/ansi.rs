@@ -4,6 +4,7 @@
 //! escape sequences only at the very end, by [`Painter`], so tests can assert
 //! on plain text and the color mode can be switched without touching modules.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -274,11 +275,7 @@ impl Segment {
     /// Append text, sanitised like [`Segment::plain`] (no allocation when
     /// it is already plain: the bar builder appends a glyph per cell).
     pub fn push_str(&mut self, text: &str) {
-        if text.chars().any(|c| c.is_control() || is_format_char(c)) {
-            self.text.push_str(&plain_text(text));
-        } else {
-            self.text.push_str(text);
-        }
+        self.text.push_str(&plain_cow(text));
     }
 
     /// Display width of the text.
@@ -618,17 +615,28 @@ pub fn safe_link(url: &str) -> bool {
 /// they are part of how glyphs are spelled.
 #[must_use]
 pub fn plain_text(s: &str) -> String {
-    clean(s.to_owned())
+    plain_cow(s).into_owned()
 }
 
-/// [`plain_text`] without an allocation when the text is already plain,
-/// which on a warm tick is every string.
+/// [`plain_text`], borrowing `s` when it is already plain, which on a warm
+/// tick is every string. Whatever measures or cuts text from outside (a
+/// payload string, a ref name) before it becomes a [`Segment`] measures
+/// this, the text the row will show, never the raw string.
+pub(crate) fn plain_cow(s: &str) -> Cow<'_, str> {
+    if is_plain(s) { Cow::Borrowed(s) } else { Cow::Owned(strip(s)) }
+}
+
+/// [`plain_text`] without an allocation when the text is already plain.
 fn clean(s: String) -> String {
-    if s.chars().any(|c| c.is_control() || is_format_char(c)) {
-        strip_ansi(&s).chars().filter(|&c| !c.is_control() && !is_format_char(c)).collect()
-    } else {
-        s
-    }
+    if is_plain(&s) { s } else { strip(&s) }
+}
+
+fn is_plain(s: &str) -> bool {
+    !s.chars().any(|c| c.is_control() || is_format_char(c))
+}
+
+fn strip(s: &str) -> String {
+    strip_ansi(s).chars().filter(|&c| !c.is_control() && !is_format_char(c)).collect()
 }
 
 /// Unicode `Cf` characters that change layout or reading order without

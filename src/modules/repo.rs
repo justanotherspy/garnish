@@ -108,12 +108,14 @@ pub fn fish(path: &str) -> String {
 /// A segment whose abbreviation would read as `.`, `..` or nothing at all
 /// is kept whole instead: `...` shortened to `..` would show the path as
 /// its own parent, and a zero-width first character would show a segment
-/// that is not there.
+/// that is not there. The character is the first the row shows: the
+/// segment is reduced to plain text first, like a name cut.
 fn initial(segment: &str) -> String {
+    let segment = crate::ansi::plain_cow(segment);
     let keep = if segment.starts_with('.') { 2 } else { 1 };
-    let short: String = crate::ansi::clusters(segment).take(keep).collect();
+    let short: String = crate::ansi::clusters(&segment).take(keep).collect();
     if matches!(short.as_str(), "" | "." | "..") || crate::ansi::display_width(&short) == 0 {
-        segment.to_owned()
+        segment.into_owned()
     } else {
         short
     }
@@ -1270,7 +1272,12 @@ mod tests {
         assert_eq!(fish("/.../x"), "/.../x");
         assert_eq!(fish("/../x"), "/../x");
         assert_eq!(fish("/./x"), "/./x");
-        assert_eq!(fish("/\u{200b}hidden/x"), "/\u{200b}hidden/x");
+        assert_eq!(fish("/\u{301}hidden/x"), "/\u{301}hidden/x");
+        // The initial is taken from the text the row shows: an escape
+        // sequence or a format character is not a first character.
+        assert_eq!(fish("/a/\x1b[31mfoo/bar"), "/a/f/bar");
+        assert_eq!(fish("/\u{200b}hidden/x"), "/h/x");
+        assert_eq!(fish("/\x1b[31m/x"), "//x", "nothing shown, nothing to abbreviate");
         assert_eq!(fish(&shorten("~/repos/garnish/src", 2)), "~/g/src");
         assert_eq!(fish(&shorten("/srv/repos/garnish/src", 2)), "g/src");
         assert_eq!(fish(&shorten("~/repos/garnish/src", 0)), "~/r/g/src");
