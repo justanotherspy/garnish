@@ -970,6 +970,17 @@ was built, what the reviews found and what was decided, not how.
       fixing agent's own Edit tool turned `\uXXXX` into the glyph.
     - Inside a box, the gap ≥ 1 decision changed one golden: the
       `box-columns` "Panel" row now shows `42%` where it showed `4…`.
+    - Panicking in test builds on a read of an undeclared key found one
+      live case the source scan had missed: `spend` read the pace
+      switches it does not declare. Three planted typos were caught by
+      both layers.
+    - mod-16 was checked against the 2.1.282 binary: Claude Code writes
+      `.claude.json` through a temp file and a rename, and when the
+      rename fails (a bind-mounted file) truncates it and writes in
+      place, so a half-written read is possible; the `account` worker
+      retries once after a parse failure.
+    - `context.colors.percent` changed four colour goldens, each checked
+      at the escape-code level to differ only in that colour.
   - *Conflicts on merge:* the CLI batch renamed `settings_files` to
     `settings_chain` under the render batch's new `render::context`, and
     two batches both reworded the `truncate`/`overflow` reference rows.

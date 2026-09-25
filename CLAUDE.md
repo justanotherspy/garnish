@@ -383,7 +383,12 @@ path (`unwrap_used`, `expect_used`, `indexing_slicing`, `arithmetic_side_effects
   Integration tests under `tests/` are not `#[cfg(test)]` modules, so they
   carry a crate-level `#![allow(clippy::unwrap_used, …)]` with that comment.
 - Prefer combinator pipelines over `if let` towers. Data in → data out.
-- Prototype freely inside unit tests; clippy ignores unwraps there.
+- Prototype freely inside unit tests; clippy ignores unwraps there. It
+  does not ignore `arithmetic_side_effects` in a helper function inside a
+  test module that is not itself a `#[test]`: use `saturating_*` there.
+  `unsafe_code` is forbidden, so a unit test cannot set an environment
+  variable; to keep a render from spawning, hold a live lock instead of
+  setting `GARNISH_NO_SPAWN`.
 - Shell scripts (`scripts/`, `bench/`, `.claude/hooks/`) pass `shellcheck`
   and stay portable across GNU and BSD userlands (the macOS runner has no
   GNU sed/awk extensions).
@@ -501,8 +506,13 @@ for the contract and `docs/` for user docs.
   still wants a test of its own. A unit test scans `src/modules/*.rs` for
   every key read by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `lead(cfg,
   "…")`, `badge(cfg, "…", "…")`, …) and fails on one that no schema in that
-  file declares; a new helper that takes a key by name has to be added to
-  that scan's pattern list.
+  file declares. Its lists are consts in `modules/mod.rs`: `KEY_CALLS`
+  (the calls that take a key by name; a new such helper joins it),
+  `IMPLIED` (the keys a helper reads on its caller's behalf) and
+  `DEFINED` (which modules each file defines; a new module file joins
+  it, and every module is claimed exactly once). Behind the scan, a test
+  build panics on any `ModuleCfg` read of a key the module does not
+  declare, so the render matrix catches what the scan cannot parse.
 - **The setup screen is generated from the same schema.** Every `OptSpec`
   kind and every top-level key has a form row (a unit test walks them),
   the module picker lists `modules::SCHEMAS`, and the glyph picker's
@@ -566,7 +576,11 @@ for the contract and `docs/` for user docs.
   as the settings badges are), a trailing one `modules::badge`, a glyph built into a
   longer string `modules::glyph_prefix`, a name cut `util::cut_name`, the
   mark a cut ends in `IconSet::ellipsis`, the overdue and failed marks
-  `IconSet::stale_glyphs`. Each was written out per module once and
+  `IconSet::stale_glyphs`, the no-value mark `IconSet::placeholder`, the
+  spacing after a switched-off part `modules::close_up`, the `show_icon`
+  option `modules::show_icon_opt`, the bar, band and threshold options
+  `util::bar_opt` and its siblings, an added/removed pair
+  `util::added_removed`. Each was written out per module once and
   drifted. **Fix the shape, not the example**: the first pass at the badge
   guard converted the sites that looked like badges and left `cache`'s
   countdown, which interpolates the same glyph.

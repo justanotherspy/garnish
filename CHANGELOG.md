@@ -82,6 +82,20 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 - Under `color = "256"`, near-grey colours (every theme's frame) use the
   grey ramp instead of being lightened.
 
+*Modules*
+
+- `context` draws its percentage in `colors.percent` (default `text`) as
+  documented; the band colour stays on the bar. `warn_at` compares the
+  percentage the row prints, so `80%` with `warn_at = 80` warns.
+- `context` and `effort` no longer print a leading or double space when
+  an earlier part is switched off.
+- With the ascii icon set, a module with no value shows `-` instead of
+  `–`.
+- The `lines` net delta takes the module's own `+`/`−` glyphs, and a zero
+  net prints `+0`.
+- The `account` worker reads a `.claude.json` caught mid-write once more
+  before showing `✗`.
+
 *Layout*
 
 - Rows that start with spaces no longer slide left on screen (Claude Code

@@ -93,7 +93,9 @@ Open items only; closed ones are in `WORKLOG.md`.
 - [ ] Whether a gateway session with only a spend limit should show `cost`:
   `rate_limits` present means subscription (SPEC § 2.2), so today it hides
   `cost` by default (review finding mod-07; SPEC's wording now matches the
-  rule, the behaviour is unchanged)
+  rule, the behaviour is unchanged). The alternative is `spend` in the
+  usage rows of `minimal` and `compact`, which today show neither for
+  such a session; a spend-only payload fixture would come first
 - [ ] `sidebar-panels` shows what `valign = "bottom"` does to a column
   shorter than its row: the empty lines above it are blank, not rule.
   Decide whether a padding line in a `fill = true` row should carry the
@@ -160,6 +162,9 @@ Open items only; closed ones are in `WORKLOG.md`.
     setup screen re-plans before applying)
   - payload: a nested payload struct still accepts a JSON array
     positionally (serde's sequence form); harmless
+  - modules: the key scan finds a key read but not declared; the reverse,
+    a key declared that nothing reads (how `colors.percent` went unread),
+    would need the scan to track a key's kind (icon, colour, option)
   - layout: under a rule (`Fill::Rule`) a column facing a gap of 1 or
     more still reserves a fill cell beside the gap's rule cells
     (cosmetic; without a rule the reservation is gone)
