@@ -142,6 +142,9 @@ pub enum SlotKind {
     Icon,
     /// A list of strings, typed comma-separated.
     StrList,
+    /// A list of animation frames, typed as the TOML array it is written
+    /// as: a frame's spaces are part of it, and it may hold a comma.
+    Frames,
     /// A list of numbers, typed comma-separated.
     NumList,
     /// A list of colours, typed comma-separated.
@@ -211,6 +214,18 @@ impl SlotKind {
                 let f: f64 = text.parse().map_err(|_| format!("{text:?} is not a number"))?;
                 Value::Float(f)
             }
+            Self::Frames => {
+                if text.is_empty() {
+                    return Ok(None);
+                }
+                let v = literal(text)?;
+                if !v.as_array().is_some_and(|a| a.iter().all(Value::is_str)) {
+                    return Err(format!(
+                        "{text} is not a list of strings, like [\" │ \", \" ┃ \"]"
+                    ));
+                }
+                v
+            }
             Self::StrList | Self::ColorList => Value::Array(
                 text.split(',')
                     .map(str::trim)
@@ -241,6 +256,24 @@ impl SlotKind {
             },
         }))
     }
+}
+
+/// A TOML value typed as the file would write it (`"12h"`, `[" │ "]`,
+/// `true`), or why it is not one.
+fn literal(text: &str) -> Result<Value, String> {
+    toml::from_str::<toml::Table>(&format!("v = {text}"))
+        .ok()
+        .and_then(|mut t| t.remove("v"))
+        .ok_or_else(|| format!("{text} is not a TOML value (a string is quoted: \"…\")"))
+}
+
+/// A list of strings as the TOML array literal the file would hold.
+fn array_literal(items: &[Value]) -> String {
+    let items: Vec<String> = items
+        .iter()
+        .map(|v| v.as_str().map_or_else(|| v.to_string(), crate::config::schema::toml_string))
+        .collect();
+    format!("[{}]", items.join(", "))
 }
 
 /// A TOML value as a form shows it: strings bare, lists in brackets.
@@ -507,9 +540,10 @@ impl Form {
     /// from it, so a label is edited rather than retyped.
     fn activate(field: &Field) -> Outcome {
         let target = Target::Slot(field.slot.clone(), field.kind.clone());
-        let typed = field.value.as_ref().map_or_else(String::new, |v| match v {
-            Value::Array(items) => items.iter().map(show).collect::<Vec<_>>().join(", "),
-            other => show(other),
+        let typed = field.value.as_ref().map_or_else(String::new, |v| match (&field.kind, v) {
+            (SlotKind::Frames, Value::Array(items)) => array_literal(items),
+            (_, Value::Array(items)) => items.iter().map(show).collect::<Vec<_>>().join(", "),
+            (_, other) => show(other),
         });
         let open = |title: String, mut items: Vec<Choice>, custom: Option<&str>| {
             if let Some(what) = custom {
@@ -547,6 +581,7 @@ impl Form {
             SlotKind::Int { .. }
             | SlotKind::Float
             | SlotKind::StrList
+            | SlotKind::Frames
             | SlotKind::NumList
             | SlotKind::ColorList => input(field.key.clone(), typed),
             SlotKind::Str | SlotKind::Color | SlotKind::Icon => {
@@ -1283,8 +1318,8 @@ fn frame_motion_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> V
         .valued(draft, Some(string(config.frame.fill_direction.name())), "right"),
         Field::new(
             "separator_frames",
-            "Separator frames cycled one per tick, all the same width.",
-            SlotKind::StrList,
+            "Separator frames cycled one per tick, all the same width, as a TOML array.",
+            SlotKind::Frames,
             s("separator_frames"),
         )
         .valued(
@@ -1654,6 +1689,31 @@ mod tests {
         let (mut top, _) = built("animate = false\n", &FormKind::Top);
         top.focus("animate");
         assert!(matches!(top.handle(Key::Enter).actions.first(), Some(Action::Unset(_))));
+    }
+
+    /// frm-02: separator frames keep their spaces (and may hold commas), so
+    /// they are edited as the TOML array they are written as; an untouched
+    /// `Enter` gives the same array back.
+    #[test]
+    fn frames_are_typed_as_a_toml_array_and_keep_their_spaces() {
+        let (mut form, _) =
+            built("[frame]\nseparator_frames = [\" │ \", \" , \"]\n", &FormKind::Frame);
+        form.focus("separator_frames");
+        let field = form.fields.get(form.cursor).unwrap().clone();
+        let Some(Layer::Input(input)) = form.handle(Key::Enter).push else { panic!("an input") };
+        assert_eq!(input.text, "[\" │ \", \" , \"]");
+        let want = Value::Array(vec![Value::String(" │ ".into()), Value::String(" , ".into())]);
+        assert_eq!(field.kind.parse(&input.text), Ok(Some(want)));
+        assert_eq!(SlotKind::Frames.parse("[]"), Ok(Some(Value::Array(Vec::new()))));
+        assert_eq!(SlotKind::Frames.parse("  "), Ok(None), "nothing typed unsets it");
+        assert!(SlotKind::Frames.parse("[1, 2]").is_err());
+        assert!(SlotKind::Frames.parse(" │ , ┃ ").is_err(), "not an array literal");
+        // The comma form stays for the lists whose items have no spaces.
+        let (mut m, _) =
+            built("[modules.context]\nhide = [\"empty\"]\n", &FormKind::Module("context".into()));
+        m.focus("hide");
+        let Some(Layer::Input(input)) = m.handle(Key::Enter).push else { panic!("an input") };
+        assert_eq!(input.text, "empty");
     }
 
     #[test]

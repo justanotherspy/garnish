@@ -1717,7 +1717,11 @@ its key, which is how undo has a button. *Editing*: a picker opens on
 the value in effect and its `custom…` line starts from it, so a label is
 edited rather than retyped, and the input line has a cursor (`←`/`→`,
 `Home`/`End`, `Delete`); a string keeps its spaces (a picked `  `
-separator had arrived as `""`); the `[colors]` form offers literals only
+separator had arrived as `""`), and so does a frame of
+`separator_frames`, which is typed as the TOML array it is written as
+(`[" │ ", " ┃ "]`; the comma form had trimmed every frame, 2026-09-25
+review), while `hide` and the lists of colours and numbers stay
+comma-separated; the `[colors]` form offers literals only
 (the theme's own, each noted with its role, then the named colours),
 since a role there has no ground, while a module's `colors.*`, a title
 and a box still take roles; a row's form lists only the keys the parser

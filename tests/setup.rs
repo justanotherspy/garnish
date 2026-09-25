@@ -1019,6 +1019,21 @@ fn e_opens_the_box_form_from_the_keyboard() {
     assert!(snapshot(&mut app, 80, 24).contains("[box.c]"), "the column's own box");
 }
 
+/// frm-02: `Enter` twice on a preset's `separator_frames` changes nothing
+/// (the frames kept their spaces through the input line).
+#[test]
+fn an_untouched_frames_list_is_not_an_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let preset = garnish::gallery::find("animated-dots").unwrap();
+    std::fs::write(&file, garnish::gallery::body(preset.source)).unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "2");
+    on_field(&mut app, "separator_frames", "<enter><enter>");
+    assert!(!app.draft().is_dirty(), "{:?}", app.draft().get(&["frame", "separator_frames"]));
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
