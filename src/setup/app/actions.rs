@@ -9,8 +9,8 @@ use super::{Action, App, Level, new_problem};
 use crate::config::presets::TopPreset;
 use crate::config::{self, is_bare_key};
 use crate::setup::builder::Builder;
-use crate::setup::draft::{Draft, dropped_boxes};
-use crate::setup::form::{FormKind, Slot, SlotKind};
+use crate::setup::draft::{Draft, TITLE_KEYS, dropped_boxes};
+use crate::setup::form::{Base, FormKind, Slot, SlotKind};
 use crate::setup::pick::{Confirm, Layer, Question, Target};
 
 /// Why a box name was refused (SPEC § 4.3): the parser's own rule.
@@ -43,10 +43,11 @@ impl App {
                 let default = Value::String(TopPreset::Default.name().to_owned());
                 let swapped = self.swap_preset_rows(&slot, &default);
                 slot.unset(&mut self.draft);
+                let decorations = self.unset_decorations(&slot);
                 // The last member leaving a box takes an unused
                 // `[box.<name>]` with it, as the builder's `b` does.
                 let dropped = if slot.key == "box" { self.prune_orphan_boxes() } else { None };
-                let note = notes([swapped, dropped]);
+                let note = notes([swapped, decorations, dropped]);
                 let path = slot.path();
                 match self.refresh() {
                     Some(problem) => {
@@ -112,6 +113,29 @@ impl App {
         let rows = fresh.get(&["row"])?.clone();
         self.draft.set(&["row"], rows);
         Some(format!("rows replaced with the {name} preset's"))
+    }
+
+    /// A row's or a box's `title` unset takes the keys that decorate it,
+    /// which the parser reports without one, as the builder's `B` does;
+    /// says which, when any.
+    fn unset_decorations(&mut self, slot: &Slot) -> Option<String> {
+        let titled = slot.key == "title"
+            && match &slot.base {
+                Base::Row(_) => true,
+                Base::Table(path) => path.first().is_some_and(|t| t == "box"),
+            };
+        if !titled {
+            return None;
+        }
+        let mut gone: Vec<&str> = Vec::new();
+        for key in TITLE_KEYS {
+            let decoration = Slot { base: slot.base.clone(), key: key.to_owned() };
+            if decoration.get(&self.draft).is_some() {
+                decoration.unset(&mut self.draft);
+                gone.push(key);
+            }
+        }
+        (!gone.is_empty()).then(|| format!("{} went with it", gone.join(", ")))
     }
 
     /// Drop every `[box.<name>]` nothing joins any more; says which, when
