@@ -920,7 +920,9 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   id on a line is reported and removed, so `config show` writes only ids
   that render, and leaves out a row (or a stack's row) that its removal
   emptied wherever `hide_empty_rows` drops it, since `modules = []` would
-  make it a spacer that is always drawn. With `stale_style = "hide"` a line of only cached modules can
+  make it a spacer that is always drawn; a `[box.<name>]` that none of the
+  rows and columns it writes names is left out too, or the file would read
+  back with a box nothing joins (2026-09-25 review). With `stale_style = "hide"` a line of only cached modules can
   come and go as its values fall overdue and refresh; `hide_when_empty =
   false` on one of them pins the row.
 - **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
