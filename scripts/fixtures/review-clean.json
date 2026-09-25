@@ -1,0 +1,34 @@
+[
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "name": "mcp__github_comment__update_claude_comment",
+          "input": { "body": "## Review\n\n- [ ] read the diff" }
+        }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "name": "mcp__github_comment__update_claude_comment",
+          "input": { "body": "## Review\n\n- [x] read the diff\n\nOne finding, posted inline." }
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 12,
+    "total_cost_usd": 0.9,
+    "permission_denials": []
+  }
+]

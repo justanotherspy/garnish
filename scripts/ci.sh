@@ -6,6 +6,10 @@ cd "$(dirname "$0")/.."
 step() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 
 step "cargo fmt --check";   cargo fmt --check
+# The release builds with --locked; everything below would quietly rewrite a
+# stale Cargo.lock and go green, so a version bump without its lock passed CI
+# and then failed every build job after the tag.
+step "Cargo.lock is current"; cargo metadata --locked --format-version 1 > /dev/null
 step "cargo clippy";        cargo clippy --all-targets --all-features -- -D warnings
 # CLAUDE.md § Style makes this a rule for every script here; nothing used to
 # check it, and scripts/render-cask.sh and changelog-section.sh are what a
@@ -17,6 +21,7 @@ if command -v shellcheck >/dev/null; then
 else
   echo "shellcheck not installed; skipping (run scripts/setup.sh)"
 fi
+step "script tests";        scripts/test-scripts.sh
 # The docs-sync suite runs inside this: `cargo nextest run` includes every
 # integration binary, `docs_sync` among them.
 step "cargo nextest run";   cargo nextest run

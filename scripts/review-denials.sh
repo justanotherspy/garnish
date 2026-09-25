@@ -18,7 +18,9 @@
 # subcommand words that follow it when the command is one that takes them
 # (`git rev-parse`, `gh pr diff`). That is what the allowlist matches on, so it
 # is all that is needed to write the missing entry, and it keeps an argument
-# that might carry a path or a token out of a public job log.
+# that might carry a path or a token out of a public job log. Leading `NAME=…`
+# assignments are skipped, and a command word that is not a plain verb (an
+# absolute path, say) is printed as `<path>` or `<word>`.
 set -uo pipefail
 # An empty argument is what the workflow passes when the action wrote no
 # execution file (it skips itself on a pull request that edits the workflow
@@ -131,6 +133,11 @@ printf '%s' "$result" | jq -r '
   def verbish: . != null and (. | test("^[a-z][a-z0-9_-]*$"));
   # Only these take subcommands; for anything else the command word is the key.
   def drives: test("^(git|gh|cargo|make|npm|bun|docker|node|python3?)$");
+  # `NAME=value cmd` runs cmd: the assignments are skipped, never printed,
+  # since the value is exactly what may be a token.
+  def strip_env: if length > 0 and (.[0] | test("^[A-Za-z_][A-Za-z0-9_]*=")) then .[1:] | strip_env else . end;
+  # The command word itself is printed only when it looks like a verb.
+  def shown: if verbish then . elif test("/") then "<path>" else "<word>" end;
   (.permission_denials // [])
   | map(
       if .tool_name == "Bash" then
@@ -139,11 +146,12 @@ printf '%s' "$result" | jq -r '
           | gsub("\\s+"; " ")
           | ltrimstr(" ")
           | split(" ")
+          | strip_env
         ) as $w
         | ($w[0] // "") as $c
         | (
             if $c == "" then "Bash"
-            elif ($c | drives | not) then "Bash(" + $c + ":*)"
+            elif ($c | drives | not) then "Bash(" + ($c | shown) + ":*)"
             elif ($w[1] | verbish | not) then "Bash(" + $c + ":*)"
             elif ($w[2] | verbish) then "Bash(" + $c + " " + $w[1] + " " + $w[2] + ":*)"
             else "Bash(" + $c + " " + $w[1] + ":*)"
@@ -170,6 +178,9 @@ echo '```'
 # denied command ran. Verbs only, never arguments, same as above.
 shapes="$(
   printf '%s' "$result" | jq -r '
+    def verbish: . != null and (. | test("^[a-z][a-z0-9_-]*$"));
+    def strip_env: if length > 0 and (.[0] | test("^[A-Za-z_][A-Za-z0-9_]*=")) then .[1:] | strip_env else . end;
+    def shown: if verbish then . elif test("/") then "<path>" else "<word>" end;
     (.permission_denials // [])
     | map(select(.tool_name == "Bash") | (.tool_input.command // ""))
     | map(
@@ -178,8 +189,8 @@ shapes="$(
         # splitting on: it is far more often the tail of a `2>&1`, which cut
         # `ls … 2>&1 | head` into a phantom verb named `1` (run 35458733807).
         | [ splits("\\|\\||&&|[|;]") ]
-        | map(ltrimstr(" ") | split(" ") | .[0] // "")
-        | map(select(. != ""))
+        | map(ltrimstr(" ") | split(" ") | map(select(. != "")) | strip_env | .[0] // "")
+        | map(select(. != "") | shown)
         | join(" → ")
       )
     | map(select(test(" → ")))

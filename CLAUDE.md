@@ -159,15 +159,19 @@ make docs         # regenerate docs/ and examples/ from the module schemas
 make bench        # hyperfine budget gate (fails when over budget)
 make watch        # watchexec: lint + test on every save
 make install      # cargo install --path . --locked  → $CARGO_HOME/bin/garnish
-./scripts/ci.sh   # everything above plus shellcheck and rustdoc -D warnings
+./scripts/ci.sh   # everything above plus a --locked Cargo.lock check, shellcheck,
+                  # scripts/test-scripts.sh and rustdoc -D warnings
 ```
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `scripts/setup.sh` and
-then `scripts/ci.sh` on Linux and `make check` on macOS for every push to
-`main`, tag and PR; the bench job is `workflow_dispatch` only and never
-gates. The macOS job is the only coverage of the Mac-only code paths.
+then `scripts/ci.sh` on Linux and `make check` plus
+`scripts/test-scripts.sh` on macOS for every push to `main`, tag and PR;
+the bench job is `workflow_dispatch` only and never gates. The macOS job
+is the only coverage of the Mac-only code paths.
 **Every action is pinned to a full commit SHA** with a `# vX.Y.Z` comment
-(Renovate bumps them); never use a floating tag or branch. On failure the
+(Renovate bumps them); never use a floating tag or branch. The same goes
+for a downloaded tool: `setup.sh` fetches a pinned cargo-nextest and
+checks its sha256 (bump the version and the three hashes together). On failure the
 workflow runs `scripts/ci-annotate.sh`, which turns failing tests, clippy
 errors and rustfmt diffs into check-run annotations, so a red run can be
 diagnosed from the Checks API alone.
@@ -175,10 +179,13 @@ diagnosed from the Checks API alone.
 ## Claude review
 
 `.github/workflows/claude-review.yml` runs a Claude code review on a pull
-request, on demand only: **write `@claude`** in a PR comment, a review
-comment or a review body, or **add the `claude-review` label**; the PR must
-be **opened by `justanotherspy`** and be **open and not a draft** (a guard
-step reads live state). It never fires on a push: a review costs money.
+request, on demand only: **`justanotherspy` writes `@claude`** in a PR
+comment, a review comment or a review body, or **adds the `claude-review`
+label**; the PR must be **opened by `justanotherspy`** and be **open and
+not a draft** (a guard step reads live state). It never fires on a push: a
+review costs money. The trigger checks `github.actor` because anyone can
+comment on a public pull request, and a stranger's `@claude` used to start
+a run that took the concurrency group and cancelled the review in progress.
 
 It authenticates with **workload identity federation**: the job's OIDC
 token is exchanged for a short-lived Claude token, so there is no API key
@@ -202,9 +209,18 @@ claim, which embeds the numeric owner and repository IDs
   (each naming the `CLAUDE.md` rule it comes from), how to post, how to
   write (terse, under 120 words a comment, a suggestion block over
   prose), and never to end without the summary.
-- **The file tools, `TodoWrite`, `Bash` whole and the GitHub MCP tools
-  are allowed; `Task` is deliberately absent.** The job holds `contents:
-  read`, the checkout is disposable, and an allowlist of verbs cannot
+- **The read tools, `TodoWrite`, `Bash` whole and the GitHub MCP tools
+  are allowed; `Write`, `Edit` and `Task` are deliberately absent.** Bash
+  whole is safe only because of what is in its reach, so that is pinned
+  down: the action is given the job's own token (`github_token`), capped by
+  the job's `contents: read`. Without it the action mints a Claude GitHub
+  App token with `contents: write` and writes it into the checkout's
+  remote URL, readable by the model's Bash, while the prompt carried every
+  commenter's text. So only the owner's comments reach the prompt
+  (`include_comments_by_actor`), the checkout keeps no credentials, and
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` keeps the OIDC request variables out
+  of the model's commands (review of 2026-09-25, ci-02). The checkout is
+  disposable, and an allowlist of verbs cannot
   work: it matches on a prefix (`git --no-pager diff` is not `git diff`),
   and **a compound command is refused even when every part of it is
   allowed** (`git diff … | wc -l` with both on the list). `Task` is
@@ -230,8 +246,9 @@ claim, which embeds the numeric owner and repository IDs
   `show_full_output` says; the result message carries
   `permission_denials` as `{tool_name, tool_use_id, tool_input}`) and
   **exits non-zero on a refusal or on a run that posted no summary**. It
-  prints a denied command's verbs only, never its arguments, so a public
-  log cannot pick up a path or a token, and names `$( … )`, backticks and
+  prints a denied command's verbs only, never its arguments or a leading
+  `NAME=value`, so a public log cannot pick up a path or a token
+  (`scripts/test-scripts.sh` holds it to that), and names `$( … )`, backticks and
   redirects, which hide inside a command that looks single. It runs the
   base branch's copy of the script (`git show FETCH_HEAD:…`), because the
   checkout is the untrusted head and that step holds the job's token.
@@ -246,17 +263,22 @@ claim, which embeds the numeric owner and repository IDs
   such a run and cancelled it. The `if` also excludes bot authors, since
   the review talks on the events it listens to.
 - **A pull request that edits the workflow file cannot be reviewed by
-  it.** The action exchanges its OIDC token only when the workflow file is
-  byte-identical to the copy on the default branch, and otherwise goes
-  green in about twelve seconds having done nothing (`Workflow validation
-  failed`; the tell is the duration). The report step then has no
-  execution file and must say so and exit 0: PR #78 went red on that
-  step because `main`'s copy of the script took the empty argument as a
-  usage error. A change to the workflow lands in its own pull request,
-  before the branch that wants the review.
+  it.** The action exchanged its OIDC token for the GitHub App token only
+  when the workflow file was byte-identical to the copy on the default
+  branch, and otherwise went green in about twelve seconds having done
+  nothing (`Workflow validation failed`; the tell is the duration). That
+  exchange no longer runs now that the job passes its own token, so the
+  first pull request to edit the workflow again will show whether the
+  skip survives; until then, keep a change to the workflow in its own
+  pull request, before the branch that wants the review. A skipped run
+  has no execution file, and the report step must say so and exit 0: PR
+  #78 went red on that step because `main`'s copy of the script took the
+  empty argument as a usage error.
 - The checkout is `fetch-depth: 0` with the pull request's head as `ref`
   (three of the four triggers are comment events whose `GITHUB_REF` is the
-  default branch); at depth 1 there is no merge base.
+  default branch); at depth 1 there is no merge base. The diff is taken
+  against the pull request's own base branch, so a stacked layer is
+  reviewed alone, not with every layer below it.
 
 ## Release process
 
@@ -268,18 +290,24 @@ Daniel's approval.
    `Cargo.toml` (`make check` updates `Cargo.lock`), turn the `## Unreleased`
    section of `CHANGELOG.md` into `## X.Y.Z — YYYY-MM-DD`, `make check`,
    merge.
-2. **Tag** the merged commit; the tag message is the CHANGELOG section:
+2. **Tag** the merged commit; the tag message is the CHANGELOG section
+   (`--cleanup=verbatim`, since git's default cleanup drops every line
+   starting with `#`, a `### ` subheading included):
    ```
    git switch main && git pull
-   scripts/changelog-section.sh X.Y.Z | git tag -s vX.Y.Z -F -
+   scripts/changelog-section.sh X.Y.Z | git tag -s vX.Y.Z --cleanup=verbatim -F -
    git push origin vX.Y.Z
    ```
-3. **The workflow** then runs, job by job: `verify` (the tag names the crate
-   version, sits on `main`, has its CHANGELOG section, no `## Unreleased`
-   left; the `release` environment exists with a required reviewer) →
+3. **The workflow** then runs, job by job: `verify` (the tag is annotated
+   and names the crate version, `Cargo.lock` agrees, it sits on `main`, has
+   its CHANGELOG section, no `## Unreleased` left; the `release` environment
+   exists with a required reviewer, no administrator bypass and a custom
+   deployment policy; the tag's signature status is reported, not gated) →
    `release` (a GitHub *pre-release* whose notes are the section body) →
    `build` (one `garnish-<target>.tar.gz` plus `.sha256` per target:
-   x86_64/aarch64 for Linux and macOS) → `render` (fills
+   x86_64/aarch64 for Linux and macOS; the job holds `contents: write`, so
+   it installs only rustup's toolchain, restores no cache, and renders one
+   fixture with the release binary before uploading it) → `render` (fills
    `.github/homebrew/garnish-cask.rb.tmpl` with `scripts/render-cask.sh`,
    prints the cask in its log, checks it with `brew fetch`, keeps it as the
    `cask` artifact) → **`publish` waits in the `release` environment until
@@ -296,8 +324,8 @@ Daniel's approval.
    it must exist before the first tag): the `release` environment on
    `justanotherspy/garnish` with Daniel as its required reviewer,
    deployment branches/tags restricted to `v*` tags, and *allow
-   administrators to bypass* off (`verify` refuses to run when the
-   environment is missing or has no required reviewer); the octo-sts app on
+   administrators to bypass* off (`verify` refuses to run when any of the
+   three is missing); the octo-sts app on
    the tap with `.github/chainguard/garnish.sts.yaml` trusting the subject
    `repo:justanotherspy/garnish:environment:release`; and, so that only
    Daniel can start a release at all, a tag ruleset on `v*` limited to
@@ -579,7 +607,8 @@ for the contract and `docs/` for user docs.
   by `worker_repo_modules_render_in_every_preset_and_icon_set` in a real
   repository instead. Tests that touch the cache dir or PATH shims are
   named `cache_*`, `spawn_*`, `worker_*`, `gc_*` so nextest runs them
-  serially (`.config/nextest.toml`). A test that must kill a process
+  serially (`.config/nextest.toml`; unit tests too, whose names nextest
+  prefixes with `module::tests::`). A test that must kill a process
   group spawns the tick with `process_group(0)` and kills `-<pid>` through
   the `kill` *binary* (with `LC_ALL=C`): dash's builtin `kill` takes
   neither `--` nor a negative pid.
