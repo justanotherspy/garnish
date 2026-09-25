@@ -153,6 +153,7 @@ impl App {
             return;
         }
         let Screen::Picker(picker) = &mut self.screen else { return };
+        let gallery = picker.item().and_then(|i| crate::gallery::find(&i.name));
         let Some((preset, ..)) = picker.shown() else { return };
         let mut preset = preset.clone();
         let unreadable = self.draft.unreadable().map(str::to_owned);
@@ -160,10 +161,18 @@ impl App {
             self.say(format!("the config file does not parse ({problem}) and is never overwritten; fix or move it first"), Level::Error);
             return;
         }
-        preset.materialise_rows();
         let mut draft = self.draft.clone();
-        draft.replace_table(preset.table().clone());
-        match draft.save() {
+        // A gallery preset is written as `setup --preset` writes it, its
+        // comments included; a built-in one as the lean table the builder
+        // edits (the twin writes `config init`'s annotated defaults).
+        let saved = if let Some(p) = gallery {
+            draft.save_text(&crate::gallery::body(p.source))
+        } else {
+            preset.materialise_rows();
+            draft.replace_table(preset.table().clone());
+            draft.save()
+        };
+        match saved {
             Ok(backup) => {
                 let path = draft.path().map_or_else(String::new, |p| self.shown(p));
                 let note =

@@ -1779,7 +1779,12 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   have lines of their own under the facts they qualify, never the end of
   a line that a narrow terminal cuts (found by the Phase 22 review).
   `Enter` applies it: the file is written with the previous one kept by
-  `install`'s backup rule (§ 5), and the install screen follows if the
+  `install`'s backup rule (§ 5), a gallery preset as its file, comments
+  included, as `setup --preset` writes it, a built-in one as `preset =
+  "<name>"` with its rows written out, the lean table the builder edits
+  (where the non-interactive twin writes `config init`'s annotated
+  defaults; 2026-09-25 review: the picker had dropped a gallery file's
+  comments), and the install screen follows if the
   settings file has no `statusLine` yet. `e` opens the highlighted preset
   in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen

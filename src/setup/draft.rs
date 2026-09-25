@@ -361,6 +361,18 @@ impl Draft {
         Ok(backup)
     }
 
+    /// Write `text` as the draft's file, with a save's checks and backup,
+    /// and open the draft on it again: how the picker writes a gallery
+    /// preset as `setup --preset` does, comments and all.
+    ///
+    /// # Errors
+    /// As [`Draft::save`].
+    pub fn save_text(&mut self, text: &str) -> Result<Option<PathBuf>, String> {
+        let backup = self.write(text)?;
+        self.reload();
+        Ok(backup)
+    }
+
     /// Write `text` as the draft's file, with a save's checks and backup.
     fn write(&mut self, text: &str) -> Result<Option<PathBuf>, String> {
         let Some(path) = self.path.clone() else {

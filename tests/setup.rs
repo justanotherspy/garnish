@@ -1288,6 +1288,25 @@ fn a_click_on_a_rows_own_separator_opens_the_row() {
     assert!(snapshot(&mut app, 80, 24).contains("[frame]"), "the frame's separator");
 }
 
+/// app-21: the picker writes a gallery preset as `setup --preset` does,
+/// the file with its comments; the draft is that file, unedited.
+#[test]
+fn the_picker_writes_a_gallery_preset_verbatim() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let mut app = for_test("", Some(file.clone()), home);
+    let at = garnish::gallery::PRESETS.iter().position(|p| p.name == "boxed-panels").unwrap();
+    keys(&mut app, "<enter>");
+    keys(&mut app, &"j".repeat(at + 4));
+    keys(&mut app, "<enter>");
+    let preset = garnish::gallery::find("boxed-panels").unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), garnish::gallery::body(preset.source));
+    assert!(!app.draft().is_dirty());
+    assert!(app.draft().loses_comments(), "the next save says it drops them");
+    assert_eq!(app.draft().resolved().1, Vec::new());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
