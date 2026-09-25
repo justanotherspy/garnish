@@ -103,6 +103,14 @@ jobs:
             echo "::error::the 'release' environment accepts deployments from any branch; restrict it to v* tags"
             exit 1
           fi
+          # A custom policy exists; it must be exactly the v* tag rule, not a
+          # branch (main, say) that could deploy an untagged build.
+          policies="$(gh api "repos/$GITHUB_REPOSITORY/environments/release/deployment-branch-policies" \
+            --jq '[.branch_policies[] | {name, type}]')"
+          if [ "$(printf '%s' "$policies" | jq -c .)" != '[{"name":"v*","type":"tag"}]' ]; then
+            echo "::error::the 'release' environment's deployment policy is $policies; it must be the one tag rule v*"
+            exit 1
+          fi
       # Asked of the API, since a shallow or refspec fetch can turn a tag into
       # a lightweight ref locally. GitHub verifies a signature only against a
       # signing key registered on the tagger's account, so the signature
@@ -216,7 +224,9 @@ jobs:
             GARNISH_CACHE_DIR="$RUNNER_TEMP/garnish-cache" GARNISH_MANAGED_SETTINGS='' \
             COLUMNS=120 "$bin" < tests/fixtures/payloads/subscription-full.json)"
           printf '%s\n' "$out"
-          if [ -z "$out" ] || printf '%s\n' "$out" | grep -q 'garnish:'; then
+          # Both warning rows, in either icon set: `⚠ garnish:` (the render
+          # failed) and `⚠ config:` (a config the runner should not have).
+          if [ -z "$out" ] || printf '%s\n' "$out" | grep -qE '(⚠|!) (garnish|config): '; then
             echo "::error::the release binary did not render the fixture cleanly"
             exit 1
           fi

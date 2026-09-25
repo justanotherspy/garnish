@@ -23,8 +23,8 @@
 # absolute path, say) is printed as `<path>` or `<word>`.
 set -uo pipefail
 # An empty argument is what the workflow passes when the action wrote no
-# execution file (it skips itself on a pull request that edits the workflow
-# file), and `${1:?}` would have made that a red check of its own.
+# execution file (it failed before Claude started), and `${1:?}` would have
+# made that a red check of its own.
 file="${1:-}"
 
 if ! command -v jq > /dev/null 2>&1; then

@@ -210,16 +210,26 @@ claim, which embeds the numeric owner and repository IDs
   write (terse, under 120 words a comment, a suggestion block over
   prose), and never to end without the summary.
 - **The read tools, `TodoWrite`, `Bash` whole and the GitHub MCP tools
-  are allowed; `Write`, `Edit` and `Task` are deliberately absent.** Bash
+  are allowed; the edit tools are disallowed and `Task` is absent.** Bash
   whole is safe only because of what is in its reach, so that is pinned
   down: the action is given the job's own token (`github_token`), capped by
   the job's `contents: read`. Without it the action mints a Claude GitHub
   App token with `contents: write` and writes it into the checkout's
   remote URL, readable by the model's Bash, while the prompt carried every
   commenter's text. So only the owner's comments reach the prompt
-  (`include_comments_by_actor`), the checkout keeps no credentials, and
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` keeps the OIDC request variables out
-  of the model's commands (review of 2026-09-25, ci-02). The checkout is
+  (`include_comments_by_actor`), and `allowed_non_write_users:
+  justanotherspy` turns on the action's isolation: bubblewrap and a PID
+  namespace around the model's commands, the subprocess environment scrub
+  (the OIDC request variables and the tokens stay out of Bash; the id
+  token could otherwise be traded for that App token), and a credential
+  helper instead of a token in `.git/config` (review of 2026-09-25, ci-02
+  and its final review). `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` must never be
+  set on its own: without the isolation step's bubblewrap the CLI refuses
+  to start. Tag mode runs in `acceptEdits`, which allows the edit tools
+  inside the workspace whatever `--allowedTools` says, so they are named
+  in `--disallowedTools`. The Claude GitHub App is no longer needed by the
+  workflow; uninstalling it from the repository removes the `contents:
+  write` token the id token could be exchanged for. The checkout is
   disposable, and an allowlist of verbs cannot
   work: it matches on a prefix (`git --no-pager diff` is not `git diff`),
   and **a compound command is refused even when every part of it is
@@ -250,8 +260,10 @@ claim, which embeds the numeric owner and repository IDs
   `NAME=value`, so a public log cannot pick up a path or a token
   (`scripts/test-scripts.sh` holds it to that), and names `$( … )`, backticks and
   redirects, which hide inside a command that looks single. It runs the
-  base branch's copy of the script (`git show FETCH_HEAD:…`), because the
-  checkout is the untrusted head and that step holds the job's token.
+  base branch's copy of the script, fetched through the contents API from
+  outside the checkout, because the checkout is the untrusted head the
+  model had its hands on (a planted hook or `insteadOf` would run or
+  redirect a git command there) and that step holds the job's token.
   Never enable `show_full_output` to get the same thing: it dumps every
   tool result into a world-readable log. Trust the report; distrust the
   theory: of four explanations written between the third run and the
@@ -267,13 +279,15 @@ claim, which embeds the numeric owner and repository IDs
   when the workflow file was byte-identical to the copy on the default
   branch, and otherwise went green in about twelve seconds having done
   nothing (`Workflow validation failed`; the tell is the duration). That
-  exchange no longer runs now that the job passes its own token, so the
-  first pull request to edit the workflow again will show whether the
-  skip survives; until then, keep a change to the workflow in its own
-  pull request, before the branch that wants the review. A skipped run
-  has no execution file, and the report step must say so and exit 0: PR
-  #78 went red on that step because `main`'s copy of the script took the
-  empty argument as a usage error.
+  exchange no longer runs now that the job passes its own token (the
+  action's `setupGitHubToken` returns a provided token before it, and
+  only it throws the skip), so a label run on such a pull request uses
+  the pull request's own copy of the workflow; keep a change to the
+  workflow in its own pull request anyway, so the branch that wants the
+  review is reviewed by a known workflow. A run with no execution file
+  (the action failed before Claude started) must be reported as such
+  and exit 0: PR #78 went red on that step because `main`'s copy of the
+  script took the empty argument as a usage error.
 - The checkout is `fetch-depth: 0` with the pull request's head as `ref`
   (three of the four triggers are comment events whose `GITHUB_REF` is the
   default branch); at depth 1 there is no merge base. The diff is taken

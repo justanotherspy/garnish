@@ -33,7 +33,9 @@ if scripts/changelog-section.sh 999.999.999 > /dev/null 2>&1; then
 else
   pass "changelog-section.sh refuses a version with no section"
 fi
-body="$(scripts/changelog-section.sh --body "$version")"
+# `|| true`: under `set -e` a missing section would end the run here, before
+# the review-denials.sh tests and the failure count.
+body="$(scripts/changelog-section.sh --body "$version" || true)"
 if [ -z "$body" ] || [ "$(printf '%s\n' "$body" | head -n 1)" = "$(printf '%s\n' "$section" | head -n 1)" ]; then
   fail "changelog-section.sh --body $version: empty, or still carries the subject line"
 else
