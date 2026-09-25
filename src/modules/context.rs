@@ -9,7 +9,7 @@ use crate::icons::glyph;
 use crate::num::percent_of;
 
 use super::util::{band_colors_opt, bar, bar_empty_color, bar_icons, bar_opt, thresholds_opt};
-use super::{Ctx, IconShown, Module, Rendered, badge, lead, seg, show_icon_opt};
+use super::{Ctx, IconShown, Module, Rendered, badge, close_up, lead, seg, show_icon_opt};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
 /// percentage means.
@@ -86,6 +86,7 @@ impl Module for ContextModule {
         let window = ctx.payload.context_window_size();
         let used = ctx.payload.context_window.as_ref().and_then(|c| c.used_percentage);
         let mut segs: Vec<Segment> = lead(cfg, "context");
+        let first = segs.len();
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
         // SPEC § 3.2 `scale = "usable"`: 100 % is the compaction point, so
@@ -129,8 +130,7 @@ impl Module for ContextModule {
         if cfg.bool("show_percent") {
             let text =
                 pct.map_or_else(|| ctx.icons.placeholder().to_owned(), |p| ctx.percent(cfg, p));
-            let sp = if segs.is_empty() { "" } else { " " };
-            segs.push(Segment::styled(format!("{sp}{text}"), Style::fg(fill_color).bolded()));
+            segs.push(Segment::styled(format!(" {text}"), Style::fg(fill_color).bolded()));
         }
         // The label follows the threshold, not the marker: the two are
         // separate switches, and only the `usable` scale hides both (the
@@ -155,6 +155,7 @@ impl Module for ContextModule {
         if warn_at > 0.0 && shown.is_some_and(|s| s >= warn_at) {
             segs.extend(badge(cfg, "warn", "warn"));
         }
+        close_up(&mut segs, first);
         Rendered::fresh(segs).measured(shown.map(super::Measure::Percent))
     }
 }
@@ -240,14 +241,19 @@ mod tests {
     use crate::render::{Clock, render_plain_at};
 
     /// The context module alone, plain, with `used_percentage` on a 1M
-    /// window and the given auto-compaction environment.
+    /// window and the given auto-compaction environment, its bar 10 cells.
     fn render(used: f64, extra: &str, env: crate::claude_settings::Env) -> String {
+        render_table(used, &format!("width = 10\n{extra}"), env)
+    }
+
+    /// [`render`] with the whole `[modules.context]` table given.
+    fn render_table(used: f64, table: &str, env: crate::claude_settings::Env) -> String {
         let payload = crate::payload::Payload::parse(&format!(
             "{{\"session_id\": \"s\", \"context_window\": {{\"context_window_size\": 1000000, \"used_percentage\": {used}}}}}"
         ))
         .unwrap();
         let text = format!(
-            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nwidth = 10\n{extra}"
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\n{table}"
         );
         let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
         assert!(errs.is_empty(), "{errs:?}");
@@ -311,6 +317,24 @@ mod tests {
         let warn = "scale = \"usable\"\nwarn_at = 90\n";
         assert_eq!(render(89.0, warn, env.clone()), "⊞ █████████░ 90% ⚠");
         assert_eq!(render(88.0, warn, env), "⊞ ████████▉░ 89%");
+    }
+
+    /// Each part carries its space only when something precedes it, and the
+    /// lead's own space is that space. With the bar off the percentage used
+    /// to add a second one (`⊞  50%`), and with the icon off too a later
+    /// part opened the module with one (` 1.0M`).
+    #[test]
+    fn parts_are_spaced_once_whatever_is_switched_off() {
+        let env = crate::claude_settings::Env::default();
+        assert_eq!(render_table(50.0, "width = 0\n", env.clone()), "⊞ 50%");
+        assert_eq!(render_table(50.0, "width = 0\nshow_icon = false\n", env.clone()), "50%");
+        let window_only =
+            "width = 0\nshow_icon = false\nshow_percent = false\nshow_window = true\n";
+        assert_eq!(render_table(50.0, window_only, env.clone()), "1.0M");
+        let badge_only = "width = 0\nshow_percent = false\nwarn_at = 10\n";
+        assert_eq!(render_table(50.0, badge_only, env.clone()), "⊞ ⚠");
+        // With something before them the parts keep their space.
+        assert_eq!(render(50.0, "show_window = true\n", env), "⊞ █████░░░░▏ 50% 1.0M");
     }
 
     /// SPEC § 3.2: `warn_at` follows the percentage on display, as the band

@@ -648,6 +648,26 @@ pub fn lead_only(cfg: &ModuleCfg, icon_key: &str) -> Vec<Segment> {
     leading(cfg, icon_key, "")
 }
 
+/// Drop the space the part at `first` opens with when nothing before it
+/// needs one: at the start of the module, or right after a [`lead`], whose
+/// glyph already ends in its space.
+///
+/// A part that follows a value carries its own space (a [`badge`], a
+/// ` 1.0M` tag). A module whose earlier parts can each be switched off
+/// (`context`'s bar and percentage, `effort`'s scale) marks where they
+/// start and closes the join up once, at the end, instead of every part
+/// asking what came before it: a double space or a leading one is a cell
+/// that shifts an aligned column.
+pub fn close_up(segs: &mut [Segment], first: usize) {
+    let after_space =
+        first.checked_sub(1).and_then(|i| segs.get(i)).is_none_or(|s| s.text().ends_with(' '));
+    if let Some(part) = segs.get_mut(first).filter(|_| after_space)
+        && let Some(rest) = part.text().strip_prefix(' ').map(str::to_owned)
+    {
+        *part = std::mem::take(part).with_text(rest);
+    }
+}
+
 /// A trailing badge: a space and the icon in its own colour, or nothing when
 /// the icon set (or an override) leaves that glyph empty.
 ///

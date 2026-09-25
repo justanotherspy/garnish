@@ -1727,10 +1727,11 @@ mod tests {
     }
 
     /// Every switch a module's schema declares, as a TOML line: both values
-    /// of a `Bool`, every variant of an `Enum`. This is what makes the
-    /// matrix cover a new *option*, not just a new module.
+    /// of a `Bool`, every variant of an `Enum`, and `0` for an `Int` whose
+    /// default is not (a width, a length or a count turned off). This is
+    /// what makes the matrix cover a new *option*, not just a new module.
     fn matrix_switches(schema: &crate::config::schema::ModuleSchema) -> Vec<String> {
-        use crate::config::schema::Kind;
+        use crate::config::schema::{Kind, Value};
         schema
             .opts
             .iter()
@@ -1741,6 +1742,7 @@ mod tests {
                 Kind::Enum(values) => {
                     values.iter().map(|v| format!("{} = \"{v}\"\n", opt.key)).collect()
                 }
+                Kind::Int if opt.default != Value::Int(0) => vec![format!("{} = 0\n", opt.key)],
                 _ => Vec::new(),
             })
             .collect()
@@ -1842,6 +1844,13 @@ mod tests {
                         assert!(width <= max, "{label}: {width} cells > {max}: {line:?}");
                     }
                     let text = Painter::PLAIN.paint(line);
+                    // A part carries the space before it only when something
+                    // precedes it, and a lead's own space is that space: a
+                    // module never opens with a space nor doubles one.
+                    assert!(
+                        !text.starts_with(' ') && !text.contains("  "),
+                        "{label}: stray space in {text:?}"
+                    );
                     if i == 0 && !lines.is_empty() && !was_cut {
                         assert_eq!(
                             Some(line),
