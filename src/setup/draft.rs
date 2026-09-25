@@ -89,6 +89,9 @@ impl Draft {
     pub fn open(path: Option<PathBuf>) -> Self {
         let mut draft = Self::from_text("");
         let Some(p) = path else { return draft };
+        // Stamped before the read: a write landing in between then shows
+        // as a change (a question too many), never as what was read.
+        let stamp = Stamp::of(&p);
         match std::fs::read_to_string(&p) {
             Ok(text) => {
                 if let Some(problem) = config::syntax_error(&text) {
@@ -101,7 +104,7 @@ impl Draft {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => draft.unreadable = Some(format!("cannot read: {e}")),
         }
-        draft.stamp = Stamp::of(&p);
+        draft.stamp = stamp;
         draft.path = Some(p);
         draft
     }
