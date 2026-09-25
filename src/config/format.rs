@@ -252,7 +252,7 @@ mod tests {
         // The defaults are the old rendering, so a config without the
         // table renders byte for byte as before.
         assert_eq!(FormatCfg::default().tokens.format(12_345), util::tokens(12_345));
-        assert_eq!(FormatCfg::default().percent.format(41.6, true), util::percent(41.6));
+        assert_eq!(FormatCfg::default().percent.format(41.6, true), "42%");
         assert_eq!(FormatCfg::default().cost.format(1.2345, 2), util::dollars(1.2345, 2));
         assert_eq!(FormatCfg::default().parens, ParensStyle::Plain);
     }

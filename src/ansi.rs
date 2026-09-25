@@ -176,8 +176,6 @@ pub enum ColorMode {
 }
 
 /// Text attributes.
-// Four independent flags; a bitset would only obscure the config mapping.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Style {
     /// Foreground color.
@@ -186,16 +184,13 @@ pub struct Style {
     pub bold: bool,
     /// Dim / faint.
     pub dim: bool,
-    /// Italic.
-    pub italic: bool,
     /// Underline.
     pub underline: bool,
 }
 
 impl Style {
     /// Plain text.
-    pub const PLAIN: Self =
-        Self { fg: Color::Default, bold: false, dim: false, italic: false, underline: false };
+    pub const PLAIN: Self = Self { fg: Color::Default, bold: false, dim: false, underline: false };
 
     /// Style with only a foreground color.
     #[must_use]
@@ -231,9 +226,6 @@ impl Style {
         }
         if self.dim {
             params.push("2".into());
-        }
-        if self.italic {
-            params.push("3".into());
         }
         if self.underline {
             params.push("4".into());

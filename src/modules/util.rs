@@ -1,4 +1,5 @@
-//! Shared rendering helpers: smooth bars, percent formatting.
+//! Shared rendering helpers: smooth bars, name cuts, short hashes, token
+//! and dollar formatting. Percentages print through `config::format`.
 
 use crate::ansi::{Color, Segment, Style};
 use crate::icons::IconSet;
@@ -86,18 +87,6 @@ pub fn bar(
 /// `ModuleCfg::resolve` applies the shorthand to the `fill`/`empty` icons; an
 /// explicit override still wins.
 pub const BAR_STYLES: &[&str] = &["blocks", "line"];
-
-/// Format a percentage with no decimals, e.g. `42%`.
-#[must_use]
-pub fn percent(p: f64) -> String {
-    format!("{}%", crate::num::round_to_u64(crate::num::clamp_percent(p)))
-}
-
-/// Format a percentage allowing values above 100 (spend limits).
-#[must_use]
-pub fn percent_unclamped(p: f64) -> String {
-    if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
-}
 
 /// Format dollars: `$0.42`, `$12.35`, `$1.2k`; the amount is bounded like
 /// every printed one ([`crate::num::shown_amount`]).
@@ -345,9 +334,6 @@ mod tests {
 
     #[test]
     fn formatting_helpers() {
-        assert_eq!(percent(41.6), "42%");
-        assert_eq!(percent(140.0), "100%");
-        assert_eq!(percent_unclamped(112.4), "112%");
         assert_eq!(dollars(1.2345, 2), "$1.23");
         assert_eq!(dollars(0.0, 2), "$0.00");
         assert_eq!(dollars(-0.0, 2), "$0.00");

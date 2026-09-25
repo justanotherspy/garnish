@@ -538,9 +538,6 @@ pub const MAX_FR: u32 = 64;
 pub const MAX_DECIMALS: usize = 8;
 
 /// The fully resolved configuration.
-// Four independent switches that mirror config keys one to one; a bitset
-// would only obscure the mapping.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// Top-level preset.
