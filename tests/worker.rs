@@ -747,6 +747,23 @@ fn worker_refs_that_are_not_files_fall_back_to_the_worker() {
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert!(out.contains("main") && out.contains('⟳'), "{out}");
     assert_eq!(spawns(&env).len(), 4, "{:?}", spawns(&env));
+    // A worker whose git fails leaves nothing to name, and still its mark.
+    let shim = env.work.parent().unwrap().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    std::fs::write(shim.join("git"), "#!/bin/sh\necho 'fatal: nope' >&2\nexit 128\n").unwrap();
+    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+    let w = env.work.to_str().unwrap().to_owned();
+    for module in ["branch", "sync"] {
+        let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
+        if cfg!(target_os = "linux") {
+            args.push("--lock-held");
+        }
+        let (_, err, ok) = garnish(&env, &args, None, &[("PATH", path.as_str())]);
+        assert!(ok, "{err}");
+    }
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert_eq!(out.matches('✗').count(), 2, "{out}");
 }
 
 /// The real reftable format, where the installed git has it (2.45 and
@@ -811,6 +828,11 @@ fn worker_an_unreadable_head_with_a_payload_branch_settles() {
     std::os::unix::fs::symlink(&outside, &head).unwrap();
     let with_branch = payload(&env.work)
         .replace(r#""model":"#, r#""worktree":{"name":"w","branch":"main"},"model":"#);
+    // Without the payload's name there is nothing to show, and so nothing
+    // to spawn a worker for.
+    let (out, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok && !out.contains("main"), "{out}");
+    assert!(spawns(&env).is_empty(), "{:?}", spawns(&env));
     let w = env.work.to_str().unwrap().to_owned();
     let (_, err, ok) = garnish(
         &env,

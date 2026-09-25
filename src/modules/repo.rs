@@ -499,7 +499,8 @@ impl Module for BranchModule {
         // on the tick, so the worker asks git, and its entry is keyed on
         // the ref store's stamp, which the tick can `stat`.
         let fallback = head.is_none() && dirs.is_some_and(git::Dirs::uses_reftable);
-        let cached = dirs.filter(|_| fallback || cfg.bool("dirty")).map(|d| {
+        let named = head.is_some() || payload_branch.is_some();
+        let cached = dirs.filter(|_| fallback || (named && cfg.bool("dirty"))).map(|d| {
             let scope = Scope::Repo(d.cache_key());
             if fallback {
                 let stamp = git::reftable_stamp(d);
@@ -515,12 +516,17 @@ impl Module for BranchModule {
             }
         });
         let entry = cached.as_ref().and_then(|(lookup, _)| lookup.entry.as_ref());
+        let freshness = cached
+            .as_ref()
+            .filter(|(lookup, _)| lookup.entry.is_some())
+            .map_or(Freshness::Fresh, |(_, fresh)| *fresh);
         let asked = if fallback { entry.and_then(asked_head) } else { None };
         let (name, detached) = match (head.or(asked.as_ref()), payload_branch) {
             (Some(Head::Branch(b)), _) => (b.clone(), false),
             (Some(Head::Detached(sha)), _) => (short_sha(sha), true),
             (None, Some(b)) => (b.to_owned(), false),
-            (None, None) => return Rendered::empty(),
+            // Nothing to name; a worker that failed still shows its mark.
+            (None, None) => return Rendered { segments: Vec::new(), freshness, measure: None },
         };
         let shown = cut_name(&name, cfg.size("max_length"), ctx.icons);
         let mut segs: Vec<Segment> = lead(cfg, if detached { "detached" } else { "branch" });
@@ -552,9 +558,6 @@ impl Module for BranchModule {
         if cfg.bool("dirty") && entry.and_then(|e| e.get("dirty")) == Some("1") {
             segs.extend(badge(cfg, "dirty", "dirty"));
         }
-        let freshness = cached
-            .filter(|(lookup, _)| lookup.entry.is_some())
-            .map_or(Freshness::Fresh, |(_, fresh)| fresh);
         Rendered { segments: segs, freshness, measure: None }
     }
 
