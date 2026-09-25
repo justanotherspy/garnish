@@ -583,7 +583,8 @@ impl Builder {
         };
         siblings.insert(index.saturating_add(1), copy);
         self.rebuild(draft);
-        self.move_line(true);
+        self.select_at(item.sibling(index.saturating_add(1)), item.kind);
+        self.chip = None;
         Ok("cloned".into())
     }
 
@@ -1123,6 +1124,28 @@ mod tests {
         b.move_line(true);
         assert!(b.above(&d).is_none());
         assert!(b.box_with_above(&mut d, "x").unwrap_err().contains("column"));
+    }
+
+    /// app-12: a clone selects the copy, not the next line of the list,
+    /// which for a row of columns or a stacked column is the original's
+    /// own first child.
+    #[test]
+    fn a_clone_selects_the_copy() {
+        let mut d = Draft::from_text(
+            "[[row]]\n[[row.col]]\nmodules = [\"path\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"clock\"]\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.clone_line(&mut d).unwrap();
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Row, RowAt::row(1))));
+        b.select_row(0);
+        b.move_line(true);
+        b.move_line(true);
+        let stack = RowAt { row: 0, col: Some(1), inner: None };
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Col, stack)));
+        b.clone_line(&mut d).unwrap();
+        let copy = RowAt { col: Some(2), ..stack };
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Col, copy)));
     }
 
     /// app-08: the last `[[row]]` is not deleted: an empty row list means
