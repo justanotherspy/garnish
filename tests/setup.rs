@@ -1307,6 +1307,29 @@ fn the_picker_writes_a_gallery_preset_verbatim() {
     assert_eq!(app.draft().resolved().1, Vec::new());
 }
 
+/// app-22: deleting a line, or making a row a spacer, that took a text
+/// module's last placement asks about its table, as deleting its chip
+/// does; one question for every such module.
+#[test]
+fn a_line_that_held_a_text_modules_last_placement_asks() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let text = format!(
+        "{TWO_ROWS}[[row]]\nmodules = [\"text.motd\", \"text.news\"]\n[modules.text.motd]\ntext = \"hi\"\n[modules.text.news]\ntext = \"new\"\n"
+    );
+    for script in ["<down><down>x", "<down><down> "] {
+        std::fs::write(&file, &text).unwrap();
+        let mut app = for_test("", Some(file.clone()), home);
+        keys(&mut app, script);
+        let shot = snapshot(&mut app, 80, 24);
+        assert!(shot.contains("text.motd, text.news are placed nowhere"), "{script}: {shot}");
+        keys(&mut app, "y");
+        assert!(app.draft().get(&["modules", "text"]).is_none(), "{script}");
+        assert_eq!(app.draft().resolved().1, Vec::new(), "{script}");
+    }
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

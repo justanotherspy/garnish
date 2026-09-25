@@ -1805,7 +1805,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   `garnish modules`; the new-text entry asks for a name checked by the
   § 3.7 rule, creates the table with the schema defaults and opens its
   editor, and removing a text module's last placement asks whether to
-  drop the table. `Enter` on a module
+  drop the table (by its chip, by the line holding it, or by `space`
+  making its row a spacer, one question for every module so left;
+  2026-09-25 review: only the chip had asked). `Enter` on a module
   opens its **editor**: one row per schema option (`preset`, `refresh`,
   `hide`, `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
   the module's own options, then `icons.*` for the active icon set and

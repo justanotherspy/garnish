@@ -325,11 +325,15 @@ impl App {
                     self.say(line, level);
                 }
             }
-            Question::DropText(name) => {
+            Question::DropText(names) => {
                 if yes {
-                    self.draft.remove(&["modules", "text", &name]);
+                    for name in &names {
+                        self.draft.remove(&["modules", "text", name]);
+                    }
                     self.refresh();
-                    self.say(format!("dropped [modules.text.{name}]"), Level::Info);
+                    let tables: Vec<String> =
+                        names.iter().map(|n| format!("[modules.text.{n}]")).collect();
+                    self.say(format!("dropped {}", tables.join(", ")), Level::Info);
                 }
             }
             Question::ReplaceDraft(name) => {

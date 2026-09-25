@@ -389,8 +389,8 @@ pub enum Question {
     /// The file changed on disk since it was read: `true` overwrites,
     /// `false` reloads.
     OverwriteOrReload,
-    /// Drop the `[modules.text.<name>]` table whose last placement went.
-    DropText(String),
+    /// Drop the `[modules.text.<name>]` tables whose last placements went.
+    DropText(Vec<String>),
     /// Replace a draft with unsaved edits by the named preset.
     ReplaceDraft(String),
     /// Write the picker's preset over a config file that appeared or

@@ -20,6 +20,8 @@ use crate::setup::ui::Chrome;
 impl App {
     /// The builder's keys that change the draft; `false` for any other key.
     fn builder_edit_key(&mut self, key: Key) -> bool {
+        // A spacer loses its modules, a text module's last placement too.
+        let before = (key == Key::Char(' ')).then(|| self.placed_texts());
         let out = match key {
             Key::Char('a') => self.edit(|b, d| b.insert(d, true)),
             Key::Char('i') => self.edit(|b, d| b.insert(d, false)),
@@ -35,6 +37,9 @@ impl App {
             _ => return false,
         };
         self.report(out);
+        if let Some(before) = before {
+            self.ask_about_unplaced(&before);
+        }
         true
     }
 
@@ -236,32 +241,59 @@ impl App {
         self.open_form(kind);
     }
 
-    /// `x`: the module (asking about its text table when that was its
-    /// last placement), or the line.
+    /// `x`: the module or the line, asking about the tables of the text
+    /// modules whose last placement it was.
     fn delete_selection(&mut self) {
-        let text = self
-            .builder
-            .selected_id()
-            .and_then(|id| id.strip_prefix(crate::modules::text::PREFIX))
-            .map(str::to_owned);
+        let before = self.placed_texts();
         let out = self.builder.delete(&mut self.draft);
         self.report(out);
-        if let Some(name) = text {
-            let id = format!("{}{name}", crate::modules::text::PREFIX);
-            let placed =
-                self.config.rows.iter().flat_map(crate::config::RowCfg::ids).any(|i| *i == id);
-            if !placed && self.config.texts.contains_key(&name) {
-                self.layers.push(Layer::Confirm(Confirm::new(
-                    Question::DropText(name.clone()),
-                    &[
-                        &format!("text.{name} is placed nowhere now."),
-                        "Drop its [modules.text] table too?",
-                    ],
-                    "drop it",
-                    "keep it",
-                )));
-            }
+        self.ask_about_unplaced(&before);
+    }
+
+    /// The names of the text modules the rows place, as resolved.
+    fn placed_texts(&self) -> Vec<String> {
+        self.config
+            .rows
+            .iter()
+            .flat_map(crate::config::RowCfg::ids)
+            .filter_map(|id| id.strip_prefix(crate::modules::text::PREFIX))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// After an edit that took placements away (`x`, `space`): one question
+    /// about dropping the tables of the text modules `before` placed and
+    /// nothing places now (SPEC § 14).
+    fn ask_about_unplaced(&mut self, before: &[String]) {
+        let now = self.placed_texts();
+        let mut gone: Vec<String> = before
+            .iter()
+            .filter(|name| !now.contains(name) && self.config.texts.contains_key(*name))
+            .cloned()
+            .collect();
+        gone.sort();
+        gone.dedup();
+        if gone.is_empty() {
+            return;
         }
+        let ids: Vec<String> = gone.iter().map(|n| format!("text.{n}")).collect();
+        let (first, second) = if gone.len() == 1 {
+            (
+                format!("{} is placed nowhere now.", ids.join(", ")),
+                "Drop its [modules.text] table too?",
+            )
+        } else {
+            (
+                format!("{} are placed nowhere now.", ids.join(", ")),
+                "Drop their [modules.text] tables too?",
+            )
+        };
+        self.layers.push(Layer::Confirm(Confirm::new(
+            Question::DropText(gone),
+            &[&first, second],
+            "drop",
+            "keep",
+        )));
     }
 
     /// `s`: write the draft, after the change check (SPEC § 14); a draft
