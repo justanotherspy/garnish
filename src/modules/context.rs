@@ -106,8 +106,10 @@ impl Module for ContextModule {
         let pct = used
             .map(crate::num::clamp_percent)
             .map(|u| usable.map_or(u, |scale| crate::num::clamp_percent(u * 100.0 / scale)));
-        let fill_color =
-            ctx.theme.band(ctx.percent_shown(cfg, pct.unwrap_or(0.0)), &thresholds, &bands);
+        // The number the row prints: what the band, `warn_at` and the
+        // `hide` measure compare (SPEC § 3.2, § 4).
+        let shown = pct.map(|p| ctx.percent_shown(cfg, p));
+        let fill_color = ctx.theme.band(shown.unwrap_or(0.0), &thresholds, &bands);
 
         let marker =
             if usable.is_some() || !cfg.bool("compaction_marker") { None } else { threshold };
@@ -150,11 +152,10 @@ impl Module for ContextModule {
             segs.extend(badge(cfg, "exceeds", "exceeds"));
         }
         let warn_at = cfg.float("warn_at");
-        if warn_at > 0.0 && pct.is_some_and(|p| p >= warn_at) {
+        if warn_at > 0.0 && shown.is_some_and(|s| s >= warn_at) {
             segs.extend(badge(cfg, "warn", "warn"));
         }
-        Rendered::fresh(segs)
-            .measured(pct.map(|p| super::Measure::Percent(ctx.percent_shown(cfg, p))))
+        Rendered::fresh(segs).measured(shown.map(super::Measure::Percent))
     }
 }
 
@@ -310,6 +311,20 @@ mod tests {
         let warn = "scale = \"usable\"\nwarn_at = 90\n";
         assert_eq!(render(89.0, warn, env.clone()), "⊞ █████████░ 90% ⚠");
         assert_eq!(render(88.0, warn, env), "⊞ ████████▉░ 89%");
+    }
+
+    /// SPEC § 3.2: `warn_at` follows the percentage on display, as the band
+    /// and the `hide` measure do. It compared the unrounded number, so 89.6
+    /// printed `90%` in the top band with no badge under `warn_at = 90`.
+    #[test]
+    fn warn_at_compares_the_printed_percentage() {
+        let env = crate::claude_settings::Env::default();
+        let warn = "warn_at = 90\n";
+        assert!(render(89.6, warn, env.clone()).ends_with(" 90% ⚠"));
+        assert!(render(89.4, warn, env.clone()).ends_with(" 89%"));
+        let precise = "warn_at = 90\npercent = \"precise\"\n";
+        assert!(render(89.96, precise, env.clone()).ends_with(" 90.0% ⚠"));
+        assert!(render(89.94, precise, env).ends_with(" 89.9%"));
     }
 
     /// SPEC § 3.2: `compaction_marker` draws the marker and
