@@ -169,7 +169,7 @@ impl Draft {
 
     /// The preset's rows written out on opening, so the list has lines to
     /// edit, without counting as an edit: a file that only names a preset
-    /// gains its rows on its first save.
+    /// gains its rows with the first save of an edit.
     pub fn materialise_rows_as_read(&mut self) {
         let was_dirty = self.is_dirty();
         self.materialise_rows();

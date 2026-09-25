@@ -1187,6 +1187,32 @@ fn the_picker_asks_before_replacing_a_changed_file() {
     assert!(std::fs::read_to_string(&file).unwrap().contains("preset = \"default\""));
 }
 
+/// app-15: `s` with nothing changed writes nothing: no rewrite that drops
+/// the file's comments, no new backup.
+#[test]
+fn s_with_nothing_changed_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let text = "# mine\npreset = \"compact\"\n";
+    std::fs::write(&file, text).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "s");
+    assert!(app.status().unwrap().contains("nothing to save"), "{:?}", app.status());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    let backups = std::fs::read_dir(home)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".bak-"))
+        .count();
+    assert_eq!(backups, 0);
+    // An edit undone is nothing to save either; an edit is.
+    keys(&mut app, "<right>xus");
+    assert!(app.status().unwrap().contains("nothing to save"), "{:?}", app.status());
+    keys(&mut app, "<right>xs");
+    assert!(app.status().unwrap().starts_with("saved"), "{:?}", app.status());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.

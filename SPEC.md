@@ -1896,7 +1896,10 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   does (§ 2.1: the `DIM` modifier on every span, the twin of
   `Painter.dim`), so it also shows the intensity the screen will have.
 - **Saving.** Edits live in memory as the file's own table (see the
-  differences above), and `s` writes it back (with the § 5 backup), so a
+  differences above), and `s` writes it back (with the § 5 backup; a
+  draft the file already holds is not written again, since that would
+  only drop the file's comments and leave one more backup, 2026-09-25
+  review), so a
   hand-written file's ordering survives a save and its comments do not;
   the status bar says so on opening a file that has comments (a `#`
   outside every string) and again, ahead of the backup's path, with the

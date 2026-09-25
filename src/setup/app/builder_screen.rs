@@ -264,8 +264,17 @@ impl App {
         }
     }
 
-    /// `s`: write the draft, after the change check (SPEC § 14).
+    /// `s`: write the draft, after the change check (SPEC § 14); a draft
+    /// the file already holds is not written again, which would only drop
+    /// its comments and leave one more backup.
     pub(super) fn save(&mut self, force: bool) {
+        let exists = self.draft.path().is_some_and(std::path::Path::exists);
+        let unchanged = !self.draft.is_dirty() && !self.draft.changed_on_disk();
+        // A file that does not parse is told why it is never written.
+        if exists && unchanged && self.draft.unreadable().is_none() {
+            self.say("nothing to save: the file holds the draft already".into(), Level::Info);
+            return;
+        }
         if !force && self.draft.changed_on_disk() {
             // Both answers act (one drops the file, the other the edits),
             // so the question opens on doing neither, which `Esc` is too.
