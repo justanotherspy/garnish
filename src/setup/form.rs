@@ -1109,17 +1109,23 @@ fn module_glyph_fields(
         );
     }
     let colors_base: Vec<&str> = base.iter().copied().chain(std::iter::once("colors")).collect();
+    // A text module's `color` is its `colors.text` while that is unset.
+    let is_text = schema.id == crate::modules::text::SCHEMA.id;
+    let color_path: Vec<&str> = base.iter().copied().chain(std::iter::once("color")).collect();
+    let shorthand = draft.get(&color_path).filter(|_| is_text);
     for color in &schema.colors {
-        let value = cfg.map(|c| Value::String(c.color(color.key).to_spec()));
+        let slot = Slot::table(&colors_base, color.key);
+        // As written, a role or a literal, not the resolved colour: picked
+        // back, that would pin a role to today's theme.
+        let value = slot
+            .get(draft)
+            .or_else(|| shorthand.filter(|_| color.key == "text"))
+            .cloned()
+            .unwrap_or_else(|| Value::String(color.default.to_owned()));
         fields.push(
-            Field::new(
-                &format!("colors.{}", color.key),
-                color.doc,
-                SlotKind::Color,
-                Slot::table(&colors_base, color.key),
-            )
-            .valued(draft, value, color.default)
-            .with_choices(color_choices(config)),
+            Field::new(&format!("colors.{}", color.key), color.doc, SlotKind::Color, slot)
+                .valued(draft, Some(value), color.default)
+                .with_choices(color_choices(config)),
         );
     }
     fields
@@ -1947,6 +1953,32 @@ mod tests {
             Ok(Some(Value::Array(vec![1.into(), 2.into()])))
         );
         assert!(SlotKind::Literal.parse("12h").is_err(), "a string is quoted");
+    }
+
+    /// frm-05: a module colour's row shows the role or literal in effect,
+    /// as written, and its picker opens on it; a text module's `color`
+    /// shorthand is what its `colors.text` row shows while that is unset.
+    #[test]
+    fn a_module_colour_shows_and_opens_on_the_value_as_written() {
+        let module = |id: &str| FormKind::Module(id.to_owned());
+        let open = |form: &mut Form, key: &str| {
+            form.focus(key);
+            let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+            c.items.get(c.cursor).map(|i| i.value.clone())
+        };
+        let (mut form, _) = built("", &module("context"));
+        let marker = form.fields.iter().find(|f| f.key == "colors.marker").unwrap().clone();
+        assert_eq!((marker.current.as_str(), marker.set), ("warn", false));
+        assert_eq!(open(&mut form, "colors.marker").as_deref(), Some("warn"));
+        let (mut form, _) =
+            built("[modules.context.colors]\nmarker = \"ok\"\n", &module("context"));
+        let marker = form.fields.iter().find(|f| f.key == "colors.marker").unwrap().clone();
+        assert_eq!((marker.current.as_str(), marker.set), ("ok", true));
+        assert_eq!(open(&mut form, "colors.marker").as_deref(), Some("ok"));
+        let (t, _) =
+            built("[modules.text.m]\ntext = \"hi\"\ncolor = \"accent2\"\n", &module("text.m"));
+        let text = t.fields.iter().find(|f| f.key == "colors.text").unwrap();
+        assert_eq!(text.current, "accent2");
     }
 
     #[test]

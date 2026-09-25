@@ -15,8 +15,8 @@ r│  label                ┌ icons.folder ────────────
  │  show_added      false│custom…                     │                       │
  │  icons.folder    ❒    │                            │                       │
  │  icons.added     +    │type to filter: ▏           │                       │
- │  colors.icon     #7dd3│↑↓ move  enter pick  esc bac│)                      │
- │  colors.base     #cdd6└────────────────────────────┘                       │
+ │  colors.icon     accen│↑↓ move  enter pick  esc bac│)                      │
+ │  colors.base     text └────────────────────────────┘                       │
  │Folder icon.                                                                │
  │                                                                            │
  │                                                                            │

@@ -15,8 +15,8 @@ r│  label                                       ("")                          
  │  show_added      false                       (false)                       │
  │  icons.folder    ❒                           (❒)                           │
  │  icons.added     +                           (+)                           │
- │  colors.icon     #7dd3a0                     (accent)                      │
- │  colors.base     #cdd6f4                     (text)                        │
+ │  colors.icon     accent                      (accent)                      │
+ │  colors.base     text                        (text)                        │
  │Render this module at all.                                                  │
  │                                                                            │
  │                                                                            │
