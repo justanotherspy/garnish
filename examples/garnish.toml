@@ -173,7 +173,7 @@ max_width = 0
 # show_icon = true
 # show_sha (bool) — Append the short commit SHA. [minimal=false default=false full=true]
 # show_sha = false
-# dirty (bool) — Show a marker when the tree has changes. [minimal=false default=false full=true]
+# dirty (bool) — Show a marker when tracked files have staged or unstaged changes (untracked files do not count; a file touched without changing counts until git next refreshes its index, since garnish never reads file contents). [minimal=false default=false full=true]
 # dirty = false
 # max_length (integer) — Cut the name itself to this many characters with `…` (`..` in the ascii set; 0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
 # max_length = 40

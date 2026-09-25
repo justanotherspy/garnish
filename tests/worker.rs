@@ -484,6 +484,29 @@ fn worker_a_quoted_upstream_counts_like_any_other() {
     assert!(!out.contains('✗') && !out.contains('"'), "{out}");
 }
 
+/// The tick reads the payload's repository from `.git` directly; the
+/// worker's git follows `GIT_DIR` and friends first. A harness started
+/// with one exported (by a hook, an alias) made `sync` count another
+/// repository's commits next to this one's branch.
+#[test]
+fn worker_git_ignores_an_inherited_git_dir() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let other = push_from_a_second_clone(&env, "theirs");
+    let w = env.work.to_str().unwrap().to_owned();
+    let other_git = other.join(".git");
+    let refresh = &["refresh", "--module", "sync", "--session", "sess-worker", "--cwd", &w];
+    let (_, err, ok) = garnish(
+        &env,
+        refresh,
+        None,
+        &[("GIT_DIR", other_git.to_str().unwrap()), ("GIT_WORK_TREE", other.to_str().unwrap())],
+    );
+    assert!(ok, "{err}");
+    let entry = sync_entry(&env);
+    assert!(entry.contains("ahead=1\n") && entry.contains("behind=0\n"), "{entry}");
+}
+
 /// SPEC § 6: `fetch_interval` runs `git fetch` in the worker, once per
 /// interval, so a commit pushed elsewhere shows as `behind` without any
 /// fetch by hand.

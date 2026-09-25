@@ -1407,8 +1407,39 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   value holding `#`, so `fix/#12` used to read as a tracking ref with
   quotes in it and `sync` showed `✗`). Reftable repos report no
   head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
-  worker only through `git::run_program` (pipes drained on threads, kill on
-  timeout: 2 s for local commands, 20 s for `fetch`, `GIT_TERMINAL_PROMPT=0`).
+  worker only through `git::run_program` (pipes drained on threads with 1 MiB
+  of stdout and 64 KiB of stderr kept and the rest discarded, kill on
+  timeout: 2 s for local commands, 20 s for `fetch`). `git` is the first
+  executable on an *absolute* `PATH` entry, looked up once (an empty or
+  relative entry would find a `git` the checkout ships, since the child
+  resolves the name after its `chdir`); every call clears `core.fsmonitor`,
+  sets `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0` and
+  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone), and removes
+  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the other variables that
+  point git elsewhere, so git finds the repository from the directory as the
+  tick did.
+- **The dirty check never reads a worktree file** (decided 2026-09-25 with
+  Daniel): `git status` hashes every file whose stat data no longer
+  matches the index, through the `clean`/`process` filter driver the
+  repository's own `.git/config` defines, so in an unpacked archive it ran
+  that command on every refresh. `dirty` is `git diff-index --cached --quiet
+  HEAD` (anything in the index before the first commit) plus `git -c
+  core.checkStat=default diff-files --quiet --ignore-submodules=dirty`,
+  which compare stat data and stop at the first difference; the stat rule
+  is pinned so a repository cannot relax it until its files look "racily
+  clean" and get hashed, and a submodule's own dirtiness (a `git status`
+  inside it) is not asked. The accepted cost: a file touched without
+  changing reads as dirty until the user's own git refreshes the index.
+  `status.showStash` no longer matters (porcelain printed `# stash N`).
+- **Fetch** (opt-in, `fetch_interval`) passes `--no-auto-maintenance`,
+  `--recurse-submodules=no`, `--upload-pack git-upload-pack` and the remote
+  after `--` (a name starting with `-` is refused), and sets
+  `SSH_ASKPASS_REQUIRE=force` with `SSH_ASKPASS` a program that fails
+  (`false`, found as `git` is): the worker keeps Claude Code's controlling
+  terminal, and ssh would otherwise draw a host-key or passphrase prompt on
+  it (OpenSSH 8.4 and later honour it; nothing else in git's environment
+  stops ssh reading `/dev/tty`). `core.sshCommand`, `core.gitProxy`, an
+  `ext::` URL, hooks and credential helpers stay a backlog decision (PLAN).
   A failed fetch is recorded in the entry (`fetch_error`, `fetch_attempt`)
   without hiding the local counts and is not retried within `fetch_interval`.
 

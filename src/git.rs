@@ -43,7 +43,7 @@ impl Dirs {
 /// directory, and a `commondir` file inside that names the shared one.
 /// Both come from the checkout, which is not the user's file, and every
 /// later read is contained in the directories they name, so each must be a
-/// git directory by git's own test ([`is_git_directory`]) before it is
+/// git directory by git's own test (setup.c `is_git_directory`) before it is
 /// used: a `.git` file naming anything else is no repository (git says
 /// "not a git repository" there too), and a `commondir` naming anything
 /// else is ignored.
@@ -241,7 +241,7 @@ fn read_under(root: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
 /// Loose refs are tried first, then `packed-refs`. `None` for reftable
 /// repositories, unknown refs, symbolic-ref chains longer than five
 /// (cycles included), matching git's own limit, and a hop to anything git
-/// would not follow ([`safe_symref`]).
+/// would not follow (only `refs/…` and capitalised pseudo-refs).
 #[must_use]
 pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
     if dirs.uses_reftable() {
@@ -533,117 +533,221 @@ pub fn fetch_age(dirs: &Dirs, now_epoch_secs: i64) -> Option<u64> {
     Some(now.saturating_sub(secs))
 }
 
-/// Config keys that make git run a command, cleared on every call.
+/// Config keys cleared on every git call because git would run their value
+/// as a command, and the repository's `.git/config` is not the user's file.
 ///
-/// The repository's `.git/config` is not the user's file in a checkout they
-/// did not create, and `core.fsmonitor` is a command `git status` starts on
-/// its own. The user typing `git status` there would run it too, so this is
-/// not a new trust boundary; what is new is that garnish runs git on a
-/// *timer*, without anyone asking. `-c` on the command line beats the file.
+/// Only `core.fsmonitor` is cleared here: a command `git status` and
+/// `diff-files` would start on their own, and clearing it costs nothing
+/// (the monitor is a speed hint and git falls back to walking the tree,
+/// which is what the 2 s timeout is for). `-c` on the command line beats
+/// the file. This is *not* every command a config can name:
 ///
-/// Clearing it costs nothing: the monitor is a speed hint for large working
-/// trees and git falls back to walking them, which is what the 2 s timeout
-/// is for. Keys that only a network transport reaches (`core.sshCommand`,
-/// `core.gitProxy`, an `ext::` URL) are not cleared, because each is a
-/// setting a user may legitimately want honoured and only an opted-in
-/// `fetch_interval` reaches them; PLAN's backlog carries that decision.
+/// - `filter.<driver>.clean`/`process` run whenever git hashes a worktree
+///   file; [`is_dirty`] is built so git never does (plumbing, and the stat
+///   rule pinned), rather than by clearing drivers one name at a time;
+/// - `core.hooksPath` and `.git/hooks`, `credential.helper`,
+///   `core.askPass`, `core.alternateRefsCommand`, `core.sshCommand`,
+///   `core.gitProxy` and an `ext::` URL are reached only by [`fetch`],
+///   which the user opts into (`fetch_interval`); [`fetch`] turns off the
+///   maintenance and submodule recursion it would start, and PLAN's
+///   backlog carries the decision on the rest;
+/// - lazy fetching in a partial clone is off through `GIT_NO_LAZY_FETCH`
+///   (git 2.44 and later; an older git ignores it).
+///
+/// The user typing `git status` in that checkout would run all of these
+/// too; what is new is that garnish runs git on a *timer*, unasked.
 const NO_COMMAND_HOOKS: [&str; 2] = ["-c", "core.fsmonitor="];
 
-/// Run `git` with arguments in `cwd`, killing it after `timeout`.
+/// Variables that point git at a repository, index or object store other
+/// than the one it would find from its working directory. A worker started
+/// by a harness that exported one (a hook, an alias) would otherwise count
+/// another repository's changes next to this one's branch; git discovers
+/// the repository from `cwd` exactly as the tick did. `GIT_DIR` is never
+/// *set* either: git's `safe.directory` ownership check applies to
+/// discovery, not to an explicit `GIT_DIR`.
+const DISCOVERY_ENV: [&str; 10] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+];
+
+/// The first executable regular file called `name` in an *absolute* entry
+/// of `path` (a `PATH` value).
 ///
-/// # Errors
-/// Returns the stderr text (or a timeout message) on failure.
-pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
-    let args: Vec<&str> = NO_COMMAND_HOOKS.into_iter().chain(args.iter().copied()).collect();
-    run_program_wanting(Path::new("git"), cwd, &args, timeout, Stdout::Read)
+/// std resolves a bare program name in the child after `current_dir`, so an
+/// empty or relative entry (`:/usr/bin`, `.`) would run `<repository>/git`,
+/// a file the checkout ships, on a timer; Go's `exec.LookPath` refuses the
+/// same result (`ErrDot`). Such entries are skipped.
+fn find_program(name: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::env::split_paths(path?).filter(|dir| dir.is_absolute()).map(|dir| dir.join(name)).find(
+        |p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0),
+    )
 }
 
-/// [`run_git`] for a command whose stdout the caller throws away.
-///
-/// Only the exit status matters, so a stdout read that has to be abandoned
-/// is not a failure: `fetch` runs `--quiet` and is precisely the call whose
-/// pipes an ssh `ControlPersist` master holds open, so treating that as an
-/// error recorded a fetch that worked as one that did not.
-///
-/// # Errors
-/// Returns the stderr text (or a timeout message) on failure.
-fn run_git_quiet(cwd: &Path, args: &[&str], timeout: Duration) -> Result<(), String> {
-    let args: Vec<&str> = NO_COMMAND_HOOKS.into_iter().chain(args.iter().copied()).collect();
-    run_program_wanting(Path::new("git"), cwd, &args, timeout, Stdout::Discard).map(|_| ())
+/// `git`, looked up once per process by [`find_program`].
+fn git_program() -> Result<&'static Path, String> {
+    static GIT: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    GIT.get_or_init(|| find_program("git", std::env::var_os("PATH").as_deref()))
+        .as_deref()
+        .ok_or_else(|| "git: not found on PATH".to_owned())
+}
+
+/// A program that fails, for `SSH_ASKPASS`: `false` looked up like `git`,
+/// or a path that does not exist, which fails as surely.
+fn failing_program() -> &'static Path {
+    static FALSE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    FALSE.get_or_init(|| {
+        find_program("false", std::env::var_os("PATH").as_deref())
+            .unwrap_or_else(|| PathBuf::from("/bin/false"))
+    })
 }
 
 /// Whether the caller reads what the child wrote to stdout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stdout {
+pub enum Stdout {
     /// The output is the answer, so failing to read it is a failure.
     Read,
-    /// Only the exit status matters.
+    /// Only the exit status matters: a stdout read that has to be abandoned
+    /// is not a failure. `fetch` runs `--quiet` and is precisely the call
+    /// whose pipes an ssh `ControlPersist` master holds open, so treating
+    /// that as an error recorded a fetch that worked as one that did not.
     Discard,
 }
+
+/// What a program that ran to its end left behind.
+#[derive(Debug)]
+pub struct Finished {
+    /// How it exited.
+    pub status: std::process::ExitStatus,
+    /// Its stdout, at most [`MAX_STDOUT`] bytes (empty when discarded).
+    pub stdout: Vec<u8>,
+    /// Whether stdout went on past [`MAX_STDOUT`].
+    pub truncated: bool,
+    /// Its stderr, trimmed, at most [`MAX_STDERR`] bytes of it.
+    pub stderr: String,
+}
+
+/// Why a program did not run to its end.
+#[derive(Debug)]
+pub enum Failure {
+    /// It could not be started.
+    Start(std::io::Error),
+    /// Waiting on it failed.
+    Wait(std::io::Error),
+    /// It was killed at the timeout.
+    TimedOut(Duration),
+    /// It exited, but its stdout could not be read before the deadline.
+    Unread,
+}
+
+impl Failure {
+    /// The failure as a message about `command` (`git rev-list …`), which
+    /// the caller names: the arguments it asked for, not the ones added on
+    /// its behalf.
+    #[must_use]
+    pub fn describe(&self, command: &str) -> String {
+        match self {
+            Self::Start(e) | Self::Wait(e) => format!("{command}: {e}"),
+            Self::TimedOut(t) => format!("{command} timed out after {} ms", t.as_millis()),
+            Self::Unread => format!("{command} wrote no output before the timeout"),
+        }
+    }
+}
+
+/// Bytes of a command's stdout kept: git's answers here are a line or two.
+pub const MAX_STDOUT: u64 = 1024 * 1024;
+
+/// Bytes of a command's stderr kept: it only decorates a failure, and a
+/// failed entry keeps 500 characters of it.
+pub const MAX_STDERR: u64 = 64 * 1024;
 
 /// How long the pipes are still read after the child has exited and the
 /// timeout is already spent. The child's own ends close with it, so this
 /// bounds one case only: a descendant still holding them (see [`drain`]).
 const DRAIN_FLOOR: Duration = Duration::from_millis(250);
 
-/// Read a pipe to the end on its own thread, delivering the bytes once.
+/// Read at most `cap` bytes of a pipe on its own thread, then discard the
+/// rest so the child can finish, delivering the bytes and whether any were
+/// discarded once.
 ///
 /// A channel rather than a join handle, so the caller can put a deadline on
 /// the read. Joining has none: the write end stays open while *any*
 /// descendant holds it, not only the child — ssh's `ControlPersist` master
 /// outlives the `git fetch` that started it — and the worker would then sit
-/// in `read_to_end` for ever with its lock held, whatever timeout was asked
+/// in the read for ever with its lock held, whatever timeout was asked
 /// for. A thread left behind does not hold the process up; it is dropped
-/// when the worker exits.
-fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+/// when the worker exits. Stopping the read at the cap instead would leave
+/// the child blocked on a full pipe and turn a big but quick answer into a
+/// timeout.
+fn drain<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+    cap: u64,
+) -> std::sync::mpsc::Receiver<(Vec<u8>, bool)> {
+    use std::io::Read as _;
     let (tx, rx) = std::sync::mpsc::channel();
     if let Some(mut pipe) = pipe {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf);
-            let _ = tx.send(buf);
+            let _ = pipe.by_ref().take(cap).read_to_end(&mut buf);
+            let truncated = std::io::copy(&mut pipe, &mut std::io::sink()).is_ok_and(|n| n > 0);
+            let _ = tx.send((buf, truncated));
         });
     }
     rx
 }
 
-/// [`run_git`] with an explicit program (tests use a fake git).
+/// Run `program` with `args` and the extra `env` in `cwd`, killing it after
+/// `timeout`.
+///
+/// The one way garnish runs an external command (every git call, tests'
+/// fake gits). Its stdin is null and both pipes are drained with a cap,
+/// git's environment is cut down to the repository `cwd` names (no
+/// `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` or kin from the harness),
+/// and git is told never to prompt, lock optionally, fetch lazily or
+/// translate.
 ///
 /// # Errors
-/// Returns the stderr text (or a timeout message) on failure.
+/// When the program cannot be started or waited on, times out, or (with
+/// [`Stdout::Read`]) exits without its stdout arriving in time. A non-zero
+/// exit is not an error here; the caller reads [`Finished::status`].
 pub fn run_program(
     program: &Path,
     cwd: &Path,
     args: &[&str],
-    timeout: Duration,
-) -> Result<String, String> {
-    run_program_wanting(program, cwd, args, timeout, Stdout::Read)
-}
-
-/// [`run_program`], told whether the caller will read the output.
-fn run_program_wanting(
-    program: &Path,
-    cwd: &Path,
-    args: &[&str],
+    env: &[(&str, &std::ffi::OsStr)],
     timeout: Duration,
     want: Stdout,
-) -> Result<String, String> {
+) -> Result<Finished, Failure> {
     use std::process::{Command, Stdio};
-    let mut child = Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args)
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("git: {e}"))?;
+        .stderr(Stdio::piped());
+    for key in DISCOVERY_ENV {
+        cmd.env_remove(key);
+    }
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let mut child = cmd.spawn().map_err(Failure::Start)?;
     // Drain both pipes on their own threads: a child that writes more than
     // the pipe buffer (64 KiB) before exiting would otherwise block forever.
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    let stdout = drain(child.stdout.take(), MAX_STDOUT);
+    let stderr = drain(child.stderr.take(), MAX_STDERR);
     let start = std::time::Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -651,41 +755,93 @@ fn run_program_wanting(
             Ok(None) if start.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
-                    "git {} timed out after {}s",
-                    args.join(" "),
-                    timeout.as_secs()
-                ));
+                return Err(Failure::TimedOut(timeout));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(Failure::Wait(e)),
         }
     };
     // What is left of the budget, never below a floor: the child has exited,
     // so its pipes are normally closed already and both arrive at once.
     let left = || timeout.saturating_sub(start.elapsed()).max(DRAIN_FLOOR);
     // A read that gave up is an error, never an empty answer, for a caller
-    // that reads it: `is_dirty` takes "no output" for "clean", so `Ok("")`
-    // here would put a fabricated value in the cache for a whole TTL
-    // instead of a `✗`. For a caller that discards it, nothing was lost.
-    let out = match (stdout.recv_timeout(left()), want) {
+    // that reads it: an empty answer can read as "nothing to report", which
+    // would put a fabricated value in the cache for a whole TTL instead of
+    // a `✗`. For a caller that discards it, nothing was lost.
+    let (stdout, truncated) = match (stdout.recv_timeout(left()), want) {
         (Ok(out), _) => out,
-        (Err(_), Stdout::Discard) => Vec::new(),
-        (Err(_), Stdout::Read) => {
-            return Err(format!("git {} wrote no output before the timeout", args.join(" ")));
-        }
+        (Err(_), Stdout::Discard) => (Vec::new(), false),
+        (Err(_), Stdout::Read) => return Err(Failure::Unread),
     };
     // stderr only decorates a failure, so a lost one costs the message, not
     // the answer.
-    let err = stderr.recv_timeout(left()).unwrap_or_default();
+    let (err, _) = stderr.recv_timeout(left()).unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err).trim().to_owned();
-    if status.success() {
-        Ok(String::from_utf8_lossy(&out).into_owned())
-    } else if stderr.is_empty() {
-        Err(format!("git {} failed", args.join(" ")))
+    Ok(Finished { status, stdout, truncated, stderr })
+}
+
+/// `git <args>` through [`run_program`] with the command hooks cleared,
+/// its failures described in terms of the caller's own `args`.
+fn git_call(
+    program: &Path,
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, &std::ffi::OsStr)],
+    timeout: Duration,
+    want: Stdout,
+) -> Result<Finished, String> {
+    let full: Vec<&str> = NO_COMMAND_HOOKS.iter().chain(args).copied().collect();
+    run_program(program, cwd, &full, env, timeout, want)
+        .map_err(|f| f.describe(&format!("git {}", args.join(" "))))
+}
+
+/// A finished git call that exited non-zero, as the message to record:
+/// git's own words when it wrote any.
+fn git_failed(args: &[&str], finished: Finished) -> String {
+    if finished.stderr.is_empty() {
+        format!("git {} failed", args.join(" "))
     } else {
-        Err(stderr)
+        finished.stderr
     }
+}
+
+/// Run `git` with arguments in `cwd`, killing it after `timeout`, and
+/// return its stdout.
+///
+/// # Errors
+/// git's stderr (or a message naming the command) when it cannot be run,
+/// times out, exits non-zero, or writes more than [`MAX_STDOUT`].
+pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+    let finished = git_call(git_program()?, cwd, args, &[], timeout, Stdout::Read)?;
+    if !finished.status.success() {
+        return Err(git_failed(args, finished));
+    }
+    if finished.truncated {
+        return Err(format!("git {} wrote more than {MAX_STDOUT} bytes", args.join(" ")));
+    }
+    Ok(String::from_utf8_lossy(&finished.stdout).into_owned())
+}
+
+/// The exit code of a git command asked a yes-or-no question (`--quiet`
+/// plumbing: 0 = no difference, 1 = difference), with the message to
+/// record for any other exit.
+fn git_answer(cwd: &Path, args: &[&str], timeout: Duration) -> Result<Answer, String> {
+    let finished = git_call(git_program()?, cwd, args, &[], timeout, Stdout::Discard)?;
+    Ok(match finished.status.code() {
+        Some(0) => Answer::No,
+        Some(1) => Answer::Yes,
+        _ => Answer::Failed(git_failed(args, finished)),
+    })
+}
+
+/// What [`git_answer`] heard.
+enum Answer {
+    /// Exit 0.
+    No,
+    /// Exit 1.
+    Yes,
+    /// Anything else, with the message.
+    Failed(String),
 }
 
 /// Ahead/behind counts of HEAD against `upstream_ref`.
@@ -714,25 +870,90 @@ pub fn ahead_behind(
     Ok((ahead, behind))
 }
 
-/// Whether the working tree has staged or unstaged changes (untracked files ignored).
+/// Whether the working tree has staged or unstaged changes (untracked files
+/// ignored), asked of plumbing that never reads a worktree file's content.
+///
+/// `git status` re-hashes every file whose stat data no longer matches the
+/// index, through the `clean`/`process` filter driver `.gitattributes`
+/// names and `.git/config` defines, so in a checkout the user did not
+/// build (an unpacked archive, whose stat data never matches) it ran the
+/// repository's command on every refresh (review 2026-09-25). Instead:
+///
+/// - `diff-index --cached --quiet HEAD` for staged changes (index against
+///   the commit; no worktree at all). With no commit yet, anything in the
+///   index is staged;
+/// - `diff-files --quiet` for unstaged ones, which compares stat data and
+///   stops at the first difference without reading content, with
+///   `core.checkStat=default` pinned so a repository cannot relax the
+///   comparison (`minimal`) until an archive's files match their index by
+///   mtime and size and git hashes them as "racily clean", and with
+///   `--ignore-submodules=dirty`, since a submodule's own dirtiness is a
+///   `git status` run inside it.
+///
+/// The trade-off, accepted: a file whose stat data changed and content did
+/// not (touched, rewritten with the same bytes) reads as dirty until the
+/// user's own git refreshes the index.
 ///
 /// # Errors
 /// Propagates git failures.
 pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
-    let out = run_git(
-        cwd,
-        &["status", "--porcelain=v2", "--untracked-files=no", "--no-renames"],
-        timeout,
-    )?;
-    Ok(!out.trim().is_empty())
+    let staged =
+        match git_answer(cwd, &["diff-index", "--cached", "--quiet", "HEAD", "--"], timeout)? {
+            Answer::No => false,
+            Answer::Yes => true,
+            Answer::Failed(e) => {
+                match git_answer(cwd, &["rev-parse", "-q", "--verify", "HEAD"], timeout)? {
+                    // HEAD names no commit yet: everything in the index is staged.
+                    Answer::Yes => {
+                        let args = ["ls-files", "--cached", "-z"];
+                        let listed =
+                            git_call(git_program()?, cwd, &args, &[], timeout, Stdout::Read)?;
+                        if !listed.status.success() {
+                            return Err(git_failed(&args, listed));
+                        }
+                        listed.truncated || !listed.stdout.is_empty()
+                    }
+                    _ => return Err(e),
+                }
+            }
+        };
+    if staged {
+        return Ok(true);
+    }
+    let unstaged =
+        ["-c", "core.checkStat=default", "diff-files", "--quiet", "--ignore-submodules=dirty"];
+    match git_answer(cwd, &unstaged, timeout)? {
+        Answer::No => Ok(false),
+        Answer::Yes => Ok(true),
+        Answer::Failed(e) => Err(e),
+    }
+}
+
+/// The arguments of [`fetch`] for `remote` (a plain name, checked there).
+///
+/// `--no-auto-maintenance` and `--recurse-submodules=no` because neither
+/// is anything a status line needs: the first would start `gc --auto` (and
+/// its hook) detached, outliving the timeout, and the second walks into
+/// submodules with configs of their own.
+const fn fetch_args(remote: &str) -> [&str; 8] {
+    [
+        "fetch",
+        "--quiet",
+        "--no-auto-maintenance",
+        "--recurse-submodules=no",
+        "--upload-pack",
+        "git-upload-pack",
+        "--",
+        remote,
+    ]
 }
 
 /// `git fetch --quiet <remote>`, killed after `timeout` (a hung network
 /// fetch must not pin the worker and its lock).
 ///
 /// The remote is the one named in the repository's own `.git/config`, which
-/// is not the user's file in a checkout they did not create. Two things
-/// follow from that, and the first is not the whole of it:
+/// is not the user's file in a checkout they did not create. Several things
+/// follow from that:
 ///
 /// - a name starting with `-` would be read by git as an option rather than
 ///   a remote, and `--upload-pack=<cmd>` runs `<cmd>`, so the name is
@@ -740,12 +961,17 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
 /// - the same file can set `remote.<name>.uploadpack`, which needs no
 ///   suspicious name at all. `--upload-pack` on the command line beats it.
 ///   Overriding it loses nothing but a per-remote server path, which is rare
-///   where a hostile checkout getting a command run is not.
+///   where a hostile checkout getting a command run is not;
+/// - the worker keeps Claude Code's controlling terminal, and ssh opens
+///   `/dev/tty` for a host key or a passphrase whatever
+///   `GIT_TERMINAL_PROMPT` says, so its prompt would be drawn into the
+///   harness's screen: `SSH_ASKPASS_REQUIRE=force` with an `SSH_ASKPASS`
+///   that fails makes ssh ask a program instead, and fail (OpenSSH 8.4 and
+///   later; an older ssh ignores both).
 ///
-/// `core.sshCommand`, `core.gitProxy` and an `ext::` URL remain: each is a
-/// setting a user may legitimately want honoured, and `fetch_interval`
-/// defaults to 0, so nothing reaches them until the user opts in. PLAN's
-/// backlog carries that decision.
+/// `core.sshCommand`, `core.gitProxy`, an `ext::` URL, hooks and credential
+/// helpers remain: `fetch_interval` defaults to 0, so nothing reaches them
+/// until the user opts in, and PLAN's backlog carries that decision.
 ///
 /// # Errors
 /// Propagates git failures; refuses a remote that is not a plain name.
@@ -753,8 +979,13 @@ pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> 
     if remote.is_empty() || remote.starts_with('-') {
         return Err(format!("refusing to fetch from remote {remote:?}"));
     }
-    let args = ["fetch", "--quiet", "--upload-pack", "git-upload-pack", "--", remote];
-    run_git_quiet(cwd, &args, timeout)
+    let args = fetch_args(remote);
+    let env = [
+        ("SSH_ASKPASS_REQUIRE", std::ffi::OsStr::new("force")),
+        ("SSH_ASKPASS", failing_program().as_os_str()),
+    ];
+    let finished = git_call(git_program()?, cwd, &args, &env, timeout, Stdout::Discard)?;
+    if finished.status.success() { Ok(()) } else { Err(git_failed(&args, finished)) }
 }
 
 /// `git --version`, for `doctor` (killed after two seconds like every other
@@ -1241,8 +1472,9 @@ mod tests {
         // The grandchild inherits the pipes and outlives the child, so the
         // write end never closes and the read has to be abandoned.
         let leaky = write("git-leaky", "#!/bin/sh\nsleep 30 &\nprintf 'M file\\n'\nexit 0\n");
+        let half = Duration::from_millis(500);
         let started = std::time::Instant::now();
-        let out = run_program(&leaky, &work, &["status"], Duration::from_millis(500));
+        let out = fake_git(&leaky, &work, &["status"], half, Stdout::Read);
         assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
         let err = out.expect_err("a drained-out read must not pass as an empty answer");
         assert!(err.contains("wrote no output before the timeout"), "{err}");
@@ -1250,7 +1482,7 @@ mod tests {
         // The same output without the grandchild arrives in full: the
         // deadline is on the pipes, not on every call.
         let clean = write("git-clean", "#!/bin/sh\nprintf 'M file\\n'\nexit 0\n");
-        let out = run_program(&clean, &work, &["status"], Duration::from_millis(500));
+        let out = fake_git(&clean, &work, &["status"], half, Stdout::Read);
         assert_eq!(out.as_deref(), Ok("M file\n"));
 
         // A caller that discards stdout loses nothing when the read is
@@ -1258,26 +1490,31 @@ mod tests {
         // *worked* into a failure. `fetch` is that caller, runs `--quiet`,
         // and is the very call an ssh `ControlPersist` master outlives.
         let started = std::time::Instant::now();
-        let out = run_program_wanting(
-            &leaky,
-            &work,
-            &["fetch"],
-            Duration::from_millis(500),
-            Stdout::Discard,
-        );
+        let out = fake_git(&leaky, &work, &["fetch"], half, Stdout::Discard);
         assert_eq!(out.as_deref(), Ok(""), "a discarded read is not a failure");
         assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
         // It still fails when the command itself does, in git's own words
         // (nothing holds the pipes here, so the stderr does arrive).
         let bad = write("git-bad", "#!/bin/sh\necho boom >&2\nexit 1\n");
-        let out = run_program_wanting(
-            &bad,
-            &work,
-            &["fetch"],
-            Duration::from_millis(500),
-            Stdout::Discard,
-        );
+        let out = fake_git(&bad, &work, &["fetch"], half, Stdout::Discard);
         assert_eq!(out.as_deref().map_err(String::as_str), Err("boom"));
+    }
+
+    /// A fake git run the way [`run_git`] runs the real one: its stdout on
+    /// success, git's words (or the described failure) otherwise.
+    fn fake_git(
+        program: &Path,
+        cwd: &Path,
+        args: &[&str],
+        timeout: Duration,
+        want: Stdout,
+    ) -> Result<String, String> {
+        let finished = git_call(program, cwd, args, &[], timeout, want)?;
+        if finished.status.success() {
+            Ok(String::from_utf8_lossy(&finished.stdout).into_owned())
+        } else {
+            Err(git_failed(args, finished))
+        }
     }
 
     #[test]
@@ -1307,23 +1544,40 @@ mod tests {
         assert!(fetch_age(&linked, now).unwrap() < 60);
     }
 
+    /// Output past the pipe buffer never deadlocks the worker, and output
+    /// past [`MAX_STDOUT`] is not held in memory: the rest is read and
+    /// dropped so the child finishes, and the cut is reported.
     #[test]
     fn large_output_does_not_deadlock_the_worker() {
         let dir = tempfile::tempdir().unwrap();
-        let fake = dir.path().join("git");
-        std::fs::write(&fake, "#!/bin/sh\nhead -c 300000 /dev/zero | tr '\\0' 'x'\nexit 0\n")
-            .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = |name: &str, body: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        let five = Duration::from_secs(5);
+        let fake = script("git", "#!/bin/sh\nhead -c 300000 /dev/zero | tr '\\0' 'x'\nexit 0\n");
         let started = std::time::Instant::now();
-        let out = run_program(&fake, dir.path(), &["status"], Duration::from_secs(5)).unwrap();
+        let out = fake_git(&fake, dir.path(), &["status"], five, Stdout::Read).unwrap();
         assert_eq!(out.len(), 300_000);
         assert!(started.elapsed() < Duration::from_secs(4));
-        let noisy = dir.path().join("noisy");
-        std::fs::write(&noisy, "#!/bin/sh\nhead -c 200000 /dev/zero >&2\nexit 3\n").unwrap();
-        std::fs::set_permissions(&noisy, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(run_program(&noisy, dir.path(), &["x"], Duration::from_secs(5)).is_err());
+        let noisy = script("noisy", "#!/bin/sh\nhead -c 200000 /dev/zero >&2\nexit 3\n");
+        let err = fake_git(&noisy, dir.path(), &["x"], five, Stdout::Read).unwrap_err();
+        assert!(u64::try_from(err.len()).is_ok_and(|n| n <= MAX_STDERR), "{}", err.len());
+
+        let huge = script("huge", "#!/bin/sh\nhead -c 5000000 /dev/zero | tr '\\0' 'x'\nexit 0\n");
+        let started = std::time::Instant::now();
+        let run = run_program(&huge, dir.path(), &[], &[], five, Stdout::Read).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(4), "took {:?}", started.elapsed());
+        assert!(run.status.success() && run.truncated);
+        assert_eq!(u64::try_from(run.stdout.len()).unwrap(), MAX_STDOUT);
     }
 
+    /// The timeout kills the child, and the message names the command the
+    /// caller asked for, in milliseconds: not the `-c core.fsmonitor=` put
+    /// in front of it (whose `=` and path made `doctor` lines unreadable),
+    /// and not `after 0s` for a sub-second limit.
     #[test]
     fn timeout_kills_slow_git() {
         let dir = tempfile::tempdir().unwrap();
@@ -1331,9 +1585,169 @@ mod tests {
         std::fs::write(&fake, "#!/bin/sh\nsleep 5\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let started = std::time::Instant::now();
-        let r = run_program(&fake, dir.path(), &["status"], Duration::from_millis(200));
-        assert!(r.is_err(), "{r:?}");
-        assert!(r.unwrap_err().contains("timed out"));
+        let r = fake_git(&fake, dir.path(), &["status"], Duration::from_millis(200), Stdout::Read);
+        assert_eq!(r, Err("git status timed out after 200 ms".to_owned()));
         assert!(started.elapsed() < Duration::from_secs(3));
+        let missing = dir.path().join("nope");
+        let r = run_program(&missing, dir.path(), &[], &[], Duration::from_secs(1), Stdout::Read);
+        let err = r.map(|_| ()).unwrap_err().describe("nope --version");
+        assert!(err.starts_with("nope --version: "), "{err}");
+    }
+
+    /// std looks a bare program name up after the child's `chdir`, so an
+    /// empty or relative `PATH` entry would find a `git` the checkout ships.
+    #[test]
+    fn programs_are_looked_up_on_absolute_path_entries_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(bin.join("tool.d")).unwrap();
+        std::fs::write(bin.join("tool"), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(bin.join("tool"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(bin.join("plain"), "").unwrap();
+        let find = |path: String| find_program("tool", Some(std::ffi::OsStr::new(&path)));
+        let b = bin.display();
+        for path in [format!(":{b}"), format!(".:{b}"), format!("relative:{b}"), format!("{b}:")] {
+            assert_eq!(find(path.clone()), Some(bin.join("tool")), "{path}");
+        }
+        assert_eq!(find(":.:relative".to_owned()), None);
+        assert_eq!(find_program("plain", Some(bin.as_os_str())), None, "not executable");
+        assert_eq!(find_program("tool.d", Some(bin.as_os_str())), None, "a directory");
+        assert_eq!(find_program("tool", None), None);
+    }
+
+    /// The dirty check never hashes a worktree file, so a filter driver
+    /// the repository's own config defines never runs: not on a clean
+    /// tree, not on a file whose stat data changed (an unpacked archive's
+    /// every file), and not on an entry an attacker made "racily clean"
+    /// under a `core.checkStat = minimal` of the repository's choosing.
+    #[test]
+    fn the_dirty_check_never_runs_a_filter_driver() {
+        let (d, work) = repo();
+        let t = Duration::from_secs(5);
+        let set_mtime = |p: &Path, t: std::time::SystemTime| {
+            std::fs::File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
+        };
+        let old = std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        std::fs::write(work.join("b.txt"), "b\n").unwrap();
+        git(&work, &["add", "b.txt"]);
+        git(&work, &["commit", "-q", "-m", "b"]);
+        // The index records an mtime well before its own, so nothing is racy.
+        set_mtime(&work.join("a.txt"), old);
+        set_mtime(&work.join("b.txt"), old);
+        git(&work, &["update-index", "--refresh"]);
+        let marker = d.path().join("marker");
+        let config = work.join(".git/config");
+        let text = std::fs::read_to_string(&config).unwrap();
+        let m = marker.display();
+        let drivers = format!(
+            "[filter \"c\"]\n\tclean = \"sh -c 'touch {m}; cat'\"\n[filter \"p\"]\n\tprocess = \"sh -c 'touch {m}; exit 1'\"\n"
+        );
+        std::fs::write(&config, format!("{text}{drivers}")).unwrap();
+        std::fs::write(work.join(".gitattributes"), "a.txt filter=c\nb.txt filter=p\n").unwrap();
+
+        assert_eq!(is_dirty(&work, t), Ok(false), "a clean tree");
+        assert!(!marker.exists(), "a clean tree ran the filter");
+        // Stat data changed, content did not: dirty (the accepted
+        // trade-off), and still no filter.
+        set_mtime(&work.join("a.txt"), std::time::SystemTime::now());
+        assert_eq!(is_dirty(&work, t), Ok(true));
+        assert!(!marker.exists(), "a stat-dirty file ran the filter");
+
+        // The crafted case: the repository relaxes the stat rule to mtime
+        // and size, both files are replaced by same-content copies with
+        // the same mtime (a new inode, as extraction gives), and the index
+        // is older than its entries, so git would take them for racily
+        // clean and hash them.
+        git(&work, &["config", "core.checkStat", "minimal"]);
+        git(&work, &["config", "core.trustctime", "false"]);
+        for name in ["a.txt", "b.txt"] {
+            let path = work.join(name);
+            let body = std::fs::read(&path).unwrap();
+            let copy = work.join(format!("{name}.copy"));
+            std::fs::write(&copy, body).unwrap();
+            set_mtime(&copy, old);
+            std::fs::rename(&copy, &path).unwrap();
+        }
+        set_mtime(
+            &work.join(".git/index"),
+            std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000),
+        );
+        let _ = std::fs::remove_file(&marker);
+        assert_eq!(is_dirty(&work, t), Ok(true));
+        assert!(!marker.exists(), "a racily clean entry ran the filter");
+        // Without the pinned stat rule, git really would have run it: the
+        // case above is not vacuous.
+        let _ = Command::new("git")
+            .args(["diff-files", "--quiet"])
+            .current_dir(&work)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(marker.exists(), "the relaxed rule hashes the file");
+    }
+
+    /// Since git 2.35, porcelain `status` prints `# stash <n>` when
+    /// `status.showStash` is on, which the old check read as a change. The
+    /// plumbing prints nothing, so a stash never reads as dirty.
+    #[test]
+    fn a_stash_is_not_a_change() {
+        let (_d, work) = repo();
+        let t = Duration::from_secs(5);
+        git(&work, &["config", "status.showStash", "true"]);
+        std::fs::write(work.join("a.txt"), "b\n").unwrap();
+        git(&work, &["stash", "push", "-q"]);
+        assert_eq!(is_dirty(&work, t), Ok(false));
+        std::fs::write(work.join("a.txt"), "c\n").unwrap();
+        assert_eq!(is_dirty(&work, t), Ok(true));
+    }
+
+    /// Before the first commit `HEAD` names nothing, so `diff-index HEAD`
+    /// fails; anything in the index is then staged.
+    #[test]
+    fn an_unborn_head_is_dirty_only_with_something_staged() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = Duration::from_secs(5);
+        git(dir.path(), &["init", "-q"]);
+        assert_eq!(is_dirty(dir.path(), t), Ok(false));
+        std::fs::write(dir.path().join("x.txt"), "x\n").unwrap();
+        assert_eq!(is_dirty(dir.path(), t), Ok(false), "untracked files do not count");
+        git(dir.path(), &["add", "x.txt"]);
+        assert_eq!(is_dirty(dir.path(), t), Ok(true));
+        assert!(is_dirty(&dir.path().join("nowhere"), t).is_err());
+    }
+
+    /// `fetch` never starts maintenance or walks into submodules, and never
+    /// lets ssh prompt on the terminal it inherited: ssh is told to ask a
+    /// program instead, and the program fails.
+    #[test]
+    fn fetch_starts_no_maintenance_and_lets_ssh_prompt_nowhere() {
+        let args = fetch_args("origin");
+        assert!(
+            args.contains(&"--no-auto-maintenance") && args.contains(&"--recurse-submodules=no")
+        );
+        assert_eq!(args.last(), Some(&"origin"));
+        let (d, work) = repo();
+        let seen = d.path().join("seen");
+        let shim = d.path().join("ssh-shim");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n%s\\n' \"$SSH_ASKPASS_REQUIRE\" \"$SSH_ASKPASS\" > '{}'\nexit 1\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&work, &["config", "core.sshCommand", shim.to_str().unwrap()]);
+        git(&work, &["remote", "add", "far", "ssh://example.invalid/x.git"]);
+        assert!(fetch(&work, "far", Duration::from_secs(5)).is_err());
+        let seen = std::fs::read_to_string(&seen).unwrap();
+        let mut lines = seen.lines();
+        assert_eq!(lines.next(), Some("force"), "{seen}");
+        let askpass = PathBuf::from(lines.next().unwrap());
+        assert!(askpass.is_absolute(), "{}", askpass.display());
+        let ran = Command::new(&askpass).output();
+        assert!(ran.is_err() || ran.is_ok_and(|o| !o.status.success()), "the askpass must fail");
     }
 }

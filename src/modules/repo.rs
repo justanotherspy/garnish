@@ -424,7 +424,7 @@ impl Module for BranchModule {
             measure: None,
             summary: "Checked-out branch (or detached HEAD).",
             doc: "The current branch read from the repository without spawning git; a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).",
-            sources: &["worktree.branch", ".git/HEAD", "git status (worker)"],
+            sources: &["worktree.branch", ".git/HEAD", "git diff-index and diff-files (worker)"],
             refresh: 5,
             opts: vec![
                 OptSpec::new("show_icon", Kind::Bool, "Show the branch icon.", Value::Bool(true))
@@ -439,7 +439,7 @@ impl Module for BranchModule {
                 OptSpec::new(
                     "dirty",
                     Kind::Bool,
-                    "Show a marker when the tree has changes.",
+                    "Show a marker when tracked files have staged or unstaged changes (untracked files do not count; a file touched without changing counts until git next refreshes its index, since garnish never reads file contents).",
                     Value::Bool(false),
                 )
                 .full(Value::Bool(true)),
