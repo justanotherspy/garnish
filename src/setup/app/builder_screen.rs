@@ -352,8 +352,12 @@ impl App {
             }
             Elem::Group(_) => self.builder.select_row(hit.row),
             Elem::Rule | Elem::Cap => self.open_form(FormKind::Frame),
+            // The key that draws it: the row's own `separator` when it sets
+            // one (the map names the outer row only), else the frame's.
             Elem::Separator => {
-                self.open_form(FormKind::Frame);
+                let at = RowAt::row(hit.row);
+                let own = self.draft.row(at).is_some_and(|t| t.contains_key("separator"));
+                self.open_form(if own { FormKind::Row(at) } else { FormKind::Frame });
                 if let Some(Layer::Form(f)) = self.layers.last_mut() {
                     f.focus("separator");
                 }

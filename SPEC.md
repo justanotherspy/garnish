@@ -1836,7 +1836,10 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   arrows move the selection; `Enter` or a second click on the selected
   item opens its editor as an **overlay panel** over the screen; clicking
   the rule or a cap opens the frame form, a separator the same form on
-  its `separator` key. Everything the mouse does has a key, since tmux
+  its `separator` key, or the row's own form on its `separator` when the
+  row sets one, since that is the key drawing it (2026-09-25 review; the
+  placement map names the outer row, so an inner row's own separator
+  still opens the frame's). Everything the mouse does has a key, since tmux
   and some SSH sessions swallow mouse events (a separator, a cap and the
   rule are reached through `2`, the frame form, and a box through `e`,
   see above).

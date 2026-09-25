@@ -1266,6 +1266,28 @@ fn a_click_in_the_gutter_selects_the_row() {
     assert_eq!(shot.lines().position(|l| !l.starts_with("  ") && l.contains("Opus")), Some(2));
 }
 
+/// app-20: a click on a separator of a row that sets its own opens that
+/// row's `separator`, the key that draws it; otherwise the frame's.
+#[test]
+fn a_click_on_a_rows_own_separator_opens_the_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "icons = \"unicode\"\n[[row]]\nseparator = \" + \"\nmodules = [\"path\", \"model\"]\n[[row]]\nmodules = [\"path\", \"model\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), " + ") + 1, 1);
+    assert_eq!(app.form_keys().unwrap().first().map(String::as_str), Some("separator"));
+    assert!(snapshot(&mut app, 80, 24).contains("┌ row[0]"), "the row's form");
+    keys(&mut app, "<esc>");
+    click(&mut app, col(shot.lines().nth(2).unwrap(), " │ ") + 1, 2);
+    assert!(snapshot(&mut app, 80, 24).contains("[frame]"), "the frame's separator");
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
