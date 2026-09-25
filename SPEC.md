@@ -1727,7 +1727,13 @@ since a role there has no ground, while a module's `colors.*`, a title
 and a box still take roles; a row's form lists only the keys the parser
 would take for it (`blank` on a spacer or a row of columns, the title
 keys outside a named box) plus any key the file already sets, so `d` can
-unset one the parser reports; a value the parser takes but that leaves
+unset one the parser reports, and every form does the same (2026-09-25
+review: only the row's did, so an unknown or misplaced key the status
+bar said `d` could unset had no row anywhere): a key of the table no row
+covers is listed after the form's own, showing its value, taking a TOML
+literal on `Enter` and gone on `d`, except that an icon's `<key>_frames`
+(typed as its array) and a text module's `color` shorthand get proper
+rows; a value the parser takes but that leaves
 another key reported (`fill = false` under a `fill_pattern`) is set and
 the status names that key; a `box` unset or changed, from the form, with
 `d` or with the builder's `b`, drops a `[box.<name>]` nothing joins any

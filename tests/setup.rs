@@ -1034,6 +1034,23 @@ fn an_untouched_frames_list_is_not_an_edit() {
     assert!(!app.draft().is_dirty(), "{:?}", app.draft().get(&["frame", "separator_frames"]));
 }
 
+/// frm-03: the status bar's promise holds: a key the parser reports is a
+/// row of its form, and `d` there removes it.
+#[test]
+fn a_reported_key_is_unset_from_its_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, "[modules.clock]\nfromat = \"12h\"\n[[row]]\nmodules = [\"clock\"]\n")
+        .unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert!(app.status().unwrap().contains("d in its form unsets it"), "{:?}", app.status());
+    keys(&mut app, "<right><enter>");
+    on_field(&mut app, "fromat", "d");
+    assert_eq!(app.draft().resolved().1, Vec::new(), "{:?}", app.status());
+    assert!(app.draft().get(&["modules", "clock"]).is_none());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
