@@ -415,9 +415,27 @@ fn blocks<'a, 'b>(rows: &'b [Row<'a>]) -> Vec<Block<'a, 'b>> {
 }
 
 /// Whether the right edge of a row's last column carries content rather than
-/// fill, on any of its lines.
+/// fill, on any of its lines. With no `fr` column the free width is a rule
+/// after the last column, which keeps a pad of its own (SPEC § 4.3): the
+/// row then ends in that rule, never in content.
 fn row_ends_in_content(row: &Row<'_>) -> bool {
-    row.cols.last().is_some_and(col_ends_in_content)
+    has_fr(row) && row.cols.last().is_some_and(col_ends_in_content)
+}
+
+/// Whether any column of the row shares the free width.
+fn has_fr(row: &Row<'_>) -> bool {
+    row.cols.iter().any(|c| matches!(c.width, Width::Fr(_)))
+}
+
+/// Whether a column's text can meet a rule beside it: not when a box's side
+/// stands between them on every line, as it does for a boxed column and a
+/// stack of boxed rows.
+fn meets_rule(col: &Col<'_>) -> bool {
+    col.boxed.is_none()
+        && match &col.content {
+            Content::Groups { .. } => true,
+            Content::Stack(rows) => rows.iter().any(|r| r.boxed.is_none()),
+        }
 }
 
 fn col_ends_in_content(col: &Col<'_>) -> bool {
@@ -481,9 +499,10 @@ impl Layout<'_> {
 impl Layout<'_> {
     /// One row's lines as drafts, each `width` cells wide.
     ///
-    /// `exact` marks a row laid out to its own content (an inner row of an
-    /// `auto` column): it reserves no rule cell, so nothing is cut to make
-    /// room for a rule that is not drawn (SPEC § 4.3).
+    /// `inherit` is how the column holding this row is laid out, for an
+    /// inner row of a stack: an `auto` column's rows are exact, and the
+    /// column's own pads belong to the ends of the row that reach its edges
+    /// (SPEC § 4.3).
     fn row_body(
         &self,
         row: &Row<'_>,
@@ -501,9 +520,14 @@ impl Layout<'_> {
             .zip(&widths)
             .enumerate()
             .map(|(j, (col, w))| {
+                let (l, r) = self.edge_pads(row, j, fill);
+                let (outer_l, outer_r) = inherit.pads;
                 let fit = Fit {
                     exact: inherit.exact || col.width == Width::Auto,
-                    pads: self.edge_pads(row, j, fill),
+                    pads: (
+                        if j == 0 { l.max(outer_l) } else { l },
+                        if j == last { r.max(outer_r) } else { r },
+                    ),
                     trailing: inherit.trailing && j == last,
                 };
                 self.col_lines(col, *w, height, row, fill, fit)
@@ -548,16 +572,16 @@ impl Layout<'_> {
     /// (SPEC § 4.3).
     fn share(&self, row: &Row<'_>, width: usize, fill: Fill) -> Vec<usize> {
         let n = row.cols.len();
-        let gaps = row.gap.saturating_mul(n.saturating_sub(1));
-        let available = width.saturating_sub(gaps);
         let want: Vec<usize> = row
             .cols
             .iter()
             .enumerate()
             .map(|(j, col)| match col.width {
                 Width::Cells(c) => c,
-                Width::Auto => match Self::auto_width(col, row) {
+                Width::Auto => match self.auto_width(col, row) {
                     0 => 0,
+                    // A box's side stands between its text and the rule.
+                    content if !meets_rule(col) => content,
                     // Beside a rule, an `auto` column keeps the pad every
                     // other group has, so the rule never runs into its text.
                     content => {
@@ -568,6 +592,17 @@ impl Layout<'_> {
                 Width::Fr(_) => 0,
             })
             .collect();
+        // A gap sits between two columns that are drawn, and an `auto`
+        // column with nothing to show draws nothing: `row_body` skips it and
+        // its gap, so reserving that gap would leave its cells over.
+        let drawn = row
+            .cols
+            .iter()
+            .zip(&want)
+            .filter(|(col, w)| col.width != Width::Auto || **w > 0)
+            .count();
+        let gaps = row.gap.saturating_mul(drawn.saturating_sub(1));
+        let available = width.saturating_sub(gaps);
         let fixed: usize = want.iter().sum();
         let free = available.saturating_sub(fixed);
         let total_fr: u32 = row
@@ -615,18 +650,26 @@ impl Layout<'_> {
         }
         // Left to right, gap then column: a column whose gap plus one cell
         // does not fit renders nothing, and so does everything to its right.
+        // A column that takes no cells takes no gap either, as `row_body`
+        // draws a gap only between two columns it draws.
         let mut left = width;
         let mut dropped = 0_usize;
-        for (j, take) in desired.iter_mut().enumerate() {
-            let cost = if j > 0 { row.gap } else { 0 };
+        let mut after_one = false;
+        for (col, take) in row.cols.iter().zip(desired.iter_mut()) {
+            if *take == 0 && col.width == Width::Auto {
+                continue;
+            }
+            let cost = if after_one { row.gap } else { 0 };
             if left < cost.saturating_add(1) {
                 *take = 0;
                 dropped = dropped.saturating_add(1);
                 continue;
             }
-            left = left.saturating_sub(cost);
-            *take = (*take).min(left);
-            left = left.saturating_sub(*take);
+            *take = (*take).min(left.saturating_sub(cost));
+            if *take > 0 {
+                left = left.saturating_sub(cost).saturating_sub(*take);
+                after_one = true;
+            }
         }
         // A dropped column is invisible on screen, so the one place it can
         // be explained is the debug log (SPEC § 4.3).
@@ -650,18 +693,18 @@ impl Layout<'_> {
         let last = j.saturating_add(1) >= row.cols.len();
         // With no `fr` column the free width is a rule after the last one,
         // so even the last column has a rule to its right (SPEC § 4.3).
-        let trailing = row.cols.iter().all(|c| !matches!(c.width, Width::Fr(_)));
-        (if j > 0 { pad } else { 0 }, if last && !trailing { 0 } else { pad })
+        (if j > 0 { pad } else { 0 }, if last && has_fr(row) { 0 } else { pad })
     }
 
     /// An `auto` column is exactly its content: its groups joined by the
-    /// separator, or its widest inner row.
+    /// separator, or its widest inner row, with the sides and pads of any
+    /// box drawn around it.
     ///
     /// The width is re-measured every tick, so a column whose content
     /// changes width moves its neighbours: `auto` is for values that hold
     /// still (SPEC § 4.3).
-    fn auto_width(col: &Col<'_>, row: &Row<'_>) -> usize {
-        match &col.content {
+    fn auto_width(&self, col: &Col<'_>, row: &Row<'_>) -> usize {
+        let content = match &col.content {
             Content::Groups { left, right, .. } => {
                 let sep = display_width(row.separator);
                 let join = |g: &[Vec<Segment>]| {
@@ -674,13 +717,32 @@ impl Layout<'_> {
                 let joined = if l > 0 && r > 0 { sep } else { 0 };
                 l.saturating_add(joined).saturating_add(r)
             }
-            Content::Stack(rows) => rows
+            Content::Stack(rows) => blocks(rows)
                 .iter()
-                .map(|inner| {
-                    inner.cols.iter().map(|c| Self::auto_width(c, inner)).max().unwrap_or(0)
+                .map(|block| {
+                    let widest = block
+                        .rows
+                        .iter()
+                        .flat_map(|(_, inner)| inner.cols.iter().map(|c| self.auto_width(c, inner)))
+                        .max()
+                        .unwrap_or(0);
+                    self.boxed_width(block.boxed, widest)
                 })
                 .max()
                 .unwrap_or(0),
+        };
+        self.boxed_width(col.boxed, content)
+    }
+
+    /// `content` cells with the box around them, when there is one: its two
+    /// sides and a pad inside each. Nothing is drawn around no content.
+    fn boxed_width(&self, boxed: Option<&BoxRef>, content: usize) -> usize {
+        match boxed {
+            Some(b) if content > 0 => {
+                let side = display_width(&self.box_chars(&self.box_cfg(b)).side);
+                content.saturating_add(side.saturating_add(self.box_pad()).saturating_mul(2))
+            }
+            _ => content,
         }
     }
 
@@ -808,9 +870,16 @@ impl Layout<'_> {
         // block's first row stands in when the box has no title of its own.
         let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
         let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
+        // Inside the box its sides stand between the rows and any rule.
+        let inside = Fit { pads: (0, 0), ..fit };
         for (_, inner) in &block.rows {
-            let body =
-                self.row_body(inner, interior, self.row_height(inner), Fill::from_box(&cfg), fit);
+            let body = self.row_body(
+                inner,
+                interior,
+                self.row_height(inner),
+                Fill::from_box(&cfg),
+                inside,
+            );
             lines.extend(body.into_iter().map(|d| self.side_drafts(d, &chars, &cfg, pad)));
         }
         lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
@@ -944,8 +1013,9 @@ impl Layout<'_> {
         // the rule already surrounds needs none.
         let (touch_left, touch_right) = group.touches(fit.exact);
         let (before, after) = fit.pads;
-        let (before, after) =
-            (if touch_left { before } else { 0 }, if touch_right { after } else { 0 });
+        // A column narrower than its two pads keeps what fits of them.
+        let before = if touch_left { before.min(width) } else { 0 };
+        let after = if touch_right { after.min(width.saturating_sub(before)) } else { 0 };
         let inner = width.saturating_sub(before).saturating_sub(after);
         let mut drafts: Vec<Draft> = Vec::new();
         if before > 0 {
@@ -968,14 +1038,17 @@ impl Layout<'_> {
         // neighbour and move the whole row (SPEC § 4.3).
         let cut = self.truncate || !fit.trailing;
         let exact = fit.exact;
+        let packed = fill == Fill::Packed || exact;
         // The right group is never *scrolled* (SPEC § 4.1), but it is cut
         // to its column like anything else: a group wider than the column
-        // used to push the columns beside it off their shares.
+        // used to push the columns beside it off their shares. Beside a
+        // rule it keeps the pad before it, so it gets the cells after that.
+        let right_room = if packed { width } else { width.saturating_sub(pad_w) };
         let right_pieces =
-            self.fit_group(self.group_pieces(right, right_ids, separator), width, cut, false);
+            self.fit_group(self.group_pieces(right, right_ids, separator), right_room, cut, false);
         let right_w: usize = right_pieces.iter().map(|p| segments_width(&p.segs)).sum();
 
-        if fill == Fill::Packed || exact {
+        if packed {
             // Left-packed: the right group follows the left one after a
             // separator, and nothing fills the rest (SPEC § 4.1).
             let sep_w = if right_w == 0 { 0 } else { display_width(separator) };
@@ -985,8 +1058,10 @@ impl Layout<'_> {
             // column that is meant to hold still (SPEC § 4.3).
             let pieces = self.group_pieces(left, left_ids, separator);
             let mut pieces = self.fit_group(pieces, budget, cut, !exact);
+            let left_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
             if right_w > 0 {
-                if !pieces.is_empty() && !separator.is_empty() {
+                // A left group cut to nothing is not there to be joined.
+                if left_w > 0 && !separator.is_empty() {
                     let before = left.last().map_or(&[][..], Vec::as_slice);
                     pieces.push(self.separator_piece(separator, before));
                 }
@@ -1017,7 +1092,7 @@ impl Layout<'_> {
             let budget = width.saturating_sub(right_block).saturating_sub(join);
             let left_pieces = self.fit_group(left_pieces, budget, cut, true);
             let left_w: usize = left_pieces.iter().map(|p| segments_width(&p.segs)).sum();
-            let left_pad = if left_pieces.is_empty() { 0 } else { pad_w };
+            let left_pad = if left_w == 0 { 0 } else { pad_w };
             let rule =
                 width.saturating_sub(left_w).saturating_sub(left_pad).saturating_sub(right_block);
             let mut drafts: Vec<Draft> = left_pieces.into_iter().map(Draft::Done).collect();
@@ -1036,7 +1111,7 @@ impl Layout<'_> {
         let budget = width.saturating_sub(cell.saturating_add(pad_w).saturating_mul(sides));
         let pieces = self.fit_group(pieces, budget, cut, true);
         let text_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
-        let pad_w = if pieces.is_empty() { 0 } else { pad_w };
+        let pad_w = if text_w == 0 { 0 } else { pad_w };
         let space = width.saturating_sub(text_w).saturating_sub(pad_w.saturating_mul(sides));
         let (before, after) = split(space, justify);
         let mut drafts: Vec<Draft> = Vec::new();
@@ -1938,6 +2013,232 @@ mod tests {
 
     fn row(cols: Vec<Col<'static>>, gap: usize) -> Row<'static> {
         Row { cols, gap, separator: " │ ", title: None, boxed: None, blank: false }
+    }
+
+    /// A flex column: `left` anchored left, `right` anchored right, each a
+    /// single module (none when empty), leaked as [`col`] does.
+    fn flex(width: Width, left: &str, right: &str) -> Col<'static> {
+        let group = |text: &str| -> &'static [Vec<Segment>] {
+            if text.is_empty() {
+                &[]
+            } else {
+                Box::leak(Box::new(vec![vec![Segment::plain(text)]]))
+            }
+        };
+        Col {
+            content: Content::Groups {
+                left: group(left),
+                right: group(right),
+                left_ids: &[],
+                right_ids: &[],
+            },
+            ..col(width, "")
+        }
+    }
+
+    /// The text a line shows, for assertion messages.
+    fn show(line: &Line) -> String {
+        Painter::PLAIN.paint(&line.segments())
+    }
+
+    /// SPEC § 4.3: content never spills into a neighbour. A right group as
+    /// wide as its column was cut to the whole column with its pad on top,
+    /// and a left group cut to nothing still took its pad (and, packed, a
+    /// separator), so the column came out over its share; `paint` then recut
+    /// the whole line, which took its cap and its placement map with it.
+    #[test]
+    fn a_columns_drafts_fill_exactly_its_share() {
+        let f = Fixture::new(FrameStyle::Rounded, true, 80);
+        let l = f.layout();
+        let text = |n: usize| -> Vec<Vec<Segment>> {
+            if n == 0 { Vec::new() } else { vec![vec![Segment::plain("x".repeat(n))]] }
+        };
+        for fill in [Fill::Rule, Fill::Spaces, Fill::Packed] {
+            for exact in [false, true] {
+                for pads in [(0, 0), (0, 1), (1, 1)] {
+                    for justify in [Justify::Left, Justify::Center, Justify::Right] {
+                        for (left_w, right_w) in
+                            (0..=12).flat_map(|l| (0..=12).map(move |r| (l, r)))
+                        {
+                            let (left, right) = (text(left_w), text(right_w));
+                            let group = Group {
+                                left: &left,
+                                right: &right,
+                                left_ids: &[],
+                                right_ids: &[],
+                                justify,
+                                separator: " │ ",
+                            };
+                            for width in 0..=14_usize {
+                                let fit = Fit { exact, pads, ..Fit::default() };
+                                let drafts = l.compose_group(&group, width, fill, fit);
+                                let cells: usize = drafts.iter().map(Draft::cells).sum();
+                                assert_eq!(
+                                    cells, width,
+                                    "{fill:?} exact={exact} pads={pads:?} {justify:?} left={left_w} right={right_w} width={width}: {drafts:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The shape the review found: a 12-cell flex column whose right
+        // group leaves no room for the left one, beside a second column.
+        for width in [30_usize, 60, 96] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let r = row(
+                vec![flex(Width::Cells(12), "❖ Opus", "⠋ 16:00:00"), col(Width::Fr(1), "s")],
+                1,
+            );
+            let lines = l.lines(std::slice::from_ref(&r));
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            assert_eq!(line.width(), width, "{}", show(line));
+            assert!(show(line).ends_with("──"), "the cap survives: {}", show(line));
+            assert!(show(line).contains("⠋ 16:00:00"), "{}", show(line));
+            assert!(
+                !line.pieces.iter().any(|p| p.elem == Elem::Group(Vec::new())),
+                "the line was recut: {}",
+                show(line)
+            );
+        }
+    }
+
+    /// SPEC § 4.3: with no `fr` column the free width is a rule after the
+    /// last column, and that column keeps its own right pad, so the rule
+    /// runs into the cap. The cap used to take a pad of its own as well,
+    /// which left a hole in the rule: `⠋ 16:00:00 ──── ─┤`.
+    #[test]
+    fn a_row_with_no_fr_column_rules_into_its_cap() {
+        for width in [60_usize, 120] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let last = Col { justify: Justify::Right, ..col(Width::Auto, "⠋ 16:00:00") };
+            let r = row(vec![col(Width::Auto, "a"), col(Width::Cells(20), "b"), last], 2);
+            let lines = l.lines(std::slice::from_ref(&r));
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            assert_eq!(line.width(), width, "{}", show(line));
+            let text = show(line);
+            let tail = text.split_once("16:00:00 ").map_or("", |(_, t)| t);
+            assert!(tail.len() > 3 && tail.chars().all(|c| c == '─'), "a hole: {text}");
+        }
+    }
+
+    /// SPEC § 4.3 Pads: a rule never runs into a module's text, in a stack
+    /// as out of one. An inner row's column took its pads from the inner
+    /// row, where it is both first and last, so the outer column's pad was
+    /// lost and a flex inner row's right group ran into the gap's rule.
+    #[test]
+    fn a_stacked_row_keeps_its_columns_pads() {
+        for width in [40_usize, 80] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let stacked = Col {
+                content: Content::Stack(vec![Row {
+                    cols: vec![flex(Width::Fr(1), "❖ Opus", "⚙ high")],
+                    ..row(Vec::new(), 1)
+                }]),
+                ..col(Width::Fr(1), "")
+            };
+            let plain = flex(Width::Fr(1), "❖ Opus", "⚙ high");
+            let line = |first: Col<'static>| {
+                let r = row(vec![first, col(Width::Fr(1), "⠋ 16:00:00")], 1);
+                l.lines(std::slice::from_ref(&r))
+                    .into_iter()
+                    .flatten()
+                    .map(|l| show(&l))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(line(stacked), line(plain));
+            // An `auto` stack gets a pad on each side of its text, where
+            // `share` reserved them, never both on one side.
+            let auto = Col {
+                content: Content::Stack(vec![row(vec![col(Width::Fr(1), "mid")], 1)]),
+                ..col(Width::Auto, "")
+            };
+            let r = row(vec![col(Width::Fr(1), "a"), auto, col(Width::Fr(1), "z")], 1);
+            let lines = l.lines(std::slice::from_ref(&r));
+            let text = lines.first().and_then(|r| r.first()).map_or_default(show);
+            assert!(text.contains("─ mid ─"), "{text}");
+        }
+    }
+
+    /// SPEC § 4.3: an `auto` column always fits its content, a box around
+    /// it included. The width used to leave out the box's sides and pads,
+    /// so a boxed `auto` column, or an `auto` stack of boxed rows, cut its
+    /// content with `…` inside a box drawn two to four cells too narrow.
+    #[test]
+    fn an_auto_column_fits_its_content_inside_a_box() {
+        let ten = "0123456789";
+        let boxed_col = || Col { boxed: Some(&BoxRef::Anon), ..col(Width::Auto, ten) };
+        let boxed_stack = || Col {
+            content: Content::Stack(
+                (0..2)
+                    .map(|_| Row {
+                        boxed: Some(&BoxRef::Anon),
+                        ..row(vec![col(Width::Fr(1), ten)], 1)
+                    })
+                    .collect(),
+            ),
+            ..col(Width::Auto, "")
+        };
+        for width in [40_usize, 80] {
+            for fill in [true, false] {
+                let f = Fixture::new(FrameStyle::Rounded, fill, width);
+                let l = f.layout();
+                for stacked in [false, true] {
+                    for at in 0..3_usize {
+                        let mut cols: Vec<Col<'static>> =
+                            (0..2).map(|_| col(Width::Fr(1), "x")).collect();
+                        cols.insert(at, if stacked { boxed_stack() } else { boxed_col() });
+                        let r = row(cols, 1);
+                        let lines: Vec<Line> =
+                            l.lines(std::slice::from_ref(&r)).into_iter().flatten().collect();
+                        let text = lines.iter().map(show).collect::<Vec<_>>().join("\n");
+                        assert!(!text.contains('…'), "cut at {at}, fill={fill}:\n{text}");
+                        let top = lines.first().map_or_default(Line::spans);
+                        let edges: Vec<Range<usize>> = top
+                            .into_iter()
+                            .filter(|(e, _)| *e == Elem::BoxEdge)
+                            .map(|(_, r)| r)
+                            .collect();
+                        assert_eq!(edges.len(), 2, "{text}");
+                        assert_eq!(edges[1].end - edges[0].start, 14, "at {at}:\n{text}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// SPEC § 4.3: an `auto` column with nothing to show takes no cells and
+    /// no gap. `share` used to reserve its gap, which `row_body` never drew,
+    /// so the cells turned up as a stray rule after the last column and a
+    /// right-justified module ended against it: `⠋ 16:00:00─ ─╮`.
+    #[test]
+    fn an_empty_auto_column_takes_no_gap() {
+        for width in [30_usize, 60, 101] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let last = || Col { justify: Justify::Right, ..col(Width::Fr(1), "end") };
+            for cols in [
+                vec![col(Width::Auto, ""), col(Width::Fr(1), "a"), last()],
+                vec![col(Width::Fr(1), "a"), col(Width::Auto, ""), last()],
+            ] {
+                let r = row(cols, 1);
+                let widths = l.share(&r, l.inner_width(&r, 0, 1), Fill::Rule);
+                let gaps = widths.iter().filter(|w| **w > 0).count().saturating_sub(1);
+                assert_eq!(
+                    widths.iter().sum::<usize>() + gaps,
+                    l.inner_width(&r, 0, 1),
+                    "the drawn columns and their gaps fill the row: {widths:?}"
+                );
+                let lines = l.lines(std::slice::from_ref(&r));
+                let line = lines.first().and_then(|r| r.first()).unwrap();
+                assert_eq!(line.width(), width, "{}", show(line));
+                assert!(show(line).ends_with(" end ──"), "{}", show(line));
+            }
+        }
     }
 
     /// SPEC § 4.3: the `fr` columns share the free width as

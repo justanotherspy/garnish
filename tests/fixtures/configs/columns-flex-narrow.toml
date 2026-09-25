@@ -1,0 +1,16 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# A 12-cell flex column whose right group leaves no room for its left one
+# (SPEC § 4.3): the clock keeps the pad before it and the model is cut to
+# nothing, so the column is exactly its 12 cells. It used to come out a
+# cell over, spill into its neighbour and get the whole line recut, the
+# right cap included.
+
+[[row]]
+[[row.col]]
+width = 12
+modules = ["model"]
+right = ["clock"]
+[[row.col]]
+modules = ["session"]

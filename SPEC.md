@@ -1065,7 +1065,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
 - **Columns and width.** The row's width is the box of § 2.1 minus
   `gap` cells per boundary. A column with `width = 24` takes 24 cells and
   `"auto"` takes its content's width (its modules joined by the
-  separator; `max_width` applies); what is left is the free width, shared
+  separator; `max_width` applies; a box around it adds its two sides and
+  two pads, 2026-09-25: they were left out and the content was cut); an
+  `auto` column with nothing to show takes no cells and no gap, since a
+  gap only ever sits between two columns that are drawn (2026-09-25: its
+  gap was reserved, never drawn, and turned up as a stray rule cell after
+  the last column); what is left is the free width, shared
   by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
   cells going one each to the first of them, so shares differ by at most
   one cell and always add up. Defaults: `"1fr"`, so three bare columns
@@ -1085,7 +1090,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   branch names; an `auto` flex column joins its two groups with the
   separator and draws no rule between them, and an `auto` stack is as
   wide as its widest inner row. With no `fr` column at all, the free
-  width is a rule after the last column. When the width runs out, the
+  width is a rule after the last column, running into the right cap (the
+  last column keeps a pad of its own before it, so the cap takes none;
+  2026-09-25: it did, and left a hole in the rule). When the width runs out, the
   row is laid out left to right, gap then column: a fixed or `auto`
   column takes at most what remains, and a column whose gap plus one
   cell does not fit renders nothing, as does everything to its right
@@ -1233,7 +1240,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   reaches (a flex column's two groups, a left- or right-justified lone
   group, and both ends of an `auto` column, whose declared width is its
   content plus those cells), and none where the rule already surrounds the
-  group or where the frame's cap or the box's side has padded it. A box's
+  group or where the frame's cap or the box's side has padded it. A
+  stack's column pads belong to the inner rows that reach its edges, as
+  they would to the same modules unstacked. A box's
   interior pad is the frame's `pad`, or one cell when the frame has none,
   so a box never has its content against its side and a `style = "none"`
   box indents by it. A title right after a cap drops its own leading pad
