@@ -852,6 +852,25 @@ mod tests {
         }
     }
 
+    /// SPEC § 3.4: the clock's `tz` is read the way `TZ` is, a POSIX rule
+    /// included; one that names nothing is the tick's zone.
+    #[test]
+    fn the_clock_tz_reads_like_tz() {
+        let payload = Payload::parse("{\"session_id\": \"s\"}").unwrap();
+        let clock_at = |tz: &str| {
+            let text = format!(
+                "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"clock\"]\n[modules.clock]\nspinner = false\ntz = {tz:?}\n"
+            );
+            let (config, errs) = config::parse(&text, &SCHEMAS);
+            assert_eq!(errs, Vec::new());
+            render_plain_at(&payload, &config, Some(40), &Clock::fixed()).trim().to_owned()
+        };
+        assert_eq!(clock_at("JST-9"), "01:00:00");
+        assert_eq!(clock_at("<-0330>3:30"), "12:30:00");
+        assert_eq!(clock_at("Not/AZone"), "16:00:00");
+        assert_eq!(clock_at(""), "16:00:00");
+    }
+
     /// SPEC § 5: `max_length` counts the text the row shows. A bold session
     /// name lost cells to the escapes' bytes, and a cut inside a sequence
     /// left it open, so the row's plain-text pass swallowed the ellipsis.

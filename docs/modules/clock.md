@@ -45,7 +45,7 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 | `spinner` | bool | `false` | `true` | `true` | Show the spinner. |
 | `date` | bool | `false` | `false` | `true` | Show the date. |
 | `utc_offset` | bool | `false` | `false` | `true` | Show the UTC offset. |
-| `tz` | string | `""` | `""` | `""` | IANA time zone; empty means the system zone. |
+| `tz` | string | `""` | `""` | `""` | Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone. |
 
 ## Icons
 

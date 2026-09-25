@@ -1,8 +1,6 @@
 //! `session`, `api`, `cache`, `clock`: time spent, time waiting, prompt cache
 //! health, and the wall clock with a spinner.
 
-use jiff::tz::TimeZone;
-
 use crate::ansi::{Segment, Style};
 use crate::config::schema::{
     ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
@@ -268,7 +266,7 @@ impl Module for ClockModule {
                 OptSpec::new(
                     "tz",
                     Kind::Str,
-                    "IANA time zone; empty means the system zone.",
+                    "Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone.",
                     Value::Str(String::new()),
                 ),
             ],
@@ -288,7 +286,7 @@ impl Module for ClockModule {
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let tz = cfg.str("tz");
         let zone = (!tz.is_empty())
-            .then(|| TimeZone::get(tz).ok())
+            .then(|| crate::time::zone(tz))
             .flatten()
             .unwrap_or_else(|| ctx.tz.clone());
         let zoned = ctx.now.to_zoned(zone);

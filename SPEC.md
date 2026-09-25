@@ -507,6 +507,20 @@ passed prints none of them.
 cache-read share from `current_usage`; `prompt_cache` absent → `–`.
 Spinner frame = `now_secs mod frames.len()` (stateless).
 
+The tick's local zone (the `clock`'s, and the absolute reset times' of
+§ 3.3) is `TZ` when it names a zone, else `/etc/localtime`, else UTC. `TZ`,
+and the `clock`'s own `tz`, are read the way the C library reads `TZ`: a
+POSIX rule (`JST-9`, `EST5EDT,M3.2.0,M11.1.0`) is that rule; anything else,
+or anything after a leading `:`, is an absolute path to a TZif file or a
+zone name, whose file is read from `TZDIR`, `/usr/share/zoneinfo`,
+`/usr/share/lib/zoneinfo` or `/etc/zoneinfo`. A name holding a `..`
+component or naming no file matches nothing, and a relative one is never
+read against the working directory. Only a name no directory has a file for
+goes to jiff's database, whose first use walks the whole zoneinfo tree; a
+`TZ` that names nothing is reported once on stderr. (Decided 2026-09-25: a
+POSIX rule fell through to `/etc/localtime`, UTC in most containers,
+without a word, and a zone name paid that walk on every tick.)
+
 ### 3.5 Session-identity group
 
 | id | shows | minimal | default | full | refresh |

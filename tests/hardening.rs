@@ -152,8 +152,13 @@ fn hostile_environment_is_tolerated() {
     assert!(ok, "exit status\n{out}\n{err}");
     assert_eq!(out.lines().count(), 4, "{out}\n{err}");
     assert!(err.contains("GARNISH_NOW"), "{err}");
-    let (out, _, ok) = tick(PAYLOAD.as_bytes(), &[("HOME", ""), ("TZ", "Not/AZone")], dir.path());
+    let (out, err, ok) = tick(PAYLOAD.as_bytes(), &[("HOME", ""), ("TZ", "Not/AZone")], dir.path());
     assert!(ok && out.lines().count() == 4, "{out}");
+    assert!(err.contains("TZ=\"Not/AZone\" names no time zone"), "{err}");
+    // A POSIX rule is a zone (SPEC § 3.4); it used to fall through to
+    // `/etc/localtime`, UTC in most containers, without a word.
+    let (out, err, ok) = tick(PAYLOAD.as_bytes(), &[("TZ", "JST-9")], dir.path());
+    assert!(ok && out.contains("01:00:00") && !err.contains("TZ="), "{out}{err}");
 }
 
 /// SPEC § 5: the tick prints and exits 0 whatever the repository holds. A

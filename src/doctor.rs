@@ -480,15 +480,16 @@ fn environment_section(o: &mut String) {
     let _ = writeln!(o, "environment");
     // The terminal's own variables, garnish's test hooks, then the settings
     // and renderer switches Claude Code reads (SPEC § 2.1, § 2.3, § 4.2).
-    let keys = ["COLUMNS", "LINES", "NO_COLOR", "TZ"].into_iter().chain(TEST_HOOKS).chain([
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-        "DISABLE_AUTO_COMPACT",
-        "DISABLE_COMPACT",
-        "CLAUDE_CODE_NO_FLICKER",
-        "CLAUDE_CODE_DECSTBM",
-        claude_settings::CONFIG_DIR_ENV,
-    ]);
+    let keys =
+        ["COLUMNS", "LINES", "NO_COLOR", "TZ", "TZDIR"].into_iter().chain(TEST_HOOKS).chain([
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+            "DISABLE_AUTO_COMPACT",
+            "DISABLE_COMPACT",
+            "CLAUDE_CODE_NO_FLICKER",
+            "CLAUDE_CODE_DECSTBM",
+            claude_settings::CONFIG_DIR_ENV,
+        ]);
     for key in keys {
         if let Ok(v) = std::env::var(key) {
             // The path-valued hooks may carry the home directory.
