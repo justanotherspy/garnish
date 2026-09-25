@@ -207,9 +207,12 @@ impl Draft {
     }
 
     /// The draft as the file it is saved as.
-    #[must_use]
-    pub fn text(&self) -> String {
-        toml::to_string_pretty(&self.table).unwrap_or_default()
+    ///
+    /// # Errors
+    /// A table TOML cannot write, in a line for the status bar.
+    pub fn text(&self) -> Result<String, String> {
+        toml::to_string_pretty(&self.table)
+            .map_err(|e| format!("the draft cannot be written as TOML: {e}"))
     }
 
     /// The value at a dotted path of table keys (`["modules", "context",
@@ -246,13 +249,6 @@ impl Draft {
         remove_at(&mut self.table, path);
     }
 
-    /// Whether a key is set in the file (as opposed to resolved from a
-    /// preset or a default): what a chip's dot and a form's marker show.
-    #[must_use]
-    pub fn is_set(&self, path: &[&str]) -> bool {
-        self.get(path).is_some()
-    }
-
     /// Whether `[modules.<id>]` carries any override.
     #[must_use]
     pub fn module_has_overrides(&self, id: &str) -> bool {
@@ -263,15 +259,12 @@ impl Draft {
     }
 
     /// The `[[row]]` array, written out from the preset first when the file
-    /// has none, so the rows can be edited at all. `None` only when the key
-    /// holds something that is not an array, which the parser reports.
+    /// has none (or holds something else under `row`, which goes), so the
+    /// rows can be edited at all: after that it is always there, and the
+    /// `Option` is only the lookup's.
     pub fn rows_mut(&mut self) -> Option<&mut Vec<Value>> {
         self.materialise_rows();
-        let slot = self.table.entry("row".to_owned()).or_insert_with(|| Value::Array(Vec::new()));
-        if !slot.is_array() {
-            *slot = Value::Array(Vec::new());
-        }
-        slot.as_array_mut()
+        self.table.get_mut("row").and_then(Value::as_array_mut)
     }
 
     /// The `[[row]]` tables as read, empty when the preset's rows are in
@@ -355,8 +348,7 @@ impl Draft {
     /// A draft with no file, a file that does not parse (never rewritten),
     /// or the OS error of the write, each as one line.
     pub fn save(&mut self) -> Result<Option<PathBuf>, String> {
-        let text = toml::to_string_pretty(&self.table)
-            .map_err(|e| format!("the draft cannot be written as TOML: {e}"))?;
+        let text = self.text()?;
         let backup = self.write(&text)?;
         self.saved = self.table.clone();
         Ok(backup)
@@ -566,16 +558,16 @@ mod tests {
         assert!(!d.is_dirty());
         assert_eq!(d.rows().len(), 1, "[[line]] is read as [[row]]");
         assert!(d.get(&["line"]).is_none());
-        let out = d.text();
+        let out = d.text().unwrap();
         assert!(out.find("theme").unwrap() < out.find("preset").unwrap(), "order kept: {out}");
         assert!(out.contains("[[row]]") && !out.contains("[[line]]"), "{out}");
         let (config, errs) = d.resolved();
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(config.modules.get("context").unwrap().int("width"), 30);
         assert_eq!(config.rows.len(), 1);
-        // set, get, is_set, remove with pruning
+        // set, get, remove with pruning
         d.set(&["modules", "clock", "preset"], Value::String("full".into()));
-        assert!(d.is_dirty() && d.is_set(&["modules", "clock", "preset"]));
+        assert!(d.is_dirty() && d.get(&["modules", "clock", "preset"]).is_some());
         assert!(d.module_has_overrides("clock") && !d.module_has_overrides("model"));
         d.remove(&["modules", "clock", "preset"]);
         assert!(d.get(&["modules", "clock"]).is_none(), "an emptied table is pruned");
@@ -649,7 +641,7 @@ mod tests {
         d.remove(&["b"]);
         let keys: Vec<&str> = d.table().keys().map(String::as_str).collect();
         assert_eq!(keys, ["a", "c", "d"]);
-        assert_eq!(d.text(), "a = 1\nc = 3\nd = 4\n");
+        assert_eq!(d.text().unwrap(), "a = 1\nc = 3\nd = 4\n");
     }
 
     /// app-18: a NaN equals a NaN for the draft's comparisons, and nothing
@@ -717,8 +709,9 @@ mod tests {
             d.remove(&path);
             assert_eq!(d.get(table), Some(&Value::Table(Table::new())), "{text}");
             assert_eq!(d.resolved().1, Vec::new(), "{text}");
-            let again = Draft::from_text(&d.text());
-            assert_eq!(again.get(table), Some(&Value::Table(Table::new())), "{}", d.text());
+            let text = d.text().unwrap();
+            let again = Draft::from_text(&text);
+            assert_eq!(again.get(table), Some(&Value::Table(Table::new())), "{text}");
             d.remove(table);
             assert!(d.get(table.get(..1).unwrap()).is_none(), "{text}: the parents go");
         }

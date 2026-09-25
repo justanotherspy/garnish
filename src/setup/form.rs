@@ -888,19 +888,19 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
     );
     if text.is_none() {
         let preset = cfg.map_or(Preset::Default, |c| c.preset);
-        let mut f = Field::new(
-            "preset",
-            "minimal | default | full; unset follows the top-level preset.",
-            SlotKind::Preset,
-            slot("preset"),
-        )
-        .valued(
-            draft,
-            Some(Value::String(preset.name().to_owned())),
-            config.preset.module_preset().name(),
+        fields.push(
+            Field::new(
+                "preset",
+                "minimal | default | full; unset follows the top-level preset.",
+                SlotKind::Preset,
+                slot("preset"),
+            )
+            .valued(
+                draft,
+                Some(Value::String(preset.name().to_owned())),
+                config.preset.module_preset().name(),
+            ),
         );
-        f.set = slot("preset").get(draft).is_some();
-        fields.push(f);
         let min = i64::from(schema.refresh > 0);
         fields.push(
             Field::new(

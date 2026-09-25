@@ -1328,7 +1328,7 @@ mod tests {
         assert_eq!(config.rows[1].cols.len(), 2);
         assert_eq!(config.rows[1].cols[1].rows.len(), 1);
         // The whole thing still saves as a file the parser reads back.
-        let again = Draft::from_text(&d.text());
+        let again = Draft::from_text(&d.text().unwrap());
         assert_eq!(again.resolved().0, config);
     }
 }
