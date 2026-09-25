@@ -89,6 +89,11 @@ files Claude Code reads for the current directory, which one sets
 
 ## 3. Try it before you commit
 
+`garnish setup` previews every change live on the bundled sample payloads.
+The commands below read the payload files of a checkout of this repository
+(`tests/fixtures/payloads` is not installed with the binary); any payload
+you saved works the same way:
+
 ```sh
 garnish preview tests/fixtures/payloads/subscription-full.json
 garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
@@ -153,7 +158,16 @@ right   = ["limit5h", "limit7d", "cost"]
 | usage | `limit5h` `limit7d` `spend` `cost` |
 | session | `session` `api` `cache` `clock` |
 | identity | `session_name` `vim` `agent` `lines` |
+| harness | `version` `sandbox` `voice` `account` |
 | yours | `text.<name>`: a fixed string in a box, any number of them |
+
+The harness group reports on Claude Code itself: `version` prints the
+version from the payload, `sandbox` and `voice` are badges that show only
+while Bash sandboxing or voice dictation is on in your settings, and
+`account` shows the claude.ai account the session is signed in with (a
+cached module, refreshed in the background). Between modules,
+`[frame] separator_color` paints every separator in a theme role, a colour,
+or `inherit` (the colour of the module before it).
 
 A text module is the one thing you define yourself: plain text (escape
 sequences are stripped) in a box of fixed width, so it doubles as a
@@ -285,7 +299,7 @@ modules = ["path", "model"]
 right   = ["clock"]
 ```
 
-The keys are in [config.md § `[[row.col]]`](config.md#row-col) and
+The keys are in [config.md § `[[row.col]]`](config.md#rowcol) and
 § `[box.<name>]`; `grid-three`, `grid-six`, `boxed-panels` and
 `dashboard-panels` in the gallery are working examples to copy from.
 

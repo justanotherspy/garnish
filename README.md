@@ -207,7 +207,7 @@ corners and sides:
 ```
 
 The `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` presets
-are working examples; [docs/config.md](docs/config.md#row-col) has the keys.
+are working examples; [docs/config.md](docs/config.md#rowcol) has the keys.
 
 | group | modules |
 |---|---|
@@ -226,9 +226,17 @@ module definitions in the code, so they always match the binary you built.
 ## Try it without a session
 
 ```sh
-garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
 garnish config init && garnish config check && garnish config show
 garnish doctor          # versions, settings, config, cache, failed refreshes, glyph test
+garnish setup           # pick, build and preview a layout full-screen
+```
+
+`garnish setup` previews every change live on the bundled sample payloads.
+From a checkout of this repository, `preview` renders those payloads
+directly (`tests/fixtures/payloads` is not installed with the binary):
+
+```sh
+garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
 ```
 
 ## Skills

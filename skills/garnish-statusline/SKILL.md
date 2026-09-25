@@ -49,7 +49,12 @@ it" answer at any point is mapped onto the same keys.
 | Long branch names or session titles? | `max_width` on that module; `path.style = "fish"` | nothing cut |
 | Clickable (a terminal with OSC 8)? | `branch.link = true`; `url` on a text module | nothing |
 | Context bar: the window, or how close compaction is? | `context.scale = "usable"` | `window` |
-| A window's reset as a countdown or a clock time? | `reset = "countdown" \| "absolute" \| "both"` on `limit5h`, `limit7d`, `spend` | `countdown` |
+| A window's reset as a countdown or a clock time? | `reset = "countdown" \| "absolute" \| "both"` on `limit5h`, `limit7d`, `spend`; `"elapsed"` too on the two windows | `countdown` |
+| Am I on pace to run out before the reset? | `pace = true`, `eta = true` (with `pace_colors`, `elapsed_marker`) on `limit5h`, `limit7d` | off |
+| Hide a module while it has nothing to say? | `hide = ["zero", …]` on the module (its page lists the states it can hide) | shown |
+| Numbers: `128k` or `128,400`, `42%` or `42.3%`? | the `[format]` table (`tokens`, `percent`, `cost`, `parens = "dim"`), or the same key on one module | compact |
+| Show the Claude Code version, the account, or badges while sandboxing or voice is on? | the `version`, `account`, `sandbox` and `voice` modules | off |
+| Separators in the colour of the module before them? | `[frame] separator_color = "inherit"` (or a role or colour) | `muted` |
 
 Start from the closest of the 32 gallery presets (`garnish presets`;
 `titled-sections`, `sidebar-panels`, `grid-three`, `boxed-panels`,

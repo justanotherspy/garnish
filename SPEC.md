@@ -7,7 +7,9 @@ what Phase 19 found in the harness (§ 2.1). The Phase 20 keys (§ 3)
 shipped on 2026-09-13, the layout model on 2026-09-17 and the setup on
 2026-09-19; revised the same day with the Phase 23 keys (`hide` in § 3,
 pace in § 3.3, the four modules of § 3.8, `[format]` and
-`separator_color` in § 4), which `PLAN.md` Phase 23 is building. Owner:
+`separator_color` in § 4), which shipped on 2026-09-20 with the setup
+refinements; revised 2026-09-25 with the decisions of the whole-codebase
+review (each section names them). Owner:
 Daniel Schwartz. Builder: Claude. This document is the target design of
 the whole system; when the design changes, it changes here first, with
 the reason (`CLAUDE.md` § Phase protocol). Everything in it is
@@ -1928,8 +1930,11 @@ them needs network access from garnish itself, they drive `gh` and the
 - **Both reporting skills post to a public repository**, so each one first
   replaces the home directory in every path with `~` (`doctor` already
   collapses it and `config show` prints no path at all, so this catches
-  what the person pasted by hand), keeps only `GARNISH_*` lines of the
-  doctor's environment section, prints the whole issue body, and asks the
+  what the person pasted by hand), keeps only the `GARNISH_*` lines of the
+  doctor's environment section and the Claude Code renderer and compaction
+  switches it lists (they explain height and compaction reports and are
+  not private; `COLUMNS`, `LINES` and `TZ` are the Bash tool's, not the
+  status line's, so they go), prints the whole issue body, and asks the
   person explicitly before `gh issue create`. Nothing leaves the machine on
   an unanswered or negative question.
 

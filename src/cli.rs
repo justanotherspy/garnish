@@ -40,7 +40,8 @@ pub struct RenderArgs {
     /// Color mode override.
     #[arg(long, value_name = "auto|always|never|256|truecolor")]
     pub color: Option<String>,
-    /// Terminal width to lay out for (defaults to `COLUMNS`, then 120); the
+    /// Terminal width to lay out for (defaults to `COLUMNS`, then
+    /// `GARNISH_COLUMNS`, then 120); the
     /// lines come out 4 cells narrower, the width of Claude Code's box.
     #[arg(long, value_name = "N")]
     pub width: Option<usize>,
@@ -146,7 +147,8 @@ pub enum Command {
         #[arg(long, conflicts_with = "all")]
         lock_held: bool,
     },
-    /// Remove cache directories of sessions idle for more than a day.
+    /// Remove cache directories (sessions and repositories) idle for more
+    /// than a day, and leftover temporary and stale lock files.
     Gc,
     /// Regenerate the reference documentation from the module schemas (for
     /// maintainers; `make docs` does it through the docs-sync test).
@@ -454,7 +456,7 @@ fn run_command() -> Result<()> {
             let n = cache.gc_sessions(crate::cache::GC_MAX_AGE_MS, usize::MAX);
             writeln!(
                 std::io::stdout().lock(),
-                "removed {n} idle session dir(s) under {}",
+                "removed {n} idle cache dir(s) (sessions and repositories) under {}",
                 cache.root().display()
             )?;
             Ok(())
