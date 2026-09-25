@@ -1305,6 +1305,82 @@ fn a_reinstall_keeps_an_environment_prefix_and_the_config() {
     }
 }
 
+/// SPEC § 4: without `--config` or `GARNISH_CONFIG`, the config a garnish
+/// `statusLine.command` passes with `--config` is the file its ticks
+/// read, and so the file every command that writes a config writes.
+/// `install` kept that `--config` but wrote a default config the command
+/// never read and checked its padding note against that one, `setup
+/// --preset P --install` wrote P where the tick does not look, and `config
+/// path` named the unread file too.
+#[test]
+fn the_config_a_command_passes_is_the_config_the_writing_commands_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let xdg = home.join(".config/garnish/garnish.toml");
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let hook = |command: &str| {
+        let status = serde_json::json!({"statusLine": {"type": "command", "command": command, "padding": 1}});
+        std::fs::write(&settings, status.to_string()).unwrap();
+    };
+    let command = || -> String {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        v["statusLine"]["command"].as_str().unwrap().to_owned()
+    };
+    let work = home.join("work.toml");
+    let marker =
+        "padding = 4\n[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"OLDWORK\"\n";
+    std::fs::write(&work, marker).unwrap();
+    hook(&format!("garnish --config {}", work.display()));
+    // `install` keeps the file, and the padding it notes is that file's.
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok, "{out}{err}");
+    assert!(!xdg.exists(), "a default config the command never reads:\n{out}");
+    assert!(err.contains("work.toml") && err.contains("set `padding = 2`"), "{err}");
+    assert!(command().ends_with(&format!(" --config {}", work.display())), "{}", command());
+    // `config path` names it and `config init` will not replace it.
+    let (out, _, ok) = run(&["config", "path"], home, &[]);
+    assert!(ok && out.trim_end() == work.to_str().unwrap(), "{out}");
+    let (_, err, ok) = run(&["config", "init"], home, &[]);
+    assert!(!ok && err.contains("work.toml exists"), "{err}");
+    // `setup --preset P --install` writes P there, and the tick reads it.
+    let (out, err, ok) = run(&["setup", "--preset", "minimal", "--install"], home, &[]);
+    assert!(ok && out.contains("work.toml (backup: "), "{out}{err}");
+    assert!(std::fs::read_to_string(&work).unwrap().contains("preset = \"minimal\""));
+    // (`setup` writes the bare program word, which is not on the test's PATH.)
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && err.contains("work.toml already exists"), "{out}{err}");
+    let tick = sh_tick(&command(), home);
+    assert!(!tick.contains("OLDWORK") && !tick.contains('⚠') && !tick.is_empty(), "{tick}");
+    assert!(!xdg.exists());
+    // A file the command names that is not there yet is where the default
+    // config goes, a home-relative one as the shell expands it.
+    let fresh = home.join("cfg").join("fresh.toml");
+    hook("GARNISH_ANIMATE=0 garnish --config ~/cfg/fresh.toml");
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && out.contains(&format!("default config to {}", fresh.display())), "{out}{err}");
+    assert!(command().ends_with(" --config ~/cfg/fresh.toml"), "{}", command());
+    let tick = sh_tick(&command(), home);
+    assert!(!tick.contains('⚠') && !tick.is_empty(), "{tick}");
+    assert!(!xdg.exists());
+    // A value that names no one file (the harness resolves a relative one
+    // in whatever directory it runs the command from): `install` writes no
+    // default config and says why; the commands that need the file refuse.
+    hook("garnish --config rel.toml");
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && !out.contains("default config") && err.contains("rel.toml"), "{out}{err}");
+    for args in [&["config", "path"][..], &["config", "init"], &["setup", "--preset", "minimal"]] {
+        let (out, err, ok) = run(args, home, &[]);
+        assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
+        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
+    }
+    assert!(!xdg.exists() && !home.join("rel.toml").exists());
+    // A config named explicitly still wins over the command's.
+    let (out, _, ok) = run(&["config", "path"], home, &[("GARNISH_CONFIG", "/elsewhere.toml")]);
+    assert!(ok && out.trim_end() == "/elsewhere.toml", "{out}");
+}
+
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,
 /// and the commands that write a config write *that* file rather than
 /// creating an XDG one that would hide it from the next tick.

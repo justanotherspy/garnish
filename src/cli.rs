@@ -704,12 +704,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     match action {
         ConfigAction::Path => {
-            let Some(p) = config::write_target(config_path) else {
-                return Err(refusal(Refusal::NoHome {
-                    flag: "--config <FILE>",
-                    what: "the config is",
-                }));
-            };
+            let p = target_or_quiet(config_path, "the config is")?;
             writeln!(stdout, "{}", p.display())?;
         }
         ConfigAction::Check => {
@@ -782,15 +777,26 @@ pub fn preset_text(preset: &str) -> Result<String> {
 }
 
 /// Where the config a command writes goes ([`config::write_target`]: the
-/// file the tick reads, else the default location), or a [`Quiet`] refusal
-/// without a home directory.
+/// file the tick reads, else the default location), or a [`Quiet`] refusal.
 ///
 /// # Errors
-/// [`Quiet`] after the one-line note, without a home.
+/// [`Quiet`] after the one-line note, without a home or when the
+/// `statusLine.command` passes a `--config` that names no one file.
 pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
-    config::write_target(explicit).ok_or_else(|| {
-        refusal(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" })
-    })
+    target_or_quiet(explicit, "the config goes")
+}
+
+/// [`config_target_or_quiet`], with `what` finishing the no-home note.
+fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBuf> {
+    match config::write_target(explicit, None) {
+        config::WriteTarget::File(path) => Ok(path),
+        config::WriteTarget::NoHome => {
+            Err(refusal(Refusal::NoHome { flag: "--config <FILE>", what }))
+        }
+        config::WriteTarget::Unresolved { settings, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, word }))
+        }
+    }
 }
 
 #[cfg(test)]

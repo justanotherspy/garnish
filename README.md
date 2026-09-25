@@ -125,7 +125,9 @@ preset and hooks it up, and `garnish install` alone does the settings
 (`--dry-run` shows the change; `--absolute` if `~/.cargo/bin` is not on the
 PATH Claude Code sees; `garnish --config FILE install` writes a command that
 reads FILE, and a later `install` keeps the arguments and any
-`NAME=value` prefix a garnish command already has). The equivalent by hand:
+`NAME=value` prefix a garnish command already has; a `--config FILE` kept
+that way is the file `config path`, `config init`, `setup` and `install`
+then use). The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }

@@ -730,7 +730,20 @@ that writes a config (`config init`, `setup`, `install`'s default file)
 writes the file this order finds and the XDG path only when there is
 none, so a new file never hides an existing `~/.garnish.toml` (2026-09-25
 review: `install` wrote the XDG default and the user's config silently
-stopped applying). An empty variable is unset (§ 5), and a relative
+stopped applying). Without `--config` and `GARNISH_CONFIG`, a garnish
+`statusLine.command` in the user settings file (`install --settings`'s
+file for `install`) that passes its own `--config` names the file
+instead, since that is the one its ticks read: `config path` prints it,
+`config init` and `setup` write it, and `install` keeps it, writing the
+default config there when it is missing and checking its `padding`
+against that file. The value is read as `sh` would pass it, a leading
+`~`, `$HOME` or `${HOME}` as the home directory; one that names no one
+file (a relative path, which the harness resolves in whatever directory
+it runs the command from, or any other expansion) is never guessed at:
+`install` writes no default config and says why, and the others refuse
+with a one-line note asking for `--config` (2026-09-25 review: `install`
+and `setup --preset P --install` kept the command's `--config X` but wrote
+a default file it never read). An empty variable is unset (§ 5), and a relative
 `XDG_CONFIG_HOME` (like a relative `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR`
 for the cache root, § 6) is ignored, as the XDG Base Directory spec says:
 it would name a file in the session's repository.
@@ -2305,8 +2318,10 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the explicit `garnish render` always reads stdin, and the harness
   always pipes, so rendering is unchanged (§ 7).
 - **Traps, decided.** `setup` honours the global `--config` flag and
-  `GARNISH_CONFIG` like every command, so it edits the file the tick
-  reads; without a home directory and without either it refuses with the
+  `GARNISH_CONFIG` like every command, and without either the `--config`
+  the installed `statusLine.command` passes (§ 4), so it edits the file
+  the tick reads; without a home directory and without any of them, or
+  with a command's `--config` that names no one file, it refuses with the
   § 5 one-liner. The preview fixtures are embedded in the binary
   (`include_str!` of the named files under `tests/fixtures/payloads/`, as
   the presets and skills are), so `setup` works from a `cargo install`

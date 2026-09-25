@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
+use crate::config::WriteTarget;
+
 /// What `install` should write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
@@ -211,6 +213,56 @@ fn garnish_at(words: &[Word], command: &str) -> Option<usize> {
         (at, program) = rest.find(|(_, w)| !assignment(w))?;
     }
     named(program, "garnish").then_some(at)
+}
+
+/// What the `--config` of a garnish `statusLine.command` names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandConfig {
+    /// A file: an absolute path, or one under the home directory as the
+    /// shell expands `~`, `$HOME` and `${HOME}`.
+    File(PathBuf),
+    /// A value that stands for no one file garnish can find, as written: a
+    /// relative path, which the harness resolves in whatever directory it
+    /// runs the command from, or an expansion garnish does not follow.
+    Unresolved(String),
+}
+
+/// The config file a garnish `statusLine.command` passes with `--config`
+/// (or `--config=`), which is the file its ticks read; `None` when the
+/// command does not run garnish ([`garnish_at`]) or passes no config.
+/// `home` stands for a leading `~`, `$HOME` or `${HOME}`.
+#[must_use]
+pub fn command_config(command: &str, home: Option<&Path>) -> Option<CommandConfig> {
+    let words = shell_words(command);
+    let at = garnish_at(&words, command)?;
+    let raw = |w: &Word| command.get(w.start..w.end).unwrap_or_default().to_owned();
+    let mut args = words.iter().skip(at).skip(1);
+    let (value, written) = loop {
+        let word = args.next()?;
+        if word.home {
+            continue;
+        }
+        if word.literal && word.text == "--config" {
+            let value = args.next()?;
+            break (value.clone(), raw(value));
+        }
+        if let Some(rest) = word.text.strip_prefix("--config=") {
+            let raw = raw(word);
+            let written = raw.strip_prefix("--config=").map_or_else(|| raw.clone(), str::to_owned);
+            break (Word { text: rest.to_owned(), ..word.clone() }, written);
+        }
+    };
+    let path = if !value.literal {
+        None
+    } else if value.home {
+        home.map(|h| h.join(value.text.trim_start_matches('/')))
+    } else {
+        Some(PathBuf::from(&value.text))
+    };
+    Some(
+        path.filter(|p| p.is_absolute())
+            .map_or(CommandConfig::Unresolved(written), CommandConfig::File),
+    )
 }
 
 /// The path this binary is known by, for `install --absolute`: the first
@@ -600,6 +652,15 @@ pub enum Refusal {
     },
     /// A file that exists where one is to be created, without `--force`.
     Exists(PathBuf),
+    /// The garnish `statusLine.command` passes `--config` a value that
+    /// stands for no one file ([`CommandConfig::Unresolved`]), so there is
+    /// no telling which config its ticks read.
+    UnresolvedConfig {
+        /// The settings file.
+        settings: PathBuf,
+        /// The value, as the command spells it.
+        word: String,
+    },
     /// Anything the file system refused, naming the file.
     Io(String),
 }
@@ -611,6 +672,11 @@ impl std::fmt::Display for Refusal {
                 write!(f, "HOME is not set; pass {flag} to say where {what}")
             }
             Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
+            Self::UnresolvedConfig { settings, word } => write!(
+                f,
+                "{}: statusLine.command passes --config {word:?}, which names no one file garnish can find; pass --config <FILE> to say which",
+                settings.display()
+            ),
             Self::Unparsable { path, problem } => write!(
                 f,
                 "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
@@ -628,6 +694,11 @@ impl std::error::Error for Refusal {}
 pub enum ConfigStep {
     /// `--no-config`.
     Skipped,
+    /// The command passes `--config` a value that stands for no one file
+    /// ([`CommandConfig::Unresolved`], as written): no default config is
+    /// written, since it could land where the command never reads, and
+    /// the report says so.
+    Unresolved(String),
     /// A config already exists there; `padding` is the value it would need
     /// to match `statusLine.padding` when it has another, which the report
     /// notes.
@@ -733,17 +804,26 @@ impl Steps {
             .filter(|p| *p <= MAX_PADDING);
         let padding = options.padding.or(kept).map(|p| p.saturating_mul(2));
         let config = if options.write_config {
-            let Some(path) = crate::config::write_target(options.config_path.as_deref()) else {
-                return Err(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" });
-            };
-            if path.exists() {
-                // Noted only when the file says otherwise, so a reinstall
-                // over a matching config is quiet.
-                let has = crate::config::load(Some(&path), &crate::modules::SCHEMAS).config.padding;
-                let padding = padding.filter(|p| u64::try_from(has).ok() != Some(*p));
-                ConfigStep::Exists { path, padding }
-            } else {
-                ConfigStep::Write { path, padding }
+            // The file the written command reads: the explicit one, else
+            // the one the kept command passes, else the default.
+            match crate::config::write_target(options.config_path.as_deref(), Some(&plan.settings))
+            {
+                WriteTarget::File(path) if path.exists() => {
+                    // Noted only when the file says otherwise, so a
+                    // reinstall over a matching config is quiet.
+                    let loaded = crate::config::load(Some(&path), &crate::modules::SCHEMAS);
+                    let has = loaded.config.padding;
+                    let padding = padding.filter(|p| u64::try_from(has).ok() != Some(*p));
+                    ConfigStep::Exists { path, padding }
+                }
+                WriteTarget::File(path) => ConfigStep::Write { path, padding },
+                WriteTarget::NoHome => {
+                    return Err(Refusal::NoHome {
+                        flag: "--config <FILE>",
+                        what: "the config goes",
+                    });
+                }
+                WriteTarget::Unresolved { word, .. } => ConfigStep::Unresolved(word),
             }
         } else {
             ConfigStep::Skipped
@@ -794,7 +874,7 @@ impl Steps {
                     seeded(*padding)
                 ));
             }
-            ConfigStep::Exists { .. } | ConfigStep::Skipped => {}
+            ConfigStep::Exists { .. } | ConfigStep::Skipped | ConfigStep::Unresolved(_) => {}
         }
         if let Some(dir) = &self.skills {
             lines.push(format!(
@@ -807,7 +887,9 @@ impl Steps {
     }
 
     /// The advice a plan carries whether it is applied or not: the PATH
-    /// warning, and the `padding` a config that already exists would need.
+    /// warning, the `padding` a config that already exists would need, and
+    /// why no default config is written for a `--config` that names no one
+    /// file.
     #[must_use]
     pub fn notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
@@ -817,11 +899,15 @@ impl Steps {
                     .to_owned(),
             );
         }
-        if let ConfigStep::Exists { path, padding: Some(p) } = &self.config {
-            notes.push(format!(
+        match &self.config {
+            ConfigStep::Exists { path, padding: Some(p) } => notes.push(format!(
                 "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
                 path.display()
-            ));
+            )),
+            ConfigStep::Unresolved(word) => notes.push(format!(
+                "note: statusLine.command passes --config {word:?}, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which"
+            )),
+            ConfigStep::Exists { .. } | ConfigStep::Write { .. } | ConfigStep::Skipped => {}
         }
         notes
     }
@@ -999,6 +1085,42 @@ mod tests {
         assert_eq!(split("a#b"), [word("a#b", true, false)], "a `#` inside a word is text");
         let words = shell_words("  x 'y z' ");
         assert_eq!((words[0].start, words[0].end, words[1].start, words[1].end), (2, 3, 4, 9));
+    }
+
+    /// The config a garnish command passes is the file its ticks read: an
+    /// absolute path, or one under the home as the shell expands it. A
+    /// value the harness would resolve elsewhere (a relative path, from
+    /// whatever directory it runs the command in) or through an expansion
+    /// garnish does not follow is named as written, never guessed.
+    #[test]
+    fn the_config_a_garnish_command_passes() {
+        let home = Some(Path::new("/h"));
+        let file = |p: &str| Some(CommandConfig::File(PathBuf::from(p)));
+        let unresolved = |w: &str| Some(CommandConfig::Unresolved(w.to_owned()));
+        for (command, want) in [
+            ("garnish --config /x.toml", file("/x.toml")),
+            ("/opt/garnish render --config=/x.toml", file("/x.toml")),
+            ("A=1 env B=2 garnish --config '/a b.toml' render", file("/a b.toml")),
+            ("garnish --config ~/w.toml", file("/h/w.toml")),
+            ("garnish --config \"$HOME/w.toml\"", file("/h/w.toml")),
+            ("garnish --config ${HOME}/w.toml", file("/h/w.toml")),
+            ("garnish --config w.toml", unresolved("w.toml")),
+            ("garnish --config=~/w.toml", unresolved("~/w.toml")),
+            ("garnish --config=$HOME/w.toml", unresolved("$HOME/w.toml")),
+            ("garnish \"--config=/a b\"", file("/a b")),
+            ("garnish --config \"~/w.toml\"", unresolved("\"~/w.toml\"")),
+            ("garnish --config $XDG_CONFIG_HOME/g.toml", unresolved("$XDG_CONFIG_HOME/g.toml")),
+            ("garnish --config ~root/w.toml", unresolved("~root/w.toml")),
+            ("garnish", None),
+            ("garnish --config", None),
+            ("garnish --configure /x.toml", None),
+            ("garnish \"--config\" /x.toml", file("/x.toml")),
+            ("ccstatusline --config /x.toml", None),
+            ("garnish; other --config /x.toml", None),
+        ] {
+            assert_eq!(command_config(command, home), want, "{command}");
+        }
+        assert_eq!(command_config("garnish --config ~/w.toml", None), unresolved("~/w.toml"));
     }
 
     /// An environment prefix (`NAME=value` words, after a leading `env`
