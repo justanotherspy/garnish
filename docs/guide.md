@@ -50,7 +50,8 @@ the builder: the preview at the top, your rows below it, and single keys
 to add a module (`m`, with search), a row (`a`), a column (`C`, which
 leaves the cursor on the new column; `]` on a module past the last
 column makes one for it), a stack (`S`), a title (`t`) or a box (`b`;
-`B` boxes the row together with the row above), to edit the selected
+`B` boxes the row together with the row above, `e` edits the box the
+selected line is in), to edit the selected
 module or row (`Enter`; a click in the preview selects, a second click
 edits), and to open the top-level keys (`1`), the frame (`2`) and the
 colours (`3`). `u` undoes the last edit and `U` redoes it, `f` cycles
@@ -385,6 +386,11 @@ so the two stay in step; an explicit `animate` wins over the setting, and
 - **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`
   (the lines come out 96 cells wide: what fits in Claude Code's box at that
   terminal width).
+- **A garbled terminal after `garnish setup` was killed** → `setup` puts
+  the terminal back when it exits, on `Ctrl+C` and on a crash, but a
+  `kill` (or a supervisor's SIGTERM) gives it no chance to, and the shell
+  is left without echo, on the alternate screen, with mouse reporting on.
+  Type `reset` (even unseen) and Enter.
 
 ## 8. Under the hood
 

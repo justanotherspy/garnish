@@ -1,12 +1,12 @@
 p┌ [modules.path] ────────────────────────────────────────────────────────────┐i
-▶│  enabled         true                        (true)                        │
+>│  enabled         true                        (true)                        │
  │  preset          default                     (default)                     │
 r│  refresh         0                           (0)                           │
 r│  hide            []                          ([])                          │
 r│  label                ┌ icons.folder ──────────────┐                       │
  │  prefix               │ |1  nerd                  │                       │
  │  suffix               │❒ |1  unicode               │                       │
- │  hide_when_empty true │📁 |2  emoji                │                       │
+ │  hide_when_empty true │📁|2  emoji                 │                       │
  │  max_width       0    │(blank)|0  ascii            │                       │
  │  show_icon       true │ |1  also try              │                       │
  │  depth           2    │ |1  also try              │                       │
@@ -15,8 +15,8 @@ r│  label                ┌ icons.folder ────────────
  │  show_added      false│custom…                     │                       │
  │  icons.folder    ❒    │                            │                       │
  │  icons.added     +    │type to filter: ▏           │                       │
- │  colors.icon     #7dd3│↑↓ move  enter pick  esc bac│)                      │
- │  colors.base     #cdd6└────────────────────────────┘                       │
+ │  colors.icon     accen│↑↓ move  enter pick  esc bac│)                      │
+ │  colors.base     text └────────────────────────────┘                       │
  │Folder icon.                                                                │
  │                                                                            │
  │                                                                            │

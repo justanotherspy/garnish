@@ -1803,20 +1803,32 @@ same information in less screen. The glyph suggestions are one table in
 `icons.rs` keyed by module and icon key rather than a field on each
 `IconSpec`, with the same guard test and the same *also try* list on the
 module pages, and the glyph picker prints each candidate's cell count
-(`|1`, `|2`) rather than the doctor's two-cell grid. The placement map is
+(`|1`, `|2`) rather than the doctor's two-cell grid. The marks of the
+screen's own chrome are ASCII (a chip's and a set key's `*`, the
+preview's `>` row marker) rather than the geometric dot and arrow first
+drawn, which some terminals draw two cells wide. The placement map is
 `layout::Line::modules()` over `render::render_tree_at`, which returns
 each row's lines as typed pieces. A click selects a module and a second
 click, or `Enter`, edits it; a click on a cap or the rule opens the frame
 form. A separator, a cap or the rule is reached by a click alone; keys
-reach modules, rows and columns, and `2` opens the frame form (the
-keyboard twin is in PLAN's backlog). The placement map names the outer
-row of a line, so a click on a title or a box edge inside a row of
-columns selects that row and names the list as the way to the column or
-inner row it may belong to (the same backlog item). `Esc` closes the innermost layer
+reach modules, rows and columns, `2` opens the frame form (the
+keyboard twin is in PLAN's backlog), and `e` opens the `[box.<name>]`
+form of the box the selected line is in (its own, or for an inner row
+its column's, then its row's), so a box needs no mouse either (added in
+the 2026-09-25 review: only a click on a box edge reached one). A click
+on a title or a box edge opens the form of what carries it: the named
+box's, else the row's (the 2026-09-25 review found the row's arm could
+never run). The placement map names the outer row of a line, so a click
+on a title or a box edge inside a row the file wrote columns for selects
+that row and names the list as the way to the column or inner row it
+may belong to (the same backlog item). `Esc` closes the innermost layer
 and, at the base of the builder or the picker, leaves it as `q` does. A
 module's editor is generated from `ModuleSchema`; the top-level, frame,
 row, column and box forms list their keys by hand, since those are not
-schema options, and the unit test walks both. The snapshot tests pin the
+schema options, and the unit tests walk both: the hand-listed forms
+against the key list the parser names for an unknown key, and every
+entry of every picker through the parser (both since the 2026-09-25
+review). The snapshot tests pin the
 clock in-process (`Clock::fixed()`) and need no `GARNISH_NOW` or `TZ`.
 The terminal minimum is 60 × 12. A `setup` cargo feature was not added:
 the release binary grew from 2.8 MB to 3.4 MB and the end-to-end cold
@@ -1835,18 +1847,34 @@ its key, which is how undo has a button. *Editing*: a picker opens on
 the value in effect and its `custom…` line starts from it, so a label is
 edited rather than retyped, and the input line has a cursor (`←`/`→`,
 `Home`/`End`, `Delete`); a string keeps its spaces (a picked `  `
-separator had arrived as `""`); the `[colors]` form offers literals only
+separator had arrived as `""`), and so does a frame of
+`separator_frames`, which is typed as the TOML array it is written as
+(`[" │ ", " ┃ "]`; the comma form had trimmed every frame, 2026-09-25
+review), while `hide` and the lists of colours and numbers stay
+comma-separated; the `[colors]` form offers literals only
 (the theme's own, each noted with its role, then the named colours),
 since a role there has no ground, while a module's `colors.*`, a title
 and a box still take roles; a row's form lists only the keys the parser
 would take for it (`blank` on a spacer or a row of columns, the title
 keys outside a named box) plus any key the file already sets, so `d` can
-unset one the parser reports; a value the parser takes but that leaves
+unset one the parser reports, and every form does the same (2026-09-25
+review: only the row's did, so an unknown or misplaced key the status
+bar said `d` could unset had no row anywhere): a key of the table no row
+covers is listed after the form's own, showing its value, taking a TOML
+literal on `Enter` and gone on `d`, except that an icon's `<key>_frames`
+(typed as its array) and a text module's `color` shorthand get proper
+rows; a value the parser takes but that leaves
 another key reported (`fill = false` under a `fill_pattern`) is set and
-the status names that key; a `box` unset or changed, from the form or
-with `d`, drops a `[box.<name>]` nothing joins any more, as the
-builder's `b` does; a module's `label` picker starts with the module's
-own name, bare and capitalised; changing the top-level `preset` swaps
+the status names that key; a `box` unset or changed, from the form, with
+`d` or with the builder's `b`, drops a `[box.<name>]` nothing joins any
+more (`b` reads a typed value as the form does: `none`, `false` and
+nothing unbox, `true` is a box of its own; 2026-09-25 review: `b` had
+refused to move a box's last member elsewhere); `d` on the last key of
+a `[box.<name>]` or a `[modules.text.<name>]` leaves the table, empty,
+since its being there is what defines the box or the module (an emptied
+module table is pruned, an emptied box or text table is not); a module's `label` picker starts with the module's
+own name, bare and capitalised; changing the top-level `preset` (or
+unsetting it with `d`, which makes it the default one) swaps
 the rows for the new preset's when they were still exactly the old
 preset's (the builder writes a preset's rows into the file so they can
 be edited, which would otherwise pin them) and says which happened.
@@ -1881,13 +1909,20 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   have lines of their own under the facts they qualify, never the end of
   a line that a narrow terminal cuts (found by the Phase 22 review).
   `Enter` applies it: the file is written with the previous one kept by
-  `install`'s backup rule (§ 5), and the install screen follows if the
+  `install`'s backup rule (§ 5), a gallery preset as its file, comments
+  included, as `setup --preset` writes it, a built-in one as `preset =
+  "<name>"` with its rows written out, the lean table the builder edits
+  (where the non-interactive twin writes `config init`'s annotated
+  defaults; 2026-09-25 review: the picker had dropped a gallery file's
+  comments), and the install screen follows if the
   settings file has no `statusLine` yet. `e` opens the highlighted preset
   in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen
   and re-renders on every change. Below it, the `[[row]]` list: each row
   shows its columns as chips (§ 4.3; a plain row is one column) and its
-  height in lines; keys add, insert, delete, clone and move rows, add a
+  height in lines; keys add, insert, delete (all but the last row, since
+  a file without `[[row]]` takes the preset's, which the list cannot
+  show), clone and move rows, add a
   column and set its `width` and `justify`, turn a column into a stack,
   move a module within a column or into the next one (a new one past the
   edge), mark a row as a spacer, give it a title, box a row, box it
@@ -1900,14 +1935,19 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   `garnish modules`; the new-text entry asks for a name checked by the
   § 3.7 rule, creates the table with the schema defaults and opens its
   editor, and removing a text module's last placement asks whether to
-  drop the table. `Enter` on a module
+  drop the table (by its chip, by the line holding it, or by `space`
+  making its row a spacer, one question for every module so left;
+  2026-09-25 review: only the chip had asked). `Enter` on a module
   opens its **editor**: one row per schema option (`preset`, `refresh`,
   `hide`, `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
   the module's own options, then `icons.*` for the active icon set and
   `colors.*`), showing the default, the current value and the doc string;
-  enums cycle, booleans toggle, integers edit with their `max` shown,
-  colours offer the theme's roles and accept a literal, icons accept any
-  string and show the cell count `doctor` would. A text module's editor is
+  enums cycle, booleans toggle, integers edit with their `max` shown (in
+  the input's title, `max_width (0–1024)`, since 2026-09-25: the bound
+  had shown only in the refusal of a value over it), colours offer the
+  theme's roles and accept a literal, icons accept any string and show
+  the cell count `doctor` would (in the glyph picker, see the differences
+  above). A text module's editor is
   the same screen over the text schema. Separate screens set the top-level
   keys (`preset`, `icons`, `theme`, `color`, `frame`
   style/fill/separator/`separator_color`, `align`, `durations`, the
@@ -1932,13 +1972,22 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the row list instead. A click (crossterm mouse capture, on while
   `setup` runs and off when it exits, on `Ctrl+C` and on a panic, through
   a hook chained ahead of color-eyre's so the report prints on a restored
-  terminal; the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
+  terminal, and which acts only while the screen holds the terminal; a
+  signal (`kill`, a supervisor's SIGTERM) runs neither, since std has no
+  signal hook and no crate was added for one, so a killed `setup` can
+  leave the terminal raw, on the alternate screen and reporting the
+  mouse until `reset` is typed (2026-09-25 review; the README's
+  troubleshooting says so); the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
   arrows move the selection; `Enter` or a second click on the selected
   item opens its editor as an **overlay panel** over the screen; clicking
   the rule or a cap opens the frame form, a separator the same form on
-  its `separator` key. Everything the mouse does has a key, since tmux
+  its `separator` key, or the row's own form on its `separator` when the
+  row sets one, since that is the key drawing it (2026-09-25 review; the
+  placement map names the outer row, so an inner row's own separator
+  still opens the frame's). Everything the mouse does has a key, since tmux
   and some SSH sessions swallow mouse events (a separator, a cap and the
-  rule are reached through `2`, the frame form, see above).
+  rule are reached through `2`, the frame form, and a box through `e`,
+  see above).
 - **Editing by ticking.** The overlay lists every option of the selected
   module as a form: booleans as checkboxes (`[x] hide_when_empty`),
   `preset` and every enum as a radio list, integers as a stepper showing
@@ -1947,9 +1996,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   and icons as the pickers below. Every change re-renders the preview at
   once; `Esc` closes the innermost layer (a picker over a panel over the
   builder) and, with none open, leaves the builder or the preset picker
-  as `q` does, and the module's chip shows a dot while it carries
-  overrides. The form is generated from `ModuleSchema`, so a new option
-  is a new row.
+  as `q` does, and the module's chip shows a `*` while it carries
+  overrides (a form marks a key the file sets the same way). The form is
+  generated from `ModuleSchema`, so a new option is a new row.
 - **Freeform values come with suggestions.** A string option (`label`,
   `prefix`, `suffix`, `text`, `gap`, a line's `separator`, `ticker_gap`,
   the frame's `fill_char` and caps) opens a picker whose first entries are
@@ -1996,14 +2045,24 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   does (§ 2.1: the `DIM` modifier on every span, the twin of
   `Painter.dim`), so it also shows the intensity the screen will have.
 - **Saving.** Edits live in memory as the file's own table (see the
-  differences above), and `s` writes it back (with the § 5 backup), so a
+  differences above), and `s` writes it back (with the § 5 backup; a
+  draft the file already holds is not written again, since that would
+  only drop the file's comments and leave one more backup, 2026-09-25
+  review), so a
   hand-written file's ordering survives a save and its comments do not;
-  the status bar says so with the first save that keeps a backup, and the
-  backup keeps the original. Because the tick re-reads the config every second, a saved
+  the status bar says so on opening a file that has comments (a `#`
+  outside every string) and again, ahead of the backup's path, with the
+  save that drops them, and the backup keeps the original (2026-09-25
+  review: the one warning had come after two paths, past the right edge
+  of an 80-column screen). Because the tick re-reads the config every second, a saved
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
-  says so in the status bar, and `s` refuses until the file is moved.
+  says so in the status bar, and `s` refuses until the file is moved; the
+  check is made again at the moment of writing, so a file that stopped
+  parsing while `setup` was open is refused too, whatever the change
+  check was answered, and the picker's `Enter` asks before replacing a
+  file that appeared or changed since `setup` opened (2026-09-25 review).
 - **Install.** The install screen mirrors `install --dry-run`: it lists
   the settings path, the exact `statusLine` object it will merge, the
   backup rule, whether the skills will be written and the PATH warning if
@@ -2028,19 +2087,29 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   with no repository at hand. The preview honours the config's `color`
   and `NO_COLOR` for the rendered rows while the screen's own chrome
   uses the terminal's default colours, so a `color = "never"` config
-  previews plain; in that case the preview's header says "colours off:
+  previews plain (no bold, italic or underline either, since the tick
+  prints no escape at all then; only the harness's faint stays); in that case the preview's header says "colours off:
   edits are saved, not previewed". A terminal smaller than 60 × 12 gets
-  one line asking for more room instead of a broken layout, and a resize
+  one line asking for more room instead of a broken layout, and while it
+  is up takes no click and no key but `q`, `Esc` and `Ctrl+C` (2026-09-25
+  review: a click on the old place of `s save` saved), and a resize
   redraws everything at the new width (the preview's box width follows
   it). A config that parses with problems opens on the per-key fallbacks
   (§ 5) with the first problem in the status bar and a count of the
   rest; saving writes the file's keys as they are, the bad values
   included (the tick keeps reporting them until they are fixed, and `d`
-  in a form unsets one), and the status bar says so on opening. If the
+  in a form unsets one), and the status bar says so on opening. A builder
+  edit is refused only for a problem it adds: problems are compared by
+  message and by path with the indices taken out, count for count, so a
+  row inserted above a bad one, which renumbers the old problem, is kept,
+  and a bad row cloned, which doubles it, is not (2026-09-25 review). If the
   file on disk changes while `setup` is open (another
   session, the skill, an editor), `s` notices (a best-effort compare of
   mtime and length; a file absent at open and present at save counts as
-  changed) and asks whether to overwrite or reload; it never merges. A
+  changed) and asks whether to overwrite (`y`) or reload (`n`, which `u`
+  takes back); `Esc`, and `Enter` on the answer the question opens on, do
+  neither, since both answers drop something (2026-09-25 review: `Esc`
+  had reloaded); it never merges. A
   save or an install that fails (a read-only directory, an unwritable
   `settings.json`; a symlinked settings file is written through the link
   as `install` does) shows the OS error (a failed save in the status bar,

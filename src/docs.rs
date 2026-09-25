@@ -470,19 +470,21 @@ fn write_texts(out: &mut String, cfg: &Config, annotated: bool) {
     }
 }
 
-/// The common options a text module takes: every one but `max_width`, which
-/// `config check` rejects there in favour of `width` (SPEC § 3.7).
-fn text_common_opts() -> &'static [OptSpec] {
-    static OPTS: std::sync::LazyLock<Vec<OptSpec>> = std::sync::LazyLock::new(|| {
-        COMMON_OPTS.iter().filter(|o| o.key != "max_width").cloned().collect()
-    });
-    &OPTS
+/// The common options a text module takes (SPEC § 3.7): every one the
+/// parser does not reject there, as it decides.
+fn text_common_opts() -> impl Iterator<Item = &'static OptSpec> {
+    COMMON_OPTS.iter().filter(|o| crate::config::text_takes(o.key))
 }
 
 /// The `label`, `prefix`, `suffix`, `hide_when_empty` (and, for a built-in
 /// module, `max_width`) lines of a module table, from the same specs the
 /// parser bounds them with.
-fn write_common(out: &mut String, m: &ModuleCfg, annotated: bool, opts: &[OptSpec]) {
+fn write_common<'a>(
+    out: &mut String,
+    m: &ModuleCfg,
+    annotated: bool,
+    opts: impl IntoIterator<Item = &'a OptSpec>,
+) {
     for opt in opts {
         if annotated {
             let _ = writeln!(

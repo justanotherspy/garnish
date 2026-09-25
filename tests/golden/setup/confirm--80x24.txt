@@ -1,5 +1,5 @@
 preview  80 cols, box 76  ·  2 lines  ·  subscription-full: a Pro/Max session wi
-▶ ╭─ ─────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+> ╭─ ─────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
   ╰─ ❖ Opus │ ⊞ ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────────╯
 rows  ~/garnish.toml (unsaved)
 row 1     branch  sync   │ clock
@@ -7,12 +7,12 @@ row 2     model  context   │ cost
 
 
 
-               ┌───────────────────────────────────────────────┐
-               │The file changed on disk since it was read.    │
-               │Overwrite it with the draft, or reload it?     │
-               │                                               │
-               │ overwrite     reload      y / n / enter       │
-               └───────────────────────────────────────────────┘
+      ┌─────────────────────────────────────────────────────────────────┐
+      │The file changed on disk since it was read.                      │
+      │y overwrites it with the draft; n reloads it (u undoes that).    │
+      │                                                                 │
+      │ overwrite     reload     keep editing      y / n / esc          │
+      └─────────────────────────────────────────────────────────────────┘
 
 
 

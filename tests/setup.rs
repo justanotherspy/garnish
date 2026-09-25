@@ -145,7 +145,8 @@ fn home_picker_and_builder_screens_match_their_goldens() {
     std::fs::write(&file, TWO_ROWS).unwrap();
     let mut app = for_test("", Some(file), home);
     let shot = check("builder", &mut app, 80, 24);
-    assert!(shot.contains("row 1") && shot.contains("path") && shot.contains("▶"), "{shot}");
+    assert!(shot.contains("row 1") && shot.contains("path"), "{shot}");
+    assert!(shot.lines().nth(1).unwrap().starts_with("> "), "the row marker: {shot}");
     check("builder", &mut app, 140, 40);
     // The module editor is generated from the schema.
     keys(&mut app, "<right><enter>");
@@ -170,6 +171,7 @@ fn home_picker_and_builder_screens_match_their_goldens() {
     keys(&mut app, "<esc>?");
     let shot = check("help", &mut app, 80, 24);
     assert!(shot.contains("Builder") && shot.contains("save"), "{shot}");
+    assert!(shot.contains("q / esc"), "every key fits 24 rows: {shot}");
     keys(&mut app, "<esc>1");
     let shot = check("top-form", &mut app, 80, 24);
     assert!(shot.contains("hide_empty_rows"), "{shot}");
@@ -274,7 +276,7 @@ fn a_click_in_the_preview_selects_and_then_opens_the_module() {
     click(&mut app, x, 2);
     assert_eq!(app.selected(), Some("model"), "{line2}");
     let marked = snapshot(&mut app, 80, 24);
-    assert_eq!(marked.lines().position(|l| l.starts_with('▶')), Some(2), "{marked}");
+    assert_eq!(marked.lines().position(|l| l.starts_with("> ")), Some(2), "{marked}");
     // A module placed on two rows: the clicked row is the one selected,
     // not the first row holding it.
     let twice = home.join("twice.toml");
@@ -289,7 +291,7 @@ fn a_click_in_the_preview_selects_and_then_opens_the_module() {
     click(&mut both, x, 2);
     assert_eq!(both.selected(), Some("clock"));
     let marked = snapshot(&mut both, 80, 24);
-    assert_eq!(marked.lines().position(|l| l.starts_with('▶')), Some(2), "{marked}");
+    assert_eq!(marked.lines().position(|l| l.starts_with("> ")), Some(2), "{marked}");
     // Back on `path`: the first click selects it, the second opens it.
     click(&mut app, 7, 1);
     assert_eq!(app.selected(), Some("path"));
@@ -303,7 +305,7 @@ fn a_click_in_the_preview_selects_and_then_opens_the_module() {
     keys(&mut app, "<esc>");
     // The wheel moves the row cursor.
     app.input(Input::Mouse { x: 10, y: 10, kind: Mouse::Wheel(1) });
-    assert!(snapshot(&mut app, 80, 24).lines().any(|l| l.contains("▶") && l.contains("Opus")));
+    assert!(snapshot(&mut app, 80, 24).lines().any(|l| l.starts_with("> ") && l.contains("Opus")));
 }
 
 #[test]
@@ -322,12 +324,24 @@ fn an_unparsable_file_is_never_overwritten_and_a_changed_one_asks() {
     std::fs::write(&file, TWO_ROWS).unwrap();
     let mut app = for_test("", Some(file.clone()), home);
     keys(&mut app, "<right>x");
+    let edited = app.draft().table().clone();
     std::fs::write(&file, "theme = \"nord\"\n").unwrap();
     keys(&mut app, "s");
     assert!(check("confirm", &mut app, 80, 24).contains("changed on disk"));
-    keys(&mut app, "n");
+    // Esc, and Enter on the answer it opens on, close the question and
+    // do nothing (app-06): both other answers act.
+    keys(&mut app, "<esc>");
+    assert_eq!(app.draft().table(), &edited, "esc keeps the edits");
+    keys(&mut app, "s<enter>");
+    assert_eq!(app.draft().table(), &edited, "enter's default keeps the edits");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "theme = \"nord\"\n");
+    keys(&mut app, "sn");
     assert!(!app.draft().is_dirty());
     assert_eq!(app.draft().get(&["theme"]).and_then(toml::Value::as_str), Some("nord"));
+    assert!(app.status().unwrap().contains("u takes them back"), "{:?}", app.status());
+    keys(&mut app, "u");
+    assert_eq!(app.draft().table(), &edited, "u puts the dropped edits back");
+    keys(&mut app, "U");
     // The top-level form: enter on `preset` opens its list, the second
     // entry is `minimal`; esc closes the form again.
     keys(&mut app, "1<enter>");
@@ -592,10 +606,13 @@ fn an_empty_title_removes_the_key_and_a_refused_text_module_leaves_nothing() {
     keys(&mut app, "<bs><bs><bs><bs><enter>");
     assert!(!app.draft().get(&["row"]).is_some_and(|r| r.to_string().contains("title")));
     // A text module that cannot be placed (no row at all) is not created
-    // and no editor opens.
+    // and no editor opens; `x` on the last row is refused.
     let mut empty = for_test("[[row]]\nmodules = [\"clock\"]\n", None, Path::new("/home/dev"));
     empty.open_builder();
     keys(&mut empty, "x");
+    assert!(empty.status().unwrap().contains("needs a row"), "{:?}", empty.status());
+    let mut empty = for_test("row = []\n", None, Path::new("/home/dev"));
+    empty.open_builder();
     keys(&mut empty, "m<up><enter>");
     keys(&mut empty, "motd<enter>");
     assert!(empty.status().unwrap().contains("no row"), "{:?}", empty.status());
@@ -880,6 +897,491 @@ fn b_boxes_two_rows_and_the_preset_key_follows_its_own_rows() {
     // Picking the preset already in effect says nothing about rows.
     keys(&mut app, "<enter><enter>");
     assert_eq!(app.status(), Some("preset set"));
+}
+
+/// The review of 2026-09-25 (app-01, frm-v1): a file that opens with a
+/// problem still takes builder edits that move the problem to another
+/// index; only a problem the edit adds refuses it.
+#[test]
+fn an_edit_that_renumbers_an_old_problem_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[[row]]\nmodules = [\"path\", \"brnach\", \"clock\"]\n[[row]]\nmodules = [\"model\"]\nseparator = 5\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    assert_eq!(app.draft().resolved().1.len(), 2);
+    let ids = |app: &App, row: usize| -> Vec<String> {
+        app.draft().rows()[row]
+            .get("modules")
+            .and_then(toml::Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect()
+    };
+    // `path` moves past the unknown id, which moves from index 1 to 0.
+    keys(&mut app, "<right>J");
+    assert_eq!(ids(&app, 0), ["brnach", "path", "clock"]);
+    assert!(!app.status().unwrap().contains('⚠'), "{:?}", app.status());
+    // A row inserted above the bad separator moves it from row[1] to row[2].
+    keys(&mut app, "<down>i");
+    assert_eq!(app.draft().rows().len(), 3);
+    let problems = app.draft().resolved().1;
+    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert!(problems.iter().any(|p| p.path == "row[2].separator"), "{problems:?}");
+    assert!(!app.status().unwrap().contains('⚠'), "{:?}", app.status());
+    // Cloning the broken row adds a second copy of its problem: refused.
+    keys(&mut app, "<down>c");
+    assert_eq!(app.draft().rows().len(), 3, "{:?}", app.status());
+    assert!(app.status().unwrap().contains("separator"), "{:?}", app.status());
+    // The verifier's case: `i` above a row with an unknown module, and
+    // `J` across it.
+    std::fs::write(&file, "[[row]]\nmodules = [\"clok\"]\n[[row]]\nmodules = [\"clock\"]\n")
+        .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "i");
+    assert_eq!(app.draft().rows().len(), 3, "{:?}", app.status());
+    keys(&mut app, "<down>J");
+    assert_eq!(ids(&app, 2), ["clok"], "{:?}", app.status());
+}
+
+/// Move a form's cursor from its first field to `key` and press `then`.
+fn on_field(app: &mut App, key: &str, then: &str) {
+    let at = app.form_keys().unwrap().iter().position(|k| k == key).expect(key);
+    keys(app, &"<down>".repeat(at));
+    keys(app, then);
+}
+
+/// app-03, frm-01: `d` on the last key of a text module's or a box's table
+/// leaves the table (its being there is the definition), and the form
+/// stays open on it.
+#[test]
+fn d_on_the_last_key_keeps_a_text_module_or_a_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<right>m<up><enter>motd<enter>");
+    on_field(&mut app, "text", "d");
+    let empty = toml::Value::Table(toml::Table::new());
+    assert_eq!(app.draft().get(&["modules", "text", "motd"]), Some(&empty), "{:?}", app.status());
+    assert_eq!(app.draft().resolved().1, Vec::new());
+    assert!(app.form_keys().is_some(), "the editor stays open");
+    // A box whose table holds only its title, reached by a click on its edge.
+    std::fs::write(
+        &file,
+        "[box.repo]\ntitle = \"R\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, 2, 1);
+    assert!(snapshot(&mut app, 80, 24).contains("[box.repo]"), "{shot}");
+    on_field(&mut app, "title", "d");
+    assert_eq!(app.draft().get(&["box", "repo"]), Some(&empty), "{:?}", app.status());
+    assert_eq!(app.draft().resolved().1, Vec::new());
+    assert!(app.form_keys().is_some(), "the box form stays open");
+}
+
+/// app-07: `e` opens the `[box.<name>]` form of the selected line's box
+/// with no mouse: a row's, a column's, or the column's of an inner row.
+#[test]
+fn e_opens_the_box_form_from_the_keyboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[box.repo]\ntitle = \"R\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "e");
+    assert!(snapshot(&mut app, 80, 24).contains("[box.repo]"), "{:?}", app.status());
+    on_field(&mut app, "title", "<enter><end><enter><bs>X<enter>");
+    assert_eq!(app.draft().get(&["box", "repo", "title"]).and_then(toml::Value::as_str), Some("X"));
+    std::fs::write(
+        &file,
+        "[box.c]\ntitle = \"C\"\n[[row]]\n[[row.col]]\nbox = \"c\"\n[[row.col.row]]\nmodules = [\"path\"]\n[[row.col]]\nmodules = [\"clock\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "e");
+    assert!(app.status().unwrap().contains("no named box"), "{:?}", app.status());
+    assert!(app.form_keys().is_none());
+    keys(&mut app, "<down><down>e");
+    assert!(
+        snapshot(&mut app, 80, 24).contains("[box.c]"),
+        "an inner row reaches its column's box"
+    );
+    keys(&mut app, "<esc><up>e");
+    assert!(snapshot(&mut app, 80, 24).contains("[box.c]"), "the column's own box");
+}
+
+/// frm-02: `Enter` twice on a preset's `separator_frames` changes nothing
+/// (the frames kept their spaces through the input line).
+#[test]
+fn an_untouched_frames_list_is_not_an_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let preset = garnish::gallery::find("animated-dots").unwrap();
+    std::fs::write(&file, garnish::gallery::body(preset.source)).unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "2");
+    on_field(&mut app, "separator_frames", "<enter><enter>");
+    assert!(!app.draft().is_dirty(), "{:?}", app.draft().get(&["frame", "separator_frames"]));
+}
+
+/// frm-03: the status bar's promise holds: a key the parser reports is a
+/// row of its form, and `d` there removes it.
+#[test]
+fn a_reported_key_is_unset_from_its_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, "[modules.clock]\nfromat = \"12h\"\n[[row]]\nmodules = [\"clock\"]\n")
+        .unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert!(app.status().unwrap().contains("d in its form unsets it"), "{:?}", app.status());
+    keys(&mut app, "<right><enter>");
+    on_field(&mut app, "fromat", "d");
+    assert_eq!(app.draft().resolved().1, Vec::new(), "{:?}", app.status());
+    assert!(app.draft().get(&["modules", "clock"]).is_none());
+}
+
+/// app-04: that a save drops a hand-written file's comments is said where
+/// an 80-column screen shows it: on opening, and at the front of the
+/// first save's line, not after two long paths.
+#[test]
+fn the_comment_warning_is_visible_on_an_80_column_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join(".config/garnish/garnish.toml");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "# my own line\n[[row]]\nmodules = [\"path\", \"clock\"]\n").unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.lines().nth(22).unwrap().contains("comments"), "on opening: {shot}");
+    keys(&mut app, "<right>xs");
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.lines().nth(22).unwrap().contains("comments"), "on saving: {shot}");
+    // The file is garnish's own layout now: the next save loses nothing.
+    keys(&mut app, "<right>xs");
+    assert!(!app.status().unwrap().contains("comments"), "{:?}", app.status());
+    // A file already in that layout says nothing on opening.
+    let mut again = for_test("", Some(file), home);
+    assert_eq!(again.status(), None);
+    assert!(!snapshot(&mut again, 80, 24).contains("comments"));
+}
+
+/// app-05: the home menu is whole at the smallest terminal the screen
+/// lays out for, and a click on the status or hint row below it is not a
+/// click on an entry.
+#[test]
+fn the_home_menu_fits_the_smallest_terminal() {
+    for height in [12, 13, 14, 15] {
+        let mut app = for_test("", None, Path::new("/home/dev"));
+        let shot = snapshot(&mut app, 60, height);
+        for item in ["Pick a preset", "Build a custom layout", "Install into Claude Code", "Quit"] {
+            assert!(shot.contains(item), "60x{height} lacks {item}: {shot}");
+        }
+        click(&mut app, 30, height - 2);
+        click(&mut app, 2, height - 1);
+        let shot = snapshot(&mut app, 60, height);
+        assert!(shot.contains("enter open"), "still home at 60x{height}: {shot}");
+    }
+}
+
+/// app-09: deleting a box's last member drops its table, as every other
+/// way out of a box does.
+#[test]
+fn deleting_a_boxs_last_member_drops_the_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[box.repo]\n[[row]]\nbox = \"repo\"\nmodules = [\"path\"]\n[[row]]\nmodules = [\"clock\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "x");
+    assert_eq!(app.draft().rows().len(), 1);
+    assert!(app.draft().get(&["box"]).is_none());
+    assert_eq!(app.draft().resolved().1, Vec::new());
+    assert!(app.status().unwrap().contains("[box.repo] dropped"), "{:?}", app.status());
+}
+
+/// app-10, frm-08: a reload opens the file the way a start does: a file
+/// naming only a preset lists that preset's rows, and one that stopped
+/// parsing says so.
+#[test]
+fn a_reload_opens_the_file_as_a_start_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<right>x");
+    std::fs::write(&file, "preset = \"compact\"\n").unwrap();
+    keys(&mut app, "sn");
+    assert_eq!(app.draft().rows().len(), 2, "{:?}", app.status());
+    assert!(!app.draft().is_dirty());
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.contains("row 1") && shot.contains("row 2"), "{shot}");
+    keys(&mut app, "<right>x");
+    std::fs::write(&file, "theme = \n").unwrap();
+    keys(&mut app, "sn");
+    assert!(app.status().unwrap().contains("does not parse"), "{:?}", app.status());
+}
+
+/// app-11: while the terminal is too small for the screen, nothing but
+/// quitting acts: no click lands on the geometry of the last full draw.
+#[test]
+fn a_too_small_terminal_takes_no_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    let shot = snapshot(&mut app, 80, 24);
+    let save = col(shot.lines().nth(23).unwrap(), "s save");
+    keys(&mut app, "<right>x");
+    assert!(snapshot(&mut app, 58, 24).contains("needs at least"));
+    click(&mut app, save, 23);
+    click(&mut app, 7, 1);
+    keys(&mut app, "s<right>x");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), TWO_ROWS, "{:?}", app.status());
+    assert!(app.draft().is_dirty());
+    assert_eq!(app.draft().rows()[0].get("modules").unwrap().as_array().unwrap().len(), 2);
+    keys(&mut app, "q");
+    assert!(!app.done(), "q still asks about the unsaved edit");
+    assert!(snapshot(&mut app, 80, 24).contains("Quit and lose them?"));
+}
+
+/// app-14: the picker asks before replacing a file that appeared or
+/// changed since setup opened, and never replaces one that does not parse.
+#[test]
+fn the_picker_asks_before_replacing_a_changed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<enter>");
+    std::fs::write(&file, "theme = \"nord\"\n").unwrap();
+    keys(&mut app, "<enter>");
+    assert!(snapshot(&mut app, 80, 24).contains("changed on disk"));
+    keys(&mut app, "<esc>");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "theme = \"nord\"\n");
+    std::fs::write(&file, "theme = \n").unwrap();
+    keys(&mut app, "<enter>y");
+    assert!(app.status().unwrap().contains("never rewritten"), "{:?}", app.status());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "theme = \n");
+    std::fs::write(&file, "theme = \"nord\"\n").unwrap();
+    keys(&mut app, "<enter>y");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("preset = \"default\""));
+}
+
+/// app-15: `s` with nothing changed writes nothing: no rewrite that drops
+/// the file's comments, no new backup.
+#[test]
+fn s_with_nothing_changed_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let text = "# mine\npreset = \"compact\"\n";
+    std::fs::write(&file, text).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "s");
+    assert!(app.status().unwrap().contains("nothing to save"), "{:?}", app.status());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    let backups = std::fs::read_dir(home)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".bak-"))
+        .count();
+    assert_eq!(backups, 0);
+    // An edit undone is nothing to save either; an edit is.
+    keys(&mut app, "<right>xus");
+    assert!(app.status().unwrap().contains("nothing to save"), "{:?}", app.status());
+    keys(&mut app, "<right>xs");
+    assert!(app.status().unwrap().starts_with("saved"), "{:?}", app.status());
+}
+
+/// app-17: `d` on the top-level `preset` swaps rows that are still the
+/// old preset's for the default's, as setting it does.
+#[test]
+fn unsetting_the_preset_swaps_its_rows_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, "preset = \"compact\"\n").unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert_eq!(app.draft().rows().len(), 2);
+    keys(&mut app, "1d");
+    assert!(app.draft().get(&["preset"]).is_none());
+    assert_eq!(app.draft().rows().len(), 4, "{:?}", app.status());
+    assert!(app.status().unwrap().contains("rows replaced"), "{:?}", app.status());
+}
+
+/// app-18: a `nan` in the file (TOML takes it) neither keeps the draft
+/// dirty forever nor makes every key an edit that ends the redo chain.
+#[test]
+fn a_nan_in_the_file_is_equal_to_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, format!("{TWO_ROWS}[modules.context]\nwarn_at = nan\n")).unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert!(!app.draft().is_dirty());
+    assert!(!snapshot(&mut app, 80, 24).contains("(unsaved)"));
+    keys(&mut app, "<right>xuj");
+    keys(&mut app, "U");
+    assert_eq!(app.status(), Some("redone: removed path"));
+    keys(&mut app, "uq");
+    assert!(app.done(), "nothing unsaved: q quits at once");
+}
+
+/// app-19: a click in the preview's two-cell gutter (the `>` marker's) is
+/// not a click on the frame's cap: it selects the line's row.
+#[test]
+fn a_click_in_the_gutter_selects_the_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file), home);
+    let _drawn = snapshot(&mut app, 80, 24);
+    for x in [0, 1] {
+        click(&mut app, x, 2);
+        assert_eq!(app.form_keys(), None, "x = {x}");
+    }
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.lines().nth(2).unwrap().contains("Opus"), "{shot}");
+    assert_eq!(shot.lines().position(|l| !l.starts_with("  ") && l.contains("Opus")), Some(2));
+}
+
+/// app-20: a click on a separator of a row that sets its own opens that
+/// row's `separator`, the key that draws it; otherwise the frame's.
+#[test]
+fn a_click_on_a_rows_own_separator_opens_the_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "icons = \"unicode\"\n[[row]]\nseparator = \" + \"\nmodules = [\"path\", \"model\"]\n[[row]]\nmodules = [\"path\", \"model\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), " + ") + 1, 1);
+    assert_eq!(app.form_keys().unwrap().first().map(String::as_str), Some("separator"));
+    assert!(snapshot(&mut app, 80, 24).contains("┌ row[0]"), "the row's form");
+    keys(&mut app, "<esc>");
+    click(&mut app, col(shot.lines().nth(2).unwrap(), " │ ") + 1, 2);
+    assert!(snapshot(&mut app, 80, 24).contains("[frame]"), "the frame's separator");
+}
+
+/// app-21: the picker writes a gallery preset as `setup --preset` does,
+/// the file with its comments; the draft is that file, unedited.
+#[test]
+fn the_picker_writes_a_gallery_preset_verbatim() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let mut app = for_test("", Some(file.clone()), home);
+    let at = garnish::gallery::PRESETS.iter().position(|p| p.name == "boxed-panels").unwrap();
+    keys(&mut app, "<enter>");
+    keys(&mut app, &"j".repeat(at + 4));
+    keys(&mut app, "<enter>");
+    let preset = garnish::gallery::find("boxed-panels").unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), garnish::gallery::body(preset.source));
+    assert!(!app.draft().is_dirty());
+    assert!(app.draft().loses_comments(), "the next save says it drops them");
+    assert_eq!(app.draft().resolved().1, Vec::new());
+}
+
+/// app-22: deleting a line, or making a row a spacer, that took a text
+/// module's last placement asks about its table, as deleting its chip
+/// does; one question for every such module.
+#[test]
+fn a_line_that_held_a_text_modules_last_placement_asks() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let text = format!(
+        "{TWO_ROWS}[[row]]\nmodules = [\"text.motd\", \"text.news\"]\n[modules.text.motd]\ntext = \"hi\"\n[modules.text.news]\ntext = \"new\"\n"
+    );
+    for script in ["<down><down>x", "<down><down> "] {
+        std::fs::write(&file, &text).unwrap();
+        let mut app = for_test("", Some(file.clone()), home);
+        keys(&mut app, script);
+        let shot = snapshot(&mut app, 80, 24);
+        assert!(shot.contains("text.motd, text.news are placed nowhere"), "{script}: {shot}");
+        keys(&mut app, "y");
+        assert!(app.draft().get(&["modules", "text"]).is_none(), "{script}");
+        assert_eq!(app.draft().resolved().1, Vec::new(), "{script}");
+    }
+}
+
+/// frm-04: a click on a plain row's title opens the row's form, and one
+/// on a named box's title opens the box's (the box carries it).
+#[test]
+fn a_click_on_a_title_opens_what_holds_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, "icons = \"unicode\"\n[[row]]\nmodules = [\"clock\"]\ntitle = \"Tq\"\n")
+        .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), "Tq"), 1);
+    assert!(app.form_keys().is_some_and(|k| k.contains(&"title".to_owned())), "{:?}", app.status());
+    assert!(snapshot(&mut app, 80, 24).contains("┌ row[0]"));
+    std::fs::write(
+        &file,
+        "icons = \"unicode\"\n[box.b]\ntitle = \"Bq\"\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    let shot = snapshot(&mut app, 80, 24);
+    click(&mut app, col(shot.lines().nth(1).unwrap(), "Bq"), 1);
+    assert!(snapshot(&mut app, 80, 24).contains("[box.b]"), "{:?}", app.status());
+}
+
+/// app-02: `b` moves a box's only member into another box, a box of its
+/// own or a new one, dropping the box it leaves; a typed name is read as
+/// the form reads it.
+#[test]
+fn b_moves_a_last_member_out_of_its_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    let two_boxes = "[box.a]\n[box.b]\n[[row]]\nbox = \"a\"\nmodules = [\"path\"]\n[[row]]\nbox = \"b\"\nmodules = [\"clock\"]\n";
+    let boxed = |app: &App| app.draft().rows()[0].get("box").cloned();
+    for (script, want) in [
+        ("b<enter>", Some(toml::Value::String("b".into()))),
+        ("<up><enter>", Some(toml::Value::Boolean(true))),
+        ("<end><enter>side<enter>", Some(toml::Value::String("side".into()))),
+        ("<end><enter>false<enter>", None),
+    ] {
+        std::fs::write(&file, two_boxes).unwrap();
+        let mut app = for_test("", Some(file.clone()), home);
+        keys(&mut app, "b");
+        keys(&mut app, script);
+        assert_eq!(boxed(&app), want, "{script}: {:?}", app.status());
+        assert!(app.draft().get(&["box", "a"]).is_none(), "{script}");
+        assert!(app.status().unwrap().contains("[box.a] dropped"), "{:?}", app.status());
+        assert_eq!(app.draft().resolved().1, Vec::new(), "{script}");
+        assert!(app.draft().get(&["box", "false"]).is_none(), "{script}");
+    }
 }
 
 /// What the adversarial review of 2026-09-20 found: `B` failed on a titled

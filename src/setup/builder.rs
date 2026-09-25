@@ -2,6 +2,8 @@
 //! stacks as lines to move a cursor over, and every edit those lines allow,
 //! each an operation on the draft.
 
+use std::fmt::Write as _;
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -9,8 +11,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use toml::{Table, Value};
 
-use super::draft::{Draft, RowAt, string_list};
-use super::ui::{Chrome, cells, clip, window};
+use super::draft::{Draft, RowAt, TITLE_KEYS, dropped_boxes, string_list};
+use super::ui::{Chrome, cells, clip_spans, window};
 
 /// Which group of a row a module sits in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,9 @@ pub struct Item {
     /// The modules it places (none for a row with columns or a stacked
     /// column).
     pub chips: Vec<Chip>,
+    /// A spacer: a row (or inner row) with an empty `modules` and nothing
+    /// else placed (SPEC § 4.1).
+    pub spacer: bool,
     /// What else the table sets, in a few words.
     pub note: String,
 }
@@ -79,6 +84,34 @@ impl Item {
                 self.at.inner.map_or(0, |i| i.saturating_add(1))
             ),
         }
+    }
+
+    /// Its index in the list it sits in: `[[row]]`, a row's `[[row.col]]`
+    /// or a column's `[[row.col.row]]`.
+    fn index(&self) -> usize {
+        match self.kind {
+            ItemKind::Row => self.at.row,
+            ItemKind::Col => self.at.col.unwrap_or(0),
+            ItemKind::Inner => self.at.inner.unwrap_or(0),
+        }
+    }
+
+    /// Where the entry at `index` of that same list sits.
+    fn sibling(&self, index: usize) -> RowAt {
+        RowAt {
+            row: if self.kind == ItemKind::Row { index } else { self.at.row },
+            col: if self.kind == ItemKind::Col { Some(index) } else { self.at.col },
+            inner: if self.kind == ItemKind::Inner { Some(index) } else { None },
+        }
+    }
+}
+
+/// Write a group back into its table; an emptied `right` goes with its key.
+fn set_group(table: &mut Table, side: Side, list: &[String]) {
+    if list.is_empty() && side == Side::Right {
+        table.remove("right");
+    } else {
+        table.insert(side.key().to_owned(), string_list(list));
     }
 }
 
@@ -118,8 +151,18 @@ fn chips_of(table: &Table) -> Vec<Chip> {
     chips
 }
 
+/// Whether a row table is a spacer: `modules` written and empty, nothing on
+/// the right, no columns (a column is never one).
+fn is_spacer(table: &Table, kind: ItemKind) -> bool {
+    kind != ItemKind::Col
+        && !table.contains_key("col")
+        && table.contains_key("modules")
+        && ids(table, "modules").is_empty()
+        && ids(table, "right").is_empty()
+}
+
 /// What a row or column table sets besides its modules, in a few words.
-fn note_of(table: &Table, kind: ItemKind) -> String {
+fn note_of(table: &Table) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(w) = table.get("width") {
         parts.push(super::form::show(w));
@@ -141,14 +184,6 @@ fn note_of(table: &Table, kind: ItemKind) -> String {
     if table.get("blank").and_then(Value::as_bool) == Some(true) {
         parts.push("blank".to_owned());
     }
-    if kind != ItemKind::Col
-        && !table.contains_key("col")
-        && ids(table, "modules").is_empty()
-        && ids(table, "right").is_empty()
-        && table.contains_key("modules")
-    {
-        parts.push("spacer".to_owned());
-    }
     parts.join(" · ")
 }
 
@@ -165,7 +200,8 @@ impl Builder {
                 at: RowAt::row(r),
                 kind: ItemKind::Row,
                 chips,
-                note: note_of(table, ItemKind::Row),
+                spacer: is_spacer(table, ItemKind::Row),
+                note: note_of(table),
             });
             for (c, col) in cols.into_iter().flatten().enumerate() {
                 let Some(ct) = col.as_table() else { continue };
@@ -176,7 +212,8 @@ impl Builder {
                     at,
                     kind: ItemKind::Col,
                     chips,
-                    note: note_of(ct, ItemKind::Col),
+                    spacer: false,
+                    note: note_of(ct),
                 });
                 for (i, row) in inner.into_iter().flatten().enumerate() {
                     let Some(it) = row.as_table() else { continue };
@@ -185,7 +222,8 @@ impl Builder {
                         at,
                         kind: ItemKind::Inner,
                         chips: chips_of(it),
-                        note: note_of(it, ItemKind::Inner),
+                        spacer: is_spacer(it, ItemKind::Inner),
+                        note: note_of(it),
                     });
                 }
             }
@@ -248,36 +286,34 @@ impl Builder {
         };
     }
 
-    /// `Tab`: the next chip, across lines; `Shift-Tab` the previous.
+    /// `Tab`: the next chip, across lines; `Shift-Tab` the previous. With
+    /// no chip anywhere the cursor stays where it is.
     pub fn next_chip(&mut self, forward: bool) {
         let n = self.items.len();
-        if n == 0 {
+        let chips = self.item().map_or(0, |i| i.chips.len());
+        let along = match (self.chip, forward) {
+            (Some(c), true) if c.saturating_add(1) < chips => Some(c.saturating_add(1)),
+            (None, true) if chips > 0 => Some(0),
+            (Some(c), false) if c > 0 => Some(c.saturating_sub(1)),
+            _ => None,
+        };
+        if along.is_some() {
+            self.chip = along;
             return;
         }
-        for _ in 0..n.saturating_mul(2).saturating_add(2) {
-            let chips = self.item().map_or(0, |i| i.chips.len());
-            let next = match (self.chip, forward) {
-                (Some(c), true) if c.saturating_add(1) < chips => Some(c.saturating_add(1)),
-                (None, true) if chips > 0 => Some(0),
-                (Some(c), false) if c > 0 => Some(c.saturating_sub(1)),
-                _ => None,
-            };
-            if next.is_some() {
-                self.chip = next;
-                return;
-            }
-            self.cursor = if forward {
-                self.cursor.saturating_add(1).checked_rem(n).unwrap_or(0)
+        // The first chip of the next line holding one (the last chip of the
+        // previous, backwards), coming round to this line last.
+        let mut line = self.cursor;
+        for _ in 0..n {
+            line = if forward {
+                line.saturating_add(1).checked_rem(n).unwrap_or(0)
             } else {
-                self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1))
+                line.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1))
             };
-            let chips = self.item().map_or(0, |i| i.chips.len());
-            self.chip = if forward || chips == 0 { None } else { Some(chips.saturating_sub(1)) };
-            if forward && chips > 0 {
-                self.chip = Some(0);
-                return;
-            }
-            if !forward && chips > 0 {
+            let chips = self.items.get(line).map_or(0, |i| i.chips.len());
+            if chips > 0 {
+                self.cursor = line;
+                self.chip = Some(if forward { 0 } else { chips.saturating_sub(1) });
                 return;
             }
         }
@@ -314,6 +350,14 @@ impl Builder {
         };
         let name = draft.row(above)?.get("box").and_then(Value::as_str).map(str::to_owned);
         Some((above, name))
+    }
+
+    /// Select the line of kind `kind` standing for the table at `at`, when
+    /// the list has one.
+    fn select_at(&mut self, at: RowAt, kind: ItemKind) {
+        if let Some(i) = self.items.iter().position(|it| it.at == at && it.kind == kind) {
+            self.cursor = i;
+        }
     }
 
     /// Select the first line of row `row`.
@@ -379,22 +423,19 @@ impl Builder {
                 spans.push(Span::raw(" "));
             }
             hits.push(ranges);
-            if item.chips.is_empty() && item.kind != ItemKind::Col {
-                if item.note.contains("spacer") {
-                    spans.push(Span::styled("(spacer)", Chrome::muted()));
-                } else if !draft.row(item.at).is_some_and(|t| t.contains_key("col")) {
-                    spans.push(Span::styled("(empty)", Chrome::muted()));
-                }
+            if item.spacer {
+                spans.push(Span::styled("(spacer)", Chrome::muted()));
+            } else if item.chips.is_empty()
+                && item.kind != ItemKind::Col
+                && !draft.row(item.at).is_some_and(|t| t.contains_key("col"))
+            {
+                spans.push(Span::styled("(empty)", Chrome::muted()));
             }
             if !item.note.is_empty() {
                 spans.push(Span::styled(format!("  {}", item.note), Chrome::muted()));
             }
-            let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-            if text.chars().count() > width {
-                lines.push(Line::from(clip(&text, width)));
-            } else {
-                lines.push(Line::from(spans));
-            }
+            // Cut span by span, so a selection past the cut still shows.
+            lines.push(Line::from(clip_spans(spans, width)));
         }
         self.hits = hits;
         frame.render_widget(Paragraph::new(lines), Rect { height: cells(height), ..area });
@@ -452,7 +493,9 @@ impl Builder {
         Ok(format!("added {id}{landed}"))
     }
 
-    /// Remove the selected module, or the selected line when no chip is.
+    /// Remove the selected module, or the selected line when no chip is;
+    /// the last `[[row]]` stays, and a box the line was the last member of
+    /// goes with its table.
     ///
     /// # Errors
     /// Why nothing was removed, for the status bar.
@@ -464,20 +507,17 @@ impl Builder {
             if chip.index < list.len() {
                 list.remove(chip.index);
             }
-            if list.is_empty() && chip.side == Side::Right {
-                table.remove("right");
-            } else {
-                table.insert(chip.side.key().to_owned(), string_list(&list));
-            }
+            set_group(table, chip.side, &list);
             self.rebuild(draft);
             return Ok(format!("removed {}", chip.id));
         }
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        // No `[[row]]` at all means the preset's rows (SPEC § 4), which the
+        // list cannot show and the next `a` would write back.
+        if item.kind == ItemKind::Row && siblings.len() <= 1 {
+            return Err("a status line needs a row; space makes it a spacer".into());
+        }
+        let index = item.index();
         if index < siblings.len() {
             siblings.remove(index);
         }
@@ -494,8 +534,15 @@ impl Builder {
                 table.remove(if item.kind == ItemKind::Inner { "row" } else { "col" });
             }
         }
+        // The line may have been a box's last member.
+        let orphans = draft.prune_orphan_boxes();
         self.rebuild(draft);
-        Ok(format!("deleted {}", item.label().trim()))
+        let mut out = format!("deleted {}", item.label().trim());
+        if !orphans.is_empty() {
+            out.push_str("; ");
+            out.push_str(&dropped_boxes(&orphans));
+        }
+        Ok(out)
     }
 
     /// Insert a new row after (or before) the selected one, in the same
@@ -511,11 +558,7 @@ impl Builder {
             return Ok("added a row".into());
         };
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         let at = if after { index.saturating_add(1).min(siblings.len()) } else { index };
         let fresh = if item.kind == ItemKind::Col {
             Value::Table(Table::new())
@@ -524,14 +567,7 @@ impl Builder {
         };
         siblings.insert(at, fresh);
         self.rebuild(draft);
-        let target = RowAt {
-            row: if item.kind == ItemKind::Row { at } else { item.at.row },
-            col: if item.kind == ItemKind::Col { Some(at) } else { item.at.col },
-            inner: if item.kind == ItemKind::Inner { Some(at) } else { None },
-        };
-        if let Some(i) = self.items.iter().position(|it| it.at == target && it.kind == item.kind) {
-            self.cursor = i;
-        }
+        self.select_at(item.sibling(at), item.kind);
         self.chip = None;
         Ok(match item.kind {
             ItemKind::Col => "added a column".into(),
@@ -546,17 +582,14 @@ impl Builder {
     pub fn clone_line(&mut self, draft: &mut Draft) -> Result<String, String> {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         let Some(copy) = siblings.get(index).cloned() else {
             return Err("nothing to clone".into());
         };
         siblings.insert(index.saturating_add(1), copy);
         self.rebuild(draft);
-        self.move_line(true);
+        self.select_at(item.sibling(index.saturating_add(1)), item.kind);
+        self.chip = None;
         Ok("cloned".into())
     }
 
@@ -587,25 +620,14 @@ impl Builder {
             return Ok(format!("moved {}", chip.id));
         }
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col => item.at.col.unwrap_or(0),
-            ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
+        let index = item.index();
         let to = if down { index.saturating_add(1) } else { index.saturating_sub(1) };
         if to >= siblings.len() || to == index {
             return Err("already at the end".into());
         }
         siblings.swap(index, to);
         self.rebuild(draft);
-        let target = RowAt {
-            row: if item.kind == ItemKind::Row { to } else { item.at.row },
-            col: if item.kind == ItemKind::Col { Some(to) } else { item.at.col },
-            inner: if item.kind == ItemKind::Inner { Some(to) } else { None },
-        };
-        if let Some(i) = self.items.iter().position(|it| it.at == target && it.kind == item.kind) {
-            self.cursor = i;
-        }
+        self.select_at(item.sibling(to), item.kind);
         Ok("moved".into())
     }
 
@@ -627,11 +649,8 @@ impl Builder {
         let other = if chip.side == Side::Left { Side::Right } else { Side::Left };
         let mut to = ids(table, other.key());
         to.push(id.clone());
-        table.insert(chip.side.key().to_owned(), string_list(&from));
-        table.insert(other.key().to_owned(), string_list(&to));
-        if from.is_empty() && chip.side == Side::Right {
-            table.remove("right");
-        }
+        set_group(table, chip.side, &from);
+        set_group(table, other, &to);
         self.rebuild(draft);
         if let Some(c) = self
             .items
@@ -713,21 +732,13 @@ impl Builder {
             return Err("no such module".into());
         }
         let id = from.remove(chip.index);
-        if from.is_empty() && chip.side == Side::Right {
-            from_table.remove("right");
-        } else {
-            from_table.insert(chip.side.key().to_owned(), string_list(&from));
-        }
+        set_group(from_table, chip.side, &from);
         let to_table = draft.row_mut(target_at).ok_or("no such column")?;
         let mut to = ids(to_table, "modules");
         to.push(id.clone());
-        to_table.insert("modules".to_owned(), string_list(&to));
+        set_group(to_table, Side::Left, &to);
         self.rebuild(draft);
-        if let Some(i) =
-            self.items.iter().position(|it| it.at == target_at && it.kind == ItemKind::Col)
-        {
-            self.cursor = i;
-        }
+        self.select_at(target_at, ItemKind::Col);
         self.chip = self.item().and_then(|i| i.chips.iter().position(|c| c.id == id));
         let n = target.saturating_add(1);
         Ok(if made {
@@ -760,12 +771,7 @@ impl Builder {
             1
         };
         self.rebuild(draft);
-        let target = RowAt { row: at.row, col: Some(index), inner: None };
-        if let Some(i) =
-            self.items.iter().position(|it| it.at == target && it.kind == ItemKind::Col)
-        {
-            self.cursor = i;
-        }
+        self.select_at(RowAt { row: at.row, col: Some(index), inner: None }, ItemKind::Col);
         self.chip = None;
         Ok(format!("added column {}; m adds a module to it", index.saturating_add(1)))
     }
@@ -782,15 +788,7 @@ impl Builder {
         if item.kind == ItemKind::Col {
             return Err("a column is boxed on its own: b".into());
         }
-        let index = match item.kind {
-            ItemKind::Row => item.at.row,
-            ItemKind::Col | ItemKind::Inner => item.at.inner.unwrap_or(0),
-        };
-        let above_index = index.checked_sub(1).ok_or("no row above this one")?;
-        let above_at = match item.kind {
-            ItemKind::Row => RowAt::row(above_index),
-            ItemKind::Col | ItemKind::Inner => RowAt { inner: Some(above_index), ..item.at },
-        };
+        let above_at = item.sibling(item.index().checked_sub(1).ok_or("no row above this one")?);
         let joined = draft
             .row(above_at)
             .and_then(|t| t.get("box"))
@@ -801,15 +799,18 @@ impl Builder {
             return Err("a box needs a name".into());
         }
         // A row in a named box has no title of its own (SPEC § 4.3): the
-        // first title either row carries becomes a new box's, and a title
-        // on a row joining a box that has one already goes.
-        let title_keys = ["title", "title_justify", "title_pad", "title_color"];
+        // first title either row carries becomes a new box's, and every
+        // other goes, all of them when the box exists already.
+        let existed = draft.get(&["box", &name]).is_some();
         let mut carried: Vec<(String, Value)> = Vec::new();
-        let mut lost_title = false;
+        let mut titled_rows = 0_usize;
         for at in [above_at, item.at] {
             let Some(t) = draft.row_mut(at) else { continue };
             let titled = t.contains_key("title");
-            for key in title_keys {
+            if titled {
+                titled_rows = titled_rows.saturating_add(1);
+            }
+            for key in TITLE_KEYS {
                 if let Some(v) = t.remove(key)
                     && titled
                     && carried.iter().all(|(k, _)| k != key)
@@ -817,9 +818,9 @@ impl Builder {
                     carried.push((key.to_owned(), v));
                 }
             }
-            lost_title |= titled && joined.is_some();
         }
-        if draft.get(&["box", &name]).is_none() {
+        let lost = if existed { titled_rows } else { titled_rows.saturating_sub(1) };
+        if !existed {
             if carried.is_empty() {
                 carried.push(("title".to_owned(), Value::String(name.clone())));
             }
@@ -834,22 +835,20 @@ impl Builder {
         // A row that left another box may have been its last member.
         let orphans = draft.prune_orphan_boxes();
         self.rebuild(draft);
-        let mut out = if joined.is_some() {
-            format!("joined box {name} with the row above")
-        } else {
-            format!(
+        let mut out = match (joined.is_some(), existed) {
+            (true, _) => format!("joined box {name} with the row above"),
+            (false, true) => format!("both rows joined box {name}"),
+            (false, false) => format!(
                 "both rows in a new box {name}; enter on a row edits it, [box.{name}] holds the title"
-            )
+            ),
         };
-        if lost_title {
-            out.push_str("; the row's title went ([box.");
-            out.push_str(&name);
-            out.push_str("] carries one)");
+        if lost > 0 {
+            let what = if lost == 1 { "the row's title went" } else { "the rows' titles went" };
+            let _ = write!(out, "; {what} ([box.{name}] carries one)");
         }
         if !orphans.is_empty() {
-            out.push_str("; [box.");
-            out.push_str(&orphans.join("], [box."));
-            out.push_str("] dropped, nothing used it");
+            out.push_str("; ");
+            out.push_str(&dropped_boxes(&orphans));
         }
         Ok(out)
     }
@@ -891,7 +890,7 @@ impl Builder {
     ///
     /// # Errors
     /// Why nothing changed, for the status bar.
-    pub fn toggle_spacer(&mut self, draft: &mut Draft) -> Result<String, String> {
+    pub fn make_spacer(&mut self, draft: &mut Draft) -> Result<String, String> {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
         if item.kind == ItemKind::Col {
             return Err("a column cannot be a spacer".into());
@@ -907,23 +906,44 @@ impl Builder {
         Ok(if spacer { "already a spacer; m adds a module".into() } else { "now a spacer".into() })
     }
 
-    /// Put the selected row, column or inner row in the named box (or a
-    /// box of its own with an empty name); `[box.<name>]` is created when
-    /// missing.
+    /// Set the selected row's, column's or inner row's `box` as the form's
+    /// `box` field reads it: a name (its `[box.<name>]` made when missing),
+    /// `true` for a box of its own, `None` for no box. A box the line was
+    /// the last member of goes with its table, which the parser would
+    /// otherwise report on every tick.
     ///
     /// # Errors
     /// Why nothing was boxed, for the status bar.
-    pub fn set_box(&mut self, draft: &mut Draft, name: &str) -> Result<String, String> {
+    pub fn set_box(&mut self, draft: &mut Draft, value: Option<Value>) -> Result<String, String> {
         let Some(item) = self.item().cloned() else { return Err("nothing selected".into()) };
-        let value =
-            if name.is_empty() { Value::Boolean(true) } else { Value::String(name.to_owned()) };
-        if !name.is_empty() && draft.get(&["box", name]).is_none() {
-            draft.set(&["box", name, "title"], Value::String(name.to_owned()));
+        if let Some(Value::String(name)) = &value
+            && draft.get(&["box", name]).is_none()
+        {
+            draft.set(&["box", name, "title"], Value::String(name.clone()));
         }
         let table = draft.row_mut(item.at).ok_or("no such row")?;
-        table.insert("box".to_owned(), value);
+        let mut out = match value {
+            None => {
+                table.remove("box");
+                "unboxed".to_owned()
+            }
+            Some(Value::String(name)) => {
+                let out = format!("in box {name}");
+                table.insert("box".to_owned(), Value::String(name));
+                out
+            }
+            Some(other) => {
+                table.insert("box".to_owned(), other);
+                "boxed".to_owned()
+            }
+        };
+        let orphans = draft.prune_orphan_boxes();
+        if !orphans.is_empty() {
+            out.push_str("; ");
+            out.push_str(&dropped_boxes(&orphans));
+        }
         self.rebuild(draft);
-        Ok(if name.is_empty() { "boxed".into() } else { format!("in box {name}") })
+        Ok(out)
     }
 }
 
@@ -988,7 +1008,7 @@ mod tests {
         let mut d = draft();
         let mut b = Builder::default();
         b.rebuild(&d);
-        b.toggle_spacer(&mut d).unwrap();
+        b.make_spacer(&mut d).unwrap();
         let row = d.row(RowAt::row(0)).unwrap();
         assert!(row.get("right").is_none());
         assert_eq!(ids(row, "modules"), Vec::<String>::new());
@@ -1113,6 +1133,117 @@ mod tests {
         assert!(b.box_with_above(&mut d, "x").unwrap_err().contains("column"));
     }
 
+    /// app-30: `Tab` on a list with no chip leaves the cursor; a row is a
+    /// spacer by its keys, not by a note that a title can spell; a line
+    /// wider than the list keeps its selection when it is cut.
+    #[test]
+    fn tab_stays_put_spacers_are_flags_and_cut_lines_keep_the_selection() {
+        let mut d = Draft::from_text(
+            "[[row]]\nmodules = []\n[[row]]\nmodules = []\n[[row]]\nmodules = []\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.move_line(true);
+        b.next_chip(true);
+        assert_eq!((b.cursor, b.chip), (1, None), "no chip anywhere: Tab stays");
+        b.next_chip(false);
+        assert_eq!((b.cursor, b.chip), (1, None));
+        assert!(b.items.iter().all(|i| i.spacer && !i.note.contains("spacer")));
+        let titled = Draft::from_text("[[row]]\ntitle = \"spacer row\"\n");
+        b.rebuild(&titled);
+        assert!(!b.items[0].spacer, "a title is not a spacer");
+        let shot = |b: &mut Builder, d: &Draft, width: u16| {
+            let Ok(mut t) = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, 3));
+            let Ok(_) = t.draw(|f| b.draw(f, f.area(), d));
+            t.backend().buffer().clone()
+        };
+        let text = |buf: &ratatui::buffer::Buffer| -> String {
+            (0..buf.area.width).map(|x| buf.cell((x, 0)).unwrap().symbol().to_owned()).collect()
+        };
+        assert!(text(&shot(&mut b, &titled, 40)).contains("(empty)"));
+        // A chip past the width it is cut to still shows selected.
+        d = Draft::from_text(
+            "[[row]]\nmodules = [\"path\", \"branch\", \"sync\", \"model\", \"context\", \"limit5h\"]\n",
+        );
+        b = Builder::default();
+        b.rebuild(&d);
+        b.move_chip(true);
+        b.move_chip(true);
+        assert_eq!(b.selected_id(), Some("branch"));
+        let buf = shot(&mut b, &d, 30);
+        let line = text(&buf);
+        assert!(line.trim_end().ends_with('…'), "{line}");
+        let at = line.find("branch").unwrap();
+        let x = u16::try_from(line.char_indices().take_while(|(i, _)| *i < at).count()).unwrap();
+        let cell = buf.cell((x, 0)).unwrap();
+        assert!(cell.modifier.contains(ratatui::style::Modifier::REVERSED), "{line}");
+    }
+
+    /// app-13: `B` naming a box that exists joins it, says so, and says
+    /// that the rows' titles went (the box carries its own); a new box
+    /// takes one title and says so when the other went.
+    #[test]
+    fn b_into_an_existing_box_says_the_titles_went() {
+        let text = "[box.x]\ntitle = \"X\"\n[[row]]\nbox = \"x\"\nmodules = [\"a\"]\n[[row]]\ntitle = \"T\"\nmodules = [\"b\"]\n[[row]]\nmodules = [\"c\"]\n";
+        let mut d = Draft::from_text(text);
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.select_row(2);
+        let msg = b.box_with_above(&mut d, "x").unwrap();
+        assert!(msg.contains("title went") && !msg.contains("new box"), "{msg}");
+        assert!(msg.starts_with("both rows joined box x"), "{msg}");
+        assert_eq!(d.get(&["box", "x", "title"]).and_then(Value::as_str), Some("X"));
+        let text = "[[row]]\ntitle = \"A\"\nmodules = [\"a\"]\n[[row]]\ntitle = \"B\"\nmodules = [\"b\"]\n";
+        let mut d = Draft::from_text(text);
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.select_row(1);
+        let msg = b.box_with_above(&mut d, "ab").unwrap();
+        assert!(msg.contains("new box ab") && msg.contains("title went"), "{msg}");
+        assert_eq!(d.get(&["box", "ab", "title"]).and_then(Value::as_str), Some("A"));
+    }
+
+    /// app-12: a clone selects the copy, not the next line of the list,
+    /// which for a row of columns or a stacked column is the original's
+    /// own first child.
+    #[test]
+    fn a_clone_selects_the_copy() {
+        let mut d = Draft::from_text(
+            "[[row]]\n[[row.col]]\nmodules = [\"path\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"clock\"]\n",
+        );
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        b.clone_line(&mut d).unwrap();
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Row, RowAt::row(1))));
+        b.select_row(0);
+        b.move_line(true);
+        b.move_line(true);
+        let stack = RowAt { row: 0, col: Some(1), inner: None };
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Col, stack)));
+        b.clone_line(&mut d).unwrap();
+        let copy = RowAt { col: Some(2), ..stack };
+        assert_eq!(b.item().map(|i| (i.kind, i.at)), Some((ItemKind::Col, copy)));
+    }
+
+    /// app-08: the last `[[row]]` is not deleted: an empty row list means
+    /// the preset's rows to the parser, which the list could not show and
+    /// the next `a` would write back.
+    #[test]
+    fn the_last_row_stays() {
+        let mut d = Draft::from_text("[[row]]\nmodules = [\"clock\"]\n");
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        let err = b.delete(&mut d).unwrap_err();
+        assert!(err.contains("spacer"), "{err}");
+        assert_eq!(d.rows().len(), 1);
+        // Its module still goes, and a second row can go.
+        b.move_chip(true);
+        b.delete(&mut d).unwrap();
+        b.insert(&mut d, true).unwrap();
+        b.delete(&mut d).unwrap();
+        assert_eq!(d.rows().len(), 1);
+    }
+
     #[test]
     fn the_list_mirrors_the_rows_and_the_cursor_walks_chips() {
         let d = draft();
@@ -1161,8 +1292,8 @@ mod tests {
         b.insert(&mut d, true).unwrap();
         assert_eq!(d.rows().len(), 3);
         assert_eq!(b.cursor, 2);
-        assert!(b.items[2].note.contains("spacer"));
-        b.toggle_spacer(&mut d).unwrap();
+        assert!(b.items[2].spacer);
+        b.make_spacer(&mut d).unwrap();
         b.clone_line(&mut d).unwrap();
         assert_eq!(d.rows().len(), 4);
         b.delete(&mut d).unwrap();
@@ -1190,14 +1321,14 @@ mod tests {
             ids_at(&d, RowAt { row: 1, col: Some(1), inner: Some(0) }, "modules"),
             vec!["path"]
         );
-        b.set_box(&mut d, "repo").unwrap();
+        b.set_box(&mut d, Some(Value::String("repo".into()))).unwrap();
         assert!(d.get(&["box", "repo", "title"]).is_some());
         let (config, errs) = d.resolved();
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(config.rows[1].cols.len(), 2);
         assert_eq!(config.rows[1].cols[1].rows.len(), 1);
         // The whole thing still saves as a file the parser reads back.
-        let again = Draft::from_text(&d.text());
+        let again = Draft::from_text(&d.text().unwrap());
         assert_eq!(again.resolved().0, config);
     }
 }

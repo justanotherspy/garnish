@@ -1234,7 +1234,11 @@ mod tests {
                     for frame in frames {
                         let problem = glyph_problem(&frame).map(str::to_owned).or_else(|| {
                             let cells = frame.width();
-                            let limit = if icon.key == "spinner" { 1 } else { 2 };
+                            // A glyph repeated cell by cell is one cell, as
+                            // the parser requires of an override.
+                            let one = icon.key == "spinner"
+                                || crate::config::schema::ONE_CELL_ICONS.contains(&icon.key);
+                            let limit = if one { 1 } else { 2 };
                             (cells == 0 || cells > limit).then(|| format!("{cells} cells"))
                         });
                         if let Some(problem) = problem {

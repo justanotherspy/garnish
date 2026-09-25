@@ -285,6 +285,10 @@ None of them needs network access from garnish itself; they drive the
   the terminal's rows and cuts a taller status line from the bottom; keep
   the line count at most `LINES / 2 − 5`, rounding down (7 rows on a
   24-line terminal), or use the classic renderer.
+- **The terminal is garbled after `garnish setup` was killed**: `setup`
+  puts the terminal back when it exits, on `Ctrl+C` and on a crash, but a
+  `kill` gives it no chance to; typing `reset` (even unseen) and Enter
+  restores echo, the main screen and the mouse.
 
 More in the guide's [troubleshooting section](docs/guide.md#7-troubleshooting).
 

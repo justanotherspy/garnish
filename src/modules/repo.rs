@@ -57,6 +57,13 @@ pub fn tildify(path: &str, home: Option<&str>) -> String {
     }
 }
 
+/// [`tildify`] for a path under a home directory given as one: how a
+/// report or a screen shows a path it may be pasted from.
+#[must_use]
+pub fn tildify_path(path: &Path, home: Option<&Path>) -> String {
+    tildify(&path.display().to_string(), home.and_then(Path::to_str))
+}
+
 /// Keep the last `depth` components of a path (0 = all). A leading `~` is
 /// kept so a home-relative path still reads as one: `~/projects/garnish`.
 #[must_use]
@@ -1118,6 +1125,12 @@ mod tests {
         assert_eq!(tildify("/home/dev", Some("/home/dev")), "~");
         assert_eq!(tildify("/home/developer/x", Some("/home/dev")), "/home/developer/x");
         assert_eq!(tildify("/x", None), "/x");
+        let home = Some(Path::new("/home/dev"));
+        assert_eq!(
+            tildify_path(Path::new("/home/dev/.claude/settings.json"), home),
+            "~/.claude/settings.json"
+        );
+        assert_eq!(tildify_path(Path::new("/home/devx"), home), "/home/devx");
         assert_eq!(shorten("~/projects/garnish", 2), "~/projects/garnish");
         assert_eq!(shorten("~/a/projects/garnish", 2), "~/projects/garnish");
         assert_eq!(shorten("~/projects/garnish", 1), "~/garnish");

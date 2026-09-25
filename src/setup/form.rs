@@ -1,8 +1,10 @@
 //! The editors of `setup` (SPEC § 14): forms of fields.
 //!
-//! Every form is generated from the same tables the parser reads, so an
-//! option added to a schema appears in `setup` the next build. Nothing here
-//! is hand-coded per option.
+//! A module's editor is generated from its schema, so an option added to a
+//! schema appears in `setup` the next build; the top-level, frame, row,
+//! column and box forms list their keys by hand, since those are not
+//! schema options, and the unit tests hold them to the parser's own lists.
+//! Any other key a form's table holds is listed after its own rows.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -11,9 +13,9 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use toml::Value;
 
 use super::app::{Action, Key};
-use super::draft::{Draft, RowAt};
+use super::draft::{Draft, RowAt, TITLE_KEYS};
 use super::pick::{Choice, Choose, InputBox, Layer, Outcome, Target};
-use super::ui::{Chrome, cells, centered, clip, hints, window};
+use super::ui::{Chrome, cells, centered, clip, hints, move_cursor, window};
 use crate::config::schema::{COMMON_OPTS, Kind, ModuleSchema, Preset};
 use crate::config::{self, Config};
 use crate::frame::FrameStyle;
@@ -136,12 +138,17 @@ pub enum SlotKind {
     Float,
     /// Free text, with suggestions.
     Str,
-    /// A theme role or a literal colour.
+    /// A colour: a theme role or a literal where the key takes both (a
+    /// module's `colors.*`, a title, a box), a literal alone for a
+    /// `[colors]` role, whose picker offers only those.
     Color,
     /// An icon glyph.
     Icon,
     /// A list of strings, typed comma-separated.
     StrList,
+    /// A list of animation frames, typed as the TOML array it is written
+    /// as: a frame's spaces are part of it, and it may hold a comma.
+    Frames,
     /// A list of numbers, typed comma-separated.
     NumList,
     /// A list of colours, typed comma-separated.
@@ -152,6 +159,9 @@ pub enum SlotKind {
     BoxRef,
     /// A module's `preset`: unset (follow the top level) or one of three.
     Preset,
+    /// Any TOML value, typed as the file would write it: the row of a key
+    /// the form has no row of its own for.
+    Literal,
 }
 
 impl SlotKind {
@@ -207,9 +217,24 @@ impl SlotKind {
                 }
                 Value::Integer(n)
             }
-            Self::Float => {
-                let f: f64 = text.parse().map_err(|_| format!("{text:?} is not a number"))?;
-                Value::Float(f)
+            Self::Float => Value::Float(number(text)?),
+            Self::Literal => {
+                if text.is_empty() {
+                    return Ok(None);
+                }
+                literal(text)?
+            }
+            Self::Frames => {
+                if text.is_empty() {
+                    return Ok(None);
+                }
+                let v = literal(text)?;
+                if !v.as_array().is_some_and(|a| a.iter().all(Value::is_str)) {
+                    return Err(format!(
+                        "{text} is not a list of strings, like [\" │ \", \" ┃ \"]"
+                    ));
+                }
+                v
             }
             Self::StrList | Self::ColorList => Value::Array(
                 text.split(',')
@@ -223,11 +248,7 @@ impl SlotKind {
                     .split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .map(|s| {
-                        s.parse::<f64>()
-                            .map(Value::Float)
-                            .map_err(|_| format!("{s:?} is not a number"))
-                    })
+                    .map(|s| number(s).map(Value::Float))
                     .collect();
                 Value::Array(items?)
             }
@@ -241,6 +262,32 @@ impl SlotKind {
             },
         }))
     }
+}
+
+/// A finite number typed (`f64` itself also parses `nan` and `inf`).
+fn number(text: &str) -> Result<f64, String> {
+    text.parse::<f64>()
+        .ok()
+        .filter(|f| f.is_finite())
+        .ok_or_else(|| format!("{text:?} is not a number"))
+}
+
+/// A TOML value typed as the file would write it (`"12h"`, `[" │ "]`,
+/// `true`), or why it is not one.
+fn literal(text: &str) -> Result<Value, String> {
+    toml::from_str::<toml::Table>(&format!("v = {text}"))
+        .ok()
+        .and_then(|mut t| t.remove("v"))
+        .ok_or_else(|| format!("{text} is not a TOML value (a string is quoted: \"…\")"))
+}
+
+/// A list of strings as the TOML array literal the file would hold.
+fn array_literal(items: &[Value]) -> String {
+    let items: Vec<String> = items
+        .iter()
+        .map(|v| v.as_str().map_or_else(|| v.to_string(), crate::config::schema::toml_string))
+        .collect();
+    format!("[{}]", items.join(", "))
 }
 
 /// A TOML value as a form shows it: strings bare, lists in brackets.
@@ -280,7 +327,7 @@ pub struct Field {
     pub kind: SlotKind,
     /// Where it lives.
     pub slot: Slot,
-    /// The file sets it (a dot on the line).
+    /// The file sets it (a `*` on the line).
     pub set: bool,
     /// The value in effect, as shown.
     pub current: String,
@@ -388,34 +435,19 @@ impl Form {
         let Some(field) = self.fields.get(self.cursor).cloned() else {
             return if key == Key::Esc { Outcome::close() } else { Outcome::default() };
         };
+        let moved = match key {
+            Key::BackTab => Key::Up,
+            Key::Tab => Key::Down,
+            other => other,
+        };
+        if let Some(cursor) = move_cursor(self.cursor, n, moved) {
+            self.cursor = cursor;
+            return Outcome::default();
+        }
         match key {
             Key::Esc => Outcome::close(),
-            Key::Up | Key::BackTab => {
-                self.cursor = self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Down | Key::Tab => {
-                self.cursor = self.cursor.saturating_add(1).checked_rem(n.max(1)).unwrap_or(0);
-                Outcome::default()
-            }
-            Key::PageUp => {
-                self.cursor = self.cursor.saturating_sub(10);
-                Outcome::default()
-            }
-            Key::PageDown => {
-                self.cursor = self.cursor.saturating_add(10).min(n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Home => {
-                self.cursor = 0;
-                Outcome::default()
-            }
-            Key::End => {
-                self.cursor = n.saturating_sub(1);
-                Outcome::default()
-            }
             Key::Char('d') | Key::Delete | Key::Backspace => {
-                Outcome { close: false, push: None, actions: vec![Action::Unset(field.slot)] }
+                Outcome::act(Action::Unset(field.slot))
             }
             Key::Left | Key::Right | Key::Char('-' | '+') => {
                 let up = matches!(key, Key::Right | Key::Char('+'));
@@ -428,11 +460,8 @@ impl Form {
 
     /// `←`/`→`: the next value along for a stepped kind, else nothing.
     fn step(field: &Field, up: bool) -> Outcome {
-        let set = |v: Value| Outcome {
-            close: false,
-            push: None,
-            actions: vec![Action::Set(field.slot.clone(), v)],
-        };
+        let set = |v: Value| Outcome::act(Action::Set(field.slot.clone(), v));
+        let unset = || Outcome::act(Action::Unset(field.slot.clone()));
         match &field.kind {
             SlotKind::Bool => {
                 set(Value::Boolean(!matches!(field.value, Some(Value::Boolean(true)))))
@@ -443,14 +472,7 @@ impl Form {
                     (true, Some(Value::Boolean(true))) => Some(false),
                     _ => None,
                 };
-                next.map_or_else(
-                    || Outcome {
-                        close: false,
-                        push: None,
-                        actions: vec![Action::Unset(field.slot.clone())],
-                    },
-                    |b| set(Value::Boolean(b)),
-                )
+                next.map_or_else(unset, |b| set(Value::Boolean(b)))
             }
             SlotKind::Int { min, max } => {
                 let n = match field.value {
@@ -489,14 +511,8 @@ impl Form {
                     (Some(i), true) => Some(i.saturating_add(1)),
                     (Some(i), false) => Some(i.saturating_sub(1)),
                 };
-                next.and_then(|i| names.get(i)).map_or_else(
-                    || Outcome {
-                        close: false,
-                        push: None,
-                        actions: vec![Action::Unset(field.slot.clone())],
-                    },
-                    |v| set(Value::String((*v).to_owned())),
-                )
+                next.and_then(|i| names.get(i))
+                    .map_or_else(unset, |v| set(Value::String((*v).to_owned())))
             }
             _ => Outcome::default(),
         }
@@ -507,9 +523,11 @@ impl Form {
     /// from it, so a label is edited rather than retyped.
     fn activate(field: &Field) -> Outcome {
         let target = Target::Slot(field.slot.clone(), field.kind.clone());
-        let typed = field.value.as_ref().map_or_else(String::new, |v| match v {
-            Value::Array(items) => items.iter().map(show).collect::<Vec<_>>().join(", "),
-            other => show(other),
+        let typed = field.value.as_ref().map_or_else(String::new, |v| match (&field.kind, v) {
+            (SlotKind::Literal, v) => v.to_string(),
+            (SlotKind::Frames, Value::Array(items)) => array_literal(items),
+            (_, Value::Array(items)) => items.iter().map(show).collect::<Vec<_>>().join(", "),
+            (_, other) => show(other),
         });
         let open = |title: String, mut items: Vec<Choice>, custom: Option<&str>| {
             if let Some(what) = custom {
@@ -519,15 +537,23 @@ impl Form {
             choose.custom_title = format!("{}: custom value", field.key);
             choose.custom_start.clone_from(&typed);
             choose.select(&typed);
-            Outcome { close: false, push: Some(Layer::Choose(choose)), actions: Vec::new() }
+            Outcome::open(Layer::Choose(choose))
         };
-        let input = |title: String, text: String| Outcome {
-            close: false,
-            push: Some(Layer::Input(InputBox::new(&title, &text, target.clone()))),
-            actions: Vec::new(),
+        let input = |title: String, text: String| {
+            Outcome::open(Layer::Input(InputBox::new(&title, &text, target.clone())))
         };
         match &field.kind {
             SlotKind::Bool | SlotKind::Tri => Self::step(field, true),
+            // Typed with its bounds in sight (SPEC § 14: "with their max
+            // shown"), not learnt from a refusal.
+            SlotKind::Int { min, max } => {
+                let bounds = match max {
+                    Some(max) => format!(" ({min}–{max})"),
+                    None if *min > 0 => format!(" (at least {min})"),
+                    None => String::new(),
+                };
+                input(format!("{}{bounds}", field.key), typed)
+            }
             SlotKind::Enum(vals) => {
                 open(field.key.clone(), vals.iter().map(|v| Choice::plain(v)).collect(), None)
             }
@@ -544,9 +570,10 @@ impl Form {
                 }
                 out
             }
-            SlotKind::Int { .. }
-            | SlotKind::Float
+            SlotKind::Float
             | SlotKind::StrList
+            | SlotKind::Frames
+            | SlotKind::Literal
             | SlotKind::NumList
             | SlotKind::ColorList => input(field.key.clone(), typed),
             SlotKind::Str | SlotKind::Color | SlotKind::Icon => {
@@ -748,6 +775,7 @@ fn color_choices(config: &Config) -> Vec<Choice> {
                     Span::styled(format!("  {}", c.to_spec()), Chrome::muted()),
                 ]),
                 value: role.name().to_owned(),
+                note: c.to_spec(),
                 custom: false,
             }
         })
@@ -762,23 +790,34 @@ fn color_choices(config: &Config) -> Vec<Choice> {
 /// terminal colours.
 fn literal_color_choices(config: &Config) -> Vec<Choice> {
     let mut items: Vec<Choice> = Vec::new();
+    // One entry per colour, however it is spelled (`gray` is the theme's
+    // `bright-black`, `default` may be both a literal and a name).
+    let listed = |items: &[Choice], c: crate::ansi::Color| {
+        items.iter().any(|i| crate::ansi::Color::parse(&i.value) == Some(c))
+    };
     for role in Role::ALL {
         let c = config.theme.role(role);
-        let spec = c.to_spec();
-        if items.iter().any(|i| i.value == spec) {
+        if listed(&items, c) {
             continue;
         }
+        let spec = c.to_spec();
+        let note = format!("the theme's {}", role.name());
         items.push(Choice {
             label: Line::from(vec![
                 Span::raw(format!("{spec:<8} ")),
                 swatch(c),
-                Span::styled(format!("  the theme's {}", role.name()), Chrome::muted()),
+                Span::styled(format!("  {note}"), Chrome::muted()),
             ]),
             value: spec,
+            note,
             custom: false,
         });
     }
-    items.extend(NAMED_COLORS.iter().map(|name| Choice::plain(name)));
+    for name in NAMED_COLORS {
+        if crate::ansi::Color::parse(name).is_none_or(|c| !listed(&items, c)) {
+            items.push(Choice::plain(name));
+        }
+    }
     items
 }
 
@@ -813,13 +852,16 @@ fn icon_choices(schema: &ModuleSchema, key: &str) -> Vec<Choice> {
         seen.push(glyph.to_owned());
         let width = crate::ansi::display_width(glyph);
         let shown = if glyph.is_empty() { "(blank)".to_owned() } else { glyph.to_owned() };
+        // Padded to two cells by width: a two-cell glyph takes no space.
+        let pad = " ".repeat(2_usize.saturating_sub(crate::ansi::display_width(&shown)));
         items.push(Choice {
             label: Line::from(vec![
-                Span::raw(format!("{shown:<2}")),
+                Span::raw(format!("{shown}{pad}")),
                 Span::styled(format!("|{width}  "), Chrome::muted()),
                 Span::styled(note.to_owned(), Chrome::muted()),
             ]),
             value: glyph.to_owned(),
+            note: note.to_owned(),
             custom: false,
         });
     };
@@ -865,19 +907,19 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
     );
     if text.is_none() {
         let preset = cfg.map_or(Preset::Default, |c| c.preset);
-        let mut f = Field::new(
-            "preset",
-            "minimal | default | full; unset follows the top-level preset.",
-            SlotKind::Preset,
-            slot("preset"),
-        )
-        .valued(
-            draft,
-            Some(Value::String(preset.name().to_owned())),
-            config.preset.module_preset().name(),
+        fields.push(
+            Field::new(
+                "preset",
+                "minimal | default | full; unset follows the top-level preset.",
+                SlotKind::Preset,
+                slot("preset"),
+            )
+            .valued(
+                draft,
+                Some(Value::String(preset.name().to_owned())),
+                config.preset.module_preset().name(),
+            ),
         );
-        f.set = slot("preset").get(draft).is_some();
-        fields.push(f);
         let min = i64::from(schema.refresh > 0);
         fields.push(
             Field::new(
@@ -915,7 +957,7 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
             "[]",
         ),
     );
-    for opt in COMMON_OPTS.iter().filter(|o| text.is_none() || o.key != "max_width") {
+    for opt in COMMON_OPTS.iter().filter(|o| text.is_none() || config::text_takes(o.key)) {
         let value = cfg.and_then(|c| c.common(opt.key)).map(to_toml);
         let kind = SlotKind::of(opt.kind, opt.max);
         let mut f = Field::new(opt.key, opt.doc, kind, slot(opt.key)).valued(
@@ -943,7 +985,100 @@ fn module_fields(id: &str, draft: &Draft, config: &Config, hints: &Suggestions) 
         fields.push(f);
     }
     fields.extend(module_glyph_fields(schema, cfg, &base, draft, config));
+    module_extra_fields(fields, schema, text.is_some(), &base, draft, config)
+}
+
+/// A module's form past its schema's rows: a text module's `color`
+/// shorthand and an icon's `<key>_frames` as proper rows, then every other
+/// key of its tables as [`extra_fields`].
+fn module_extra_fields(
+    mut fields: Vec<Field>,
+    schema: &ModuleSchema,
+    text: bool,
+    base: &[&str],
+    draft: &Draft,
+    config: &Config,
+) -> Vec<Field> {
+    let slot = |key: &str| Slot::table(base, key);
+    let table = draft.get(base).and_then(Value::as_table);
+    if text && let Some(color) = table.and_then(|t| t.get("color")) {
+        fields.push(
+            Field::new(
+                "color",
+                "Shorthand for colors.text; an explicit colors.text wins.",
+                SlotKind::Color,
+                slot("color"),
+            )
+            .valued(draft, Some(color.clone()), "colors.text")
+            .with_choices(color_choices(config)),
+        );
+    }
+    let sub_table = |key: &str| table.and_then(|t| t.get(key)).and_then(Value::as_table);
+    let icons_base: Vec<&str> = base.iter().copied().chain(std::iter::once("icons")).collect();
+    let colors_base: Vec<&str> = base.iter().copied().chain(std::iter::once("colors")).collect();
+    let icon_slot = |k: &str| Slot::table(&icons_base, k);
+    let color_slot = |k: &str| Slot::table(&colors_base, k);
+    let icons = sub_table("icons");
+    for (key, value) in icons.into_iter().flatten() {
+        let Some(stem) = key.strip_suffix("_frames").filter(|s| schema.icon(s).is_some()) else {
+            continue;
+        };
+        fields.push(
+            Field::new(
+                &format!("icons.{key}"),
+                &format!(
+                    "The frames icons.{stem} cycles through, one per tick while animation is on, as a TOML array."
+                ),
+                SlotKind::Frames,
+                icon_slot(key),
+            )
+            .valued(draft, Some(value.clone()), "[]"),
+        );
+    }
+    let extra = extra_fields(&fields, icons, &icon_slot, "icons.", &[], draft);
+    fields.extend(extra);
+    let colors = sub_table("colors");
+    let extra = extra_fields(&fields, colors, &color_slot, "colors.", &[], draft);
+    fields.extend(extra);
+    let tables: Vec<&str> = [("icons", icons), ("colors", colors)]
+        .iter()
+        .filter(|(_, t)| t.is_some())
+        .map(|(k, _)| *k)
+        .collect();
+    let extra = extra_fields(&fields, table, &slot, "", &tables, draft);
+    fields.extend(extra);
     fields
+}
+
+/// What the row of a key a form has no row of its own for says.
+const EXTRA_DOC: &str = "A key this form has no row of its own for; the status bar names the parser's problem with it, if any. Enter types a TOML value (a string quoted), d removes it.";
+
+/// A row for every key of `table` the form's own `fields` miss, as `slot`
+/// addresses it and keyed `<prefix><key>`, but the `skip` keys another
+/// screen edits (SPEC § 14: a form lists the keys the parser takes plus
+/// any the file sets, so `d` can unset one the parser reports).
+fn extra_fields(
+    fields: &[Field],
+    table: Option<&toml::Table>,
+    slot: &dyn Fn(&str) -> Slot,
+    prefix: &str,
+    skip: &[&str],
+    draft: &Draft,
+) -> Vec<Field> {
+    table
+        .into_iter()
+        .flatten()
+        .filter(|(key, _)| !skip.contains(&key.as_str()))
+        .map(|(key, value)| (key, value, slot(key)))
+        .filter(|(_, _, s)| !fields.iter().any(|f| f.slot == *s))
+        .map(|(key, value, s)| {
+            Field::new(&format!("{prefix}{key}"), EXTRA_DOC, SlotKind::Literal, s).valued(
+                draft,
+                Some(value.clone()),
+                "none",
+            )
+        })
+        .collect()
 }
 
 /// A module's `icons.*` and `colors.*` fields.
@@ -970,17 +1105,23 @@ fn module_glyph_fields(
         );
     }
     let colors_base: Vec<&str> = base.iter().copied().chain(std::iter::once("colors")).collect();
+    // A text module's `color` is its `colors.text` while that is unset.
+    let is_text = schema.id == crate::modules::text::SCHEMA.id;
+    let color_path: Vec<&str> = base.iter().copied().chain(std::iter::once("color")).collect();
+    let shorthand = draft.get(&color_path).filter(|_| is_text);
     for color in &schema.colors {
-        let value = cfg.map(|c| Value::String(c.color(color.key).to_spec()));
+        let slot = Slot::table(&colors_base, color.key);
+        // As written, a role or a literal, not the resolved colour: picked
+        // back, that would pin a role to today's theme.
+        let value = slot
+            .get(draft)
+            .or_else(|| shorthand.filter(|_| color.key == "text"))
+            .cloned()
+            .unwrap_or_else(|| Value::String(color.default.to_owned()));
         fields.push(
-            Field::new(
-                &format!("colors.{}", color.key),
-                color.doc,
-                SlotKind::Color,
-                Slot::table(&colors_base, color.key),
-            )
-            .valued(draft, value, color.default)
-            .with_choices(color_choices(config)),
+            Field::new(&format!("colors.{}", color.key), color.doc, SlotKind::Color, slot)
+                .valued(draft, Some(value), color.default)
+                .with_choices(color_choices(config)),
         );
     }
     fields
@@ -1015,6 +1156,19 @@ fn top_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field>
     let mut fields = look_fields(draft, config);
     fields.extend(layout_fields(draft, config, hints));
     fields.extend(format_fields(draft, config));
+    // The rows are the builder's, and each table has a form of its own.
+    let mut skip = vec!["row"];
+    skip.extend(
+        ["modules", "frame", "colors", "box", "format"]
+            .into_iter()
+            .filter(|k| draft.get(&[k]).is_some_and(Value::is_table)),
+    );
+    let extra = extra_fields(&fields, Some(draft.table()), &Slot::top, "", &skip, draft);
+    fields.extend(extra);
+    let format = draft.get(&["format"]).and_then(Value::as_table);
+    let extra =
+        extra_fields(&fields, format, &|k| Slot::table(&["format"], k), "format.", &[], draft);
+    fields.extend(extra);
     fields
 }
 
@@ -1192,6 +1346,9 @@ fn layout_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Fie
 fn frame_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     let mut fields = frame_glyph_fields(draft, config, hints);
     fields.extend(frame_motion_fields(draft, config, hints));
+    let frame = draft.get(&["frame"]).and_then(Value::as_table);
+    let extra = extra_fields(&fields, frame, &|k| Slot::table(&["frame"], k), "", &[], draft);
+    fields.extend(extra);
     fields
 }
 
@@ -1238,21 +1395,22 @@ fn frame_glyph_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> Ve
                 .valued(draft, Some(string(value)), "the style's")
                 .with_choices(hints.choices(key)),
         );
+        if key == "separator" {
+            // A role, a literal, or `inherit` (SPEC § 4.1).
+            let mut choices = vec![Choice::noted("inherit", "the module before it")];
+            choices.extend(Role::ALL.iter().map(|r| Choice::noted(r.name(), "role")));
+            fields.push(
+                Field::new(
+                    "separator_color",
+                    "Every separator's colour: muted | inherit (the module before it) | a role or literal.",
+                    SlotKind::Str,
+                    s("separator_color"),
+                )
+                .valued(draft, Some(string(config.frame.separator_color.spec())), "muted")
+                .with_choices(choices),
+            );
+        }
     }
-    // Right after `separator`: a role, a literal, or `inherit` (SPEC § 4.1).
-    let mut choices = vec![Choice::noted("inherit", "the module before it")];
-    choices.extend(Role::ALL.iter().map(|r| Choice::noted(r.name(), "role")));
-    fields.insert(
-        3,
-        Field::new(
-            "separator_color",
-            "Every separator's colour: muted | inherit (the module before it) | a role or literal.",
-            SlotKind::Str,
-            s("separator_color"),
-        )
-        .valued(draft, Some(string(config.frame.separator_color.spec())), "muted")
-        .with_choices(choices),
-    );
     fields
 }
 
@@ -1283,8 +1441,8 @@ fn frame_motion_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> V
         .valued(draft, Some(string(config.frame.fill_direction.name())), "right"),
         Field::new(
             "separator_frames",
-            "Separator frames cycled one per tick, all the same width.",
-            SlotKind::StrList,
+            "Separator frames cycled one per tick, all the same width, as a TOML array.",
+            SlotKind::Frames,
             s("separator_frames"),
         )
         .valued(
@@ -1305,7 +1463,7 @@ fn frame_motion_fields(draft: &Draft, config: &Config, hints: &Suggestions) -> V
 }
 
 fn color_fields(draft: &Draft, config: &Config) -> Vec<Field> {
-    Role::ALL
+    let mut fields: Vec<Field> = Role::ALL
         .iter()
         .map(|role| {
             let palette =
@@ -1319,13 +1477,18 @@ fn color_fields(draft: &Draft, config: &Config) -> Vec<Field> {
             .valued(draft, Some(Value::String(config.theme.role(*role).to_spec())), palette)
             .with_choices(literal_color_choices(config))
         })
-        .collect()
+        .collect();
+    let colors = draft.get(&["colors"]).and_then(Value::as_table);
+    let extra = extra_fields(&fields, colors, &|k| Slot::table(&["colors"], k), "", &[], draft);
+    fields.extend(extra);
+    fields
 }
 
 /// A row's form lists the keys the parser would take for it: `blank` only
-/// on a spacer or a row with columns, the title keys only outside a named
-/// box (the box carries the title), each still listed while the file sets
-/// it, so `d` can unset one the parser reports.
+/// on a spacer or a row with columns, `gap` only on an outer row, the
+/// title keys only outside a named box (the box carries the title), each
+/// still listed while the file sets it, and any other key the table holds
+/// after them, so `d` can unset one the parser reports.
 fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
     // No table at the path (an undo took the row back under its open
     // form): nothing to edit, and the app closes the form.
@@ -1336,6 +1499,12 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
     let has_cols = table.contains_key("col");
     let spacer = !has_cols && !ids("modules") && !ids("right");
     let named_box = matches!(table.get("box"), Some(Value::String(_)));
+    // What an unset key resolves to, so `←`/`→` and a picker start there.
+    let resolved = resolved_row(config, at);
+    let separator = resolved
+        .and_then(|r| r.separator.clone())
+        .unwrap_or_else(|| config.frame.chars.separator.clone());
+    let gap = resolved.map_or(config::DEFAULT_GAP, |r| r.gap);
     let mut fields = vec![
         Field::new(
             "separator",
@@ -1343,10 +1512,14 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
             SlotKind::Str,
             s("separator"),
         )
-        .valued(draft, raw("separator"), &config.frame.chars.separator)
+        .valued(
+            draft,
+            raw("separator").or(Some(Value::String(separator))),
+            &config.frame.chars.separator,
+        )
         .with_choices(hints.choices("separator")),
     ];
-    if at.col.is_none() {
+    if at.col.is_none() || table.contains_key("gap") {
         fields.push(
             Field::new(
                 "gap",
@@ -1354,11 +1527,12 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
                 SlotKind::Int { min: 0, max: Some(16) },
                 s("gap"),
             )
-            .valued(draft, raw("gap"), "1"),
+            .valued(draft, raw("gap").or_else(|| Some(count(gap))), "1"),
         );
     }
-    if !named_box || table.contains_key("title") {
-        fields.extend(title_fields(&s, &raw, hints, config));
+    if !named_box || TITLE_KEYS.iter().any(|k| table.contains_key(*k)) {
+        let title = resolved.and_then(|r| r.title.as_ref());
+        fields.extend(title_fields(&s, &raw, title, draft, hints, config));
     }
     fields.push(
         Field::new(
@@ -1371,6 +1545,7 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
         .with_choices(box_choices(config)),
     );
     if spacer || has_cols || table.contains_key("blank") {
+        let blank = resolved.is_some_and(|r| r.blank);
         fields.push(
             Field::new(
                 "blank",
@@ -1378,21 +1553,29 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
                 SlotKind::Bool,
                 s("blank"),
             )
-            .valued(draft, raw("blank"), "false"),
+            .valued(draft, raw("blank").or(Some(Value::Boolean(blank))), "false"),
         );
     }
+    // The groups and the lists of columns are the builder's.
+    let skip = ["modules", "right", "col", "row"];
+    let extra = extra_fields(&fields, Some(&table), &s, "", &skip, draft);
+    fields.extend(extra);
     fields
 }
 
+/// The title keys of a row or a box, `resolved` the title in effect.
 fn title_fields(
     s: &dyn Fn(&str) -> Slot,
     raw: &dyn Fn(&str) -> Option<Value>,
+    resolved: Option<&config::TitleCfg>,
+    draft: &Draft,
     hints: &Suggestions,
     config: &Config,
 ) -> Vec<Field> {
+    let effect = resolved.cloned().unwrap_or_default();
     vec![
         Field::new("title", "Plain text set into the rule.", SlotKind::Str, s("title"))
-            .valued_raw(raw("title"), "none")
+            .valued(draft, raw("title"), "none")
             .with_choices(hints.choices("title")),
         Field::new(
             "title_justify",
@@ -1400,34 +1583,41 @@ fn title_fields(
             SlotKind::Enum(vec!["left".into(), "center".into(), "right".into()]),
             s("title_justify"),
         )
-        .valued_raw(raw("title_justify"), "left"),
+        .valued(
+            draft,
+            raw("title_justify").or_else(|| Some(string(effect.justify.name()))),
+            "left",
+        ),
         Field::new(
             "title_pad",
             "Spaces on each side of the title.",
             SlotKind::Int { min: 0, max: Some(64) },
             s("title_pad"),
         )
-        .valued_raw(raw("title_pad"), "1"),
+        .valued(draft, raw("title_pad").or_else(|| Some(count(effect.pad))), "1"),
         Field::new(
             "title_color",
             "A role or literal for the title; the frame colour when unset.",
             SlotKind::Color,
             s("title_color"),
         )
-        .valued_raw(raw("title_color"), "frame")
+        .valued(draft, raw("title_color"), "frame")
         .with_choices(color_choices(config)),
     ]
 }
 
-impl Field {
-    /// With a value read straight from the file's table (row and box keys,
-    /// which the resolved config reshapes).
-    fn valued_raw(mut self, raw: Option<Value>, default: &str) -> Self {
-        self.set = raw.is_some();
-        self.current = raw.as_ref().map_or_else(|| "(unset)".to_owned(), current_text);
-        self.value = raw;
-        default.clone_into(&mut self.default);
-        self
+/// A count as a TOML integer.
+fn count(n: usize) -> Value {
+    Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// The resolved row, or a stack's inner row, at `at` (a column is none).
+fn resolved_row(config: &Config, at: RowAt) -> Option<&config::RowCfg> {
+    let row = config.rows.get(at.row)?;
+    match (at.col, at.inner) {
+        (None, _) => Some(row),
+        (Some(c), Some(i)) => row.cols.get(c)?.rows.get(i),
+        (Some(_), None) => None,
     }
 }
 
@@ -1435,17 +1625,25 @@ fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
     let Some(table) = draft.row(at).cloned() else { return Vec::new() };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::row(at, key);
-    vec![
+    // Unset, `justify` follows the column's place and `valign` is `top`.
+    let col = at.col.and_then(|c| config.rows.get(at.row)?.cols.get(c));
+    let justify = raw("justify").or_else(|| col.map(|c| string(c.justify.name())));
+    let valign = raw("valign").or_else(|| col.map(|c| string(c.valign.name())));
+    let mut fields = vec![
         Field::new("width", "\"<n>fr\" (a share of what is left) | \"auto\" (the content) | a cell count.", SlotKind::Width, s("width"))
-            .valued_raw(raw("width"), "1fr"),
+            .valued(draft, raw("width"), "1fr"),
         Field::new("justify", "Where a lone modules group sits: left | center | right (default follows the position).", SlotKind::Enum(vec!["left".into(), "center".into(), "right".into()]), s("justify"))
-            .valued_raw(raw("justify"), "by position"),
+            .valued(draft, justify, "by position"),
         Field::new("valign", "Where a short stack sits in a taller row: top | center | bottom.", SlotKind::Enum(vec!["top".into(), "center".into(), "bottom".into()]), s("valign"))
-            .valued_raw(raw("valign"), "top"),
+            .valued(draft, valign, "top"),
         Field::new("box", "Box the whole column: none, true or a [box.<name>].", SlotKind::BoxRef, s("box"))
-            .valued_raw(raw("box"), "none")
+            .valued(draft, raw("box"), "none")
             .with_choices(box_choices(config)),
-    ]
+    ];
+    // The groups and the stack's rows are the builder's.
+    let extra = extra_fields(&fields, Some(&table), &s, "", &["modules", "right", "row"], draft);
+    fields.extend(extra);
+    fields
 }
 
 fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -> Vec<Field> {
@@ -1455,12 +1653,21 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
     };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::table(&base, key);
-    let mut fields = title_fields(&s, &raw, hints, config);
+    let resolved = config.boxes.get(name);
+    let mut fields =
+        title_fields(&s, &raw, resolved.and_then(|b| b.title.as_ref()), draft, hints, config);
     let styles: Vec<String> = FrameStyle::ALL
         .iter()
         .filter(|f| **f != FrameStyle::Powerline)
         .map(|f| f.name().to_owned())
         .collect();
+    // Unset, the frame's style, rounded when that has no box shape (as the
+    // layout draws it).
+    let style = resolved.and_then(|b| b.style).unwrap_or(match config.frame.style {
+        FrameStyle::None | FrameStyle::Powerline => FrameStyle::Rounded,
+        other => other,
+    });
+    let fill = resolved.is_some_and(|b| b.fill);
     fields.push(
         Field::new(
             "style",
@@ -1468,7 +1675,7 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
             SlotKind::Enum(styles),
             s("style"),
         )
-        .valued_raw(raw("style"), "the frame's"),
+        .valued(draft, raw("style").or_else(|| Some(string(style.name()))), "the frame's"),
     );
     fields.push(
         Field::new(
@@ -1477,7 +1684,7 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
             SlotKind::Bool,
             s("fill"),
         )
-        .valued_raw(raw("fill"), "false"),
+        .valued(draft, raw("fill").or(Some(Value::Boolean(fill))), "false"),
     );
     fields.push(
         Field::new(
@@ -1486,9 +1693,11 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
             SlotKind::Color,
             s("color"),
         )
-        .valued_raw(raw("color"), "frame")
+        .valued(draft, raw("color"), "frame")
         .with_choices(color_choices(config)),
     );
+    let extra = extra_fields(&fields, Some(&table), &s, "", &[], draft);
+    fields.extend(extra);
     fields
 }
 
@@ -1503,22 +1712,99 @@ mod tests {
         (Form::build(kind.clone(), &draft, &config, &Suggestions::default()), draft)
     }
 
+    /// frm-10: the forms listed by hand have every key the parser takes in
+    /// their table (the builder's groups and lists aside), read from the
+    /// parser's own list: the one it names when a key is unknown.
+    #[test]
+    fn every_key_the_parser_takes_has_a_row_in_its_hand_listed_form() {
+        let inner = RowAt { row: 0, col: Some(0), inner: Some(0) };
+        let col = RowAt { row: 0, col: Some(0), inner: None };
+        for (text, kind, path, prefix) in [
+            ("[frame]\nzz = 1\n", FormKind::Frame, "frame.zz", ""),
+            ("[format]\nzz = 1\n", FormKind::Top, "format.zz", "format."),
+            // A spacer outside a named box: every row key is legal there.
+            ("[[row]]\nmodules = []\nzz = 1\n", FormKind::Row(RowAt::row(0)), "row[0].zz", ""),
+            (
+                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = []\nzz = 1\n",
+                FormKind::Row(inner),
+                "row[0].col[0].row[0].zz",
+                "",
+            ),
+            (
+                "[[row]]\n[[row.col]]\nmodules = [\"clock\"]\nzz = 1\n",
+                FormKind::Col(col),
+                "row[0].col[0].zz",
+                "",
+            ),
+            (
+                "[box.b]\nzz = 1\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+                FormKind::Box("b".into()),
+                "box.b.zz",
+                "",
+            ),
+        ] {
+            let (form, draft) = built(text, &kind);
+            let problems = draft.resolved().1;
+            let message = &problems.iter().find(|p| p.path == path).expect(path).message;
+            let (_, keys) = message.split_once("expected one of ").expect(message);
+            let fields: Vec<&str> = form.fields.iter().map(|f| f.key.as_str()).collect();
+            for key in keys.split(',').map(|k| k.trim().trim_end_matches('.')) {
+                if ["modules", "right", "col", "row"].contains(&key) {
+                    continue;
+                }
+                let key = format!("{prefix}{key}");
+                assert!(fields.contains(&key.as_str()), "{path}: no row for {key} in {fields:?}");
+            }
+        }
+    }
+
+    /// frm-10: every entry a picker offers is a value the parser takes for
+    /// that key (CLAUDE.md: the `[colors]` form learned this the hard way).
+    #[test]
+    fn every_picker_entry_is_a_value_the_parser_takes() {
+        let hints = Suggestions::gather();
+        let text = "[box.b]\n[[row]]\nmodules = [\"clock\"]\n[[row]]\n[[row.col]]\nmodules = [\"path\"]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"model\"]\n[[row]]\nbox = \"b\"\nmodules = [\"cost\"]\n[modules.text.m]\ntext = \"hi\"\n";
+        let draft = Draft::from_text(text);
+        let (config, problems) = draft.resolved();
+        assert_eq!(problems, Vec::new());
+        let mut kinds = vec![
+            FormKind::Top,
+            FormKind::Frame,
+            FormKind::Colors,
+            FormKind::Row(RowAt::row(0)),
+            FormKind::Col(RowAt { row: 1, col: Some(0), inner: None }),
+            FormKind::Row(RowAt { row: 1, col: Some(1), inner: Some(0) }),
+            FormKind::Box("b".into()),
+            FormKind::Module("text.m".into()),
+        ];
+        kinds.extend(SCHEMAS.iter().map(|s| FormKind::Module(s.id.to_owned())));
+        let mut offenders: Vec<String> = Vec::new();
+        let mut tried = 0_usize;
+        for kind in kinds {
+            let form = Form::build(kind.clone(), &draft, &config, &hints);
+            for field in &form.fields {
+                for choice in field.choices.iter().filter(|c| !c.custom) {
+                    let Ok(Some(value)) = field.kind.parse(&choice.value) else { continue };
+                    tried += 1;
+                    let mut trial = draft.clone();
+                    field.slot.set(&mut trial, value);
+                    let path = field.slot.path();
+                    if let Some(p) = trial.resolved().1.iter().find(|p| p.path == path) {
+                        offenders
+                            .push(format!("{kind:?} {path} = {:?}: {}", choice.value, p.message));
+                    }
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "entries the parser refuses:\n{}", offenders.join("\n"));
+        assert!(tried > 1000, "{tried} entries tried");
+    }
+
     /// SPEC § 14: every `OptSpec` kind and every top-level key has a form
-    /// row, so an option added to a schema appears in `setup` the next build.
+    /// row, so an option added to a schema appears in `setup` the next build
+    /// (a `Kind` added to the parser is a compile error in `SlotKind::of`).
     #[test]
     fn every_option_kind_and_top_level_key_has_a_field() {
-        for kind in [
-            Kind::Bool,
-            Kind::Int,
-            Kind::Float,
-            Kind::Str,
-            Kind::Enum(&["a"]),
-            Kind::StrList,
-            Kind::NumList,
-            Kind::ColorList,
-        ] {
-            let _ = SlotKind::of(kind, None);
-        }
         let (top, _) = built("", &FormKind::Top);
         let keys: Vec<&str> = top.fields.iter().map(|f| f.key.as_str()).collect();
         for key in config::TOP_KEYS {
@@ -1603,6 +1889,15 @@ mod tests {
             matches!(form.handle(Key::Enter).push, Some(Layer::Input(_))),
             "an integer opens an input"
         );
+        // frm-09: an integer is typed with its bounds in sight.
+        form.focus("max_width");
+        let Some(Layer::Input(input)) = form.handle(Key::Enter).push else { panic!("an input") };
+        let max = crate::config::MAX_CELLS.to_string();
+        assert!(input.title.contains(&format!("0–{max}")), "{}", input.title);
+        let (mut top, _) = built("", &FormKind::Top);
+        top.focus("stale_after");
+        let Some(Layer::Input(input)) = top.handle(Key::Enter).push else { panic!("an input") };
+        assert!(input.title.contains("at least 1"), "{}", input.title);
         form.focus("enabled");
         let out = form.handle(Key::Enter);
         assert!(matches!(out.actions.first(), Some(Action::Set(_, Value::Boolean(false)))));
@@ -1638,6 +1933,12 @@ mod tests {
         assert_eq!(SlotKind::BoxRef.parse("true").unwrap(), Some(Value::Boolean(true)));
         assert_eq!(SlotKind::Tri.parse("").unwrap(), None);
         assert!(SlotKind::NumList.parse("1, x").is_err());
+        // frm-07: `f64` parses `nan` and `inf`, which no option means.
+        for text in ["nan", "NaN", "inf", "-inf"] {
+            assert!(SlotKind::Float.parse(text).is_err(), "{text}");
+            assert!(SlotKind::NumList.parse(&format!("1, {text}")).is_err(), "{text}");
+        }
+        assert_eq!(SlotKind::Float.parse("2.5"), Ok(Some(Value::Float(2.5))));
         // The animate tri-state cycles unset → true → false → unset.
         let (mut top, _) = built("", &FormKind::Top);
         top.focus("animate");
@@ -1654,6 +1955,220 @@ mod tests {
         let (mut top, _) = built("animate = false\n", &FormKind::Top);
         top.focus("animate");
         assert!(matches!(top.handle(Key::Enter).actions.first(), Some(Action::Unset(_))));
+    }
+
+    /// frm-02: separator frames keep their spaces (and may hold commas), so
+    /// they are edited as the TOML array they are written as; an untouched
+    /// `Enter` gives the same array back.
+    #[test]
+    fn frames_are_typed_as_a_toml_array_and_keep_their_spaces() {
+        let (mut form, _) =
+            built("[frame]\nseparator_frames = [\" │ \", \" , \"]\n", &FormKind::Frame);
+        form.focus("separator_frames");
+        let field = form.fields.get(form.cursor).unwrap().clone();
+        let Some(Layer::Input(input)) = form.handle(Key::Enter).push else { panic!("an input") };
+        assert_eq!(input.text, "[\" │ \", \" , \"]");
+        let want = Value::Array(vec![Value::String(" │ ".into()), Value::String(" , ".into())]);
+        assert_eq!(field.kind.parse(&input.text), Ok(Some(want)));
+        assert_eq!(SlotKind::Frames.parse("[]"), Ok(Some(Value::Array(Vec::new()))));
+        assert_eq!(SlotKind::Frames.parse("  "), Ok(None), "nothing typed unsets it");
+        assert!(SlotKind::Frames.parse("[1, 2]").is_err());
+        assert!(SlotKind::Frames.parse(" │ , ┃ ").is_err(), "not an array literal");
+        // The comma form stays for the lists whose items have no spaces.
+        let (mut m, _) =
+            built("[modules.context]\nhide = [\"empty\"]\n", &FormKind::Module("context".into()));
+        m.focus("hide");
+        let Some(Layer::Input(input)) = m.handle(Key::Enter).push else { panic!("an input") };
+        assert_eq!(input.text, "empty");
+    }
+
+    /// frm-03: every form lists the keys its table holds beyond its own
+    /// rows (an unknown or misplaced key the parser reports, which `d` then
+    /// removes), and gives the legal ones it had no row for a proper one.
+    #[test]
+    fn every_form_lists_the_keys_its_table_has_beyond_its_own() {
+        let inner = RowAt { row: 0, col: Some(0), inner: Some(0) };
+        let col = RowAt { row: 0, col: Some(0), inner: None };
+        let module = |id: &str| FormKind::Module(id.to_owned());
+        for (text, kind, key, path) in [
+            (
+                "[modules.clock]\nfromat = \"12h\"\n",
+                module("clock"),
+                "fromat",
+                "modules.clock.fromat",
+            ),
+            (
+                "[modules.clock.icons]\nnope = \"x\"\n",
+                module("clock"),
+                "icons.nope",
+                "modules.clock.icons.nope",
+            ),
+            (
+                "[modules.clock.colors]\nnope = \"red\"\n",
+                module("clock"),
+                "colors.nope",
+                "modules.clock.colors.nope",
+            ),
+            (
+                "[modules.text.m]\ntext = \"hi\"\nrefresh = 3\n",
+                module("text.m"),
+                "refresh",
+                "modules.text.m.refresh",
+            ),
+            ("nope = 1\n", FormKind::Top, "nope", "nope"),
+            ("[format]\nnope = 1\n", FormKind::Top, "format.nope", "format.nope"),
+            ("[frame]\nnope = 1\n", FormKind::Frame, "nope", "frame.nope"),
+            ("[colors]\nnope = \"red\"\n", FormKind::Colors, "nope", "colors.nope"),
+            (
+                "[[row]]\nmodules = [\"clock\"]\nnope = 1\n",
+                FormKind::Row(RowAt::row(0)),
+                "nope",
+                "row[0].nope",
+            ),
+            (
+                "[[row]]\n[[row.col]]\n[[row.col.row]]\nmodules = [\"clock\"]\ngap = 2\n",
+                FormKind::Row(inner),
+                "gap",
+                "row[0].col[0].row[0].gap",
+            ),
+            (
+                "[[row]]\n[[row.col]]\nmodules = [\"clock\"]\nnope = 1\n",
+                FormKind::Col(col),
+                "nope",
+                "row[0].col[0].nope",
+            ),
+            (
+                "[box.b]\nnope = 1\n[[row]]\nmodules = [\"clock\"]\nbox = \"b\"\n",
+                FormKind::Box("b".into()),
+                "nope",
+                "box.b.nope",
+            ),
+        ] {
+            let (form, mut draft) = built(text, &kind);
+            let problems = draft.resolved().1;
+            assert!(problems.iter().any(|p| p.path == path), "{text}: {problems:?}");
+            let keys: Vec<&str> = form.fields.iter().map(|f| f.key.as_str()).collect();
+            let field = form.fields.iter().find(|f| f.key == key);
+            let field = field.unwrap_or_else(|| panic!("{text}: no {key} in {keys:?}"));
+            assert!(field.set && field.slot.path() == path, "{text}: {field:?}");
+            field.slot.unset(&mut draft);
+            let problems = draft.resolved().1;
+            assert!(!problems.iter().any(|p| p.path == path), "{text}: {problems:?}");
+        }
+        // A legal key with no row of its own gets a proper one: an icon's
+        // frames (typed as an array) and a text module's `color` shorthand.
+        let dots = crate::gallery::body(crate::gallery::find("animated-dots").unwrap().source);
+        let (m, _) = built(&dots, &module("model"));
+        let frames = m.fields.iter().find(|f| f.key == "icons.model_frames").unwrap();
+        assert!(frames.set && frames.kind == SlotKind::Frames, "{frames:?}");
+        let ticker = crate::gallery::body(crate::gallery::find("motd-ticker").unwrap().source);
+        let draft = Draft::from_text(&ticker);
+        let (config, _) = draft.resolved();
+        let name = config.texts.keys().next().unwrap().clone();
+        let (t, _) = built(&ticker, &module(&format!("text.{name}")));
+        let color = t.fields.iter().find(|f| f.key == "color").unwrap();
+        assert!(color.set && color.kind == SlotKind::Color, "{color:?}");
+        // A generic row types its value as a TOML literal.
+        let (mut form, _) = built("[modules.clock]\nfromat = \"12h\"\n", &module("clock"));
+        form.focus("fromat");
+        let Some(Layer::Input(input)) = form.handle(Key::Enter).push else { panic!("an input") };
+        assert_eq!(input.text, "\"12h\"");
+        assert_eq!(
+            SlotKind::Literal.parse("[1, 2]"),
+            Ok(Some(Value::Array(vec![1.into(), 2.into()])))
+        );
+        assert!(SlotKind::Literal.parse("12h").is_err(), "a string is quoted");
+    }
+
+    /// frm-06: an unset row, column or box key steps and opens from the
+    /// value in effect, not from the minimum or the first entry.
+    #[test]
+    fn unset_layout_keys_step_from_the_value_in_effect() {
+        let step = |form: &mut Form, key: &str, k: Key| {
+            form.focus(key);
+            match form.handle(k).actions.first() {
+                Some(Action::Set(_, v)) => v.clone(),
+                other => panic!("{key}: {other:?}"),
+            }
+        };
+        let open = |form: &mut Form, key: &str| {
+            form.focus(key);
+            let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+            c.items.get(c.cursor).map(|i| i.value.clone())
+        };
+        let (mut b, _) = built(
+            "[box.x]\n[[row]]\nbox = \"x\"\nmodules = [\"clock\"]\n",
+            &FormKind::Box("x".into()),
+        );
+        assert_eq!(b.fields.iter().find(|f| f.key == "style").unwrap().current, "rounded");
+        assert_eq!(step(&mut b, "style", Key::Right), Value::String("square".into()));
+        assert_eq!(open(&mut b, "style").as_deref(), Some("rounded"));
+        let (mut c, _) = built(
+            "[[row]]\n[[row.col]]\n[[row.col]]\n[[row.col]]\nmodules = [\"clock\"]\n",
+            &FormKind::Col(RowAt { row: 0, col: Some(2), inner: None }),
+        );
+        assert_eq!(open(&mut c, "justify").as_deref(), Some("right"));
+        assert_eq!(open(&mut c, "valign").as_deref(), Some("top"));
+        let (mut r, _) = built("[[row]]\nmodules = [\"clock\"]\n", &FormKind::Row(RowAt::row(0)));
+        assert_eq!(step(&mut r, "gap", Key::Right), Value::Integer(2));
+        assert_eq!(step(&mut r, "title_pad", Key::Right), Value::Integer(2));
+        assert_eq!(open(&mut r, "title_justify").as_deref(), Some("left"));
+        let gap = r.fields.iter().find(|f| f.key == "gap").unwrap();
+        assert!(!gap.set && gap.current == "1", "{gap:?}");
+    }
+
+    /// frm-05: a module colour's row shows the role or literal in effect,
+    /// as written, and its picker opens on it; a text module's `color`
+    /// shorthand is what its `colors.text` row shows while that is unset.
+    #[test]
+    fn a_module_colour_shows_and_opens_on_the_value_as_written() {
+        let module = |id: &str| FormKind::Module(id.to_owned());
+        let open = |form: &mut Form, key: &str| {
+            form.focus(key);
+            let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+            c.items.get(c.cursor).map(|i| i.value.clone())
+        };
+        let (mut form, _) = built("", &module("context"));
+        let marker = form.fields.iter().find(|f| f.key == "colors.marker").unwrap().clone();
+        assert_eq!((marker.current.as_str(), marker.set), ("warn", false));
+        assert_eq!(open(&mut form, "colors.marker").as_deref(), Some("warn"));
+        let (mut form, _) =
+            built("[modules.context.colors]\nmarker = \"ok\"\n", &module("context"));
+        let marker = form.fields.iter().find(|f| f.key == "colors.marker").unwrap().clone();
+        assert_eq!((marker.current.as_str(), marker.set), ("ok", true));
+        assert_eq!(open(&mut form, "colors.marker").as_deref(), Some("ok"));
+        let (t, _) =
+            built("[modules.text.m]\ntext = \"hi\"\ncolor = \"accent2\"\n", &module("text.m"));
+        let text = t.fields.iter().find(|f| f.key == "colors.text").unwrap();
+        assert_eq!(text.current, "accent2");
+    }
+
+    /// frm-17: the `[colors]` picker lists a colour once however it is
+    /// spelled and is found by the role its note names; a glyph is padded
+    /// to two cells by its width, not its characters.
+    #[test]
+    fn colour_pickers_list_each_colour_once_and_find_roles_by_note() {
+        let config = crate::config::parse("theme = \"mono\"\n", &SCHEMAS).0;
+        let items = literal_color_choices(&config);
+        let colours: Vec<crate::ansi::Color> =
+            items.iter().filter_map(|c| crate::ansi::Color::parse(&c.value)).collect();
+        for (i, c) in colours.iter().enumerate() {
+            assert!(!colours.get(..i).unwrap().contains(c), "{c:?} twice: {items:?}");
+        }
+        let mut choose = Choose::new("accent", literal_color_choices(&config), Target::Columns);
+        for ch in "accent".chars() {
+            choose.handle(Key::Char(ch));
+        }
+        let found: Vec<&str> = choose.matching().iter().map(|c| c.note.as_str()).collect();
+        assert!(found.iter().any(|n| n.contains("accent")), "{found:?}");
+        let model = SCHEMAS.iter().find(|s| s.id == "model").unwrap();
+        for choice in icon_choices(model, "model") {
+            let label: String = choice.label.spans.iter().map(|s| s.content.as_ref()).collect();
+            let (glyph, _) = label.split_once('|').unwrap();
+            let shown = if choice.value.is_empty() { "(blank)" } else { choice.value.as_str() };
+            let want = crate::ansi::display_width(shown).max(2);
+            assert_eq!(crate::ansi::display_width(glyph), want, "{label:?}");
+        }
     }
 
     #[test]

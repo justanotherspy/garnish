@@ -2103,9 +2103,19 @@ const TEXT_REJECTED_KEYS: [(&str, &str); 4] = [
     ("max_width", "a text module's box is sized by `width`; remove this key"),
 ];
 
-/// A text module name is a bare TOML key, so `text.<name>` is unambiguous on
-/// a line and `config show` can write `[modules.text.<name>]` back verbatim.
-fn is_bare_key(name: &str) -> bool {
+/// Whether a `[modules.text.<name>]` table takes the common key: every one
+/// but the [`TEXT_REJECTED_KEYS`] (SPEC § 3.7).
+#[must_use]
+pub(crate) fn text_takes(key: &str) -> bool {
+    !TEXT_REJECTED_KEYS.iter().any(|(rejected, _)| *rejected == key)
+}
+
+/// A bare TOML key: what a text module or a box may be called, so
+/// `text.<name>` and `box = "<name>"` are unambiguous on a line and
+/// `config show` can write `[modules.text.<name>]` and `[box.<name>]` back
+/// verbatim.
+#[must_use]
+pub(crate) fn is_bare_key(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
@@ -2471,7 +2481,7 @@ fn unknown_option_message(schema: &ModuleSchema) -> String {
     format!(
         "unknown option; expected one of {}",
         common_keys()
-            .filter(|k| !is_text || !TEXT_REJECTED_KEYS.iter().any(|(r, _)| r == k))
+            .filter(|k| !is_text || text_takes(k))
             .chain(std::iter::once("colors"))
             .chain(schema.opts.iter().map(|o| o.key))
             .collect::<Vec<_>>()
@@ -2614,11 +2624,13 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
             .filter(|i| *i >= 0)
             .map(Value::Int)
             .ok_or_else(|| "expected a non-negative integer".into()),
+        // TOML takes `nan` and `inf`; no option means either.
         Kind::Float => value
             .as_float()
             .or_else(|| {
                 value.as_integer().map(|i| crate::num::u64_to_f64(u64::try_from(i).unwrap_or(0)))
             })
+            .filter(|f| f.is_finite())
             .map(Value::Float)
             .ok_or_else(|| "expected a number".into()),
         Kind::Str => value
@@ -2655,10 +2667,12 @@ fn coerce(kind: Kind, value: &toml::Value) -> Result<Value, String> {
             let nums: Option<Vec<f64>> = items
                 .iter()
                 .map(|i| {
-                    i.as_float().or_else(|| {
-                        i.as_integer()
-                            .map(|n| crate::num::u64_to_f64(u64::try_from(n).unwrap_or(0)))
-                    })
+                    i.as_float()
+                        .or_else(|| {
+                            i.as_integer()
+                                .map(|n| crate::num::u64_to_f64(u64::try_from(n).unwrap_or(0)))
+                        })
+                        .filter(|f| f.is_finite())
                 })
                 .collect();
             nums.map(Value::NumList).ok_or_else(|| "expected a list of numbers".into())
@@ -4119,6 +4133,30 @@ x = 1
                 errs.iter().map(|e| (e.path.as_str(), e.message.as_str())).collect();
             assert_eq!(problems, [(&*format!("modules.text.a.{key}"), why)], "{key}");
             assert_eq!(c.texts.get("a").map(|t| t.str("text")), Some("hi"), "{key}");
+            assert!(!text_takes(key), "{key}");
+        }
+        // Every common key `text_takes` (what the docs page and the setup
+        // form list) parses there without a word.
+        for opt in COMMON_OPTS.iter().filter(|o| text_takes(o.key)) {
+            let text = format!("[modules.text.a]\n{} = {}\n", opt.key, opt.default.to_toml());
+            assert_eq!(parse(&text, &crate::modules::SCHEMAS).1, Vec::new(), "{}", opt.key);
+        }
+    }
+
+    /// A number option takes finite numbers only: TOML's `nan` and `inf`
+    /// are reported at the key (frm-07), and the default stands in.
+    #[test]
+    fn a_number_option_refuses_nan_and_inf() {
+        for (text, path) in [
+            ("[modules.context]\nwarn_at = nan\n", "modules.context.warn_at"),
+            ("[modules.context]\nwarn_at = -inf\n", "modules.context.warn_at"),
+            ("[modules.context]\nthresholds = [50.0, nan]\n", "modules.context.thresholds"),
+        ] {
+            let (c, errs) = parse(text, &crate::modules::SCHEMAS);
+            let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+            assert_eq!(paths, [path], "{text}");
+            let ctx = c.modules.get("context").unwrap();
+            assert!(ctx.value("warn_at").is_none_or(|v| *v == Value::Float(0.0)), "{text}");
         }
     }
 

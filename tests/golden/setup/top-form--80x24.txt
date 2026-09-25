@@ -1,5 +1,5 @@
 p┌ top level ─────────────────────────────────────────────────────────────────┐i
-▶│  preset          default                     (default)                     │
+>│  preset          default                     (default)                     │
  │* icons           unicode                     (nerd)                        │
 r│  theme           garnish                     (garnish)                     │
 r│  color           auto                        (auto)                        │
