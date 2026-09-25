@@ -157,7 +157,8 @@ pub enum Command {
     },
     /// Wire garnish into Claude Code's settings.json (a backup is kept).
     Install {
-        /// Settings file (default `~/.claude/settings.json`).
+        /// Settings file (default `~/.claude/settings.json`, or
+        /// `$CLAUDE_CONFIG_DIR/settings.json` when that is set).
         #[arg(long, value_name = "FILE")]
         settings: Option<PathBuf>,
         /// `statusLine.refreshInterval` in seconds (Claude Code's minimum is 1).
@@ -214,7 +215,8 @@ pub enum Command {
 /// `garnish skills …`.
 #[derive(Debug, Subcommand)]
 pub enum SkillsAction {
-    /// Write the skills to `<dir>/<name>/SKILL.md` (default `~/.claude/skills`).
+    /// Write the skills to `<dir>/<name>/SKILL.md` (default `~/.claude/skills`,
+    /// or `$CLAUDE_CONFIG_DIR/skills` when that is set).
     Install {
         /// Target directory.
         #[arg(long, value_name = "DIR")]
