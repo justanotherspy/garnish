@@ -1559,7 +1559,13 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   regular file of at most 64 KiB (a FIFO would block the tick in `open`;
   locks are read the same way). The error text, and `fetch_error`, are
   plain text of at most 500 characters: control characters and escape
-  sequences are dropped, since `doctor` prints them to a terminal. Written
+  sequences are dropped, since `doctor` prints them to a terminal. A
+  refresh whose entry would not read back as itself (a value holding a line
+  break, a file past 64 KiB) is stored as a failed entry naming the value
+  (review 2026-09-25: such an entry never matched what the tick asked for,
+  and every tick spawned a worker); the repository readers already refuse
+  a branch name, `remote` or `merge` value holding a control character or
+  longer than 4096 characters, which git cannot have written. Written
   as `.<module>.tmp.<pid>` in the entry's directory + rename; every
   temporary name is unlinked first and created exclusively, so a link
   planted at one is never followed. `ttl_ms` is informational: freshness is

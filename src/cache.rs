@@ -500,7 +500,9 @@ impl Cache {
         Lookup { entry, fresh, in_progress }
     }
 
-    /// Write an entry atomically. Creates the scope directory on demand.
+    /// Write an entry atomically. Creates the scope directory on demand. An
+    /// entry whose file would not read back as the same entry is stored as
+    /// a failure saying why (`stored_text`).
     ///
     /// The first entry a module writes in a scope also runs the bounded
     /// sweep (SPEC § 6). Only workers write entries, so this keeps the
@@ -525,7 +527,7 @@ impl Cache {
         let _cleanup = TmpFile(tmp.clone());
         {
             let mut f = create_fresh(&tmp)?;
-            f.write_all(entry.to_text().as_bytes())?;
+            f.write_all(stored_text(entry).as_bytes())?;
             f.sync_data().ok();
         }
         fs::rename(&tmp, &path)?;
@@ -641,6 +643,43 @@ impl Cache {
         }
         removed
     }
+}
+
+/// The file [`Cache::write`] stores for `entry`: its text when that reads
+/// back as the same entry, else a failed entry saying why.
+///
+/// A value holding a line break is written with a space, a trailing
+/// carriage return is lost to the reader's line split, and a file past
+/// [`MAX_ENTRY_BYTES`] reads as a miss. Stored as it came, such an entry is
+/// never the one a render's check asks for, or never read at all, and
+/// every tick spawns another worker; a failed entry is fresh for its TTL.
+/// The workers keep their values within these bounds, so this is the belt,
+/// not the rule.
+fn stored_text(entry: &Entry) -> String {
+    let text = entry.to_text();
+    let fits = u64::try_from(text.len()).is_ok_and(|n| n <= MAX_ENTRY_BYTES);
+    let back = Entry::parse(&text);
+    if fits && back.as_ref() == Some(entry) {
+        return text;
+    }
+    // A failure's own text, bounded by `Entry::err`, always reads back.
+    let why = match (entry.status, fits) {
+        (Status::Err, _) => entry.error.clone(),
+        (Status::Ok, false) => {
+            format!("the refresh's values are past the {MAX_ENTRY_BYTES} bytes of an entry")
+        }
+        (Status::Ok, true) => {
+            let changed = entry
+                .values
+                .iter()
+                .find(|(k, v)| back.as_ref().and_then(|b| b.get(k)) != Some(v.as_str()));
+            changed.map_or_else(
+                || "the refresh's values cannot be stored as they are".to_owned(),
+                |(k, _)| format!("{k}: a value the cache entry cannot keep as it is"),
+            )
+        }
+    };
+    Entry { computed_at_ms: entry.computed_at_ms, ..Entry::err(entry.ttl_ms, why) }.to_text()
 }
 
 /// An entry file read and parsed: a miss when it is absent, not a regular
@@ -837,6 +876,50 @@ mod tests {
         cache.write(&scope, "m", &entry).unwrap();
         let back = cache.read(&scope, "m").unwrap();
         assert_eq!(back.error.chars().count(), MAX_ERROR_CHARS);
+    }
+
+    /// An entry is stored only as a file that reads back as the same entry.
+    /// A value holding a line break was written with a space and one past
+    /// the entry's cap was read as a miss, so the tick never found the
+    /// entry the worker meant and spawned another worker on every render
+    /// (review 2026-09-25); such a refresh is stored as a failure, which is
+    /// fresh for its TTL like any other.
+    #[test]
+    fn cache_a_value_the_entry_cannot_carry_is_stored_as_a_failure() {
+        let (_d, cache) = temp();
+        let scope = Scope::Repo("0123456789abcdef".into());
+        let stored = |key: &str, value: String| {
+            let entry = Entry::ok(5_000, [(key.to_owned(), value)].into());
+            cache.write(&scope, "m", &entry).unwrap();
+            let back = cache.read(&scope, "m").expect("the file reads back");
+            assert_eq!(back.computed_at_ms, entry.computed_at_ms);
+            back
+        };
+        for bad in ["ma\nin", "main\r", "\r\n"] {
+            let back = stored("upstream", bad.to_owned());
+            assert_eq!(back.status, Status::Err, "{bad:?}");
+            assert!(back.error.starts_with("upstream: "), "{}", back.error);
+        }
+        let limit = usize::try_from(MAX_ENTRY_BYTES).unwrap();
+        let back = stored("head", "a".repeat(limit));
+        assert_eq!(back.status, Status::Err);
+        assert!(back.error.contains("bytes"), "{}", back.error);
+        // What does round-trip is stored as it is.
+        let back = stored("upstream", "ma\rin \u{1} é".to_owned());
+        assert_eq!((back.status, back.get("upstream")), (Status::Ok, Some("ma\rin \u{1} é")));
+        let back = stored("head", "a".repeat(limit / 2));
+        assert_eq!(back.status, Status::Ok);
+        // A failure whose text would not read back is stored bounded.
+        let raw = Entry {
+            computed_at_ms: 3,
+            ttl_ms: 4,
+            status: Status::Err,
+            values: BTreeMap::new(),
+            error: "two\nlines\r".to_owned(),
+        };
+        cache.write(&scope, "m", &raw).unwrap();
+        let back = cache.read(&scope, "m").unwrap();
+        assert_eq!((back.status, back.error.as_str()), (Status::Err, "two lines "));
     }
 
     /// A stamp in the future is a clock that stepped backwards, not a very

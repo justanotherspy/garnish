@@ -517,6 +517,46 @@ fn worker_a_quoted_upstream_counts_like_any_other() {
     assert!(!out.contains('✗') && !out.contains('"'), "{out}");
 }
 
+/// A `merge` value with a `\n` escape names a ref git cannot have (a ref
+/// name holds no control character). The worker's entry wrote the line
+/// break as a space, the tick compared it with the line break, and no
+/// entry ever matched: a worker on every tick and `⟳` for good (review
+/// 2026-09-25). Such a value is no upstream, and nothing is spawned for it.
+#[test]
+fn worker_an_upstream_with_a_line_break_is_no_upstream() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let config_file = env.work.join(".git").join("config");
+    let text = std::fs::read_to_string(&config_file).unwrap();
+    let hostile = text.replace("merge = refs/heads/main", "merge = \"refs/heads/ma\\nin\"");
+    assert_ne!(hostile, text);
+    std::fs::write(&config_file, hostile).unwrap();
+    let sync_spawns =
+        |env: &Env| spawns(env).iter().filter(|l| l.contains("--module sync")).count();
+    for _ in 0..2 {
+        let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert!(out.contains('\u{f127}') && !out.contains('⟳'), "{out}");
+    }
+    assert_eq!(sync_spawns(&env), 0, "{:?}", spawns(&env));
+}
+
+/// A `HEAD` naming a branch longer than any ref git can write made an entry
+/// past the entry cap, which reads back as a miss: a worker on every tick
+/// (review 2026-09-25). A name past `MAX_BRANCH_CHARS` is no head at all.
+#[test]
+fn worker_a_branch_name_past_the_cap_spawns_nothing() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let name = "a".repeat(65_515);
+    std::fs::write(env.work.join(".git").join("HEAD"), format!("ref: refs/heads/{name}\n"))
+        .unwrap();
+    for _ in 0..2 {
+        let (out, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert!(ok && !out.contains("aaaa") && !out.contains('⟳'), "{out}");
+    }
+    assert!(spawns(&env).is_empty(), "{:?}", spawns(&env));
+}
+
 /// The tick reads the payload's repository from `.git` directly; the
 /// worker's git follows `GIT_DIR` and friends first. A harness started
 /// with one exported (by a hook, an alias) made `sync` count another

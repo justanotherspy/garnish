@@ -143,7 +143,8 @@ pub enum Head {
 }
 
 /// Read HEAD. `None` for reftable repositories, whose `HEAD` file is a
-/// placeholder (`ref: refs/heads/.invalid`) rather than the real head.
+/// placeholder (`ref: refs/heads/.invalid`) rather than the real head, and
+/// for a name git cannot have written (`writable_name`).
 #[must_use]
 pub fn head(dirs: &Dirs) -> Option<Head> {
     if dirs.uses_reftable() {
@@ -153,9 +154,22 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
     let line = text.lines().next()?.trim();
     if let Some(r) = line.strip_prefix("ref:") {
         let r = r.trim();
-        return Some(Head::Branch(r.strip_prefix("refs/heads/").unwrap_or(r).to_owned()));
+        let name = r.strip_prefix("refs/heads/").unwrap_or(r);
+        return writable_name(name).then(|| Head::Branch(name.to_owned()));
     }
-    (!line.is_empty()).then(|| Head::Detached(line.to_owned()))
+    (!line.is_empty() && writable_name(line)).then(|| Head::Detached(line.to_owned()))
+}
+
+/// Whether git could have written `name` as a ref name or a config value
+/// naming one: no ASCII control character (`check-ref-format` refuses
+/// them) and at most [`MAX_BRANCH_CHARS`] characters.
+///
+/// A name that is neither cannot survive the worker's cache entry as it
+/// is (a line break is stored as a space, one past the cap makes an entry
+/// read as a miss), so the tick, comparing the entry with the name it
+/// read, never found it and spawned a worker on every render.
+fn writable_name(name: &str) -> bool {
+    !name.bytes().any(|b| b.is_ascii_control()) && name.chars().nth(MAX_BRANCH_CHARS).is_none()
 }
 
 /// A stamp that changes whenever a reftable repository's refs do, `HEAD`
@@ -178,8 +192,9 @@ pub fn reftable_stamp(dirs: &Dirs) -> Option<String> {
     }
 }
 
-/// Characters of a branch name the worker records: git's own limit on a
-/// ref name is the path length, and the entry has a cap to stay under.
+/// Characters of a branch name (or an upstream's remote or merge value)
+/// garnish takes: git's own limit on a ref name is the path length, and
+/// the worker's cache entry has a cap to stay under.
 const MAX_BRANCH_CHARS: usize = 4096;
 
 /// `HEAD` asked of git, for a repository whose refs are not files
@@ -263,10 +278,10 @@ const MAX_PACKED_REFS_BYTES: u64 = 16 * 1024 * 1024;
 /// suspicious name at all. Resolving both sides and comparing catches every
 /// shape of that. Git has not written a symbolic ref as a symlink since
 /// `core.prefersymlinkrefs` was deprecated, so nothing legitimate is refused.
-/// The [`MAX_REF_BYTES`] cap is also what keeps a hostile `.git/HEAD` from
-/// becoming a branch name the size of the file: `head` takes the whole
-/// first line, and every render that cuts it (`branch.max_length`) works
-/// over its clusters.
+/// The [`MAX_REF_BYTES`] cap bounds the read of a hostile `.git/HEAD`,
+/// and [`head`] refuses a first line past [`MAX_BRANCH_CHARS`], so no
+/// branch name is the size of the file for every render that cuts it
+/// (`branch.max_length`) to walk over its clusters.
 fn read_ref_file(base: &Path, name: &str) -> Option<String> {
     String::from_utf8(read_ref_bytes(base, name, MAX_REF_BYTES)?).ok()
 }
@@ -390,7 +405,8 @@ pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
 
 /// [`upstream`] over the text of a config file: `branch.<name>.remote`
 /// (the last one, as git keeps it) and `branch.<name>.merge` (the first,
-/// which is what `@{upstream}` follows).
+/// which is what `@{upstream}` follows); `None` when either is a value
+/// git cannot have written for a ref ([`writable_name`]).
 fn upstream_in(text: &str, branch: &str) -> Option<(String, String)> {
     let mut remote: Option<String> = None;
     let mut merge: Option<String> = None;
@@ -404,8 +420,8 @@ fn upstream_in(text: &str, branch: &str) -> Option<(String, String)> {
             _ => {}
         }
     }
-    let remote = remote?;
-    let merge = merge?;
+    let remote = remote.filter(|r| writable_name(r))?;
+    let merge = merge.filter(|m| writable_name(m))?;
     let short = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
     if remote == "." {
         return Some((remote, format!("refs/heads/{short}")));
@@ -1344,22 +1360,31 @@ mod tests {
     /// A ref file is one short line, so a huge one is not a ref. The cap is
     /// what stops a hostile `.git/HEAD` becoming a branch name the size of
     /// the file, which every render that cuts it then walks cluster by
-    /// cluster on the tick path.
+    /// cluster on the tick path. A name past [`MAX_BRANCH_CHARS`], or one
+    /// holding a control character, is no head at all: git writes neither,
+    /// and the worker's entry cannot carry either (one is past the entry's
+    /// cap, the other loses its line break), so the tick never found the
+    /// entry it asked for and spawned a worker every time (review
+    /// 2026-09-25).
     #[test]
     fn a_ref_file_is_bounded_so_a_huge_head_cannot_become_a_branch_name() {
         let (_d, work) = repo();
         let dirs = discover(&work).unwrap();
+        let set_head = |text: &str| std::fs::write(work.join(".git/HEAD"), text).unwrap();
         let huge = "a".repeat(usize::try_from(MAX_REF_BYTES).unwrap_or(0) * 2);
-        std::fs::write(work.join(".git/HEAD"), format!("ref: refs/heads/{huge}\n")).unwrap();
-        let name = match head(&dirs) {
-            Some(Head::Branch(n)) => n,
-            other => panic!("expected a branch, got {other:?}"),
-        };
-        assert!(
-            u64::try_from(name.len()).is_ok_and(|n| n <= MAX_REF_BYTES),
-            "the name is {} bytes, past the cap",
-            name.len()
-        );
+        set_head(&format!("ref: refs/heads/{huge}\n"));
+        assert_eq!(head(&dirs), None);
+        let longest = "b".repeat(MAX_BRANCH_CHARS);
+        set_head(&format!("ref: refs/heads/{longest}\n"));
+        assert_eq!(head(&dirs), Some(Head::Branch(longest.clone())));
+        set_head(&format!("ref: refs/heads/{longest}b\n"));
+        assert_eq!(head(&dirs), None);
+        for bad in ["ref: refs/heads/ma\u{1}in\n", "ref: refs/heads/ma\rin\n", "abc\u{7f}def\n"] {
+            set_head(bad);
+            assert_eq!(head(&dirs), None, "{bad:?}");
+        }
+        set_head("ref: refs/heads/é\n");
+        assert_eq!(head(&dirs), Some(Head::Branch("é".into())), "only control characters go");
     }
 
     /// `f` on a thread, or `None` when it has not returned within five
@@ -1541,6 +1566,27 @@ mod tests {
             up("[branch \"a\"]\nremote = .\nmerge = refs/heads/main\n", "a"),
             Some((".".to_owned(), "refs/heads/main".to_owned()))
         );
+    }
+
+    /// A value git cannot have written for a ref (a control character,
+    /// here through the `\n` and `\t` escapes, or a name past
+    /// [`MAX_BRANCH_CHARS`]) is no upstream: the worker's entry cannot
+    /// carry it as it is, so `sync` found no entry for it on any tick and
+    /// spawned a worker on every one (review 2026-09-25).
+    #[test]
+    fn an_upstream_git_cannot_have_written_is_no_upstream() {
+        let up = |remote: &str, merge: &str| {
+            upstream_in(&format!("[branch \"a\"]\nremote = {remote}\nmerge = {merge}\n"), "a")
+        };
+        assert!(up("origin", "refs/heads/a").is_some());
+        assert_eq!(up("origin", "\"refs/heads/ma\\nin\""), None);
+        assert_eq!(up("origin", "refs/heads/ma\\tin"), None);
+        assert_eq!(up("ori\\bgin", "refs/heads/a"), None);
+        assert_eq!(up("origin", "refs/heads/a\u{7f}"), None);
+        let long = "c".repeat(MAX_BRANCH_CHARS);
+        assert!(up("origin", &long).is_some());
+        assert_eq!(up("origin", &format!("{long}c")), None);
+        assert_eq!(up(&format!("{long}c"), "refs/heads/a"), None);
     }
 
     /// The remote comes from the repository's own `.git/config`, so a name
