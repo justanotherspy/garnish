@@ -821,6 +821,30 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// SPEC § 5: an array where an object belongs is absent, like any other
+/// wrong type. serde read a struct from an array by position, so
+/// `rate_limits: []` switched the line to subscription mode, which hides
+/// the cost, and `model: [id, name]` showed the second entry as the name.
+#[test]
+fn an_array_where_an_object_belongs_loses_only_that_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let config = home.join("g.toml");
+    let rows =
+        "[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [\"model\", \"cost\"]\n";
+    std::fs::write(&config, rows).unwrap();
+    let plain = [("NO_COLOR", "1")];
+    let line = |payload: &str| tick(&config, home, payload, &plain);
+    let cost = r#""cost": {"total_cost_usd": 1.5}"#;
+    let base = line(&format!(r#"{{"model": {{"display_name": "Opus"}}, {cost}}}"#));
+    assert!(base.contains("Opus") && base.contains("1.50"), "{base}");
+    let limits =
+        line(&format!(r#"{{"model": {{"display_name": "Opus"}}, {cost}, "rate_limits": []}}"#));
+    assert_eq!(limits, base, "rate_limits: [] is no subscription");
+    let model = line(&format!(r#"{{"model": ["claude-x", "Sonnet"], {cost}}}"#));
+    assert!(!model.contains("Sonnet") && model.contains("1.50"), "{model}");
+}
+
 /// One run of the binary with `args` and a payload piped in, as the
 /// harness runs `statusLine.command`: stdout and the exit code.
 fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<i32>) {

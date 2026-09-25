@@ -1460,7 +1460,9 @@ screen). Otherwise:
   stderr and in the `GARNISH_DEBUG` log (2026-09-25: it was dropped, so
   nothing said where the JSON went wrong);
   any JSON object renders. A known field of the wrong type is absent, alone,
-  and so is a list entry that is not a string and a numeric string that is
+  an array where an object belongs included (serde read such an array field
+  by field by position, so `"rate_limits": []` hid the cost, 2026-09-25
+  review), and so is a list entry that is not a string and a numeric string that is
   not finite (`inf`, `NaN`). (Decided 2026-09-25: a type change on one
   field, which only one badge might read, used to blank every row.) A
   number too large to print sensibly is printed at a bound instead: a
