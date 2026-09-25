@@ -18,13 +18,13 @@ use crate::theme::Theme;
 /// config time and the extras dropped.
 pub const MAX_COLS: usize = 16;
 
-/// Cells between two columns, and the default when nothing says otherwise:
-/// adjacent columns never touch without tuning (SPEC § 4.3).
+/// Most cells a row's `gap` may put between two columns (SPEC § 4.3).
 pub const MAX_GAP: usize = 16;
-/// `gap` when a row does not set it.
+/// `gap` when a row does not set it: adjacent columns never touch without
+/// tuning (SPEC § 4.3).
 pub const DEFAULT_GAP: usize = 1;
 
-/// Spaces on each side of a title, and the default (SPEC § 4.3).
+/// Most spaces `title_pad` may put on each side of a title (SPEC § 4.3).
 pub const MAX_TITLE_PAD: usize = 64;
 /// `title_pad` when a title does not set it.
 pub const DEFAULT_TITLE_PAD: usize = 1;

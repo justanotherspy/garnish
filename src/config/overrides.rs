@@ -647,6 +647,16 @@ mod tests {
                 opt.key
             );
         }
+
+        // sch-11: and unset, each resolves to its spec's default, which is
+        // what the reference and `config init` print: `ModuleCfg::resolve`
+        // spells its own fallbacks, and they must not drift from the specs.
+        let (cfg, errs) = parse("[modules.clock]\n", &crate::modules::SCHEMAS);
+        assert_eq!(errs, Vec::new());
+        let clock = cfg.modules.get("clock").expect("the clock module");
+        for opt in &COMMON_OPTS {
+            assert_eq!(clock.common(opt.key), Some(opt.default.clone()), "`{}` unset", opt.key);
+        }
     }
 
     /// SPEC § 3 `hide`: every state is checked against the schema's measure,

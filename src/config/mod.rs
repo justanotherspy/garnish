@@ -239,9 +239,12 @@ pub const MAX_WIDTH: usize = 4096;
 /// the reference; the renderers clamp again.
 pub const MAX_CELLS: usize = 1024;
 
-/// Longest string a config may put on a row (`text`, `gap`, `ticker_gap`),
-/// in characters: a status line, not a document. The schema `max` of the
-/// module options; `ticker_gap` is checked by hand.
+/// Longest string a config may put on a row, in characters: a status line,
+/// not a document.
+///
+/// It caps a text module's `text`, `gap` and `url`, `label`, `prefix`,
+/// `suffix`, a row or box `title` and `ticker_gap`: the schema `max` of the
+/// module options, checked by hand for `title` and `ticker_gap`.
 pub const MAX_TEXT_CHARS: usize = 4096;
 
 /// Most decimal places a money amount prints with (`cost.decimals`): the
@@ -280,7 +283,8 @@ pub struct Config {
     pub hide_empty_rows: bool,
     /// Truncate or scroll a left group wider than its budget.
     pub overflow: Overflow,
-    /// Cells the ticker advances per tick (`> 0`; 0.5 = every second tick).
+    /// Cells the ticker advances per tick (within [`STEP_RANGE`]; 0.5 =
+    /// every second tick).
     pub ticker_step: f64,
     /// Text between the end of a scrolled group and its wrapped-around start.
     pub ticker_gap: String,
@@ -585,12 +589,6 @@ impl Config {
             .saturating_sub(HARNESS_PADDING)
             .saturating_sub(self.padding)
             .max(MIN_WIDTH)
-    }
-
-    /// Separator for a row.
-    #[must_use]
-    pub fn separator<'a>(&'a self, row: &'a RowCfg) -> &'a str {
-        row.separator.as_deref().unwrap_or(&self.frame.chars.separator)
     }
 
     /// Separator for a row at animation frame `frame`: the row's own
@@ -973,7 +971,7 @@ format = "12h"
         assert!(!c.frame.fill);
         assert_eq!(c.frame.chars.separator, " | ");
         assert_eq!(c.rows.len(), 1);
-        assert_eq!(c.separator(&c.rows[0]), "  ");
+        assert_eq!(c.separator_at(&c.rows[0], 0), "  ");
         let path = c.modules.get("path").unwrap();
         assert_eq!(path.preset, Preset::Full);
         assert_eq!(path.int("depth"), 3);
