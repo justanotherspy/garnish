@@ -212,27 +212,41 @@ impl App {
             app.draft.materialise_rows_as_read();
         }
         app.builder.rebuild(&app.draft);
-        if let Some(problem) = app.draft.unreadable() {
-            app.say(
-                format!("the file does not parse ({problem}); opened on the defaults, and s will not overwrite it"),
-                Level::Error,
-            );
-        } else if has_file && !app.problems.is_empty() {
-            app.say(
-                format!(
-                    "{}; a save keeps the key as written (d in its form unsets it)",
-                    app.first_problem()
-                ),
-                Level::Warn,
-            );
-        } else if has_file && app.draft.loses_comments() {
-            // Said before anything is lost, and short enough for 80 columns.
-            app.say(
-                "this file has comments: s writes it without them (its backup keeps them)".into(),
-                Level::Info,
-            );
+        if let Some((note, level)) = app.opening_note().filter(|_| has_file) {
+            app.say(note, level);
         }
         app
+    }
+
+    /// What the status bar says about a file just opened or reloaded: that
+    /// it does not parse, its first problem, or that it has comments a save
+    /// drops (said before anything is lost, and short enough for 80
+    /// columns).
+    fn opening_note(&self) -> Option<(String, Level)> {
+        if let Some(problem) = self.draft.unreadable() {
+            return Some((
+                format!(
+                    "the file does not parse ({problem}); opened on the defaults, and s will not overwrite it"
+                ),
+                Level::Error,
+            ));
+        }
+        if !self.problems.is_empty() {
+            return Some((
+                format!(
+                    "{}; a save keeps the key as written (d in its form unsets it)",
+                    self.first_problem()
+                ),
+                Level::Warn,
+            ));
+        }
+        self.draft.loses_comments().then(|| {
+            (
+                "this file has comments: s writes it without them (its backup keeps them)"
+                    .to_owned(),
+                Level::Info,
+            )
+        })
     }
 
     /// Whether the screen asked to quit.

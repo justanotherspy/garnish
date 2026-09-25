@@ -374,9 +374,10 @@ impl Draft {
     }
 
     /// Re-read the file, dropping the draft's edits (the "reload" answer of
-    /// the change check).
+    /// the change check), and write a preset's rows out as opening does.
     pub fn reload(&mut self) {
         *self = Self::open(self.path.clone());
+        self.materialise_rows_as_read();
     }
 
     /// Whether any row, column or inner row names the box.

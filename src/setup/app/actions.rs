@@ -303,10 +303,19 @@ impl App {
                 } else {
                     self.draft.reload();
                     self.refresh();
-                    self.say(
-                        "reloaded from disk; the edits were dropped (u takes them back)".into(),
-                        Level::Info,
+                    let (line, level) = self.opening_note().map_or_else(
+                        || {
+                            (
+                                "reloaded from disk; the edits were dropped (u takes them back)"
+                                    .to_owned(),
+                                Level::Info,
+                            )
+                        },
+                        |(note, level)| {
+                            (format!("reloaded (u takes the edits back): {note}"), level)
+                        },
                     );
+                    self.say(line, level);
                 }
             }
             Question::DropText(name) => {

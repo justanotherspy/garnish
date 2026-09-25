@@ -1117,6 +1117,29 @@ fn deleting_a_boxs_last_member_drops_the_box() {
     assert!(app.status().unwrap().contains("[box.repo] dropped"), "{:?}", app.status());
 }
 
+/// app-10, frm-08: a reload opens the file the way a start does: a file
+/// naming only a preset lists that preset's rows, and one that stopped
+/// parsing says so.
+#[test]
+fn a_reload_opens_the_file_as_a_start_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "<right>x");
+    std::fs::write(&file, "preset = \"compact\"\n").unwrap();
+    keys(&mut app, "sn");
+    assert_eq!(app.draft().rows().len(), 2, "{:?}", app.status());
+    assert!(!app.draft().is_dirty());
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.contains("row 1") && shot.contains("row 2"), "{shot}");
+    keys(&mut app, "<right>x");
+    std::fs::write(&file, "theme = \n").unwrap();
+    keys(&mut app, "sn");
+    assert!(app.status().unwrap().contains("does not parse"), "{:?}", app.status());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
