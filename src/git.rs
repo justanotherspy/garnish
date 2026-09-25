@@ -18,8 +18,6 @@ pub struct Dirs {
     pub git_dir: PathBuf,
     /// The shared git directory (`git_dir` for the main worktree).
     pub common_dir: PathBuf,
-    /// True inside a linked worktree.
-    pub linked_worktree: bool,
 }
 
 impl Dirs {
@@ -40,6 +38,15 @@ impl Dirs {
 }
 
 /// Locate the repository containing `path` by walking up to the root.
+///
+/// A `.git` *file* (a linked worktree, a submodule) names its git
+/// directory, and a `commondir` file inside that names the shared one.
+/// Both come from the checkout, which is not the user's file, and every
+/// later read is contained in the directories they name, so each must be a
+/// git directory by git's own test ([`is_git_directory`]) before it is
+/// used: a `.git` file naming anything else is no repository (git says
+/// "not a git repository" there too), and a `commondir` naming anything
+/// else is ignored.
 #[must_use]
 pub fn discover(path: &Path) -> Option<Dirs> {
     let mut dir = if path.is_dir() { path.to_path_buf() } else { path.parent()?.to_path_buf() };
@@ -47,17 +54,11 @@ pub fn discover(path: &Path) -> Option<Dirs> {
         let dot = dir.join(".git");
         if dot.is_dir() {
             let common = common_dir(&dot);
-            let linked = common != dot;
-            return Some(Dirs {
-                toplevel: dir,
-                git_dir: dot,
-                common_dir: common,
-                linked_worktree: linked,
-            });
+            return Some(Dirs { toplevel: dir, git_dir: dot, common_dir: common });
         }
         if dot.is_file() {
-            let text = std::fs::read_to_string(&dot).ok()?;
-            let target = text.trim().strip_prefix("gitdir:")?.trim();
+            let text = String::from_utf8(read_bounded(&dot, MAX_REF_BYTES)?).ok()?;
+            let target = text.lines().next()?.trim().strip_prefix("gitdir:")?.trim();
             let git_dir = if Path::new(target).is_absolute() {
                 PathBuf::from(target)
             } else {
@@ -65,29 +66,56 @@ pub fn discover(path: &Path) -> Option<Dirs> {
             };
             let git_dir = normalize(&git_dir);
             let common = common_dir(&git_dir);
-            return Some(Dirs {
-                toplevel: dir,
-                linked_worktree: common != git_dir,
-                git_dir,
-                common_dir: common,
-            });
+            if !is_git_directory(&git_dir, &common) {
+                return None;
+            }
+            return Some(Dirs { toplevel: dir, git_dir, common_dir: common });
         }
         dir = dir.parent()?.to_path_buf();
     }
     None
 }
 
+/// The shared git directory `git_dir/commondir` names, or `git_dir` itself
+/// when there is no such file, it cannot be read as a short regular file,
+/// or what it names has no `objects/` and `refs/` of its own.
 fn common_dir(git_dir: &Path) -> PathBuf {
-    let Ok(text) = std::fs::read_to_string(git_dir.join("commondir")) else {
-        return git_dir.to_path_buf();
-    };
-    let target = text.trim();
-    if target.is_empty() {
-        return git_dir.to_path_buf();
-    }
-    let p =
-        if Path::new(target).is_absolute() { PathBuf::from(target) } else { git_dir.join(target) };
-    normalize(&p)
+    let named = read_bounded(&git_dir.join("commondir"), MAX_REF_BYTES)
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .and_then(|text| {
+            let target = text.lines().next()?.trim().to_owned();
+            (!target.is_empty()).then(|| {
+                normalize(&if Path::new(&target).is_absolute() {
+                    PathBuf::from(target)
+                } else {
+                    git_dir.join(target)
+                })
+            })
+        });
+    named.filter(|common| has_object_store(common)).unwrap_or_else(|| git_dir.to_path_buf())
+}
+
+/// git's `is_git_directory` (setup.c), by `stat` alone: a `HEAD` in the
+/// per-worktree directory and an object store in the common one.
+fn is_git_directory(git_dir: &Path, common: &Path) -> bool {
+    git_dir.join("HEAD").is_file() && has_object_store(common)
+}
+
+/// The half of [`is_git_directory`] a common directory answers for.
+fn has_object_store(common: &Path) -> bool {
+    common.join("objects").is_dir() && common.join("refs").is_dir()
+}
+
+/// At most `max` bytes of the regular file at `path`, or `None` when
+/// there is none or it is not one.
+///
+/// Every file under `.git` is read through here. `open` on a FIFO waits
+/// for a writer that never comes, and a link to `/dev/zero` never ends;
+/// an archive can carry either, and the tick would repeat the read every
+/// second. [`crate::claude_settings::read_regular`] refuses what is not a
+/// regular file before opening it and stops at the cap.
+fn read_bounded(path: &Path, max: u64) -> Option<Vec<u8>> {
+    crate::claude_settings::read_regular(path, max).ok().flatten()
 }
 
 /// Collapse `.` and `..` components without touching the filesystem.
@@ -153,6 +181,25 @@ fn joinable_ref(name: &str) -> bool {
         && name.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
+/// Where a symbolic ref may point, as git's `refname_is_safe` has it: under
+/// `refs/`, or a one-level pseudo-ref in capitals (`HEAD`, `FETCH_HEAD`).
+///
+/// [`joinable_ref`] keeps a hop inside the git directory; this keeps it to
+/// the files git itself would follow, so `ref: config` or `ref: key` in a
+/// directory a hostile `commondir` named is not read as a commit id.
+fn safe_symref(name: &str) -> bool {
+    name.starts_with("refs/")
+        || (!name.is_empty() && name.bytes().all(|b| b.is_ascii_uppercase() || b == b'_'))
+}
+
+/// Bytes of a ref file read: one short line, so anything near this is not
+/// one (see [`read_ref_file`]).
+const MAX_REF_BYTES: u64 = 64 * 1024;
+
+/// `packed-refs` is a real file in a real repository and a large one in a
+/// big repository, so its bound is generous where a ref's is tight.
+const MAX_PACKED_REFS_BYTES: u64 = 16 * 1024 * 1024;
+
 /// Read a ref file, but only when it really is inside the git directory.
 ///
 /// [`joinable_ref`] keeps `..` out of the *name*; this keeps the *file* in,
@@ -162,16 +209,10 @@ fn joinable_ref(name: &str) -> bool {
 /// suspicious name at all. Resolving both sides and comparing catches every
 /// shape of that. Git has not written a symbolic ref as a symlink since
 /// `core.prefersymlinkrefs` was deprecated, so nothing legitimate is refused.
-/// A ref file holds one short line, so anything near this is not one. The
-/// cap is also what keeps a hostile `.git/HEAD` from becoming a branch name
-/// the size of the file: `head` takes the whole first line, and every render
-/// that cuts it (`branch.max_length`) works over its clusters.
-const MAX_REF_BYTES: u64 = 64 * 1024;
-
-/// `packed-refs` is a real file in a real repository and a large one in a
-/// big repository, so its bound is generous where a ref's is tight.
-const MAX_PACKED_REFS_BYTES: u64 = 16 * 1024 * 1024;
-
+/// The [`MAX_REF_BYTES`] cap is also what keeps a hostile `.git/HEAD` from
+/// becoming a branch name the size of the file: `head` takes the whole
+/// first line, and every render that cuts it (`branch.max_length`) works
+/// over its clusters.
 fn read_ref_file(base: &Path, name: &str) -> Option<String> {
     String::from_utf8(read_ref_bytes(base, name, MAX_REF_BYTES)?).ok()
 }
@@ -188,34 +229,34 @@ fn read_ref_bytes(base: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
 /// times on a warm tick, where the old code did none. It is resolved once
 /// per directory and only the target is resolved per read.
 fn read_under(root: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
-    use std::io::Read as _;
     let path = root.join(name).canonicalize().ok()?;
     if !path.starts_with(root) {
         return None;
     }
-    let mut bytes = Vec::new();
-    std::fs::File::open(&path).ok()?.take(max).read_to_end(&mut bytes).ok()?;
-    Some(bytes)
+    read_bounded(&path, max)
 }
 
 /// Resolve a full ref name (`refs/heads/main`) to a commit id.
 ///
 /// Loose refs are tried first, then `packed-refs`. `None` for reftable
-/// repositories, unknown refs, and symbolic-ref chains longer than five
-/// (cycles included), matching git's own limit.
+/// repositories, unknown refs, symbolic-ref chains longer than five
+/// (cycles included), matching git's own limit, and a hop to anything git
+/// would not follow ([`safe_symref`]).
 #[must_use]
 pub fn resolve_ref(dirs: &Dirs, refname: &str) -> Option<String> {
     if dirs.uses_reftable() {
         return None;
     }
-    // Resolved once for the whole walk, not once per hop per directory.
-    let roots: Vec<PathBuf> = [&dirs.git_dir, &dirs.common_dir]
+    // Resolved once for the whole walk, not once per hop per directory; a
+    // main worktree's two directories are one.
+    let mut roots: Vec<PathBuf> = [&dirs.git_dir, &dirs.common_dir]
         .into_iter()
         .filter_map(|d| d.canonicalize().ok())
         .collect();
+    roots.dedup();
     let mut name = refname.to_owned();
     for _ in 0..SYMREF_MAX_DEPTH {
-        if !joinable_ref(&name) {
+        if !joinable_ref(&name) || !safe_symref(&name) {
             return None;
         }
         let mut next: Option<String> = None;
@@ -263,11 +304,13 @@ fn packed_ref(dirs: &Dirs, refname: &str) -> Option<String> {
         })
 }
 
-/// The HEAD commit id, if it can be read without git.
+/// The commit id `head` (what [`head`] read) points at, if it can be read
+/// without git. The head is passed in so a tick that read it once reads
+/// the same one everywhere, even while a checkout rewrites `HEAD`.
 #[must_use]
-pub fn head_commit(dirs: &Dirs) -> Option<String> {
-    match head(dirs)? {
-        Head::Detached(sha) => Some(sha),
+pub fn head_commit(dirs: &Dirs, head: &Head) -> Option<String> {
+    match head {
+        Head::Detached(sha) => Some(sha.clone()),
         Head::Branch(name) => resolve_ref(dirs, &format!("refs/heads/{name}")),
     }
 }
@@ -594,19 +637,24 @@ mod tests {
         (dir, work)
     }
 
+    /// HEAD's commit, read the way the tick reads it.
+    fn commit_of(dirs: &Dirs) -> Option<String> {
+        head(dirs).and_then(|h| head_commit(dirs, &h))
+    }
+
     #[test]
     fn discovers_dirs_head_upstream_and_commit() {
         let (_d, work) = repo();
         let dirs =
             discover(&work.join("sub").join("deeper")).unwrap_or_else(|| discover(&work).unwrap());
         assert_eq!(dirs.toplevel, work);
-        assert!(!dirs.linked_worktree);
+        assert_eq!(dirs.common_dir, dirs.git_dir);
         assert_eq!(head(&dirs), Some(Head::Branch("main".into())));
         assert_eq!(
             upstream(&dirs, "main"),
             Some(("origin".into(), "refs/remotes/origin/main".into()))
         );
-        let sha = head_commit(&dirs).unwrap();
+        let sha = commit_of(&dirs).unwrap();
         assert_eq!(sha.len(), 40);
         assert_eq!(resolve_ref(&dirs, "refs/remotes/origin/main"), Some(sha.clone()));
         // packed refs still resolve
@@ -664,7 +712,7 @@ mod tests {
         let wt = d.path().join("wt");
         git(&work, &["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()]);
         let dirs = discover(&wt).unwrap();
-        assert!(dirs.linked_worktree);
+        assert_ne!(dirs.common_dir, dirs.git_dir);
         assert_eq!(dirs.toplevel, wt);
         // git reports the common dir canonicalised; on macOS the temp dir
         // sits behind the `/var` → `/private/var` symlink.
@@ -673,7 +721,7 @@ mod tests {
             work.join(".git").canonicalize().unwrap()
         );
         assert_eq!(head(&dirs), Some(Head::Branch("feature".into())));
-        assert!(head_commit(&dirs).is_some());
+        assert!(commit_of(&dirs).is_some());
         assert_ne!(dirs.cache_key(), discover(&work).unwrap().cache_key());
         git(&work, &["checkout", "-q", "--detach"]);
         let main = discover(&work).unwrap();
@@ -688,10 +736,10 @@ mod tests {
         assert_eq!(resolve_ref(&dirs, "refs/heads/loop"), None);
         std::fs::write(work.join(".git/refs/heads/a"), "ref: refs/heads/b\n").unwrap();
         std::fs::write(work.join(".git/refs/heads/b"), "ref: refs/heads/main\n").unwrap();
-        assert_eq!(resolve_ref(&dirs, "refs/heads/a"), head_commit(&dirs));
+        assert_eq!(resolve_ref(&dirs, "refs/heads/a"), commit_of(&dirs));
         std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/loop\n").unwrap();
         assert_eq!(head(&dirs), Some(Head::Branch("loop".into())));
-        assert_eq!(head_commit(&dirs), None);
+        assert_eq!(commit_of(&dirs), None);
 
         let rt = tmp.path().join("rt");
         let out = Command::new("git")
@@ -735,11 +783,11 @@ mod tests {
         // `.git/refs/heads/../../../secret.txt` is `<work>/secret.txt`.
         std::fs::write(work.join(".git/HEAD"), "ref: ../../../secret.txt\n").unwrap();
         assert_eq!(head(&dirs), Some(Head::Branch("../../../secret.txt".into())));
-        assert_eq!(head_commit(&dirs), None, "the file must not be read");
+        assert_eq!(commit_of(&dirs), None, "the file must not be read");
         // Nor through a symbolic-ref hop.
         std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/hop\n").unwrap();
         std::fs::write(work.join(".git/refs/heads/hop"), "ref: ../../../secret.txt\n").unwrap();
-        assert_eq!(head_commit(&dirs), None, "the file must not be read through a hop");
+        assert_eq!(commit_of(&dirs), None, "the file must not be read through a hop");
     }
 
     /// The name rule is not the whole of it: the same archive that carries a
@@ -764,7 +812,7 @@ mod tests {
         // 2. HEAD is honest and the ref it names is a link.
         std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
         link(&work.join(".git/refs/heads/main"), &secret);
-        assert_eq!(head_commit(&dirs), None, "a linked ref must not be read");
+        assert_eq!(commit_of(&dirs), None, "a linked ref must not be read");
 
         // 3. Nothing on the path is suspicious and a *directory* is the link.
         std::fs::remove_file(work.join(".git/refs/heads/main")).unwrap();
@@ -776,7 +824,7 @@ mod tests {
         //    so a link there is the same door.
         let (_d2, work2) = repo();
         let dirs2 = discover(&work2).unwrap();
-        let sha = head_commit(&dirs2).unwrap();
+        let sha = commit_of(&dirs2).unwrap();
         git(&work2, &["pack-refs", "--all"]);
         assert_eq!(resolve_ref(&dirs2, "refs/heads/main"), Some(sha), "packed refs still resolve");
         let elsewhere = work2.join("packed-elsewhere");
@@ -804,6 +852,110 @@ mod tests {
             "the name is {} bytes, past the cap",
             name.len()
         );
+    }
+
+    /// `f` on a thread, or `None` when it has not returned within five
+    /// seconds: the shape of a read that blocks for ever.
+    fn within_5s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(Duration::from_secs(5)).ok()
+    }
+
+    /// Every file under `.git` is read on the tick path, so none may block
+    /// or read without bound: `open` on a FIFO waits for a writer that never
+    /// comes, and a `commondir` linked to `/dev/zero` reads until the
+    /// allocation fails. An archive carries both (tar extracts FIFOs for
+    /// anyone), and the tick repeats the read every second.
+    #[test]
+    fn a_fifo_or_an_endless_file_under_git_never_blocks_a_read() {
+        let fifo = crate::claude_settings::tests::fifo;
+        let (_d, work) = repo();
+        let git_dir = work.join(".git");
+
+        // 1. HEAD is a FIFO.
+        std::fs::rename(git_dir.join("HEAD"), git_dir.join("HEAD.real")).unwrap();
+        if fifo(&git_dir.join("HEAD")).is_none() {
+            return;
+        }
+        let dirs = discover(&work).unwrap();
+        let d = dirs.clone();
+        assert_eq!(within_5s(move || head(&d)), Some(None), "a FIFO HEAD must not block");
+        std::fs::remove_file(git_dir.join("HEAD")).unwrap();
+        std::fs::rename(git_dir.join("HEAD.real"), git_dir.join("HEAD")).unwrap();
+
+        // 2. `packed-refs` is a FIFO: the fallback of every absent loose ref.
+        fifo(&git_dir.join("packed-refs")).unwrap();
+        let d = dirs.clone();
+        assert_eq!(within_5s(move || resolve_ref(&d, "refs/heads/nope")), Some(None));
+        std::fs::remove_file(git_dir.join("packed-refs")).unwrap();
+
+        // 3. `config` is a FIFO.
+        std::fs::rename(git_dir.join("config"), git_dir.join("config.real")).unwrap();
+        fifo(&git_dir.join("config")).unwrap();
+        assert_eq!(within_5s(move || upstream(&dirs, "main")), Some(None));
+        std::fs::remove_file(git_dir.join("config")).unwrap();
+        std::fs::rename(git_dir.join("config.real"), git_dir.join("config")).unwrap();
+
+        // 4. `commondir` is a FIFO, then a link to an endless file.
+        fifo(&git_dir.join("commondir")).unwrap();
+        let w = work.clone();
+        let found = within_5s(move || discover(&w)).expect("discover blocked on a FIFO commondir");
+        assert_eq!(found.map(|d| d.common_dir), Some(git_dir.clone()));
+        std::fs::remove_file(git_dir.join("commondir")).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", git_dir.join("commondir")).unwrap();
+        let w = work.clone();
+        let found = within_5s(move || discover(&w)).expect("discover read /dev/zero");
+        assert_eq!(found.map(|d| d.common_dir), Some(git_dir.clone()));
+        std::fs::remove_file(git_dir.join("commondir")).unwrap();
+
+        // 5. A linked worktree's `.git` file is bounded too: a sparse one of
+        //    64 GiB is not a gitdir line.
+        let wt = work.parent().unwrap().join("wt");
+        git(&work, &["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()]);
+        let dot = std::fs::File::options().write(true).open(wt.join(".git")).unwrap();
+        dot.set_len(1 << 36).unwrap();
+        let found = within_5s(move || discover(&wt)).expect("a huge .git file was read whole");
+        // Canonicalised: macOS's temp dir sits behind `/var` → `/private/var`.
+        let common = found.and_then(|d| d.common_dir.canonicalize().ok());
+        assert_eq!(common, git_dir.canonicalize().ok(), "the gitdir line still counts");
+    }
+
+    /// The containment rule is relative to directories the checkout names
+    /// itself (`commondir`, a `.git` file's `gitdir:`), so those must be git
+    /// directories before anything is read under them, and a symbolic ref
+    /// may only point where git lets one point: `refs/…` or a pseudo-ref.
+    /// Otherwise `commondir: /home/u/.ssh` plus a ref `ref: id_ed25519`
+    /// renders the key's first line as a short SHA.
+    #[test]
+    fn a_commondir_or_gitdir_that_is_not_a_git_directory_is_never_read() {
+        let (d, work) = repo();
+        let secret = d.path().join("secret");
+        std::fs::create_dir_all(&secret).unwrap();
+        std::fs::write(secret.join("key"), "SECRETVALUE\n").unwrap();
+        let git_dir = work.join(".git");
+        std::fs::write(git_dir.join("commondir"), format!("{}\n", secret.display())).unwrap();
+        std::fs::write(git_dir.join("refs/heads/x"), "ref: key\n").unwrap();
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/x\n").unwrap();
+        let dirs = discover(&work).unwrap();
+        assert_ne!(dirs.common_dir, secret, "a commondir without objects/ and refs/ is refused");
+        assert_eq!(head_commit(&dirs, &Head::Branch("x".into())), None);
+        // The hop is refused even where the directory is a real one: `key`
+        // is neither under `refs/` nor a pseudo-ref.
+        std::fs::remove_file(git_dir.join("commondir")).unwrap();
+        std::fs::write(git_dir.join("key"), "SECRETVALUE\n").unwrap();
+        assert_eq!(resolve_ref(&dirs, "refs/heads/x"), None);
+        assert!(safe_symref("refs/heads/main") && safe_symref("HEAD") && safe_symref("FETCH_HEAD"));
+        assert!(!safe_symref("key") && !safe_symref("Head") && !safe_symref(""));
+
+        // A `.git` file naming a directory that is not a git directory is
+        // no repository at all, as git says.
+        let fake = d.path().join("fake");
+        std::fs::create_dir_all(&fake).unwrap();
+        std::fs::write(fake.join(".git"), format!("gitdir: {}\n", secret.display())).unwrap();
+        assert_eq!(discover(&fake), None);
     }
 
     /// The remote comes from the repository's own `.git/config`, so a name
@@ -886,7 +1038,7 @@ mod tests {
     fn packed_refs_scan_handles_peeled_tags_and_stops_at_first_match() {
         let (_d, work) = repo();
         let dirs = discover(&work).unwrap();
-        let sha = head_commit(&dirs).unwrap();
+        let sha = commit_of(&dirs).unwrap();
         git(&work, &["tag", "-a", "-m", "t", "v1"]);
         git(&work, &["pack-refs", "--all"]);
         let packed = std::fs::read_to_string(work.join(".git/packed-refs")).unwrap();

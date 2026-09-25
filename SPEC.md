@@ -1391,7 +1391,16 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   files older than 1 h); `garnish gc` for manual runs.
 - **No child process on a warm tick.** Branch/upstream/HEAD are read from
   `.git` files (loose refs, `packed-refs` scanned as bytes with early exit,
-  worktree `gitdir`, symref chains capped at 5); reftable repos report no
+  worktree `gitdir`, symref chains capped at 5). Every such read is a
+  bounded read of a regular file (a FIFO or a link to `/dev/zero` is
+  refused, not opened: an archive can carry either and the tick repeats
+  the read every second), contained in the git directory, and a symbolic
+  ref may only point under `refs/` or at a capitalised pseudo-ref, as git's
+  own `refname_is_safe` has it; a `.git` file's `gitdir:` and a `commondir`
+  count only when they name a git directory by git's test (a `HEAD`, an
+  `objects/` and a `refs/`), since the containment is relative to them
+  (review 2026-09-25: `commondir: ~/.ssh` rendered a key's first line as
+  the SHA). Reftable repos report no
   head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
   worker only through `git::run_program` (pipes drained on threads, kill on
   timeout: 2 s for local commands, 20 s for `fetch`, `GIT_TERMINAL_PROMPT=0`).

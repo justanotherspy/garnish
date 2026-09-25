@@ -214,6 +214,9 @@ pub struct Ctx<'a> {
     pub animate: bool,
     /// The repository for the payload's directory, discovered at most once.
     pub dirs: std::cell::OnceCell<Option<crate::git::Dirs>>,
+    /// That repository's `HEAD`, read at most once, so `branch` and `sync`
+    /// agree on it even while a checkout rewrites the file.
+    pub head: std::cell::OnceCell<Option<crate::git::Head>>,
     /// Claude Code's settings files this tick may read (SPEC § 2.3, § 4.2),
     /// highest precedence first: the chain of the directory Claude Code was
     /// launched in (not whatever subdirectory the session moved to) and the
@@ -355,6 +358,14 @@ impl Ctx<'_> {
                 })?
             })
             .as_ref()
+    }
+
+    /// Where [`Ctx::git_dirs`]'s `HEAD` points, read on first use: `None`
+    /// outside a repository and where the file cannot be read (a reftable
+    /// repository, a refused link).
+    #[must_use]
+    pub fn git_head(&self) -> Option<&crate::git::Head> {
+        self.head.get_or_init(|| self.git_dirs().and_then(crate::git::head)).as_ref()
     }
 
     /// Look a cached module up and, when it is stale and nobody is refreshing
@@ -1014,6 +1025,7 @@ mod tests {
             format: FormatCfg::default(),
             animate: false,
             dirs: std::cell::OnceCell::new(),
+            head: std::cell::OnceCell::new(),
             settings_files: Vec::new(),
             settings: std::cell::OnceCell::new(),
             workers: false,

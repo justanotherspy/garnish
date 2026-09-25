@@ -318,24 +318,38 @@ pub fn open_regular(path: &Path) -> std::io::Result<Option<std::fs::File>> {
     std::fs::File::open(path).map(Some)
 }
 
+/// At most `limit` bytes of the regular file at `path`.
+///
+/// [`open_regular`] followed by a bounded read: the one way garnish reads
+/// a file it does not own on a timer (settings files, `.claude.json`, every
+/// file under `.git`, cache entries). `Ok(None)` when there is nothing at
+/// `path`. A caller that must tell an over-long file from one at its cap
+/// asks for one byte more and compares.
+///
+/// # Errors
+/// The metadata, open or read error, or one saying the path is not a
+/// regular file.
+pub fn read_regular(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read as _;
+    let Some(file) = open_regular(path)? else { return Ok(None) };
+    let mut bytes = Vec::new();
+    file.take(limit).read_to_end(&mut bytes)?;
+    Ok(Some(bytes))
+}
+
 /// Read one settings file of the chain, at most [`MAX_SETTINGS_BYTES`] of it.
 #[must_use]
 pub fn read_file(path: &Path) -> FileState {
-    use std::io::Read as _;
-    let file = match open_regular(path) {
-        Ok(Some(file)) => file,
-        Ok(None) => return FileState::Absent,
-        Err(e) => return FileState::Unreadable(e.to_string()),
-    };
     // Bytes first, then UTF-8: reading straight into a `String` validates
     // the *truncated* stream, so a file over the cap whose cut lands inside
     // a multi-byte character failed as "unreadable: stream did not contain
     // valid UTF-8" and sent the reader looking for corruption that was not
     // there. One byte past the cap tells an over-long file from one at it.
-    let mut bytes = Vec::new();
-    if let Err(e) = file.take(MAX_SETTINGS_BYTES.saturating_add(1)).read_to_end(&mut bytes) {
-        return FileState::Unreadable(e.to_string());
-    }
+    let bytes = match read_regular(path, MAX_SETTINGS_BYTES.saturating_add(1)) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return FileState::Absent,
+        Err(e) => return FileState::Unreadable(e.to_string()),
+    };
     if u64::try_from(bytes.len()).is_ok_and(|n| n > MAX_SETTINGS_BYTES) {
         return FileState::Invalid(format!(
             "longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"

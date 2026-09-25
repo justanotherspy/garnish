@@ -484,9 +484,9 @@ impl Module for BranchModule {
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let dirs = ctx.git_dirs();
-        let head = dirs.and_then(git::head);
+        let head = ctx.git_head();
         let (name, detached) =
-            match (&head, ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref())) {
+            match (head, ctx.payload.worktree.as_ref().and_then(|w| w.branch.as_deref())) {
                 (Some(Head::Branch(b)), _) => (b.clone(), false),
                 (Some(Head::Detached(sha)), _) => (short_sha(sha), true),
                 (None, Some(b)) => (b.to_owned(), false),
@@ -511,7 +511,8 @@ impl Module for BranchModule {
         segs.push(name_seg);
         if cfg.bool("show_sha")
             && !detached
-            && let Some(sha) = dirs.and_then(git::head_commit)
+            && let (Some(d), Some(h)) = (dirs, head)
+            && let Some(sha) = git::head_commit(d, h)
         {
             segs.push(seg(cfg, format!(" {}", short_sha(&sha)), "sha"));
         }
@@ -627,9 +628,9 @@ impl Module for SyncModule {
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
         let Some(dirs) = ctx.git_dirs() else { return Rendered::empty() };
-        let Some(Head::Branch(branch)) = git::head(dirs) else { return Rendered::empty() };
+        let Some(Head::Branch(branch)) = ctx.git_head() else { return Rendered::empty() };
         let mut segs: Vec<Segment> = Vec::new();
-        let Some((_remote, tracking)) = git::upstream(dirs, &branch) else {
+        let Some((_remote, tracking)) = git::upstream(dirs, branch) else {
             if !cfg.icon("no_upstream").is_empty() {
                 segs.push(seg(cfg, cfg.icon("no_upstream"), "upstream"));
             }

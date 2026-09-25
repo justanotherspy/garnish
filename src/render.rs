@@ -274,6 +274,7 @@ pub fn render_tree_at(
         format: config.format,
         animate: false,
         dirs: std::cell::OnceCell::new(),
+        head: std::cell::OnceCell::new(),
         settings_files: clock.settings_files(payload),
         settings: clock
             .settings_keys
