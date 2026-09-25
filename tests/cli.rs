@@ -9,6 +9,8 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use rayon::prelude::*;
+
 fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, bool) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
     // The working directory is the test's own, not the checkout: `config
@@ -679,11 +681,15 @@ fn config_show_round_trips_every_fixture_and_preset() {
     files.push(root.join("examples/garnish.toml"));
     files.sort();
     assert!(files.len() > 30, "{}", files.len());
-    for file in files {
+    // Five runs of the binary per file, over a hundred files: one after
+    // another that took 48 s on a macOS runner and then passed nextest's
+    // 60 s limit, so the files are checked in parallel, each with its own
+    // copy. Nothing here writes the cache (`preview` never touches it).
+    files.par_iter().enumerate().for_each(|(i, file)| {
         let (shown, _, ok) =
             run(&["--config", file.to_str().unwrap(), "config", "show"], home, &[]);
         assert!(ok, "{}: show failed", file.display());
-        let copy = home.join("shown.toml");
+        let copy = home.join(format!("shown-{i}.toml"));
         std::fs::write(&copy, &shown).unwrap();
         let (out, _, ok) = run(&["--config", copy.to_str().unwrap(), "config", "check"], home, &[]);
         assert!(ok && out.contains(": ok"), "{}: show output fails check:\n{out}", file.display());
@@ -704,8 +710,8 @@ fn config_show_round_trips_every_fixture_and_preset() {
                 .map(str::to_owned)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(render(&file), render(&copy), "{}: show changes the render", file.display());
-    }
+        assert_eq!(render(file), render(&copy), "{}: show changes the render", file.display());
+    });
 }
 
 #[test]
