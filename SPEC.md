@@ -599,7 +599,14 @@ its `✗`, `context` before the first response, `cache` without a ratio), is
 `–`, and `-` in the ascii set, whose marks are all 7-bit like its
 ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
 2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
-on the first tick of every session.
+on the first tick of every session. One character in an ascii row is not
+7-bit, and it is not a mark: with colour off, the braille blank U+2800
+that holds a row's leading cells through the harness's trim (§ 2.1: a
+row that would start with whitespace, such as a right group alone under
+`style = "none"`) and that `blank = true` puts in a spacer (§ 4.1). The
+only 7-bit character that takes a cell and shows nothing is the space,
+which the trim removes, so the alternative is a row drawn shifted left or
+dropped.
 
 ### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 

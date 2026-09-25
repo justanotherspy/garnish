@@ -1666,14 +1666,22 @@ mod tests {
                     )
                 }))
                 .collect();
-        for text in [preset.as_str(), every.as_str()] {
+        // With colour off, a row that would start with whitespace (a right
+        // group alone, unframed) and a `blank` spacer lead with the braille
+        // blank that keeps them through the harness's trim: the one
+        // character § 3.6 lets an ascii row carry, and only there.
+        let held = "icons = \"ascii\"\n[frame]\nstyle = \"none\"\n[[row]]\nmodules = [\"model\"]\n[[row]]\nright = [\"clock\"]\n[[row]]\nblank = true\nmodules = []\n";
+        for text in [preset.as_str(), every.as_str(), held] {
             let loaded = loaded(text);
             assert_eq!(loaded.errors, Vec::new());
             for f in &crate::fixtures::FIXTURES {
                 let out = render_plain(&Payload::parse(f.text).unwrap(), &loaded, Some(100));
                 for l in out.lines() {
-                    assert!(l.is_ascii(), "{}: {l:?}", f.name);
+                    let rest = l.strip_prefix(BLANK_CELL).unwrap_or(l);
+                    assert!(rest.is_ascii(), "{}: {l:?}", f.name);
                 }
+                let leading = out.lines().filter(|l| l.starts_with(BLANK_CELL)).count();
+                assert_eq!(leading, if text == held { 2 } else { 0 }, "{}: {out}", f.name);
             }
         }
         let every = render_plain(&fixture("pre-first-response"), &loaded(&every), Some(100));
