@@ -1468,11 +1468,13 @@ screen). Otherwise:
   number too large to print sensibly is printed at a bound instead: a
   percentage past 100 (`spend`) and a cost stop at 99 999
   (`num::MAX_SHOWN`), and the bands compare the bounded number;
-- a command line clap refuses on the render path (no subcommand word and
-  stdin not a terminal: a typo in `statusLine.command`, or a flag an
-  upgrade removed) → `⚠ garnish: <the error's first line>`, the whole
-  error on stderr; a subcommand's bad flag, or one typed at a terminal,
-  keeps clap's usage error and exit code;
+- a command line clap refuses on the render path (no subcommand word but
+  `render`, which is the render path spelled out, and stdin not a
+  terminal: a typo in `statusLine.command`, or a flag an upgrade removed)
+  → `⚠ garnish: <the error's first line>`, the whole error on stderr; a
+  subcommand's bad flag, or one typed at a terminal, keeps clap's usage
+  error and exit code (2026-09-25 review: `garnish render --bogus` exited
+  2 and cleared the status line);
 - internal error (a panic) → `⚠ garnish: internal error`: a panic hook
   installed on the render path prints it and exits 0, and it runs before
   the release build's `panic = "abort"`; a stack overflow or a signal is

@@ -902,6 +902,12 @@ fn a_bad_flag_or_a_panic_on_the_render_path_is_a_warning_row() {
     assert!(code == Some(0) && out.starts_with("⚠ garnish: "), "{out}");
     let (out, code) = piped(&["config", "--no-such-flag"], home, &[]);
     assert!(code == Some(2) && out.is_empty(), "{out}");
+    // `render` names the render path itself, not another command.
+    let (out, code) = piped(&["render", "--bogus"], home, &[]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.starts_with("⚠ garnish: ") && out.contains("--bogus"), "{out}");
+    let (out, code) = piped(&["render", "--bogus"], home, &[("GARNISH_STDIN_TTY", "1")]);
+    assert!(code == Some(2) && out.is_empty(), "{out}");
     let (out, code) = piped(&["--version"], home, &[]);
     assert!(code == Some(0) && out.starts_with("garnish "), "{out}");
     // At a terminal a typo is clap's error as usual.
@@ -927,10 +933,11 @@ fn a_stderr_nobody_reads_never_costs_the_row() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
     let good = include_str!("fixtures/payloads/subscription-full.json");
-    let cases: [Case<'_>; 5] = [
+    let cases: [Case<'_>; 6] = [
         ("panic", &[], good, &[("GARNISH_TEST_PANIC", "1")], "⚠ garnish: internal error\n"),
         ("bad payload", &[], "[1]", &[], "⚠ garnish: bad payload\n"),
         ("bad flag", &["--confg"], good, &[], "⚠ garnish: "),
+        ("render, bad flag", &["render", "--bogus"], good, &[], "⚠ garnish: "),
         ("unknown TZ", &[], good, &[("TZ", "Bogus/Zone")], ""),
         ("bad GARNISH_NOW", &[], good, &[("GARNISH_NOW", "soon")], ""),
     ];

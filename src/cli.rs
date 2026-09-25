@@ -321,14 +321,16 @@ fn parse_failure(e: &clap::Error) -> Result<()> {
     Ok(row?)
 }
 
-/// Whether the command line names a subcommand, so it is not the render
-/// path whatever else is wrong with it.
+/// Whether the command line names a subcommand other than `render`, so it
+/// is not the render path whatever else is wrong with it. `render` is the
+/// render path spelled out, for a settings file that wants a subcommand.
 fn names_a_subcommand() -> bool {
     use clap::CommandFactory as _;
     let command = Cli::command();
-    std::env::args_os()
-        .skip(1)
-        .any(|arg| command.get_subcommands().any(|s| arg.as_os_str() == s.get_name()))
+    let other = |arg: &std::ffi::OsStr| {
+        command.get_subcommands().any(|s| s.get_name() != "render" && arg == s.get_name())
+    };
+    std::env::args_os().skip(1).any(|arg| other(&arg))
 }
 
 /// Debug builds only: set, a tick panics before it renders, so the
