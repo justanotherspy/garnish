@@ -123,7 +123,9 @@ impl Preview {
         };
     }
 
-    /// Show the fixture called `name`, when there is one.
+    /// Show the fixture called `name`, when there is one (tests; the screen
+    /// steps with `f` and `F`).
+    #[cfg(test)]
     pub fn show(&mut self, name: &str) {
         if let Some(i) = FIXTURES.iter().position(|f| f.name == name) {
             self.fixture = i;

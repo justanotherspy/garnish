@@ -296,7 +296,8 @@ impl App {
         crate::modules::repo::tildify_path(path, self.home.as_deref())
     }
 
-    /// Open the builder straight away (the picker's `e`, tests).
+    /// Open the builder straight away (tests: a screen over a text draft,
+    /// which starts on the home menu).
     pub fn open_builder(&mut self) {
         self.screen = Screen::Builder;
     }
@@ -797,6 +798,22 @@ mod tests {
             marked += usize::from(reversed);
         }
         assert!(marked > 0);
+    }
+
+    /// app-28: a box picked for a line goes on that line or nowhere, as
+    /// `B`'s typed name does.
+    #[test]
+    fn a_box_pick_for_another_line_is_refused() {
+        let text = "[[row]]\nmodules = [\"path\"]\n[[row]]\nmodules = [\"clock\"]\n";
+        let mut app = crate::setup::for_test(text, None, Path::new("/home/dev"));
+        app.open_builder();
+        let other = super::super::draft::RowAt::row(1);
+        app.apply(Action::Picked(Target::BoxFor(other), "true".into()));
+        assert_eq!(app.status(), Some("the selection moved; press b again"));
+        assert!(app.draft().rows().iter().all(|r| r.get("box").is_none()));
+        let here = super::super::draft::RowAt::row(0);
+        app.apply(Action::Picked(Target::BoxFor(here), "true".into()));
+        assert_eq!(app.draft().rows()[0].get("box"), Some(&Value::Boolean(true)));
     }
 
     /// app-01: a problem renumbered by an edit is the same problem; one

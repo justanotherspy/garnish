@@ -184,17 +184,24 @@ impl App {
             },
             // A pick or a typed name reads as the form's `box` field reads
             // it: `none`, `false` and nothing unbox, `true` is a box of its
-            // own.
-            Target::BoxFor(_) => match SlotKind::BoxRef.parse(value) {
-                Ok(Some(Value::String(name))) if !is_bare_key(&name) => {
-                    self.say(BOX_NAME_RULE.into(), Level::Error);
+            // own. It was asked for one line, as `B`'s name is, and goes on
+            // that line or nowhere.
+            Target::BoxFor(at) => {
+                if self.builder.item().map(|i| i.at) != Some(at) {
+                    self.say("the selection moved; press b again".into(), Level::Warn);
+                    return;
                 }
-                Ok(v) => {
-                    let out = self.edit(|builder, draft| builder.set_box(draft, v));
-                    self.report(out);
+                match SlotKind::BoxRef.parse(value) {
+                    Ok(Some(Value::String(name))) if !is_bare_key(&name) => {
+                        self.say(BOX_NAME_RULE.into(), Level::Error);
+                    }
+                    Ok(v) => {
+                        let out = self.edit(|builder, draft| builder.set_box(draft, v));
+                        self.report(out);
+                    }
+                    Err(e) => self.say(e, Level::Error),
                 }
-                Err(e) => self.say(e, Level::Error),
-            },
+            }
             Target::BoxWith(at) => {
                 let name = value.trim();
                 if !is_bare_key(name) {
