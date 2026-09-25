@@ -2,7 +2,7 @@
 
 use crate::ansi::{Segment, Style};
 use crate::config::schema::{
-    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Rule, Value,
 };
 use crate::icons::{Glyph, glyph};
 use crate::num::{clamp_percent, round_to_u64, u64_to_f64};
@@ -354,7 +354,8 @@ fn limit_opts(window: Window, windowed: bool) -> Vec<OptSpec> {
             Kind::NumList,
             "Ascending percentages where the color changes.",
             Value::NumList(vec![50.0, 75.0, 90.0]),
-        ),
+        )
+        .rule(Rule::Ascending),
         super::durations_opt(),
         super::format_opt(super::NumberKind::Percent),
         OptSpec::new(

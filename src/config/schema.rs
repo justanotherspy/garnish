@@ -138,6 +138,23 @@ impl Kind {
     }
 }
 
+/// A rule an option's value must meet beyond its [`Kind`], checked when the
+/// config is read, so a value that would parse and then misrender is
+/// reported under its path and the default stands in (SPEC § 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Rule {
+    /// Nothing beyond the kind.
+    #[default]
+    None,
+    /// Numbers in ascending order (band thresholds: a band is the number of
+    /// them a percentage has reached).
+    Ascending,
+    /// A time zone as `TZ` names one ([`crate::time::zone`]), or empty for
+    /// the tick's own; resolved once, when the config is read
+    /// ([`ModuleCfg::zone`]).
+    TimeZone,
+}
+
 /// One module option.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptSpec {
@@ -160,19 +177,28 @@ pub struct OptSpec {
     /// counts, row text, decimal places), so the cap is part of the
     /// reference docs rather than a rule buried in the parser.
     pub max: Option<usize>,
+    /// What the value must meet beyond its kind.
+    pub rule: Rule,
 }
 
 impl OptSpec {
     /// Option with the same value in every preset.
     #[must_use]
     pub const fn new(key: &'static str, kind: Kind, doc: &'static str, default: Value) -> Self {
-        Self { key, kind, doc, default, minimal: None, full: None, max: None }
+        Self { key, kind, doc, default, minimal: None, full: None, max: None, rule: Rule::None }
     }
 
     /// Bound the option (see [`OptSpec::max`]).
     #[must_use]
     pub const fn max(mut self, max: usize) -> Self {
         self.max = Some(max);
+        self
+    }
+
+    /// Hold the value to a [`Rule`].
+    #[must_use]
+    pub const fn rule(mut self, rule: Rule) -> Self {
+        self.rule = rule;
         self
     }
 
@@ -519,6 +545,7 @@ pub struct ModuleCfg {
     /// absent keys keep their static glyph.
     icon_frames: BTreeMap<&'static str, Vec<String>>,
     colors: BTreeMap<&'static str, Color>,
+    zone: Option<jiff::tz::TimeZone>,
 }
 
 impl ModuleCfg {
@@ -603,7 +630,15 @@ impl ModuleCfg {
                 .filter_map(|i| overrides.icon_frames.get(i.key).map(|f| (i.key, f.clone())))
                 .collect(),
             colors,
+            zone: overrides.zone.clone(),
         }
+    }
+
+    /// The zone a [`Rule::TimeZone`] option names (`clock.tz`), resolved
+    /// once when the config was read; `None` for the tick's own zone.
+    #[must_use]
+    pub const fn zone(&self) -> Option<&jiff::tz::TimeZone> {
+        self.zone.as_ref()
     }
 
     /// The animation frames of an icon (`<key>_frames`); empty when static.
@@ -769,6 +804,8 @@ pub struct Overrides {
     pub colors: BTreeMap<String, String>,
     /// `<key>_frames`: animation frames for an icon key (SPEC § 4.2).
     pub icon_frames: BTreeMap<String, Vec<String>>,
+    /// The zone a [`Rule::TimeZone`] option named, resolved by the parser.
+    pub zone: Option<jiff::tz::TimeZone>,
 }
 
 #[cfg(test)]

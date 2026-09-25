@@ -871,7 +871,8 @@ mod tests {
                 "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"clock\"]\n[modules.clock]\nspinner = false\ntz = {tz:?}\n"
             );
             let (config, errs) = config::parse(&text, &SCHEMAS);
-            assert_eq!(errs, Vec::new());
+            // One that names no zone is also reported (cfg-12).
+            assert_eq!(errs.is_empty(), tz != "Not/AZone", "{errs:?}");
             render_plain_at(&payload, &config, Some(40), &Clock::fixed()).trim().to_owned()
         };
         assert_eq!(clock_at("JST-9"), "01:00:00");

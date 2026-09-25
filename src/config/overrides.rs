@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::read::{bad_color, equal_width_frames, is_bare_key, is_color_spec, problem};
 use super::schema::{
-    COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Value,
+    COMMON_OPTS, HideRule, Kind, ModuleCfg, ModuleSchema, OptSpec, Overrides, Preset, Rule, Value,
     common_keys,
 };
 use super::{ConfigError, STEP_MESSAGE, STEP_RANGE, Vocab};
@@ -151,11 +151,18 @@ pub(super) fn parse_overrides(
             // a common key).
             other => {
                 match COMMON_OPTS.iter().find(|o| o.key == other).or_else(|| schema.opt(other)) {
-                    Some(spec) => match coerce(spec.kind, value).and_then(|v| bounded(spec, v)) {
-                        Ok(v) if !set_common(&mut ov, other, v.clone()) => {
-                            ov.opts.insert(other.to_owned(), v);
+                    Some(spec) => match coerce(spec.kind, value)
+                        .and_then(|v| bounded(spec, v))
+                        .and_then(|v| ruled(spec, &v).map(|zone| (v, zone)))
+                    {
+                        Ok((v, zone)) => {
+                            if zone.is_some() {
+                                ov.zone = zone;
+                            }
+                            if !set_common(&mut ov, other, v.clone()) {
+                                ov.opts.insert(other.to_owned(), v);
+                            }
                         }
-                        Ok(_) => {}
                         Err(msg) => err(other, msg),
                     },
                     None => err(other, unknown_option_message(schema)),
@@ -209,6 +216,29 @@ fn hide_rules(schema: &ModuleSchema, value: &toml::Value) -> Result<Vec<HideRule
 /// size an allocation or a loop on every tick.
 fn bounded(spec: &OptSpec, value: Value) -> Result<Value, String> {
     spec.over_max(&value).map_or(Ok(value), Err)
+}
+
+/// The option's [`Rule`] (SPEC § 5: a value that parses but would misrender
+/// is a problem like any other), and the zone a [`Rule::TimeZone`] names,
+/// resolved here so the render never looks it up again.
+fn ruled(spec: &OptSpec, value: &Value) -> Result<Option<jiff::tz::TimeZone>, String> {
+    match (spec.rule, value) {
+        (Rule::Ascending, Value::NumList(nums)) => {
+            if nums.iter().zip(nums.iter().skip(1)).all(|(a, b)| a <= b) {
+                Ok(None)
+            } else {
+                Err("must be in ascending order, e.g. [50, 75, 90]".to_owned())
+            }
+        }
+        (Rule::TimeZone, Value::Str(tz)) if !tz.is_empty() => {
+            crate::time::zone(tz).map(Some).ok_or_else(|| {
+                format!(
+                    "unknown time zone {tz:?}; use an IANA name, a POSIX rule or a TZif path, as TZ takes (the system zone stands in)"
+                )
+            })
+        }
+        _ => Ok(None),
+    }
 }
 
 fn unknown_option_message(schema: &ModuleSchema) -> String {
@@ -846,6 +876,38 @@ mod tests {
             assert_eq!(paths, [path], "{text}");
             let ctx = c.modules.get("context").unwrap();
             assert!(ctx.value("warn_at").is_none_or(|v| *v == Value::Float(0.0)), "{text}");
+        }
+    }
+
+    /// cfg-12: values that parse but would misrender are reported under
+    /// their path and the default stands in: `thresholds` out of order
+    /// (the bands would stop at the first unreached one), and a `tz` that
+    /// names no zone (the clock would show the system's in silence).
+    #[test]
+    fn thresholds_out_of_order_and_an_unknown_zone_are_reported() {
+        let all = &crate::modules::SCHEMAS;
+        for (text, path) in [
+            ("[modules.context]\nthresholds = [90, 50, 75]\n", "modules.context.thresholds"),
+            ("[modules.limit5h]\nthresholds = [50, 50.5, 50.4]\n", "modules.limit5h.thresholds"),
+            ("[modules.clock]\ntz = \"Nowhere/Zone\"\n", "modules.clock.tz"),
+            ("[modules.clock]\ntz = \"../../etc/passwd\"\n", "modules.clock.tz"),
+        ] {
+            let (c, errs) = parse(text, all);
+            let paths: Vec<&str> = errs.iter().map(|e| e.path.as_str()).collect();
+            assert_eq!(paths, [path], "{text}");
+            let defaults = crate::config::Config::defaults(all);
+            assert_eq!(c.modules, defaults.modules, "{text}: the default stands in");
+        }
+        let (_, errs) = parse("[modules.clock]\ntz = \"Nowhere/Zone\"\n", all);
+        assert!(errs[0].message.contains("unknown time zone \"Nowhere/Zone\""), "{errs:?}");
+        for text in [
+            "[modules.context]\nthresholds = [50, 50, 90]\n",
+            "[modules.context]\nthresholds = []\n",
+            "[modules.clock]\ntz = \"UTC\"\n",
+            "[modules.clock]\ntz = \"\"\n",
+            "[modules.clock]\ntz = \"JST-9\"\n",
+        ] {
+            assert_eq!(parse(text, all).1, Vec::new(), "{text}");
         }
     }
 

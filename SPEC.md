@@ -408,6 +408,10 @@ colour, as in the § 4 example); a `▏` marker at the autocompact position;
 module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
 threshold. No token counter. `used_percentage` null → empty bar and `–`.
+The band is the number of thresholds the percentage has reached; a
+`thresholds` list out of ascending order (here and on the usage modules)
+is reported and the default stands in (2026-09-25: `[90, 50, 75]` at 80 %
+drew the lowest band with `config check` saying ok).
 
 `scale = "window" | "usable"` (PLAN Phase 20; from FUTURE-SPEC § 8.3,
 A11): with `usable` the bar and the percentage are measured against the
@@ -521,7 +525,11 @@ read against the working directory. Only a name no directory has a file for
 goes to jiff's database, whose first use walks the whole zoneinfo tree; a
 `TZ` that names nothing is reported once on stderr. (Decided 2026-09-25: a
 POSIX rule fell through to `/etc/localtime`, UTC in most containers,
-without a word, and a zone name paid that walk on every tick.)
+without a word, and a zone name paid that walk on every tick.) The
+`clock`'s `tz` is resolved once, when the config is read, and one that
+names nothing on this machine is reported by `config check` under
+`modules.clock.tz` while the tick's zone stands in (2026-09-25: it fell
+back in silence, and no test could tell a working `tz` from a broken one).
 
 ### 3.5 Session-identity group
 

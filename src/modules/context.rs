@@ -3,7 +3,7 @@
 use crate::ansi::{Segment, Style};
 use crate::claude_settings::{self, DEFAULT_COMPACT_BUFFER};
 use crate::config::schema::{
-    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Rule, Value,
 };
 use crate::icons::glyph;
 use crate::num::percent_of;
@@ -185,7 +185,8 @@ fn opts() -> Vec<OptSpec> {
             Kind::NumList,
             "Ascending percentages where the band color changes.",
             Value::NumList(vec![50.0, 75.0, 90.0]),
-        ),
+        )
+        .rule(Rule::Ascending),
         OptSpec::new(
             "band_colors",
             Kind::ColorList,

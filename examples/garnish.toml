@@ -959,7 +959,7 @@ max_width = 0
 # date = false
 # utc_offset (bool) — Show the UTC offset. [minimal=false default=false full=true]
 # utc_offset = false
-# tz (string) — Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone. [minimal="" default="" full=""]
+# tz (string) — Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone. One this machine cannot resolve is reported and the system zone stands in. [minimal="" default="" full=""]
 # tz = ""
 [modules.clock.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
