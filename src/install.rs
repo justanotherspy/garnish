@@ -323,9 +323,11 @@ pub fn replace_file(
     let permissions = std::fs::metadata(&target).ok().map(|m| m.permissions());
     // The temp file is born with the old file's mode, so a 0600 settings
     // file is never readable by others even for a moment; a failed write
-    // leaves nothing behind.
+    // leaves nothing behind. It is on disk before the rename: without the
+    // sync, a crash soon after it can leave a zero-length file on a file
+    // system without ext4's rename heuristic (XFS, APFS).
     let written = create_with(&tmp, permissions.as_ref())
-        .and_then(|mut file| file.write_all(contents.as_bytes()))
+        .and_then(|mut file| file.write_all(contents.as_bytes()).and_then(|()| file.sync_all()))
         .map_err(|e| format!("writing {}: {e}", tmp.display()));
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
@@ -338,6 +340,11 @@ pub fn replace_file(
         let _ = std::fs::remove_file(&tmp);
         format!("replacing {}: {e}", target.display())
     })?;
+    // The rename itself is durable once the directory is; best effort, as a
+    // directory cannot be opened for syncing everywhere.
+    if let Some(dir) = target.parent() {
+        let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    }
     Ok(backup)
 }
 
@@ -388,7 +395,16 @@ fn create_with(
 
 /// Copy `target` to `<name>.bak-<epoch>[-n]` next to it, never clobbering
 /// an existing backup. Uses the wall clock (not `GARNISH_NOW`).
+///
+/// The bytes and the mode are read first, so a target that cannot be read
+/// leaves no empty backup, and the backup is created with the target's
+/// mode, as [`replace_file`]'s temp file is: a full copy of a 0600 file is
+/// never readable by others, even while it is written. A failed write
+/// removes the partial backup.
 fn write_backup(target: &Path) -> Result<PathBuf, String> {
+    let read = |e: std::io::Error| format!("reading {}: {e}", target.display());
+    let bytes = std::fs::read(target).map_err(read)?;
+    let permissions = std::fs::metadata(target).map_err(read)?.permissions();
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -398,15 +414,16 @@ fn write_backup(target: &Path) -> Result<PathBuf, String> {
     for attempt in 0..1000_u32 {
         let suffix = if attempt == 0 { String::new() } else { format!("-{attempt}") };
         let path = target.with_file_name(format!("{name}.bak-{stamp}{suffix}"));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        match create_with(&path, Some(&permissions)) {
             Ok(mut f) => {
-                let bytes = std::fs::read(target)
-                    .map_err(|e| format!("reading {}: {e}", target.display()))?;
-                f.write_all(&bytes)
-                    .map_err(|e| format!("backing up to {}: {e}", path.display()))?;
-                if let Ok(meta) = std::fs::metadata(target) {
-                    let _ = std::fs::set_permissions(&path, meta.permissions());
+                let written = f.write_all(&bytes).and_then(|()| f.sync_all());
+                if let Err(e) = written {
+                    let _ = std::fs::remove_file(&path);
+                    return Err(format!("backing up to {}: {e}", path.display()));
                 }
+                // The creation mode passed through the umask; this is the
+                // old file's exactly.
+                let _ = std::fs::set_permissions(&path, permissions);
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -1074,6 +1091,27 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(left, vec!["garnish.toml"], "no temp file left behind");
+    }
+
+    /// The backup is born with the target's mode, so a 0600 settings file
+    /// (an `env` block can hold a token) is never readable by others while
+    /// it is copied; and a target that is gone by the time of the backup
+    /// leaves no empty `.bak-` behind.
+    #[cfg(unix)]
+    #[test]
+    fn a_backup_is_born_private_and_never_left_empty() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("settings.json");
+        std::fs::write(&target, "{\"env\":{}}").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let backup = write_backup(&target).unwrap();
+        assert_eq!(std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{\"env\":{}}");
+        let gone = dir.path().join("gone.json");
+        let err = write_backup(&gone).unwrap_err();
+        assert!(err.contains("gone.json"), "{err}");
+        assert_eq!(backups(dir.path(), "gone.json"), Vec::<PathBuf>::new(), "no empty backup");
     }
 
     /// SPEC § 5: a rewrite goes through a symlink even before its target

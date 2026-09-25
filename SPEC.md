@@ -1750,7 +1750,9 @@ binary. Everything else is a **gallery preset**: a complete config file under
 Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
 in the repository, are embedded in the binary (`include_str!`) so a
 `cargo install` has them, and are written to `~/.claude/skills/<name>/`
-(`$CLAUDE_CONFIG_DIR/skills/<name>/` when that is set, § 2.3) by
+(`$CLAUDE_CONFIG_DIR/skills/<name>/` when that is set, § 2.3; a
+`SKILL.md` with other text is replaced behind the § 5 backup, so a
+person's edits survive, 2026-09-25 review) by
 `garnish install` (or `garnish skills install`). Each skill is plain
 Markdown with frontmatter (`name`, `description`) and instructions; none of
 them needs network access from garnish itself, they drive `gh` and the

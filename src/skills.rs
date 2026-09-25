@@ -48,6 +48,9 @@ pub struct Report {
     pub dir: PathBuf,
     /// `(skill name, what happened)`, in [`SKILLS`] order.
     pub statuses: Vec<(&'static str, Status)>,
+    /// The backups of the files that were replaced (an edited `SKILL.md`,
+    /// or one from an older garnish), next to each.
+    pub backups: Vec<PathBuf>,
 }
 
 impl Report {
@@ -85,6 +88,10 @@ impl Report {
         if !skipped.is_empty() {
             parts.push(format!("left {} alone (symlink)", skipped.join(", ")));
         }
+        if !self.backups.is_empty() {
+            let kept: Vec<String> = self.backups.iter().map(|b| b.display().to_string()).collect();
+            parts.push(format!("backup: {}", kept.join(", ")));
+        }
         format!("skills in {}: {}", self.dir.display(), parts.join(", "))
     }
 }
@@ -94,12 +101,16 @@ impl Report {
 /// Only garnish's own three files are ever written, so nothing else in `dir`
 /// is touched; a file that already has the right text is left as it is, a
 /// symlinked skill is skipped (see [`Status::Skipped`]), and a replacement
-/// goes through a temp file and `rename` so a reader never sees a torn file.
+/// goes through [`crate::install::replace_file`] like every file a command
+/// rewrites (SPEC § 5): a backup of the old text next to it, then a temp
+/// file and a `rename`, so a person's edits survive and no reader sees a
+/// torn file.
 ///
 /// # Errors
 /// Propagates the first I/O error (the skills already written stay).
 pub fn install(dir: &Path) -> std::io::Result<Report> {
     let mut statuses = Vec::with_capacity(SKILLS.len());
+    let mut backups = Vec::new();
     for (name, text) in SKILLS {
         let target = dir.join(name);
         let file = target.join("SKILL.md");
@@ -109,29 +120,20 @@ pub fn install(dir: &Path) -> std::io::Result<Report> {
             continue;
         }
         std::fs::create_dir_all(&target).map_err(|e| at(&target, &e))?;
-        let status = match std::fs::read_to_string(&file) {
-            Ok(existing) if existing == text => Status::Unchanged,
-            Ok(_) => Status::Updated,
-            Err(_) => Status::Written,
+        let status = match std::fs::read(&file) {
+            Ok(existing) if existing == text.as_bytes() => Status::Unchanged,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Status::Written,
+            // Something is there that is not this text, readable or not.
+            _ => Status::Updated,
         };
         if status != Status::Unchanged {
-            // A fresh, pid-named temp file (`create_new`, so a planted symlink
-            // of that name is an error, never followed), then an atomic rename.
-            let tmp = target.join(format!("SKILL.md.{}.tmp", std::process::id()));
-            let write = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp)
-                .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
-                .and_then(|()| std::fs::rename(&tmp, &file));
-            if let Err(e) = write {
-                let _ = std::fs::remove_file(&tmp);
-                return Err(at(&file, &e));
-            }
+            let backup = crate::install::replace_file(&file, text, status == Status::Updated)
+                .map_err(std::io::Error::other)?;
+            backups.extend(backup);
         }
         statuses.push((name, status));
     }
-    Ok(Report { dir: dir.to_path_buf(), statuses })
+    Ok(Report { dir: dir.to_path_buf(), statuses, backups })
 }
 
 /// An I/O error that names the path it happened at.
@@ -194,13 +196,32 @@ mod tests {
         let report = install(&root).unwrap();
         assert_eq!(report.count(Status::Written), 2);
         assert_eq!(report.count(Status::Updated), 1);
+        let names = |dir: &Path| -> Vec<String> {
+            std::fs::read_dir(dir)
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        };
         for (name, text) in SKILLS {
             let file = root.join(name).join("SKILL.md");
             assert_eq!(std::fs::read_to_string(&file).unwrap(), text, "{name}");
-            assert!(!root.join(name).join("SKILL.md.tmp").exists());
+            let left = names(&root.join(name));
+            assert!(left.iter().all(|n| !n.contains(".tmp")), "{name}: {left:?}");
         }
         assert!(report.summary().starts_with("skills in "), "{}", report.summary());
         assert!(report.summary().contains("wrote 2, updated 1"), "{}", report.summary());
+        // The replaced file had edits of its own: they are kept as a
+        // backup next to it (SPEC § 5), and the summary names it.
+        let kept: Vec<String> = names(&root.join("garnish-feedback"))
+            .into_iter()
+            .filter(|n| n.starts_with("SKILL.md.bak-"))
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        let backup = root.join("garnish-feedback").join(&kept[0]);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "old text");
+        assert!(report.summary().contains(&kept[0]), "{}", report.summary());
+        assert_eq!(names(&root.join("garnish-statusline")), vec!["SKILL.md"], "no backup of none");
 
         // A second run changes nothing; a stranger's file is left alone.
         let again = install(&root).unwrap();
@@ -254,7 +275,7 @@ mod tests {
         std::fs::write(&victim, "precious").unwrap();
         let preset = root.join("garnish-submit-preset");
         std::fs::write(preset.join("SKILL.md"), "stale").unwrap();
-        let tmp = preset.join(format!("SKILL.md.{}.tmp", std::process::id()));
+        let tmp = preset.join(format!("SKILL.md.tmp.{}", std::process::id()));
         std::os::unix::fs::symlink(&victim, &tmp).unwrap();
         let err = install(&root).unwrap_err().to_string();
         assert!(err.contains("garnish-submit-preset/SKILL.md"), "{err}");
