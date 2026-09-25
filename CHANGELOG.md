@@ -5,6 +5,140 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 ## Unreleased
 
+**Whole-codebase review** (2026-09-25; each fix with a test)
+
+*A repository you did not create*
+
+- A FIFO or an endless file under `.git` can no longer hang the status
+  line: every file there is read only when it is a regular file, up to a
+  size cap. A `gitdir:` or `commondir` counts only when it points at a
+  real git directory.
+- The dirty check never runs a repository's filter drivers: it asks git's
+  plumbing, which compares stat data and never hashes file content. A file
+  touched without changing now reads as dirty until your own git
+  refreshes its index. A partial clone never fetches lazily.
+- Workers take `git` only from absolute `PATH` entries (never a `git` the
+  checkout ships), ignore an inherited `GIT_DIR` or `GIT_WORK_TREE`, and
+  bound what they read from git. A background `fetch` starts no
+  maintenance and no submodule recursion, and ssh never prompts on the
+  terminal.
+- The last-resort cache root under the temporary directory is per user
+  and private; GC removes only what garnish created, never follows a
+  link, and the automatic sweep now actually runs.
+
+*Git and sync*
+
+- A deleted and pruned upstream shows the no-upstream glyph instead of a
+  permanent `✗`; upstreams whose names contain `#` or `;` count
+  correctly; switching between branches that share an upstream no longer
+  shows the previous branch's counts.
+- The fetch-age hint counts from the last fetch that worked, and
+  `garnish doctor` lists fetches that keep failing.
+- `branch` and `sync` work in reftable repositories.
+- `--config` on the status line command now reaches the background
+  workers.
+
+*Install, config location and the CLI*
+
+- `install`, `config init` and `setup` write the config the status line
+  reads: an existing `~/.garnish.toml` is no longer hidden behind a new
+  XDG file.
+- `CLAUDE_CONFIG_DIR` is honoured for `settings.json`, the skills and the
+  settings chain.
+- `install` keeps a garnish command's arguments, writes `--config` when
+  one is given (the flag or `GARNISH_CONFIG`), shell-quotes paths, no
+  longer reorders `settings.json`'s keys, and seeds a new config's
+  `padding` from `statusLine.padding`. `install --absolute` records the
+  launcher on `PATH`, not a versioned Homebrew path that an upgrade
+  deletes. `--dry-run` says "already up to date".
+- Backups keep the original file's permissions and are synced to disk;
+  an edited `SKILL.md` is backed up before it is replaced. A
+  `settings.json` or config that is not UTF-8 is refused on one line.
+- A typo'd flag in `statusLine.command`, or a panic, shows a
+  `⚠ garnish:` row instead of blanking the status line.
+- An empty `NO_COLOR` leaves colour on; the boolean `GARNISH_*` hooks
+  accept `true`/`false`/`yes`/`no`/`on`/`off`; a relative `XDG_*`
+  directory is ignored.
+- `garnish doctor` gains a `statusLine.padding` row, marks a settings
+  file Claude Code rejects, and names a config it cannot read.
+- `preview --theme` typos are refused on one line; `garnish … | head` no
+  longer prints an error report; `garnish docs` is hidden and needs
+  `--out`; `gc` says it removes idle session and repository directories.
+
+*The payload*
+
+- A payload field of an unexpected type drops only that field instead of
+  blanking the whole status line; an empty `workspace.current_dir` no
+  longer hides `cwd`.
+- Huge or non-finite numbers print bounded (at most `99999%` or
+  `$100.0k`), never `$infk` or hundreds of digits.
+- `max_length`, fish-path initials and short ids count the text the row
+  shows, so a styled session name is no longer cut short or loses its
+  `…`; `tput sgr0` in a name no longer leaves a stray `B`.
+- `TZ` accepts POSIX rules (`JST-9`) and the `:` prefix; a zone name
+  costs one file read instead of a walk of the whole zoneinfo tree each
+  tick, and an unknown `TZ` is reported on stderr. `clock.tz` takes the
+  same forms, and an unknown one is reported by `config check`.
+- Under `color = "256"`, near-grey colours (every theme's frame) use the
+  grey ramp instead of being lightened.
+
+*Layout*
+
+- Rows that start with spaces no longer slide left on screen (Claude Code
+  trims every row it draws).
+- `[frame] pad` is drawn as its text again (`pad = "·"`), boxes included.
+- Every column is exactly its share: a flex column whose right group
+  fills it no longer spills into its neighbour; an `auto` column in a
+  box, or an `auto` stack of boxed rows, is no longer cut; an empty
+  `auto` column leaves no stray rule cell; a row with no `fr` column has
+  no hole before its cap; a module that exactly fits a box is no longer
+  cut; a stacked row keeps its pad.
+- A title on a multi-line row no longer draws rule across padding;
+  `align = true` stacks right-justified columns correctly next to
+  left-justified ones; a `blank` inner row adds no braille cell to a
+  framed line; scrolling text and the ticker no longer skip a step on
+  ligature scripts.
+- A bad payload says why on stderr and in the `GARNISH_DEBUG` log.
+
+*Config*
+
+- A `[row.col]` typo is reported and the row keeps its modules instead of
+  becoming a blank spacer; a box on a stack inside a boxed row is
+  reported (boxes never nest); `config show` writes an emptied row the
+  way it renders.
+- Negative whole numbers in number options keep their sign, whole floats
+  are written back as valid TOML, and `nan`/`inf` are refused.
+- Reported now: `thresholds` out of order, `title_justify`/`title_pad`/
+  `title_color` without a `title`, `refresh` on a module that renders
+  every tick (and `garnish refresh --module` on one). `gap`, `title_pad`
+  and count errors name their range; every colour key reports a bad
+  colour with one message; `hide_empty_rows` next to `hide_empty_lines`
+  no longer depends on key order; `preview --preset` no longer reports
+  problems in the rows the preset replaced.
+
+*`garnish setup`*
+
+- `e` edits the box of the selected line from the keyboard; every form
+  lists all the keys its table holds, so `d` removes an unknown or
+  misplaced key, and `<key>_frames` and a text module's `color` are
+  editable; frame lists are typed as TOML arrays and keep their spaces.
+- The "changed on disk" question opens on *keep editing* (Esc and Enter
+  no longer reload); the comment-loss warning shows when the file opens;
+  `s` with nothing changed writes nothing; the picker writes gallery
+  presets with their comments and asks before replacing a changed file;
+  a save refuses a file that stopped parsing.
+- `b` moves a box's last member out; deleting a box's last member drops
+  the box; `d` keeps a box or text-module table; `x` on the last row is
+  refused; builder edits are no longer refused over a problem the file
+  already had.
+- The home menu works at 60×12 and a too-small terminal ignores clicks
+  and keys; clicks on titles, boxes, separators and the gutter open the
+  right form; the preview marker is `>`, a selection inside a ticker
+  line highlights only its module, and the colour-off preview draws
+  plain; unset layout keys step from their value in effect, colours show
+  as roles, integer inputs show their bounds, and colour pickers list
+  each colour once; mouse moves no longer redraw.
+
 **Usage views and formats** (PLAN Phase 23)
 
 - `hide = ["zero", "below:10"]` on a module names the states in which it
@@ -88,6 +222,8 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 - **Boxes**: `[box.<name>]` frames a run of adjacent rows, or a whole
   column, with its own corners and sides; `box = true` boxes one row. A
   box takes its style from `[frame]` unless it names one.
+- Four gallery presets show the layout: `grid-three`, `grid-six`,
+  `boxed-panels` and `dashboard-panels`.
 
 **Per-module presentation** (Phase 20)
 
@@ -119,7 +255,12 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   `hideVimModeIndicator = true` when the config calls for them.
 - `garnish preview` draws its rows faint, as Claude Code draws every
   status line row (verified in 2.1.270: nothing a command prints can undo
-  it), so a theme is judged at the intensity the screen gives it.
+  it), so a theme is judged at the intensity the screen gives it. It no
+  longer reads the cache or starts background workers, so previewing a
+  payload from inside a real repository changes nothing on disk.
+- A FIFO or other non-regular file in the settings chain no longer blocks
+  the tick: settings files are read only when they are regular files, up
+  to a size cap.
 - The guide says how many rows fit: Claude Code's fullscreen renderer
   gives the prompt box and the status line together at most half the
   terminal and cuts a taller status line from the bottom; the classic
@@ -262,7 +403,7 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   maintainer needs, `garnish-submit-preset` proposes a gallery preset.
   Matching issue templates live under `.github/ISSUE_TEMPLATE/`.
 
-## 0.1.0 — 2026-09-05
+## 0.1.0 — 2026-09-04
 
 First release: the 21 modules, presets, themes, icon sets, frames, the
 cache and detached workers, `install`, `doctor`, `preview`, `config`, the

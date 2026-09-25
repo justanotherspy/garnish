@@ -898,3 +898,70 @@ was built, what the reviews found and what was decided, not how.
   a newer major. `anthropics/claude-code-action` 1.0.231 → 1.0.233 (no
   input changes); every other action pin is the latest release. `make
   check` and `scripts/ci.sh` green on the 2026-09-22 nightly.
+- **2026-09-25** — A whole-codebase review at Daniel's request, then its
+  fixes. The review was read-only: 12 area reviewers, each followed by
+  an adversarial verifier. 287 findings; 17 refuted or duplicates, 250
+  confirmed, 8 plausible, and 12 found by the verifiers themselves (2
+  high, 34 medium, 158 low, 76 nit).
+  - *What it found, by theme:*
+    - **git.** The tick read `.git` with no regular-file check or bound, so
+      a FIFO `HEAD` hung every tick (git-01, high). `git status` ran a
+      repository's filter drivers and a partial clone lazy-fetched.
+      `commondir`/`gitdir:` could name any directory, so ref containment
+      contained nothing. `git` was looked up on `PATH` after the chdir.
+      Quoted `.git/config` values broke `sync`, and a pruned upstream
+      showed `✗` for good.
+    - **Never implemented.** The GC sweep never ran, `fetch_error` was
+      never shown, the reftable fallback SPEC § 6 promised was missing,
+      and so were `refresh` on payload-only modules, `colors.percent` and
+      SPEC § 5's internal-error line.
+    - **Wrong file written.** The worker never got `--config`. install,
+      init and setup wrote the XDG file over a `~/.garnish.toml` in use,
+      and ignored `CLAUDE_CONFIG_DIR`.
+    - **Blanked status line.** One wrong-typed payload field blanked
+      every row.
+    - **Layout.** The harness trims every row, not only the blank ones, so
+      rows starting with plain spaces slid left. Flex columns overflowed
+      their share, and `auto` columns in boxes were cut.
+    - **setup.** Edits were refused when a problem's row index shifted, `d`
+      deleted box and text tables, and Esc on "changed on disk" dropped
+      the edits.
+    - **The review workflow.** It planted a `contents: write` App token
+      in reach of the model's Bash, prompted with any commenter's text,
+      and any user's `@claude` cancelled a paid run. The release build
+      restored a cache a default-branch job could seed, and ran an
+      unpinned nextest.
+    - **Tests.** render.rs unit tests used the real clock, cache and
+      workers. The criterion bench spawned itself as a worker.
+  - *Decided with Daniel:*
+    - The dirty check is plumbing (`diff-index --cached` + `diff-files`,
+      `checkStat` pinned), accepting a touched-but-unchanged file as
+      dirty until the user's git refreshes its index.
+    - Rows starting with whitespace are held against the trim (an empty
+      SGR with colour on, U+2800 with colour off).
+    - `context.colors.percent` paints the percentage.
+    - A non-zero `refresh` on a payload-only module is a config problem.
+    - Reftable repositories fall back to the worker.
+    - A `[frame] pad` string is drawn as its text.
+    - An all-hidden render still clears the line (documented).
+    - A middle column in a box drops its fill-cell reservation when
+      `gap` ≥ 1.
+    - The workflow fixes go in their own PR (#85), so the code PR (#86)
+      can be reviewed by the unchanged workflow.
+  - *How it was built:* one fix batch per concern, each a subagent in its
+    own worktree working test-first under `make check`, merged into #86
+    one batch at a time. `config/mod.rs` and `setup/app.rs` were split
+    behaviour-free before their fixes.
+  - *What the fixing found:*
+    - A new git test read the clock before the fetch it measured, and
+      failed one run in six. That became a testing rule in `CLAUDE.md`.
+    - With `RUST_BACKTRACE=1` set, a quiet refusal spends 0.7 s capturing
+      a backtrace it never prints (backlog).
+    - `make check` does not run rustdoc `-D warnings`, so one pushed
+      commit needed a follow-up; `CLAUDE.md` now says so.
+  - *Conflicts on merge:* the CLI batch renamed `settings_files` to
+    `settings_chain` under the render batch's new `render::context`, and
+    two batches both reworded the `truncate`/`overflow` reference rows.
+    Resolved by hand, and the generated docs regenerated.
+  - What is left is in PLAN's backlog under *Left open by the 2026-09-25
+    review*. 319 → 474+ tests.

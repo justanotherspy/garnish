@@ -13,19 +13,20 @@ the schema-driven config with presets, themes, icon sets and frames, the
 cache and worker model, aligned columns and fixed durations, per-key config
 fallback, the ticker, text modules and animations, the presets gallery and
 the three bundled skills. Phases 19–23 landed between 2026-09-13 and
-2026-09-19 (the table below). The release pipeline with the Homebrew tap
-waits for its first tag, which will be `v0.3.0`; `CHANGELOG.md`
-§ Unreleased is its section.
+2026-09-20 (Phase 23 merged as #79 on 2026-09-20, the setup refinements
+as #80 the same day; the table below). The release pipeline with the
+Homebrew tap waits for its first tag, which will be `v0.3.0`;
+`CHANGELOG.md` § Unreleased is its section.
 
-**There is no open phase.** The drift between `SPEC.md` and the code is
-the short list under *When asked* in the backlog (a keyboard path to a
-separator or a cap, a cargo feature); everything else in the spec
-is implemented, and where Phase 22 was built differently from its design,
-SPEC § 14 says so and why (its 2026-09-20 refinements, undo among them,
-are the paragraph after that). Phase 23 (usage views and formats) is on the
-pull request from `claude/docs-workflow-consolidation-vepxgw`, waiting
-for Daniel's merge; its decisions are in `WORKLOG.md` (2026-09-19) and
-its design in SPEC § 3, § 3.3, § 3.8 and § 4.
+**There is no open phase.** A whole-codebase review on 2026-09-25 (12 area
+reviewers, each checked by an adversarial verifier: about 270 findings,
+2 high, 34 medium) was fixed in one pull request per concern group
+(justanotherspy/garnish#86 for the code, justanotherspy/garnish#85 for
+the workflows); `WORKLOG.md` (2026-09-25) has what it found and decided,
+and the backlog below holds what it left open. The drift between `SPEC.md`
+and the code is the short list under *When asked*; everything else in the
+spec is implemented, and where Phase 22 was built differently from its
+design, SPEC § 14 says so and why.
 
 ## Done
 
@@ -59,6 +60,7 @@ its design in SPEC § 3, § 3.3, § 3.8 and § 4.
 | Consolidation | nine gallery presets showing the rest of the vocabulary (28 in all); the review workflow collecting the pull request in job shell with a short prompt and `Bash` whole; the skills shortened and pointed at `setup`; *also try* glyphs on the module pages; `WORKLOG.md` split from this file; `PLAN.md`, `SPEC.md`, `CLAUDE.md`, `README.md`, the guide and `CHANGELOG.md` brought to the code | 09-19 |
 | 23 Usage views and formats | `hide` lists derived from a module's measure (`MeasureKind`, `HideRule`, `Rendered.measure`, one check in `render_group`); the `[format]` table with per-module `tokens`/`percent`/`cost` overrides and `parens = "dim"` through one `detail()` helper; `pace`, `pace_colors`, `eta`, `reset = "elapsed"` and `elapsed_marker` on the two limit windows; `[frame] separator_color` with `inherit`; the `version`, `sandbox`, `voice` and `account` modules (25 ids; `account` is the first cached module outside the repo group, `Clock.workers` keeps pinned renders off the cache, `Clock.settings_keys` seeds the badges' docs samples); `doctor` rows for the two settings keys; four gallery presets (32 in all); seven config goldens; three adversarial reviews | 09-19 |
 | Setup refinements | after Daniel's first use: undo/redo over a history of tables (`Draft.saved` makes dirty a comparison), the hint bar as clickable buttons, pickers opening on the value in effect with `custom…` starting from it, an input cursor; six form bugs found by a walk of every preset's forms (trimmed strings, `[colors]` roles, `blank` and title keys where illegal, orphaned `[box]` tables, silent breakage of another key); `C`/`]`/`[`/`m` growing columns from the cursor, `B` boxing a row with the one above, the module's name as its first `label` suggestion, `preset` swapping its own rows; one adversarial review | 09-20 |
+| Review 2026-09-25 | a read-only review of the whole codebase by 12 area reviewers, each verified adversarially, then fixed batch by batch: bounded regular-file reads of every `.git` file, a plumbing dirty check that never runs filter drivers, `git` from absolute `PATH` only, a private temp cache root and a GC that runs; the reftable fallback, gone upstreams, honest fetch clocks, `--config` to the workers; `config/mod.rs` and `setup/app.rs` split by concern, one `Vocab` per enum, `*_KEYS` tripwires, `refresh` only for cached modules; per-field payload leniency, TZ read as one zone file; `write_target`, `CLAUDE_CONFIG_DIR`, `install` keeping `--config`, the `⚠ garnish:` row on a panic or a bad flag; the per-row trim held, every column exactly its share; about 80 setup and layout fixes; the review workflow's token and trigger, the release build without a cache or setup script; 319 → 474+ tests | 09-25 |
 
 ## Backlog
 
@@ -77,13 +79,21 @@ Open items only; closed ones are in `WORKLOG.md`.
   drop "read, not watched" from SPEC § 2.1 and `CLAUDE.md`
 - [ ] Whether `preview <dir>`'s heading should honour `--color never`
   (SPEC § 7 does not say; the test compares the plain heading)
-- [ ] How far to go in refusing a hostile `.git/config`: `core.fsmonitor`
-  and `remote.<name>.uploadpack` are overridden on every call;
-  `core.sshCommand`, `core.gitProxy` and an `ext::` remote URL are not,
-  each a setting a user may want honoured, all three reachable only with
-  the opt-in `fetch_interval > 0`. Clear them too, refuse to fetch in a
-  repository the user does not own (git's `safe.directory` answer), or
-  leave them and say so in the `fetch_interval` docs
+- [ ] How far to go in refusing a hostile `.git/config` on the *fetch*
+  path. Decided 2026-09-25: the tick and the default workers reach no
+  program a repository names (plumbing dirty check, `GIT_NO_LAZY_FETCH`,
+  `git` from absolute `PATH` only; `CLAUDE.md` § The repository is not
+  the user's file). Still open, all reachable only with the opt-in
+  `fetch_interval > 0`: `core.sshCommand`, `core.gitProxy`, an `ext::`
+  URL, hooks (`core.hooksPath`, `.git/hooks`), `credential.helper`,
+  `core.askPass` and `core.alternateRefsCommand`. Clear them, refuse to
+  fetch in a repository the user does not own, or say so in the
+  `fetch_interval` docs. (`GIT_NO_LAZY_FETCH` needs git 2.44 or later; a
+  setsid'd worker would also keep other programs off `/dev/tty`.)
+- [ ] Whether a gateway session with only a spend limit should show `cost`:
+  `rate_limits` present means subscription (SPEC § 2.2), so today it hides
+  `cost` by default (review finding mod-07; SPEC's wording now matches the
+  rule, the behaviour is unchanged)
 - [ ] `sidebar-panels` shows what `valign = "bottom"` does to a column
   shorter than its row: the empty lines above it are blank, not rule.
   Decide whether a padding line in a `fill = true` row should carry the
@@ -98,10 +108,6 @@ Open items only; closed ones are in `WORKLOG.md`.
   fixtures name no real directory; whether the CLI preview should is
   Daniel's call (a captured payload from a real repository would then
   lose its repo group)
-- [ ] The Claude settings chain (SPEC § 2.3) ignores `CLAUDE_CONFIG_DIR`,
-  which moves the user file; only the `account` worker honours it for
-  `.claude.json` (SPEC § 3.8). Honouring it in the chain means one more
-  path rule in `claude_settings::settings_files` and a doctor line
 - [ ] A `setup` cargo feature, if the binary size ever matters: the
   release binary grew from 2.8 MB to 3.4 MB with ratatui and crossterm,
   the end-to-end cold tick did not move (about 2 ms either way, 200 runs
@@ -125,6 +131,39 @@ Open items only; closed ones are in `WORKLOG.md`.
   fixture (`f`) is not an edit and is not undone, and the history is
   dropped when a preset is applied from the picker (`Enter`), since that
   writes the file rather than editing the draft
+- [ ] Two setup behaviours still unpinned by a test (WORKLOG 2026-09-20): a
+  two-cell glyph under the input cursor, and undo after a reload
+- [ ] Left open by the 2026-09-25 review, each small:
+  - git and cache: the fetch-age hint with no success recorded yet, or a
+    failed-fetch glyph (a schema icon); `LockGuard::adopt` renames over
+    any lock, so a worker that starts late can take a re-taken one; on
+    Linux a tick that cannot lock only logs it (spawning without the lock
+    would let the worker record `✗`); `upstream()` assumes the default
+    fetch refspec; `doctor`, the debug log and the spawn log still create
+    the cache root with default permissions (the scope directories are
+    0700); `diff-files` still hashes a racily-clean entry whose stat data
+    matches exactly, which an unpacked archive cannot arrange under the
+    pinned `checkStat`
+  - setup: one `post_edit` step (pruning and the preset-row swap happen
+    per route today); the `(+N more)` and `path: message` formatting in
+    the setup app is still its own (x-10); SIGTERM leaves the terminal
+    broken (documented; a fix needs a signal crate)
+  - config: an emptied single-row stack round-trips through `config show`
+    as a bare column, which draws rule where the stack drew spaces; a
+    config whose rows all vanish gets the default preset's rows back
+  - layout: a boxed stack as a row's last column still gets a cap pad
+    (`│ ─┤`, visible in the `stack-boxes` and `columns-auto-box` goldens);
+    the prefix pad is always drawn, so a row whose first column starts
+    with rule reads `── ────`
+  - install: `install --dry-run`'s skills line says "would write" when they
+    are up to date; `Steps::apply` does not re-read the settings file (the
+    setup screen re-plans before applying)
+  - payload: a nested payload struct still accepts a JSON array
+    positionally (serde's sequence form); harmless
+  - With `RUST_BACKTRACE=1` in the environment every error report captures
+    and symbolises a backtrace, so a quiet refusal (`config check` on a bad
+    file) takes 0.7 s in a debug build, 5 ms without; a `Quiet` error never
+    prints its report, so it could be built without one
 
 **Parked designs** (decided, not to be reopened without a reason)
 
@@ -135,8 +174,10 @@ Open items only; closed ones are in `WORKLOG.md`.
 - [ ] `parse_settings_json` accepts files Claude Code rejects: its schema is
   strict for every key, and a user, project or local file that fails it is
   skipped entirely, so `doctor` can show `ok` and resolve keys from a file
-  Claude Code never reads. The general check would mean carrying Claude
-  Code's schema, which is a spec decision
+  Claude Code never reads. The `tui` case is handled (2026-09-25: a file
+  Claude Code rejects for it contributes no keys and `doctor` marks it);
+  the general check would mean carrying Claude Code's schema, which is a
+  spec decision
 - [ ] Optional headroom: cache the resolved config keyed by mtime, cache the
   settings-chain reads for 30 s, but only if the tick budget is ever
   threatened

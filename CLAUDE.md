@@ -147,6 +147,22 @@ documents *first*, with the reason, then start coding.
   doctests, `cargo bench` for criterion, `./bench/run.sh` for hyperfine
   end-to-end. Without `cargo-nextest`, `cargo test` runs the same suites but
   without the serial grouping the cache/worker tests need.
+- **`make check` is not all of CI.** Rustdoc with `-D warnings` runs only
+  in `scripts/ci.sh`, so a public doc linking a `pub(crate)` item passes
+  `make check` and fails CI: run `RUSTDOCFLAGS="-D warnings" cargo doc
+  --no-deps` before pushing. And never gate a commit on a pipe:
+  `make check | grep … | head && git commit` commits on red, because the
+  pipe's status is `head`'s; write the check to a log and test its status.
+- **Testing tricks.** A test that measures an age reads the clock *after*
+  the event it measures (a stamp newer than a `now` taken earlier is from
+  the future, which has no age by design; one such test failed one run in
+  six). A test that runs a logged spawn by hand passes `--lock-held` on
+  Linux, or the worker sees the tick's lock inside its grace window and
+  quietly does nothing. A git without `--ref-format=reftable` ignores an
+  empty `.git/reftable/tables.list`, which is how the reftable fallback is
+  simulated there; CI's git runs the real format. A before/after benchmark
+  is a temporary commit, `git checkout HEAD~1 -- <files>`, the bench, then
+  the files restored and `git reset --soft HEAD~1`.
 
 ## Commands
 
@@ -355,6 +371,9 @@ path (`unwrap_used`, `expect_used`, `indexing_slicing`, `arithmetic_side_effects
   For float→int use the saturating helpers in `num.rs`.
 - Arithmetic must be `checked_*`, `saturating_*`, or `wrapping_*` when the
   operands are not compile-time constants. Prefer `saturating_sub` for durations.
+- `clamp` panics when its lower bound exceeds its upper one, and the lints
+  do not see it; with a bound computed at run time (a terminal's size) use
+  `.max(lo).min(hi)`.
 - `main` returns `color_eyre::Result<ExitCode>`: an unexpected error gets a
   color-eyre report, a `cli::Quiet` error (the problem was already printed,
   as `config check` and `config init` do) exits 1 with no report. `render`
@@ -449,9 +468,33 @@ for the contract and `docs/` for user docs.
   `enabled`, `preset`, `refresh` and `hide` are the **hand-parsed** module
   keys (their validation needs the schema: `refresh` its `refresh`, `hide`
   its `measure`); a fifth means `HAND_PARSED` in `common_keys()`, an arm
-  in `parse_overrides`, an arm in `ModuleCfg::common` (so `config show`
-  writes it back), `docs::write_modules` and `module_reference`, and the
-  module form's row in `setup::form::module_fields`.
+  in `parse_overrides`, `config show` writing it back
+  (`docs::write_modules`, through `ModuleCfg::common` when the value is
+  not a plain field, as `hide` is), `docs::write_modules` and
+  `module_reference`, and the module form's row in
+  `setup::form::module_fields`. An option rule that needs more than the
+  kind (thresholds that must ascend, a zone name) goes on `OptSpec.rule`
+  (`Rule::Ascending`, `Rule::TimeZone`), never into the module's render.
+- **Every word list has one source.** A config enum lists its words through
+  `config::Vocab`: the type gets an `ALL` array and a `name`, and joins the
+  `vocab!` list, whose tripwire in `config/vocab.rs` checks that the
+  parser, its error message, the generated reference and the setup
+  pickers all agree. Table key lists are the `*_KEYS` arrays (`ROW_KEYS`,
+  `INNER_ROW_KEYS`, `COL_KEYS`, `BOX_KEYS`, `FRAME_KEYS`), which
+  `every_key_list_is_the_keys_its_table_takes` walks. `config/` is split
+  by concern: `load` (locating and reading), `rows`, `frame`,
+  `overrides`, `read` (the value readers) and `vocab`.
+- **One helper per rule, and new code uses it.** `config::write_target`
+  (the file a writing command writes: the one `locate` finds, else the
+  default; callers resolve `GARNISH_CONFIG` into `Options.config_path`, so
+  a plan reads no environment), `claude_settings::user_dir` (the user
+  settings directory, `CLAUDE_CONFIG_DIR` first), `claude_settings::env_flag`
+  (the one truthiness rule for boolean hooks: `true`/`false`/`yes`/`no`/
+  `on`/`off`), `config::no_color_env` (`NO_COLOR` counts only when not
+  empty), `cli::refusal` (a refusal is one stderr line and `Quiet`),
+  `claude_settings::read_regular` (every file garnish reads on a timer:
+  regular files only, capped), `render::context` (the one place a module
+  context is built; the bench uses it too).
   The schema matrix test in `render.rs` renders every module × preset ×
   icon set × `max_width` against every fixture, so a new module or option
   gets the shared invariants checked for free; a behaviour of its own
@@ -481,6 +524,11 @@ for the contract and `docs/` for user docs.
   is undoable by construction; only the undo keys themselves and the
   picker's preset adoption bypass it. `Draft::is_dirty` compares the
   table with the file's, never a flag, so an edit undone is not an edit.
+  `setup::app` is `app.rs` plus `app/*.rs`, one file per screen and
+  concern; the children see `App`'s private fields, and a method one of
+  them shares with another needs `pub(super)`. `toml::Map::remove` is a
+  shift-remove under `preserve_order` (a test pins it), so unsetting a key
+  keeps the others in the file's order.
   Snapshot goldens live under
   `tests/golden/setup/` and `tests/setup.rs` lists every one it writes;
   `setup::for_test` pins the clock, aims install at a temporary home and
@@ -492,8 +540,14 @@ for the contract and `docs/` for user docs.
   findings become tests).
 - **`frame.rs` owns the characters, `layout.rs` owns where they go.** A
   row is columns (SPEC § 4.3), so there is one composer for every shape:
-  `Layout::lines` → blocks → `row_body` → `wrap_frame` or the box's
-  edges. A plain row is one `1fr` column and goes through the same path,
+  `Layout::lines` → blocks → `row_body` → `wrap_frame` or `box_lines`
+  (the one place a box is drawn; `fit_title` places every title). A
+  column's `Fit` says which of its ends sit against a box side
+  (`Fit::sides`), and `Draft::Blank` marks a line that may need
+  `frame::BLANK_CELL` once the whole line is known. The cheapest proof
+  that every column fills exactly its share is `compose_group` swept over
+  a grid of widths, fills, pads and justifications. A plain row is one
+  `1fr` column and goes through the same path,
   which is why the whole golden suite is the regression test for a change
   in there: if a layout change is meant to be invisible, *every* golden
   must come out byte-identical, and if it is not, exactly the goldens of
@@ -561,7 +615,10 @@ for the contract and `docs/` for user docs.
 - **An environment variable holding a path is unset when it is empty.**
   `config::env_path` is that rule and `claude_settings::home_dir` is its
   `HOME` twin. `GARNISH_MANAGED_SETTINGS` is the one exception, and says so:
-  empty means "no managed file", unset means the platform's.
+  empty means "no managed file", unset means the platform's. An `XDG_*`
+  variable must also be absolute (the XDG spec ignores a relative one, and
+  a relative one would make the checkout's own file the config):
+  `config::xdg_path` is that rule.
 - Fixtures: `tests/fixtures/payloads/*.json` (embedded once in
   `fixtures.rs` for the docs, the bench and the setup preview; a unit test
   keeps the table equal to the directory), `tests/fixtures/configs/*.toml`;
@@ -650,11 +707,19 @@ for the contract and `docs/` for user docs.
   variables for the session's Bash commands, and their plain-text stdout is
   added to Claude's context (this is how `SESSION_HOST` and `SPRITE.md` are
   loaded).
-- The harness trims the status line script's stdout and drops every row
-  that is whitespace after trimming (2.1.261: `v.stdout.trim().split("\n")
-  .flatMap(N => N.trim() || []).join("\n")`, found by grepping the binary
-  for `status_line_command");let D=`; 2.1.270: the same rule after
-  `b("status_line_command");let O=`). A non-zero exit, a spawn failure,
+- The harness trims the status line script's stdout, then trims **every
+  row** and draws each row's trimmed text, dropping the rows left empty
+  (2.1.261: `v.stdout.trim().split("\n").flatMap(N => N.trim() || [])
+  .join("\n")`, found by grepping the binary for
+  `status_line_command");let D=`; 2.1.270: the same rule after
+  `b("status_line_command");let O=`). So a row whose raw bytes start with
+  whitespace is drawn shifted left. `render_loaded` holds those cells once,
+  on the painted row, never in the layout: with colour on an empty SGR
+  (`ESC[0m`) goes in front (the trim keeps it, the harness's escape parser
+  drops it); with colour off the first leading space becomes
+  `frame::BLANK_CELL` (U+2800). Both golden suites fail on a row starting
+  with whitespace; `preview` folds SGR 2 into every segment, so the tick's
+  `ESC[0m` is tested in-process. A non-zero exit, a spawn failure,
   the 600 s hook timeout or empty stdout clears the status line rather
   than keeping the last one (2.1.270), which is why `render` never exits
   non-zero; a new trigger aborts the run in flight and keeps the previous
@@ -685,17 +750,34 @@ is that garnish does it on a *timer*, so the rules are:
   ref name, but the file is what matters: an archive carries symlinks, so
   `HEAD`, a ref, or the `refs/heads` directory itself can be a link to
   anywhere. `git::read_ref_file` resolves the path and requires it to stay
-  inside the git directory; every ref read goes through it.
-- **Every git call clears the config's command hooks.** `run_git` prepends
-  `NO_COMMAND_HOOKS` (`-c core.fsmonitor=`) and `fetch` passes
-  `--upload-pack git-upload-pack`, because `.git/config` sets both and git
-  runs them. `-c` on the command line beats the file. `core.sshCommand`,
-  `core.gitProxy` and an `ext::` URL are *not* cleared: each is a setting a
-  user may want honoured, all three need an opted-in `fetch_interval`, and
-  the decision sits in PLAN's backlog.
-- **A cached string from outside is bounded.** `cache::MAX_ERROR_CHARS`
-  applies to a failed entry's message *and* to `fetch_error`, which rides in
-  a successful one, because the tick parses that file on every render.
+  inside the git directory; every ref read goes through it. Every file
+  under `.git` is read through `claude_settings::read_regular` (regular
+  files only, capped: a FIFO hung every tick), and a `gitdir:` or
+  `commondir` counts only when it is a git directory by git's own test,
+  since the containment check is only as good as the directory it
+  contains to. A symbolic ref may point only under `refs/` or at a
+  capitalised pseudo-ref.
+- **Every git call clears what it can, and the rest is never reached
+  unasked.** `run_git` prepends `NO_COMMAND_HOOKS` (`-c core.fsmonitor=`),
+  runs the `git` found on an absolute `PATH` entry (never a `git` the
+  checkout ships), removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
+  kin, and sets `GIT_NO_LAZY_FETCH=1` (git 2.44 and later). Filter drivers
+  (`filter.<d>.clean`/`process`) are not cleared; instead nothing on the
+  worker path may run a git command that hashes worktree content
+  (`status`, porcelain `diff`, `add`): `is_dirty` is `diff-index --cached`
+  plus `diff-files` with `core.checkStat=default` pinned. `fetch` passes
+  `--upload-pack git-upload-pack`, `--no-auto-maintenance`,
+  `--recurse-submodules=no`, the remote after `--`, and
+  `SSH_ASKPASS_REQUIRE=force` with a failing `SSH_ASKPASS`.
+  `core.sshCommand`, `core.gitProxy`, an `ext::` URL, hooks
+  (`core.hooksPath`, `.git/hooks`), `credential.helper`, `core.askPass` and
+  `core.alternateRefsCommand` are *not* cleared: all need an opted-in
+  `fetch_interval`, and the decision sits in PLAN's backlog.
+- **A cached string from outside is bounded and plain.**
+  `cache::bounded_text` (capped at `cache::MAX_ERROR_CHARS`, reduced to
+  plain text) applies to a failed entry's message *and* to `fetch_error`,
+  which rides in a successful one, because the tick parses that file on
+  every render and `doctor` prints it.
 - **Every stored stamp can be in the future** (a resumed VM, NTP correcting
   a bad RTC) and a future stamp means the clock moved, never "very recent".
   `Entry::is_fresh`, `lock_is_live` and `sync`'s `fetch_attempt` all treat
@@ -714,9 +796,25 @@ is that garnish does it on a *timer*, so the rules are:
   "not fresh": that spawns a worker on every tick while git is broken.
 - Entries carry the situation they were computed for (`head`, `upstream`);
   renders pass a validator to `Ctx::cached` so a branch switch is a miss.
-- `refresh = 0` is only legal for payload-only modules; config validation
-  rejects it for cached ones.
-- GC compares file mtimes with the wall clock, not `GARNISH_NOW`.
+- `refresh = 0` is only legal for payload-only modules, and they take only
+  0: config validation rejects 0 for a cached module and anything else for
+  a payload-only one (it would do nothing).
+- GC compares file mtimes with the wall clock, not `GARNISH_NOW`. The
+  sweep runs when a worker writes a scope's first entry (never on the
+  tick), and it removes only what garnish made: a repo directory named
+  like a key hash, a session directory named like a sanitised id, every
+  file inside with a garnish name, never through a link.
+- Every temporary file is unlinked first, then created with `create_new`,
+  so a planted link at a predictable name is never followed. The
+  last-resort root under the temp directory is `garnish-<uid>`, created
+  0700, and refused (no cache, no workers, `doctor` says why) when it is a
+  link, writable by others, or someone else's.
+- `render::render` is the only render that builds its clock from the
+  environment; every in-process helper takes a `Clock`, and render.rs's
+  test-only `render_plain` is pinned. In the bench a seeded entry is
+  judged by the reader's TTL (the module's `refresh`), not the TTL it was
+  written with: a new cached module needs seeding in `benches/tick.rs`
+  and a long `refresh` in its `warm()`.
 - Docs and in-process tests render with `Clock::fixed()`: no git
   discovery, no settings env, no settings files (`Clock.settings = false`,
   `Clock.managed = None`), no cache. On the render path the settings chain
@@ -725,7 +823,9 @@ is that garnish does it on a *timer*, so the rules are:
   current directory on their own. Tests that run the binary must set
   `GARNISH_CACHE_DIR`, `GARNISH_NO_SPAWN` and `GARNISH_MANAGED_SETTINGS=`
   (empty: no managed settings file) and clear
-  `CLAUDE_*`/`DISABLE_*`/`GARNISH_ANIMATE`, and `tests/cli.rs` runs the
+  `CLAUDE_*` (`CLAUDE_CONFIG_DIR` included)/`DISABLE_*`/`GARNISH_ANIMATE`;
+  one that writes a payload to the child's stdin ignores `EPIPE`, since
+  the child may exit before reading; and `tests/cli.rs` runs the
   binary in the test's own directory so the checkout's `.claude/` never
   leaks into a test.
 - Every file a command rewrites goes through `install::replace_file` (a
