@@ -397,52 +397,74 @@ pub enum Question {
     Install,
 }
 
-/// A yes/no question.
+/// A yes/no question, with a third answer that does nothing when both of
+/// the others act.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Confirm {
     /// The question, one or two lines.
     pub text: Vec<String>,
     /// The two answers, `yes` first.
     pub answers: (String, String),
-    /// Which is highlighted.
-    pub yes: bool,
+    /// The answer that closes the question and does nothing, when it has
+    /// one: then it is the default, and what `Esc` means.
+    pub cancel: Option<String>,
+    /// The highlighted answer: 0 is `yes`, 1 `no`, 2 the cancel.
+    pub focus: usize,
     /// What a `yes` (or `no`) does.
     pub question: Question,
 }
 
 impl Confirm {
-    /// A question with `yes`/`no` answers.
+    /// A question with `yes`/`no` answers, opening on `no`.
     #[must_use]
     pub fn new(question: Question, text: &[&str], yes: &str, no: &str) -> Self {
         Self {
             text: text.iter().map(|s| (*s).to_owned()).collect(),
             answers: (yes.to_owned(), no.to_owned()),
-            yes: false,
+            cancel: None,
+            focus: 1,
             question,
         }
     }
 
+    /// With a third answer that does nothing, the one it opens on: for a
+    /// question whose `yes` and `no` both act, so that neither `Esc` nor a
+    /// reflexive `Enter` does either.
+    #[must_use]
+    pub fn or_cancel(mut self, label: &str) -> Self {
+        self.cancel = Some(label.to_owned());
+        self.focus = 2;
+        self
+    }
+
+    const fn answer_count(&self) -> usize {
+        if self.cancel.is_some() { 3 } else { 2 }
+    }
+
     /// Handle a key.
     pub fn handle(&mut self, key: Key) -> Outcome {
+        let answer = |yes: bool| Outcome {
+            close: true,
+            push: None,
+            actions: vec![Action::Answered(self.question.clone(), yes)],
+        };
+        let n = self.answer_count();
         match key {
-            Key::Esc | Key::Char('n') => Outcome {
-                close: true,
-                push: None,
-                actions: vec![Action::Answered(self.question.clone(), false)],
-            },
-            Key::Char('y') => Outcome {
-                close: true,
-                push: None,
-                actions: vec![Action::Answered(self.question.clone(), true)],
-            },
-            Key::Left | Key::Right | Key::Tab | Key::Up | Key::Down => {
-                self.yes = !self.yes;
+            Key::Esc if self.cancel.is_some() => Outcome::close(),
+            Key::Esc | Key::Char('n') => answer(false),
+            Key::Char('y') => answer(true),
+            Key::Left | Key::Up | Key::BackTab => {
+                self.focus = self.focus.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
                 Outcome::default()
             }
-            Key::Enter => Outcome {
-                close: true,
-                push: None,
-                actions: vec![Action::Answered(self.question.clone(), self.yes)],
+            Key::Right | Key::Down | Key::Tab => {
+                self.focus = self.focus.saturating_add(1).checked_rem(n).unwrap_or(0);
+                Outcome::default()
+            }
+            Key::Enter => match self.focus {
+                0 => answer(true),
+                1 => answer(false),
+                _ => Outcome::close(),
             },
             _ => Outcome::default(),
         }
@@ -450,8 +472,25 @@ impl Confirm {
 
     /// Draw the question as a dialog over `area`.
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let pick = |on: bool, text: &str| {
+            Span::styled(format!(" {text} "), if on { Chrome::selected() } else { Style::new() })
+        };
+        let mut answers = vec![
+            pick(self.focus == 0, &self.answers.0),
+            Span::raw("   "),
+            pick(self.focus == 1, &self.answers.1),
+        ];
+        if let Some(cancel) = &self.cancel {
+            answers.push(Span::raw("   "));
+            answers.push(pick(self.focus == 2, cancel));
+        }
+        answers.push(Span::raw("     "));
+        let keys = if self.cancel.is_some() { "y / n / esc" } else { "y / n / enter" };
+        answers.push(Span::styled(keys, Chrome::muted()));
+        let answers = Line::from(answers);
+        let text_width = self.text.iter().map(|t| crate::ansi::display_width(t)).max().unwrap_or(0);
         let width =
-            self.text.iter().map(String::len).max().unwrap_or(0).saturating_add(6).clamp(36, 72);
+            text_width.saturating_add(6).max(answers.width().saturating_add(2)).clamp(36, 72);
         let height = self.text.len().saturating_add(4);
         let rect = centered(area, cells(width), cells(height));
         frame.render_widget(Clear, rect);
@@ -461,16 +500,7 @@ impl Confirm {
         let mut lines: Vec<Line<'static>> =
             self.text.iter().map(|t| Line::from(t.clone())).collect();
         lines.push(Line::from(""));
-        let pick = |on: bool, text: &str| {
-            Span::styled(format!(" {text} "), if on { Chrome::selected() } else { Style::new() })
-        };
-        lines.push(Line::from(vec![
-            pick(self.yes, &self.answers.0),
-            Span::raw("   "),
-            pick(!self.yes, &self.answers.1),
-            Span::raw("     "),
-            Span::styled("y / n / enter", Chrome::muted()),
-        ]));
+        lines.push(answers);
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -641,6 +671,25 @@ mod tests {
         assert_eq!(
             q.handle(Key::Esc).actions,
             vec![Action::Answered(Question::QuitUnsaved, false)]
+        );
+        // app-06: a question whose two answers both act opens on the third,
+        // which does nothing, as `Esc` does; each act needs its own key.
+        let mut c = Confirm::new(Question::OverwriteOrReload, &["Changed?"], "overwrite", "reload")
+            .or_cancel("keep editing");
+        assert_eq!(c.handle(Key::Enter), Outcome::close());
+        assert_eq!(c.handle(Key::Esc), Outcome::close());
+        c.handle(Key::Left);
+        assert_eq!(
+            c.handle(Key::Enter).actions,
+            vec![Action::Answered(Question::OverwriteOrReload, false)]
+        );
+        c.handle(Key::Right);
+        assert_eq!(c.focus, 2);
+        c.handle(Key::Right);
+        assert_eq!(c.focus, 0, "wraps");
+        assert_eq!(
+            c.handle(Key::Char('y')).actions,
+            vec![Action::Answered(Question::OverwriteOrReload, true)]
         );
         let h = Help { title: "Keys".into(), keys: vec![("q".into(), "quit".into())] };
         assert!(h.handle(Key::Char('x')).close);

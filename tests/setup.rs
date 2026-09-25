@@ -322,12 +322,24 @@ fn an_unparsable_file_is_never_overwritten_and_a_changed_one_asks() {
     std::fs::write(&file, TWO_ROWS).unwrap();
     let mut app = for_test("", Some(file.clone()), home);
     keys(&mut app, "<right>x");
+    let edited = app.draft().table().clone();
     std::fs::write(&file, "theme = \"nord\"\n").unwrap();
     keys(&mut app, "s");
     assert!(check("confirm", &mut app, 80, 24).contains("changed on disk"));
-    keys(&mut app, "n");
+    // Esc, and Enter on the answer it opens on, close the question and
+    // do nothing (app-06): both other answers act.
+    keys(&mut app, "<esc>");
+    assert_eq!(app.draft().table(), &edited, "esc keeps the edits");
+    keys(&mut app, "s<enter>");
+    assert_eq!(app.draft().table(), &edited, "enter's default keeps the edits");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "theme = \"nord\"\n");
+    keys(&mut app, "sn");
     assert!(!app.draft().is_dirty());
     assert_eq!(app.draft().get(&["theme"]).and_then(toml::Value::as_str), Some("nord"));
+    assert!(app.status().unwrap().contains("u takes them back"), "{:?}", app.status());
+    keys(&mut app, "u");
+    assert_eq!(app.draft().table(), &edited, "u puts the dropped edits back");
+    keys(&mut app, "U");
     // The top-level form: enter on `preset` opens its list, the second
     // entry is `minimal`; esc closes the form again.
     keys(&mut app, "1<enter>");

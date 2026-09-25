@@ -246,15 +246,20 @@ impl App {
     /// `s`: write the draft, after the change check (SPEC § 14).
     pub(super) fn save(&mut self, force: bool) {
         if !force && self.draft.changed_on_disk() {
-            self.layers.push(Layer::Confirm(Confirm::new(
-                Question::OverwriteOrReload,
-                &[
-                    "The file changed on disk since it was read.",
-                    "Overwrite it with the draft, or reload it?",
-                ],
-                "overwrite",
-                "reload",
-            )));
+            // Both answers act (one drops the file, the other the edits),
+            // so the question opens on doing neither, which `Esc` is too.
+            self.layers.push(Layer::Confirm(
+                Confirm::new(
+                    Question::OverwriteOrReload,
+                    &[
+                        "The file changed on disk since it was read.",
+                        "y overwrites it with the draft; n reloads it (u undoes that).",
+                    ],
+                    "overwrite",
+                    "reload",
+                )
+                .or_cancel("keep editing"),
+            ));
             return;
         }
         match self.draft.save() {

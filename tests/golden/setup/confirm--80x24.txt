@@ -7,12 +7,12 @@ row 2     model  context   │ cost
 
 
 
-               ┌───────────────────────────────────────────────┐
-               │The file changed on disk since it was read.    │
-               │Overwrite it with the draft, or reload it?     │
-               │                                               │
-               │ overwrite     reload      y / n / enter       │
-               └───────────────────────────────────────────────┘
+      ┌─────────────────────────────────────────────────────────────────┐
+      │The file changed on disk since it was read.                      │
+      │y overwrites it with the draft; n reloads it (u undoes that).    │
+      │                                                                 │
+      │ overwrite     reload     keep editing      y / n / esc          │
+      └─────────────────────────────────────────────────────────────────┘
 
 
 

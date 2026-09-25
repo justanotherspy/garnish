@@ -1928,7 +1928,10 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   file on disk changes while `setup` is open (another
   session, the skill, an editor), `s` notices (a best-effort compare of
   mtime and length; a file absent at open and present at save counts as
-  changed) and asks whether to overwrite or reload; it never merges. A
+  changed) and asks whether to overwrite (`y`) or reload (`n`, which `u`
+  takes back); `Esc`, and `Enter` on the answer the question opens on, do
+  neither, since both answers drop something (2026-09-25 review: `Esc`
+  had reloaded); it never merges. A
   save or an install that fails (a read-only directory, an unwritable
   `settings.json`; a symlinked settings file is written through the link
   as `install` does) shows the OS error (a failed save in the status bar,

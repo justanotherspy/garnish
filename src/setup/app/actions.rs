@@ -303,7 +303,10 @@ impl App {
                 } else {
                     self.draft.reload();
                     self.refresh();
-                    self.say("reloaded from disk; the edits were dropped".into(), Level::Info);
+                    self.say(
+                        "reloaded from disk; the edits were dropped (u takes them back)".into(),
+                        Level::Info,
+                    );
                 }
             }
             Question::DropText(name) => {
