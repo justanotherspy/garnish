@@ -123,7 +123,9 @@ edit the config in place.
 Without the screen, `garnish setup --preset compact --install` writes a
 preset and hooks it up, and `garnish install` alone does the settings
 (`--dry-run` shows the change; `--absolute` if `~/.cargo/bin` is not on the
-PATH Claude Code sees). The equivalent by hand:
+PATH Claude Code sees; `garnish --config FILE install` writes a command that
+reads FILE, and a later `install` keeps the arguments a garnish command
+already has). The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }

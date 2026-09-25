@@ -57,7 +57,7 @@ pub fn run(args: &Args<'_>) -> Result<()> {
     }
     let draft = Draft::open(Some(target));
     let options = crate::install::Options {
-        config_path: args.config_path.map(Path::to_path_buf),
+        config_path: crate::config::explicit(args.config_path),
         ..crate::install::Options::default()
     };
     let no_color = std::env::var_os("NO_COLOR").is_some();
@@ -85,7 +85,7 @@ fn preset_twin(
     )?;
     if install {
         let options = crate::install::Options {
-            config_path: config_path.map(Path::to_path_buf),
+            config_path: crate::config::explicit(config_path),
             ..crate::install::Options::default()
         };
         let steps = crate::install::Steps::plan(&options).map_err(crate::cli::refusal)?;
@@ -127,15 +127,17 @@ pub fn snapshot(app: &mut App, width: u16, height: u16) -> String {
     out
 }
 
-/// A screen for the tests: `text` as the config (with no file behind it
-/// unless `path` says so), a pinned clock, the install plan aimed at
-/// `home`.
+/// A screen for the tests.
+///
+/// `text` as the config (with no file behind it unless `path` says so), a
+/// pinned clock, the install plan aimed at `home` (and at no config file,
+/// as `setup` plans it: the draft is the config).
 #[must_use]
 pub fn for_test(text: &str, path: Option<PathBuf>, home: &Path) -> App {
     let draft = path.map_or_else(|| Draft::from_text(text), |p| Draft::open(Some(p)));
     let options = crate::install::Options {
         settings: Some(home.join(".claude").join("settings.json")),
-        config_path: Some(home.join("garnish.toml")),
+        write_config: false,
         ..crate::install::Options::default()
     };
     let preview = Preview::new(crate::render::Clock::fixed(), true);

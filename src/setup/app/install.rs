@@ -75,9 +75,17 @@ impl App {
                     "settings file   {}",
                     self.shown(&steps.plan.settings)
                 )));
+                // The command may name a config path under the home, which
+                // is shown as `~` like every path here.
+                let command = self.home.as_deref().map_or_else(
+                    || steps.command.clone(),
+                    |home| {
+                        let prefix = format!("{}/", home.display());
+                        steps.command.replace(&prefix, "~/")
+                    },
+                );
                 lines.push(Line::from(format!(
-                    "statusLine      {{ \"type\": \"command\", \"command\": {:?}, \"refreshInterval\": {}{} }}",
-                    steps.plan.command,
+                    "statusLine      {{ \"type\": \"command\", \"command\": {command:?}, \"refreshInterval\": {}{} }}",
                     steps.plan.refresh_interval,
                     steps.plan.padding.map_or_else(String::new, |p| format!(", \"padding\": {p}"))
                 )));

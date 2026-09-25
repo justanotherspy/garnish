@@ -110,8 +110,19 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
         run(&["install", "--absolute", "--refresh-interval", "2", "--padding", "1"], home, &[]);
     assert!(ok && out.contains("already up to date"), "{out}");
     assert!(out.contains(": 3 up to date"), "unchanged skills are not rewritten: {out}");
-    assert!(err.contains("set `padding = 2`"), "existing config gets the hint on stderr: {err}");
+    assert!(!err.contains("padding"), "the config already matches: {err}");
     assert!(!out.contains("padding"), "{out}");
+    // A dry run says so too, rather than "would write" (cli-16).
+    let (out, _, ok) = run(
+        &["install", "--dry-run", "--absolute", "--refresh-interval", "2", "--padding", "1"],
+        home,
+        &[],
+    );
+    let first = out.lines().next().unwrap_or_default();
+    assert!(ok && first == format!("{} already up to date", settings.display()), "{out}");
+    // Claude Code's minimum is 1: a 0 is refused, not quietly raised.
+    let (_, err, ok) = run(&["install", "--dry-run", "--refresh-interval", "0"], home, &[]);
+    assert!(!ok && err.contains("--refresh-interval"), "{err}");
 
     // --no-skills for real: settings and config written, no skills directory.
     let other = tempfile::tempdir().unwrap();
@@ -122,8 +133,9 @@ fn install_dry_run_writes_nothing_and_real_install_merges_with_backup() {
     // The config key is a u16; a value that would not round-trip is refused up front.
     let (_, err, ok) = run(&["install", "--dry-run", "--padding", "40000"], home, &[]);
     assert!(!ok && err.contains("40000"), "{err}");
-    let (out, _, ok) = run(&["install", "--dry-run", "--padding", "3"], home, &[]);
+    let (out, err, ok) = run(&["install", "--dry-run", "--padding", "3"], home, &[]);
     assert!(ok && !out.contains("would write a default config"), "config exists: {out}");
+    assert!(err.contains("set `padding = 6`"), "existing config gets the hint on stderr: {err}");
 
     let (out, err, _) = run(&["install", "--dry-run"], home, &[("PATH", "/nonexistent")]);
     assert!(err.contains("not on PATH"), "{err}");
@@ -357,6 +369,15 @@ fn unparsable_files_are_never_rewritten() {
     let (_, err, ok) = run(&["install", "--absolute"], home, &[]);
     assert!(!ok && err.contains("object"), "{err}");
     assert_eq!(std::fs::read_to_string(&settings).unwrap(), "[1, 2]\n");
+    // Bytes that are not UTF-8 are a file that does not parse, refused the
+    // same way, not an error report (cli-14).
+    let latin1 = b"{\"theme\": \"caf\xe9\"}\n";
+    std::fs::write(&settings, latin1).unwrap();
+    let (out, err, ok) = run(&["install", "--absolute"], home, &[]);
+    assert!(!ok && out.is_empty(), "{out}");
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("settings.json: not valid UTF-8") && !err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read(&settings).unwrap(), latin1);
 
     // A TOML syntax error is refused with its line; a bad value still
     // parses, so the file is replaced and kept as a backup.
@@ -369,6 +390,12 @@ fn unparsable_files_are_never_rewritten() {
     assert!(err.contains("garnish.toml") && err.contains("line 2"), "{err}");
     assert!(!err.contains("Location:"), "{err}");
     assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "preset = \"full\"\n[frame\n");
+    assert_eq!(entries(cfg.parent().unwrap()), vec!["garnish.toml"]);
+    std::fs::write(&cfg, b"theme = \"\xff\"\n").unwrap();
+    let (_, err, ok) = run(&["config", "init", "--force"], home, &[]);
+    assert!(!ok && err.lines().count() == 1 && err.contains("not valid UTF-8"), "{err}");
+    assert!(!err.contains("Location:"), "{err}");
+    assert_eq!(std::fs::read(&cfg).unwrap(), b"theme = \"\xff\"\n");
     assert_eq!(entries(cfg.parent().unwrap()), vec!["garnish.toml"]);
     std::fs::write(&cfg, "theme = \"nope\"\n").unwrap();
     let (out, _, ok) = run(&["config", "init", "--force"], home, &[]);
@@ -904,6 +931,68 @@ fn claude_config_dir_moves_the_user_settings_and_the_skills() {
     let (report, _, ok) = run(&["doctor"], home, &env);
     assert!(ok && report.contains("work-claude/settings.json  ok"), "{report}");
     assert!(report.contains("true (user)"), "{report}");
+}
+
+/// One tick through `sh -c <command>`, as Claude Code runs
+/// `statusLine.command`, in the hermetic environment of [`run`].
+fn sh_tick(command: &str, home: &Path) -> String {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", command])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NOW", "1738425600")
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env("NO_COLOR", "1")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned()
+}
+
+/// SPEC § 7: `install` with an explicit config (`--config`, else
+/// `GARNISH_CONFIG`) writes a command that passes it, quoted for the
+/// shell, so the tick reads the file it was set up for; a reinstall
+/// without one replaces the program word only and keeps the arguments.
+#[test]
+fn install_passes_an_explicit_config_and_a_reinstall_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let work = home.join("my configs").join("work.toml");
+    std::fs::create_dir_all(work.parent().unwrap()).unwrap();
+    let marker = "[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"WORKFILE\"\n";
+    std::fs::write(&work, marker).unwrap();
+    let settings = home.join(".claude").join("settings.json");
+    let command = || -> String {
+        let text = std::fs::read_to_string(&settings).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        v["statusLine"]["command"].as_str().unwrap().to_owned()
+    };
+    let args = ["--config", work.to_str().unwrap(), "install", "--no-skills", "--absolute"];
+    let (out, _, ok) = run(&args, home, &[]);
+    assert!(ok, "{out}");
+    let written = command();
+    let quoted = format!(" --config '{}'", work.display());
+    assert!(written.ends_with(&quoted), "{written}");
+    assert!(sh_tick(&written, home).contains("WORKFILE"), "the tick reads work.toml");
+    // `install --padding 1` (the README's fix for cut rows) used to reset
+    // the command to a bare `garnish`, which reads another config.
+    let (out, _, ok) =
+        run(&["install", "--no-skills", "--no-config", "--absolute", "--padding", "1"], home, &[]);
+    assert!(ok, "{out}");
+    assert_eq!(command(), written);
+    let (out, _, ok) = run(
+        &["install", "--no-skills", "--no-config", "--dry-run"],
+        home,
+        &[("GARNISH_CONFIG", work.to_str().unwrap())],
+    );
+    assert!(ok && out.contains("\"command\": \"garnish --config '"), "{out}");
 }
 
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,

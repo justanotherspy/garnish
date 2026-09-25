@@ -140,14 +140,19 @@ pub enum Command {
         /// Settings file (default `~/.claude/settings.json`).
         #[arg(long, value_name = "FILE")]
         settings: Option<PathBuf>,
-        /// `statusLine.refreshInterval` in seconds.
-        #[arg(long, default_value_t = 1)]
+        /// `statusLine.refreshInterval` in seconds (Claude Code's minimum is 1).
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
         refresh_interval: u64,
         /// `statusLine.padding`; the generated config gets `padding = 2N`
         /// to match (the harness pads both sides).
-        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(0..=32_767))]
+        #[arg(
+            long,
+            value_name = "N",
+            value_parser = clap::value_parser!(u64).range(0..=crate::install::MAX_PADDING)
+        )]
         padding: Option<u64>,
-        /// Write the absolute path of this binary instead of `garnish`.
+        /// Write the path this binary is found by (the launcher on PATH,
+        /// not the file it links to) instead of `garnish`.
         #[arg(long)]
         absolute: bool,
         /// Do not write a default config file when none exists.
@@ -324,7 +329,7 @@ fn run_command() -> Result<()> {
                 absolute,
                 write_config: !no_config,
                 write_skills: !no_skills,
-                config_path: config_path.map(Path::to_path_buf),
+                config_path: config::explicit(config_path),
             };
             let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
             print_install(&steps, dry_run)

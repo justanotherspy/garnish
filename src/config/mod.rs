@@ -1366,13 +1366,17 @@ fn config_home() -> Option<PathBuf> {
         .or_else(|| crate::claude_settings::home_dir().map(|h| h.join(".config")))
 }
 
+/// The config file named explicitly: `--config` (`flag`), else
+/// `GARNISH_CONFIG`; `None` when neither names one.
+#[must_use]
+pub fn explicit(flag: Option<&Path>) -> Option<PathBuf> {
+    flag.map(Path::to_path_buf).or_else(|| env_path(CONFIG_ENV))
+}
+
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
 #[must_use]
-pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
-    if let Some(p) = explicit {
-        return Some(p.to_path_buf());
-    }
-    if let Some(p) = env_path(CONFIG_ENV) {
+pub fn locate(flag: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = explicit(flag) {
         return Some(p);
     }
     let xdg = config_home().map(|d| d.join("garnish").join("garnish.toml"));
