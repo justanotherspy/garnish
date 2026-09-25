@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::ansi::Segment;
 use crate::cache::Scope;
@@ -196,6 +197,10 @@ impl Module for AccountModule {
     }
 }
 
+/// How long the `account` worker waits before it reads a `.claude.json`
+/// that did not parse a second time (SPEC § 3.8).
+const REREAD_AFTER: Duration = Duration::from_millis(100);
+
 /// The `account` entry for the `.claude.json` at `path`: an `email` value
 /// when the file carries `oauthAccount.emailAddress`, nothing when it
 /// does not or when there is no file at all.
@@ -203,23 +208,51 @@ impl Module for AccountModule {
 /// # Errors
 /// A file that cannot be read, is longer than [`MAX_CLAUDE_JSON_BYTES`] or
 /// is not a JSON object: the text of a failed entry, retried once per TTL.
+/// A file that does not parse is read once more first ([`REREAD_AFTER`]).
 pub fn read_account(path: &Path) -> Result<BTreeMap<String, String>, String> {
-    let shown = path.display();
     // One byte past the cap, as `claude_settings::read_file` reads a
     // settings file: an over-long file is told from one at the cap, and
     // never parsed.
-    let bytes = match claude_settings::read_regular(path, MAX_CLAUDE_JSON_BYTES.saturating_add(1)) {
-        Ok(Some(bytes)) => bytes,
-        Ok(None) => return Ok(BTreeMap::new()),
-        Err(e) => return Err(format!("{shown}: {e}")),
+    read_account_with(path, REREAD_AFTER, || {
+        claude_settings::read_regular(path, MAX_CLAUDE_JSON_BYTES.saturating_add(1))
+    })
+}
+
+/// [`read_account`] over any reader of the file, waiting `pause` before
+/// the second read of one that did not parse.
+///
+/// Claude Code writes `.claude.json` through a temporary file and a
+/// rename, but when the rename fails (a bind-mounted file) it truncates
+/// the file and rewrites it in place (seen in 2.1.282), so a worker can
+/// read it empty or half written, and a failed entry keeps `✗` on the row
+/// for the whole TTL. Only a parse failure is read again: an error or an
+/// over-long file would not change in 100 ms.
+fn read_account_with(
+    path: &Path,
+    pause: Duration,
+    mut read: impl FnMut() -> std::io::Result<Option<Vec<u8>>>,
+) -> Result<BTreeMap<String, String>, String> {
+    let shown = path.display();
+    let mut bytes = || -> Result<Option<Vec<u8>>, String> {
+        let bytes = read().map_err(|e| format!("{shown}: {e}"))?;
+        if bytes
+            .as_ref()
+            .is_some_and(|b| u64::try_from(b.len()).is_ok_and(|n| n > MAX_CLAUDE_JSON_BYTES))
+        {
+            return Err(format!(
+                "{shown}: longer than the {MAX_CLAUDE_JSON_BYTES} bytes garnish reads"
+            ));
+        }
+        Ok(bytes)
     };
-    if u64::try_from(bytes.len()).is_ok_and(|n| n > MAX_CLAUDE_JSON_BYTES) {
-        return Err(format!(
-            "{shown}: longer than the {MAX_CLAUDE_JSON_BYTES} bytes garnish reads"
-        ));
-    }
-    let json: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("{shown}: not valid JSON: {e}"))?;
+    let Some(first) = bytes()? else { return Ok(BTreeMap::new()) };
+    let json = if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&first) {
+        json
+    } else {
+        std::thread::sleep(pause);
+        let Some(second) = bytes()? else { return Ok(BTreeMap::new()) };
+        serde_json::from_slice(&second).map_err(|e| format!("{shown}: not valid JSON: {e}"))?
+    };
     let serde_json::Value::Object(map) = json else {
         return Err(format!("{shown}: not a JSON object"));
     };
@@ -354,6 +387,39 @@ mod tests {
         let value = email(&hostile).unwrap();
         let value = value.get("email").unwrap();
         assert!(!value.contains('\u{1b}') && value.chars().count() == MAX_EMAIL_CHARS, "{value:?}");
+    }
+
+    /// SPEC § 3.8: a `.claude.json` that does not parse is read once more
+    /// before it counts as failed. Claude Code truncates and rewrites the
+    /// file in place when its atomic write fails (a bind-mounted file), so
+    /// a worker can meet it half written, and a failure holds `✗` on the
+    /// row for the whole 600 s TTL. A file that cannot be read, and one
+    /// that fails twice, are failures at once.
+    #[test]
+    fn account_rereads_a_file_that_does_not_parse_once() {
+        let path = Path::new("/home/dev/.claude.json");
+        let full = br#"{"oauthAccount": {"emailAddress": "dev@example.com"}}"#.to_vec();
+        let half = full.get(..20).unwrap().to_vec();
+        let reads = |answers: Vec<std::io::Result<Option<Vec<u8>>>>| {
+            let mut answers = answers.into_iter();
+            let mut calls = 0_usize;
+            let result = read_account_with(path, Duration::ZERO, || {
+                calls += 1;
+                answers.next().unwrap()
+            });
+            (result.map(|v| v.get("email").cloned()), calls)
+        };
+        assert_eq!(
+            reads(vec![Ok(Some(half.clone())), Ok(Some(full.clone()))]),
+            (Ok(Some("dev@example.com".to_owned())), 2)
+        );
+        assert_eq!(reads(vec![Ok(Some(Vec::new())), Ok(Some(full.clone()))]).1, 2, "emptied first");
+        let (twice, calls) = reads(vec![Ok(Some(half.clone())), Ok(Some(half))]);
+        assert!(twice.is_err_and(|e| e.contains("not valid JSON")) && calls == 2);
+        assert_eq!(reads(vec![Ok(Some(full))]).1, 1, "a good file is read once");
+        assert_eq!(reads(vec![Ok(None)]), (Ok(None), 1), "no file: no account, no retry");
+        let (refused, calls) = reads(vec![Err(std::io::Error::other("denied"))]);
+        assert!(refused.is_err_and(|e| e.contains("denied")) && calls == 1, "no retry");
     }
 
     /// SPEC § 3.8: the tick shows the entry the worker wrote, the address

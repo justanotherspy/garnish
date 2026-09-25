@@ -692,7 +692,12 @@ document decides the count for these four alone).
   the tick. An absent file is an `ok` entry with no email (an API-key
   user has no account: nothing to show, never `✗`); an unreadable,
   unparsable or oversized one is a failed entry (`✗`, retried once per
-  TTL). The field name is what the community documents for the file
+  TTL). A file that does not parse is read once more, 100 ms later,
+  before it counts as failed (2026-09-25: Claude Code 2.1.282 writes the
+  file through a temporary file and a rename, but truncates and rewrites
+  it in place when the rename fails, as it does for a bind-mounted file,
+  so a worker can meet it half written and hold `✗` for the whole TTL).
+  The field name is what the community documents for the file
   (FUTURE-SPEC grades it C), so a file without it shows nothing rather
   than guessing. `style = "email" | "user"` picks the whole address or
   the part before `@`. The settings chain of § 2.3 honours the same
