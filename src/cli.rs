@@ -314,12 +314,11 @@ fn parse_failure(e: &clap::Error) -> Result<()> {
         e.exit();
     }
     let text = e.render().to_string();
-    eprint!("{text}");
     let first = text.lines().next().unwrap_or_default();
     let first = first.strip_prefix("error: ").unwrap_or(first);
-    let mut stdout = std::io::stdout().lock();
-    writeln!(stdout, "⚠ garnish: {}", crate::ansi::plain_text(first))?;
-    Ok(())
+    let row = writeln!(std::io::stdout().lock(), "⚠ garnish: {}", crate::ansi::plain_text(first));
+    crate::debug::stderr_line(text.trim_end());
+    Ok(row?)
 }
 
 /// Whether the command line names a subcommand, so it is not the render
@@ -339,15 +338,18 @@ pub const TEST_PANIC_ENV: &str = "GARNISH_TEST_PANIC";
 /// Make a panic on the render path what SPEC § 5 promises: a `⚠ garnish:
 /// internal error` row and exit 0, since a non-zero exit clears the status
 /// line. The release build aborts on a panic, after this hook has run.
+///
+/// The row goes out before the note on stderr, and neither write may fail
+/// the hook: a panic inside it aborts the process with nothing printed.
 // A panic hook cannot return to the program, and an abort or an unwind
 // both exit non-zero: `exit(0)` is the one way to keep the status line.
 #[allow(clippy::exit)]
 fn render_panics_as_a_row() {
     std::panic::set_hook(Box::new(|info| {
-        eprintln!("garnish: {info}");
         let mut stdout = std::io::stdout();
         let _ = stdout.write_all("⚠ garnish: internal error\n".as_bytes());
         let _ = stdout.flush();
+        crate::debug::stderr_line(&format!("garnish: {info}"));
         std::process::exit(0);
     }));
 }
@@ -476,7 +478,7 @@ fn render_stdin(config_path: Option<&Path>) {
     let input = match std::io::stdin().read_to_end(&mut bytes) {
         Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(e) => {
-            eprintln!("garnish: reading stdin: {e}");
+            crate::debug::stderr_line(&format!("garnish: reading stdin: {e}"));
             String::new()
         }
     };

@@ -1477,7 +1477,11 @@ screen). Otherwise:
   installed on the render path prints it and exits 0, and it runs before
   the release build's `panic = "abort"`; a stack overflow or a signal is
   beyond it. (2026-09-25 review: nothing produced this line, and both a
-  typo and a panic cleared the status line with no word.)
+  typo and a panic cleared the status line with no word.) The hook writes
+  the row before its note on stderr, and no write to stderr on the render
+  path can fail the tick (`debug::stderr_line`): with a stderr nobody
+  reads, `eprintln!` panicked, inside the hook too, and the tick aborted
+  with nothing on stdout (2026-09-25 review).
 - **A file that fails to parse is never rewritten by any command** (PLAN
   Phase 19 for `install` and `config init --force`, Phase 22 for `setup`;
   from FUTURE-SPEC § 12.1 and § 13.4). `install`, `config init --force`

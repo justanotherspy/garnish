@@ -848,6 +848,18 @@ fn an_array_where_an_object_belongs_loses_only_that_field() {
 /// One run of the binary with `args` and a payload piped in, as the
 /// harness runs `statusLine.command`: stdout and the exit code.
 fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<i32>) {
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    piped_with(args, home, extra, payload, Stdio::piped())
+}
+
+/// [`piped`] with a payload and a stderr of the test's own.
+fn piped_with(
+    args: &[&str],
+    home: &Path,
+    extra: &[(&str, &str)],
+    payload: &str,
+    stderr: Stdio,
+) -> (String, Option<i32>) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
     cmd.args(args)
         .current_dir(home)
@@ -861,12 +873,11 @@ fn piped(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, Option<
         .env_remove("CLAUDE_CONFIG_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(stderr);
     for (k, v) in extra {
         cmd.env(k, v);
     }
     let mut child = cmd.spawn().unwrap();
-    let payload = include_str!("fixtures/payloads/subscription-full.json");
     // A run refused before it reads stdin may have exited already: the
     // write then fails with a broken pipe, which is not the test's concern.
     let _ = child.stdin.take().unwrap().write_all(payload.as_bytes());
@@ -901,6 +912,35 @@ fn a_bad_flag_or_a_panic_on_the_render_path_is_a_warning_row() {
     assert_eq!(out, "⚠ garnish: internal error\n");
     let (out, code) = piped(&["render"], home, &[("GARNISH_TEST_PANIC", "1")]);
     assert_eq!((out.as_str(), code), ("⚠ garnish: internal error\n", Some(0)));
+}
+
+/// SPEC § 5: nothing the render path writes to stderr can cost the row.
+/// `eprintln!` panics when the write fails, so with a stderr nobody reads
+/// (a pipe whose reader is gone) the panic hook's own first line panicked
+/// again and the tick aborted with nothing on stdout, which clears the
+/// status line; the notes for a bad payload, a bad flag, a `TZ` naming no
+/// zone and an unparseable `GARNISH_NOW` did the same.
+#[test]
+fn a_stderr_nobody_reads_never_costs_the_row() {
+    // What it is, the arguments, the payload, the environment, how stdout starts.
+    type Case<'a> = (&'a str, &'a [&'a str], &'a str, &'a [(&'a str, &'a str)], &'a str);
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let good = include_str!("fixtures/payloads/subscription-full.json");
+    let cases: [Case<'_>; 5] = [
+        ("panic", &[], good, &[("GARNISH_TEST_PANIC", "1")], "⚠ garnish: internal error\n"),
+        ("bad payload", &[], "[1]", &[], "⚠ garnish: bad payload\n"),
+        ("bad flag", &["--confg"], good, &[], "⚠ garnish: "),
+        ("unknown TZ", &[], good, &[("TZ", "Bogus/Zone")], ""),
+        ("bad GARNISH_NOW", &[], good, &[("GARNISH_NOW", "soon")], ""),
+    ];
+    for (label, args, payload, extra, starts) in cases {
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let (out, code) = piped_with(args, home, extra, payload, Stdio::from(writer));
+        assert_eq!(code, Some(0), "{label}: {out}");
+        assert!(out.starts_with(starts) && !out.trim().is_empty(), "{label}: {out:?}");
+    }
 }
 
 /// SPEC § 9: `GARNISH_MANAGED_SETTINGS` names the managed settings file,

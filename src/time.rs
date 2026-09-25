@@ -19,7 +19,11 @@ pub fn now() -> Timestamp {
         Ok(v) if v.trim().is_empty() => Timestamp::now(),
         Ok(v) => parse_now(&v).unwrap_or_else(|| {
             static WARNED: std::sync::Once = std::sync::Once::new();
-            WARNED.call_once(|| eprintln!("garnish: ignoring unparseable {NOW_ENV}={v:?}"));
+            WARNED.call_once(|| {
+                crate::debug::stderr_line(&format!(
+                    "garnish: ignoring unparseable {NOW_ENV}={v:?}"
+                ));
+            });
             Timestamp::now()
         }),
         Err(_) => Timestamp::now(),
@@ -44,7 +48,9 @@ pub fn local_zone() -> TimeZone {
             if tz.is_none() {
                 static WARNED: std::sync::Once = std::sync::Once::new();
                 WARNED.call_once(|| {
-                    eprintln!("garnish: TZ={value:?} names no time zone; using the system zone");
+                    crate::debug::stderr_line(&format!(
+                        "garnish: TZ={value:?} names no time zone; using the system zone"
+                    ));
                 });
             }
             tz
