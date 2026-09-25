@@ -131,6 +131,12 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   colour with one message; `hide_empty_rows` next to `hide_empty_lines`
   no longer depends on key order; `preview --preset` no longer reports
   problems in the rows the preset replaced.
+- **Upgrading:** a config an earlier `garnish setup` wrote can carry two of
+  the keys now reported, and shows a `⚠ config:` row until you delete
+  them: a `refresh` on a module that renders every tick (the old module
+  form offered it), and `title_color`, `title_pad` or `title_justify`
+  left behind when a title was removed. `garnish config check` names each
+  one.
 
 *`garnish setup`*
 

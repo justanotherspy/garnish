@@ -948,6 +948,13 @@ was built, what the reviews found and what was decided, not how.
       `gap` ≥ 1.
     - The workflow fixes go in their own PR (#85), so the code PR (#86)
       can be reviewed by the unchanged workflow.
+    - The three rules the final review showed a file old garnish wrote
+      can trip (`refresh` ≥ 1 on a payload-only module, which the old
+      module form offered; `title_*` left without a title by the old
+      title removal; `thresholds` out of order) stay problems on the
+      tick, knowingly against CLAUDE.md's tightening rule; CHANGELOG
+      carries an upgrade note, and setup now removes a title's keys
+      together.
   - *How it was built:* one fix batch per concern, each a subagent in its
     own worktree working test-first under `make check`, merged into #86
     one batch at a time. `config/mod.rs` and `setup/app.rs` were split
