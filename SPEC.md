@@ -1687,8 +1687,11 @@ module pages, and the glyph picker prints each candidate's cell count
 each row's lines as typed pieces. A click selects a module and a second
 click, or `Enter`, edits it; a click on a cap or the rule opens the frame
 form. A separator, a cap or the rule is reached by a click alone; keys
-reach modules, rows and columns, and `2` opens the frame form (the
-keyboard twin is in PLAN's backlog). The placement map names the outer
+reach modules, rows and columns, `2` opens the frame form (the
+keyboard twin is in PLAN's backlog), and `e` opens the `[box.<name>]`
+form of the box the selected line is in (its own, or for an inner row
+its column's, then its row's), so a box needs no mouse either (added in
+the 2026-09-25 review: only a click on a box edge reached one). The placement map names the outer
 row of a line, so a click on a title or a box edge inside a row of
 columns selects that row and names the list as the way to the column or
 inner row it may belong to (the same backlog item). `Esc` closes the innermost layer
@@ -1822,7 +1825,8 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the rule or a cap opens the frame form, a separator the same form on
   its `separator` key. Everything the mouse does has a key, since tmux
   and some SSH sessions swallow mouse events (a separator, a cap and the
-  rule are reached through `2`, the frame form, see above).
+  rule are reached through `2`, the frame form, and a box through `e`,
+  see above).
 - **Editing by ticking.** The overlay lists every option of the selected
   module as a form: booleans as checkboxes (`[x] hide_when_empty`),
   `preset` and every enum as a radio list, integers as a stepper showing

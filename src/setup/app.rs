@@ -430,7 +430,8 @@ impl App {
                     ("C", "add a column after the selection"),
                     ("S", "stack the column (or add an inner row)"),
                     ("t", "title the row"),
-                    ("b / B", "box the row or column / box it with the row above"),
+                    // One line for the three box keys: the page fits 24 rows.
+                    ("b / B / e", "box the line / box it with the row above / edit its [box]"),
                     ("space", "make the row a spacer"),
                     ("u / U", "undo / redo the last edit (also ctrl-z / ctrl-r)"),
                     ("1 2 3", "top-level keys / frame / colours"),

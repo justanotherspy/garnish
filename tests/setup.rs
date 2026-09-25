@@ -170,6 +170,7 @@ fn home_picker_and_builder_screens_match_their_goldens() {
     keys(&mut app, "<esc>?");
     let shot = check("help", &mut app, 80, 24);
     assert!(shot.contains("Builder") && shot.contains("save"), "{shot}");
+    assert!(shot.contains("q / esc"), "every key fits 24 rows: {shot}");
     keys(&mut app, "<esc>1");
     let shot = check("top-form", &mut app, 80, 24);
     assert!(shot.contains("hide_empty_rows"), "{shot}");
@@ -981,6 +982,41 @@ fn d_on_the_last_key_keeps_a_text_module_or_a_box() {
     assert_eq!(app.draft().get(&["box", "repo"]), Some(&empty), "{:?}", app.status());
     assert_eq!(app.draft().resolved().1, Vec::new());
     assert!(app.form_keys().is_some(), "the box form stays open");
+}
+
+/// app-07: `e` opens the `[box.<name>]` form of the selected line's box
+/// with no mouse: a row's, a column's, or the column's of an inner row.
+#[test]
+fn e_opens_the_box_form_from_the_keyboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(
+        &file,
+        "[box.repo]\ntitle = \"R\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file.clone()), home);
+    keys(&mut app, "e");
+    assert!(snapshot(&mut app, 80, 24).contains("[box.repo]"), "{:?}", app.status());
+    on_field(&mut app, "title", "<enter><end><enter><bs>X<enter>");
+    assert_eq!(app.draft().get(&["box", "repo", "title"]).and_then(toml::Value::as_str), Some("X"));
+    std::fs::write(
+        &file,
+        "[box.c]\ntitle = \"C\"\n[[row]]\n[[row.col]]\nbox = \"c\"\n[[row.col.row]]\nmodules = [\"path\"]\n[[row.col]]\nmodules = [\"clock\"]\n",
+    )
+    .unwrap();
+    let mut app = for_test("", Some(file), home);
+    keys(&mut app, "e");
+    assert!(app.status().unwrap().contains("no named box"), "{:?}", app.status());
+    assert!(app.form_keys().is_none());
+    keys(&mut app, "<down><down>e");
+    assert!(
+        snapshot(&mut app, 80, 24).contains("[box.c]"),
+        "an inner row reaches its column's box"
+    );
+    keys(&mut app, "<esc><up>e");
+    assert!(snapshot(&mut app, 80, 24).contains("[box.c]"), "the column's own box");
 }
 
 /// app-02: `b` moves a box's only member into another box, a box of its

@@ -55,6 +55,7 @@ impl App {
             Key::Char('t') => self.ask_title(),
             Key::Char('b') => self.ask_box(),
             Key::Char('B') => self.box_with_above(),
+            Key::Char('e') => self.edit_box(),
             Key::Char('1') => self.open_form(FormKind::Top),
             Key::Char('2') => self.open_form(FormKind::Frame),
             Key::Char('3') => self.open_form(FormKind::Colors),
@@ -128,6 +129,26 @@ impl App {
         );
         choose.select(&current);
         self.layers.push(Layer::Choose(choose));
+    }
+
+    /// `e`: the form of the `[box.<name>]` the selected line is in, by its
+    /// own `box` or, for a column's inner row, the column's, then the
+    /// row's: the keyboard's way to a box (SPEC § 14).
+    fn edit_box(&mut self) {
+        let Some(at) = self.builder.item().map(|i| i.at) else {
+            self.say("no rows yet; a adds one".into(), Level::Info);
+            return;
+        };
+        let named = [at, RowAt { inner: None, ..at }, RowAt::row(at.row)]
+            .into_iter()
+            .find_map(|a| self.draft.row(a)?.get("box")?.as_str().map(str::to_owned));
+        match named {
+            Some(name) if self.draft.get(&["box", &name]).is_some_and(Value::is_table) => {
+                self.open_form(FormKind::Box(name));
+            }
+            Some(name) => self.say(format!("no [box.{name}] table; b picks a box"), Level::Warn),
+            None => self.say("this line is in no named box; b puts it in one".into(), Level::Info),
+        }
     }
 
     /// `B`: the row joins the named box of the row above without asking;
