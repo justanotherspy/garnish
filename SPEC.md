@@ -609,8 +609,8 @@ color = "muted"
   screen.
 - **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
   reference gets one page for it; `config check` validates `justify`,
-  `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
-  table.
+  `overflow`, `step` (0.001–1000, like every `*_step`, § 5) and that every
+  `text.<name>` on a line has a table.
 
 ### 3.8 Harness identity and settings badges (PLAN Phase 23)
 
@@ -1357,8 +1357,9 @@ without an error report.
   it that is never overwritten, via a temp file in the same directory and
   a `rename`; `config init` names the backup it kept.
 - **Nothing but text reaches a row.** Every string that becomes part of a
-  row is reduced to plain text: escape sequences (CSI, OSC, and the string
-  sequences DCS/SOS/PM/APC with their payloads), control characters and the
+  row is reduced to plain text: escape sequences (CSI, OSC, the string
+  sequences DCS/SOS/PM/APC with their payloads, and nF sequences such as the
+  `ESC ( B` of `tput sgr0` with their final byte), control characters and the
   bidi and zero-width format characters (bidi marks, embeddings and
   isolates, zero-width space and non-joiner, word joiner, the BOM; ZWJ and
   the emoji variation selector stay) are removed.

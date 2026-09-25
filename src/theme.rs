@@ -179,7 +179,8 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Build from a palette plus role overrides (already validated color strings).
+    /// Build from a palette plus role overrides, colours the config has
+    /// already parsed; a role without one takes the palette's.
     #[must_use]
     pub fn from_palette(palette: &Palette, overrides: &BTreeMap<Role, Color>) -> Self {
         let colors = Role::ALL

@@ -805,15 +805,14 @@ mod tests {
         assert_eq!(display_width(rows[1]), 56);
     }
 
-    /// SPEC § 3.7: a text module is a fixed-width box; short text is
-    /// justified, long text clipped or scrolled by the clock, the scroller
-    /// frozen at frame 0 without animation, and the common decorations apply.
+    /// SPEC § 5: the payload's own strings (session name, model, agent,
+    /// output style, directories, PR URL) never add a row and never put an
+    /// escape of their own on one.
     #[test]
     fn hostile_payload_strings_never_add_a_row_or_an_escape() {
-        // Whole-stack review: the payload's own strings (session name,
-        // model, agent, output style, directories, PR URL) reached the row
-        // raw. A `\n` split the frame, an escape passed `--color never`, a
-        // cut could split the sequence. Segments are plain by construction.
+        // Whole-stack review: those strings reached the row raw. A `\n`
+        // split the frame, an escape passed `--color never`, a cut could
+        // split the sequence. Segments are plain by construction.
         // Built with serde so the escapes arrive as JSON escapes, the way
         // any serializer emits them (a raw ESC byte is not valid JSON).
         let dir = "/home/dev/pro\x1b[2Jjects/de\u{202e}mo";
@@ -981,6 +980,9 @@ mod tests {
         );
     }
 
+    /// SPEC § 3.7: a text module is a fixed-width box; short text is
+    /// justified, long text clipped or scrolled by the clock, the scroller
+    /// frozen at frame 0 without animation, and the common decorations apply.
     #[test]
     fn text_modules_render_as_fixed_width_boxes() {
         let payload = fixture("subscription-full");

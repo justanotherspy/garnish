@@ -1,8 +1,12 @@
-//! ANSI styling, OSC 8 hyperlinks, display width and width-aware truncation.
+//! ANSI styling, OSC 8 hyperlinks, plain-text sanitising, display width,
+//! terminal clusters, and the width-aware cut and scroller.
 //!
-//! Rendering produces [`Segment`]s (text + style). Styles are resolved to
-//! escape sequences only at the very end, by [`Painter`], so tests can assert
-//! on plain text and the color mode can be switched without touching modules.
+//! Rendering produces [`Segment`]s (text + style), whose text is reduced to
+//! plain text on the way in ([`plain_text`]). Styles are resolved to escape
+//! sequences only at the very end, by [`Painter`], so tests can assert on
+//! plain text and the color mode can be switched without touching modules.
+//! [`truncate`] and [`scroll`] work in terminal clusters, never splitting a
+//! glyph, and [`scroll_period`] is the one period their callers count with.
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -381,8 +385,8 @@ pub fn segments_width(segments: &[Segment]) -> usize {
     segments.iter().map(Segment::width).sum()
 }
 
-/// Sum of segment widths counted cluster by cluster ([`clusters`]), the
-/// unit [`truncate`] and [`scroll`] advance in.
+/// Sum of segment widths counted terminal cluster by cluster, the unit
+/// [`truncate`] and [`scroll`] advance in.
 ///
 /// It exceeds [`segments_width`] by a cell for each ligature pair
 /// `unicode-width` measures as one cell (Arabic `لا`), which the cut and the
@@ -409,7 +413,7 @@ pub fn scroll_period(segments: &[Segment], gap: &str, wrap: bool) -> usize {
 }
 
 /// The cells of text [`truncate`] keeps when it cuts to `max_width`: what
-/// the ellipsis, itself cut to fit ([`fit`]), leaves.
+/// the ellipsis, itself cut to fit, leaves.
 #[must_use]
 pub fn kept_width(max_width: usize, ellipsis: &str) -> usize {
     max_width.saturating_sub(display_width(fit(ellipsis, max_width)))
@@ -702,7 +706,13 @@ pub(crate) const fn is_format_char(c: char) -> bool {
     )
 }
 
-/// Remove ANSI CSI and OSC sequences from a string (used by docs and tests).
+/// Remove every escape sequence from a string: CSI, OSC, the string
+/// sequences DCS/SOS/PM/APC with their payloads, nF sequences (`ESC ( B`)
+/// with their final byte, and any other `ESC x` pair.
+///
+/// The first half of [`plain_text`], so it runs on the tick for every
+/// string that is not already plain; control characters are the second
+/// half's business.
 #[must_use]
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -740,6 +750,15 @@ pub fn strip_ansi(s: &str) -> String {
                         break;
                     }
                     prev_esc = n == '\x1b';
+                }
+            }
+            Some(' '..='/') => {
+                // nF (a charset designation, as `tput sgr0` emits): more
+                // intermediate bytes, then one final byte.
+                for n in chars.by_ref() {
+                    if !(' '..='/').contains(&n) {
+                        break;
+                    }
                 }
             }
             _ => {}
@@ -976,6 +995,12 @@ mod tests {
         // or kitty graphics blob is not text, and only ST ends them.
         assert_eq!(plain_text("a\x1bPq#0;2;0;0;0~~\x07still\x1b\\b"), "ab");
         assert_eq!(plain_text("a\x1b_Gf=100;AAAA\x1b\\b\x1bXsos\x1b\\c\x1b^pm\x1b\\d"), "abcd");
+        // An nF sequence keeps nothing of itself: `tput sgr0` on xterm is
+        // `ESC ( B ESC [ m`, which used to leave its `B` behind.
+        assert_eq!(plain_text("bold\x1b(B\x1b[m text"), "bold text");
+        assert_eq!(plain_text("a\x1b#8b\x1b % Gc"), "abc");
+        // Two-byte sequences (`ESC 7`, `ESC =`) lose both bytes, as before.
+        assert_eq!(plain_text("a\x1b7b\x1b=c"), "abc");
         assert_eq!(
             plain_text("🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}"),
             "🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}",
