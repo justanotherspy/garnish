@@ -16,13 +16,16 @@ use crate::modules::SCHEMAS;
 /// directory when `doctor` runs where the session was started) and the
 /// user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`), the managed file first
 /// (the platform's, or what `GARNISH_MANAGED_SETTINGS` says).
+///
+/// The config is the one `config path` prints ([`config::read_target`]),
+/// the file the status line's ticks read.
 #[must_use]
 pub fn report(config_path: Option<&Path>) -> String {
     let home = claude_settings::home_dir();
     let user = claude_settings::user_dir(home.as_deref());
     let managed = claude_settings::managed_settings_path();
     report_with(
-        config_path,
+        &config::read_target(config_path),
         &Cache::from_env(),
         managed.as_deref(),
         std::env::current_dir().ok().as_deref(),
@@ -39,7 +42,7 @@ pub fn report(config_path: Option<&Path>) -> String {
 /// directory.
 #[must_use]
 pub fn report_with(
-    config_path: Option<&Path>,
+    config_file: &config::ReadTarget,
     cache: &Cache,
     managed: Option<&Path>,
     project: Option<&Path>,
@@ -60,12 +63,28 @@ pub fn report_with(
     );
     let _ = writeln!(o, "git      {}", git_version());
     let _ = writeln!(o);
+    // A `--config` the status line command passes that names no one file
+    // is said once; the report then shows what a bare lookup finds.
+    let (config_path, unresolved) = match config_file {
+        config::ReadTarget::File(p) => (Some(p.as_path()), None),
+        config::ReadTarget::Defaults => (None, None),
+        config::ReadTarget::Unresolved { settings, word } => {
+            let refusal = crate::install::Refusal::UnresolvedConfig {
+                settings: settings.clone(),
+                word: word.clone(),
+            };
+            (None, Some(refusal.to_string()))
+        }
+    };
     let loaded = config::load(config_path, &SCHEMAS);
     let chain = read_chain(&claude_settings::settings_chain(managed, project, user));
     for row in settings_rows(&chain, project, &loaded.config, crate::time::animate_from_env()) {
         let _ = writeln!(o, "{row}");
     }
     let _ = writeln!(o);
+    if let Some(note) = unresolved {
+        let _ = writeln!(o, "config   {}", crate::ansi::plain_text(&note));
+    }
     config_section(&mut o, &loaded);
     cache_section(&mut o, cache);
     environment_section(&mut o);
@@ -1216,7 +1235,8 @@ mod tests {
         std::fs::create_dir_all(cache.root()).unwrap();
         std::fs::write(cache.root().join("debug.log"), "1 pid=1 spawn sync failed: x\n").unwrap();
         let user = dir.path().join(".claude");
-        let r = report_with(Some(&dir.path().join("none.toml")), &cache, None, None, Some(&user));
+        let none = config::ReadTarget::File(dir.path().join("none.toml"));
+        let r = report_with(&none, &cache, None, None, Some(&user));
         assert!(r.contains("  user     ") && r.contains("  absent"), "{r}");
         assert!(r.contains("not configured (run `garnish install`)"), "{r}");
         assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");

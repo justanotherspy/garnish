@@ -110,22 +110,69 @@ pub fn write_target(flag: Option<&Path>, settings: Option<&Path>) -> WriteTarget
     if let Some(p) = explicit(flag) {
         return WriteTarget::File(p);
     }
-    let settings = settings.map(Path::to_path_buf).or_else(crate::install::default_settings_path);
-    if let Some(settings) = settings {
-        let command = match crate::claude_settings::read_file(&settings) {
-            crate::claude_settings::FileState::Keys(keys) => keys.status_line_command,
-            _ => None,
-        };
-        let home = crate::claude_settings::home_dir();
-        match command.and_then(|c| crate::install::command_config(&c, home.as_deref())) {
-            Some(crate::install::CommandConfig::File(p)) => return WriteTarget::File(p),
-            Some(crate::install::CommandConfig::Unresolved(word)) => {
-                return WriteTarget::Unresolved { settings, word };
-            }
-            None => {}
+    command_target(settings).unwrap_or_else(|| {
+        locate(None).or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
+    })
+}
+
+/// The config a command run by hand reads for the person running it
+/// (`config check`, `config show`, `preview`, `doctor`): [`read_target`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadTarget {
+    /// This file (when it cannot be read, [`load`] says so).
+    File(PathBuf),
+    /// No file: the built-in defaults.
+    Defaults,
+    /// As [`WriteTarget::Unresolved`].
+    Unresolved {
+        /// The settings file.
+        settings: PathBuf,
+        /// The value, as the command spells it.
+        word: String,
+    },
+}
+
+/// The config a command run by hand reads (SPEC § 4).
+///
+/// [`write_target`]'s order without its default path, so `config check`,
+/// `config show`, `preview` and `doctor` look at the file `config path`
+/// prints, the one the status line's ticks read. The tick itself and its workers use
+/// [`locate`] alone: the harness hands the tick the command's `--config`,
+/// and the tick passes it on, so neither reads the settings file.
+#[must_use]
+pub fn read_target(flag: Option<&Path>) -> ReadTarget {
+    if let Some(p) = explicit(flag) {
+        return ReadTarget::File(p);
+    }
+    match command_target(None) {
+        Some(WriteTarget::File(p)) => ReadTarget::File(p),
+        Some(WriteTarget::Unresolved { settings, word }) => {
+            ReadTarget::Unresolved { settings, word }
+        }
+        Some(WriteTarget::NoHome) | None => {
+            locate(None).map_or(ReadTarget::Defaults, ReadTarget::File)
         }
     }
-    locate(None).or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
+}
+
+/// The `--config` the garnish `statusLine.command` of `settings` (the user
+/// settings file when `None`) passes, as a [`WriteTarget::File`] or
+/// [`WriteTarget::Unresolved`]; `None` when there is no such command or it
+/// passes none.
+fn command_target(settings: Option<&Path>) -> Option<WriteTarget> {
+    let settings =
+        settings.map(Path::to_path_buf).or_else(crate::install::default_settings_path)?;
+    let command = match crate::claude_settings::read_file(&settings) {
+        crate::claude_settings::FileState::Keys(keys) => keys.status_line_command,
+        _ => None,
+    }?;
+    let home = crate::claude_settings::home_dir();
+    match crate::install::command_config(&command, home.as_deref())? {
+        crate::install::CommandConfig::File(p) => Some(WriteTarget::File(p)),
+        crate::install::CommandConfig::Unresolved(word) => {
+            Some(WriteTarget::Unresolved { settings, word })
+        }
+    }
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported

@@ -1381,6 +1381,67 @@ fn the_config_a_command_passes_is_the_config_the_writing_commands_write() {
     assert!(ok && out.trim_end() == "/elsewhere.toml", "{out}");
 }
 
+/// SPEC § 4: the commands a person runs to look at their config (`config
+/// check`, `config show`, `preview`, `doctor`) read the file `config path`
+/// prints, the one the status line command passes with `--config`, not the
+/// one a bare lookup finds; a `--config` that names no one file is refused
+/// as `config path` refuses it, and `doctor` says so and carries on.
+#[test]
+fn the_commands_that_read_the_config_read_the_one_the_command_passes() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let xdg = home.join(".config/garnish/garnish.toml");
+    std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+    let text = |marker: &str| {
+        format!("[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"{marker}\"\n")
+    };
+    std::fs::write(&xdg, text("XDGFILE")).unwrap();
+    let work = home.join("work.toml");
+    std::fs::write(&work, format!("theme = \"no-such-theme\"\n{}", text("WORKFILE"))).unwrap();
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let hook = |command: &str| {
+        let status = serde_json::json!({"statusLine": {"type": "command", "command": command}});
+        std::fs::write(&settings, status.to_string()).unwrap();
+    };
+    let payload = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/payloads/subscription-full.json");
+    let preview = ["preview", payload.to_str().unwrap(), "--width", "100"];
+
+    hook(&format!("garnish --config {}", work.display()));
+    let (out, err, ok) = run(&["config", "check"], home, &[]);
+    assert!(!ok && out.contains("work.toml: theme") && !out.contains("garnish.toml"), "{out}{err}");
+    let (out, err, ok) = run(&["config", "show"], home, &[]);
+    assert!(ok && out.contains("WORKFILE") && !out.contains("XDGFILE"), "{out}{err}");
+    let (out, err, ok) = run(&preview, home, &[]);
+    assert!(ok && out.contains("WORKFILE") && !out.contains("XDGFILE"), "{out}{err}");
+    let (out, err, ok) = run(&["doctor"], home, &[]);
+    assert!(ok && out.contains("work.toml") && !out.contains("garnish.toml ok"), "{out}{err}");
+
+    // The command passes no `--config`: the lookup's file, as before.
+    hook("garnish");
+    let (out, err, ok) = run(&["config", "check"], home, &[]);
+    assert!(ok && out.trim_end().ends_with("garnish.toml: ok"), "{out}{err}");
+    let (out, err, ok) = run(&preview, home, &[]);
+    assert!(ok && out.contains("XDGFILE"), "{out}{err}");
+
+    // A `--config` that names no one file: the readers refuse on one line,
+    // and `doctor` says why and shows what the lookup finds.
+    hook("garnish --config rel.toml");
+    for args in [&["config", "check"][..], &["config", "show"], &preview] {
+        let (out, err, ok) = run(args, home, &[]);
+        assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
+        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
+    }
+    let (out, err, ok) = run(&["doctor"], home, &[]);
+    assert!(ok && out.contains("\"rel.toml\"") && out.contains("garnish.toml ok"), "{out}{err}");
+
+    // A config named explicitly still wins over the command's.
+    let (out, err, ok) =
+        run(&["config", "check"], home, &[("GARNISH_CONFIG", xdg.to_str().unwrap())]);
+    assert!(ok && out.trim_end().ends_with("garnish.toml: ok"), "{out}{err}");
+}
+
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,
 /// and the commands that write a config write *that* file rather than
 /// creating an XDG one that would hide it from the next tick.

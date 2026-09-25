@@ -677,6 +677,11 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
     };
     files.sort();
     let overlay = args.overlay()?;
+    // The config the status line reads (SPEC § 4), not only the one a
+    // bare lookup finds: a preview is a person asking what their line
+    // looks like.
+    let config_file = read_config_or_quiet(config_path)?;
+    let config_path = config_file.as_deref();
     let columns = args.width.or_else(env_columns);
     let mut stdout = std::io::stdout().lock();
     for file in files {
@@ -708,7 +713,8 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             writeln!(stdout, "{}", p.display())?;
         }
         ConfigAction::Check => {
-            let loaded = config::load(config_path, &SCHEMAS);
+            let path = read_config_or_quiet(config_path)?;
+            let loaded = config::load(path.as_deref(), &SCHEMAS);
             match (&loaded.path, loaded.errors.is_empty()) {
                 (None, _) => {
                     writeln!(stdout, "no config file found; built-in defaults are in effect")?;
@@ -726,7 +732,8 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             }
         }
         ConfigAction::Show => {
-            let loaded = config::load(config_path, &SCHEMAS);
+            let path = read_config_or_quiet(config_path)?;
+            let loaded = config::load(path.as_deref(), &SCHEMAS);
             let mut cfg = loaded.config;
             // The animation switch in effect for this directory (SPEC
             // § 4.2): the file, else Claude Code's prefersReducedMotion.
@@ -784,6 +791,20 @@ pub fn preset_text(preset: &str) -> Result<String> {
 /// `statusLine.command` passes a `--config` that names no one file.
 pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
     target_or_quiet(explicit, "the config goes")
+}
+
+/// The config a command run by hand reads ([`config::read_target`]: the
+/// file `config path` prints, or `None` for the built-in defaults), or a
+/// [`Quiet`] refusal when the `statusLine.command` passes a `--config`
+/// that names no one file, as `config path` refuses.
+fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
+    match config::read_target(explicit) {
+        config::ReadTarget::File(path) => Ok(Some(path)),
+        config::ReadTarget::Defaults => Ok(None),
+        config::ReadTarget::Unresolved { settings, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, word }))
+        }
+    }
 }
 
 /// [`config_target_or_quiet`], with `what` finishing the no-home note.

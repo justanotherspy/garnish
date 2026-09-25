@@ -126,8 +126,9 @@ preset and hooks it up, and `garnish install` alone does the settings
 PATH Claude Code sees; `garnish --config FILE install` writes a command that
 reads FILE, and a later `install` keeps the arguments and any
 `NAME=value` prefix a garnish command already has; a `--config FILE` kept
-that way is the file `config path`, `config init`, `setup` and `install`
-then use). The equivalent by hand:
+that way is the file every other command then uses: `config path`,
+`config check`, `config show`, `preview`, `doctor`, `config init`, `setup`
+and `install`). The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }
