@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width, strip_ansi};
+use crate::ansi::{ColorMode, Painter, Segment, Style, segments_width};
 use crate::config::{self, Config, Loaded, Overlay, StaleStyle};
 use crate::frame::Ticker;
 use crate::icons::IconSet;
@@ -33,18 +33,24 @@ pub struct Request<'a> {
     pub workers: bool,
 }
 
-/// Render a full tick. Never fails and never prints nothing.
+/// Render a full tick. Never fails (SPEC § 5).
+///
+/// The one render that reads the process environment: the tick and
+/// `preview` come through here, everything else names its [`Clock`].
 #[must_use]
 pub fn render(req: &Request<'_>) -> String {
     let Ok(payload) = Payload::parse(req.payload_json) else {
         return "⚠ garnish: bad payload\n".to_owned();
     };
     let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
-    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, req.workers)
+    let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
+    let clock = Clock { workers: req.workers, config_file, ..Clock::from_env() };
+    render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, &clock)
 }
 
-/// Render with an already loaded config (used by tests, previews and
-/// benches). `dim` is [`Request::dim`] and `workers` [`Request::workers`].
+/// Render with an already loaded config on `clock`: every row painted, then
+/// the `⚠ config:` row when the config had problems. `dim` is
+/// [`Request::dim`].
 #[must_use]
 pub fn render_loaded(
     payload: &Payload,
@@ -52,14 +58,12 @@ pub fn render_loaded(
     columns: Option<usize>,
     no_color: bool,
     dim: bool,
-    workers: bool,
+    clock: &Clock,
 ) -> String {
     let config = &loaded.config;
     let mode = config.color.mode(no_color);
     let painter = Painter { mode, links: mode != ColorMode::Never, dim };
-    let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
-    let clock = Clock { workers, config_file, ..Clock::from_env() };
-    let mut lines = render_lines_at(payload, config, columns, &clock);
+    let mut lines = render_lines_at(payload, config, columns, clock);
     if !loaded.errors.is_empty() {
         lines.push(config_warning(loaded, config.width(columns)));
     }
@@ -209,17 +213,8 @@ impl Clock {
     }
 }
 
-/// Render every configured line to segments (no escape sequences yet).
-#[must_use]
-pub fn render_lines(
-    payload: &Payload,
-    config: &Config,
-    columns: Option<usize>,
-) -> Vec<Vec<Segment>> {
-    render_lines_at(payload, config, columns, &Clock::from_env())
-}
-
-/// [`render_lines`] with an explicit clock, zone and home.
+/// Every configured row rendered to segments (no escape sequences yet), its
+/// lines in order.
 #[must_use]
 pub fn render_lines_at(
     payload: &Payload,
@@ -227,33 +222,20 @@ pub fn render_lines_at(
     columns: Option<usize>,
     clock: &Clock,
 ) -> Vec<Vec<Segment>> {
-    render_rows_at(payload, config, columns, clock)
+    render_tree_at(payload, config, columns, clock)
         .into_iter()
-        .flatten()
+        .flat_map(|(_, lines)| lines)
         .map(crate::layout::Line::into_segments)
         .collect()
 }
 
-/// Every configured row rendered to its terminal lines (SPEC § 4.3).
+/// Every row that survives `hide_empty_rows`, as its terminal lines tagged
+/// by the index of its `[[row]]` (SPEC § 4.3).
 ///
-/// One entry per `[[row]]`, in order: a row is one line today and several
-/// once it carries a stack or a box, and each line carries what its pieces
-/// are, which is what `setup`'s placement map reads (SPEC § 14).
-#[must_use]
-pub fn render_rows_at(
-    payload: &Payload,
-    config: &Config,
-    columns: Option<usize>,
-    clock: &Clock,
-) -> Vec<Vec<crate::layout::Line>> {
-    render_tree_at(payload, config, columns, clock).into_iter().map(|(_, lines)| lines).collect()
-}
-
-/// [`render_rows_at`] with each entry tagged by the index of its `[[row]]`.
-///
-/// A row whose modules all rendered nothing is dropped, so the lines that
-/// remain would otherwise not say which configured row they belong to; the
-/// `setup` builder's row list needs to know (SPEC § 14).
+/// A row is several lines once it carries a stack or a box, and each line
+/// says what its pieces are; with the dropped rows gone, the index is what
+/// tells `setup`'s row list and placement map which configured row a line
+/// belongs to (SPEC § 14).
 #[must_use]
 pub fn render_tree_at(
     payload: &Payload,
@@ -264,41 +246,7 @@ pub fn render_tree_at(
     let width = config.width(columns);
     let cache =
         clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
-    let mut ctx = Ctx {
-        payload,
-        theme: &config.theme,
-        icons: config.icons,
-        now: clock.now,
-        width,
-        cache: &cache,
-        tz: clock.tz.clone(),
-        home: clock.home.clone(),
-        settings_env: clock.settings_env.clone(),
-        git: clock.git,
-        stale_after: config.stale_after,
-        durations: config.durations,
-        format: config.format,
-        animate: false,
-        dirs: std::cell::OnceCell::new(),
-        head: std::cell::OnceCell::new(),
-        settings_files: clock.settings_files(payload),
-        settings: clock
-            .settings_keys
-            .clone()
-            .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
-        // A refused root (SPEC § 6) is no cache at all: render as a pinned
-        // tick does, never spawning a worker that could not write.
-        workers: clock.workers && cache.refused().is_none(),
-        config_file: clock.config_file.clone(),
-    };
-    // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
-    // `animate` decides, else Claude Code's prefersReducedMotion freezes,
-    // else animations run. The chain is read only when the answer depends
-    // on it, and once for the tick (the context module shares the keys).
-    ctx.animate = clock.animate
-        && config
-            .animate
-            .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
+    let ctx = context(payload, config, clock, &cache, width);
     let stale = config.icons.stale_glyphs();
     let ellipsis: String = config.icons.ellipsis().into();
     let layout = crate::layout::Layout {
@@ -348,6 +296,57 @@ pub fn render_tree_at(
     }
     let rows: Vec<crate::layout::Row<'_>> = tree.iter().map(RowRender::to_layout).collect();
     tree.iter().map(|r| r.index).zip(layout.lines(&rows)).collect()
+}
+
+/// The context a render of `config` on `clock` hands every module, its
+/// cached modules looking in `cache`.
+///
+/// Built in one place so that the tick and the per-module benchmarks
+/// (`benches/tick.rs`) render modules in the same context.
+#[must_use]
+pub fn context<'a>(
+    payload: &'a Payload,
+    config: &'a Config,
+    clock: &Clock,
+    cache: &'a crate::cache::Cache,
+    width: usize,
+) -> Ctx<'a> {
+    let mut ctx = Ctx {
+        payload,
+        theme: &config.theme,
+        icons: config.icons,
+        now: clock.now,
+        width,
+        cache,
+        tz: clock.tz.clone(),
+        home: clock.home.clone(),
+        settings_env: clock.settings_env.clone(),
+        git: clock.git,
+        stale_after: config.stale_after,
+        durations: config.durations,
+        format: config.format,
+        animate: false,
+        dirs: std::cell::OnceCell::new(),
+        head: std::cell::OnceCell::new(),
+        settings_files: clock.settings_files(payload),
+        settings: clock
+            .settings_keys
+            .clone()
+            .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
+        // A refused root (SPEC § 6) is no cache at all: render as a pinned
+        // tick does, never spawning a worker that could not write.
+        workers: clock.workers && cache.refused().is_none(),
+        config_file: clock.config_file.clone(),
+    };
+    // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
+    // `animate` decides, else Claude Code's prefersReducedMotion freezes,
+    // else animations run. The chain is read only when the answer depends
+    // on it, and once for the tick (the context module shares the keys).
+    ctx.animate = clock.animate
+        && config
+            .animate
+            .unwrap_or_else(|| !crate::claude_settings::reduced_motion(ctx.settings()));
+    ctx
 }
 
 /// One configured row with every module of it rendered, before any width is
@@ -696,12 +695,6 @@ fn cap_width(module: Vec<Segment>, max: usize, ellipsis: &str) -> Vec<Segment> {
     }
 }
 
-/// Plain-text render (no escapes), for tests and docs.
-#[must_use]
-pub fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
-    strip_ansi(&render_loaded(payload, loaded, columns, true, false, true))
-}
-
 /// Plain-text render of the configured lines with a pinned clock (docs).
 #[must_use]
 pub fn render_plain_at(
@@ -720,7 +713,13 @@ pub fn render_plain_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ansi::display_width;
+    use crate::ansi::{display_width, strip_ansi};
+
+    /// A whole render as `render` paints it, `⚠ config:` row included, on the
+    /// pinned clock: no git, no settings files, no cache, no workers.
+    fn render_plain(payload: &Payload, loaded: &Loaded, columns: Option<usize>) -> String {
+        strip_ansi(&render_loaded(payload, loaded, columns, true, false, &Clock::fixed()))
+    }
 
     fn fixture(name: &str) -> Payload {
         let path = format!("{}/tests/fixtures/payloads/{name}.json", env!("CARGO_MANIFEST_DIR"));
@@ -834,7 +833,7 @@ mod tests {
         assert!(!json.contains('\x1b'), "escaped on the wire");
         let payload = Payload::parse(&json).unwrap();
         let loaded = loaded("preset = \"full\"\ncolor = \"always\"\n[modules.pr]\nlink = true\n");
-        let out = render_loaded(&payload, &loaded, Some(160), false, false, true);
+        let out = render_loaded(&payload, &loaded, Some(160), false, false, &Clock::fixed());
         let plain = render_plain(&payload, &loaded, Some(160));
         assert_eq!(plain.lines().count(), loaded.config.rows.len(), "{plain}");
         assert!(plain.contains("Evilrow") && plain.contains("slink"), "{plain}");
@@ -1284,6 +1283,65 @@ mod tests {
         assert_eq!(rows.len(), 3, "{three:?}");
         assert!(rows[0].starts_with(BLANK_CELL) && rows[2].starts_with(BLANK_CELL), "{three:?}");
         assert!(rows[1].contains("Opus") && !rows[1].contains(BLANK_CELL), "{three:?}");
+    }
+
+    /// SPEC § 9: an in-process render names its clock, and the pinned one
+    /// reads no cache and spawns nothing. `render_plain` rendered on the
+    /// environment's clock: every run of the unit tests took a lock in the
+    /// developer's real cache for `account` and forked the test binary as
+    /// its worker.
+    #[test]
+    fn cache_a_pinned_render_touches_no_cache_and_keeps_the_config_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("c");
+        let clock = Clock { cache: Some(root.clone()), ..Clock::fixed() };
+        let payload = fixture("subscription-full");
+        let every_id = SCHEMAS
+            .iter()
+            .map(|s| format!("[[line]]\nmodules = [\"{}\"]\n", s.id))
+            .collect::<Vec<_>>()
+            .concat();
+        for text in [every_id.clone(), format!("theme = \"nope\"\n{every_id}")] {
+            let loaded = loaded(&text);
+            let out = strip_ansi(&render_loaded(&payload, &loaded, Some(120), true, false, &clock));
+            assert!(!root.exists(), "a pinned render touched {}", root.display());
+            // The helper is that render: the rows `render_plain_at` draws,
+            // then the `⚠ config:` row when the config has problems.
+            let rows = render_plain_at(&payload, &loaded.config, Some(120), &Clock::fixed());
+            let warning = (!loaded.errors.is_empty())
+                .then(|| Painter::PLAIN.paint(&config_warning(&loaded, 116)));
+            let want: Vec<String> = std::iter::once(rows).chain(warning).collect();
+            assert_eq!(out, format!("{}\n", want.join("\n")));
+            assert_eq!(render_plain(&payload, &loaded, Some(120)), out);
+        }
+    }
+
+    /// A cached entry is fresh for the TTL its reader passes, the module's
+    /// `refresh`, whatever TTL it was written with: what `benches/tick.rs`
+    /// relies on to keep its seeded entries warm past the default `refresh`
+    /// without spawning a worker.
+    #[test]
+    fn cache_a_seed_under_a_long_refresh_stays_warm_past_the_default_ttl() {
+        use crate::cache::{Cache, Entry, Scope};
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = Cache::at(tmp.path().to_path_buf());
+        let payload = fixture("subscription-full");
+        let scope = Scope::Session(payload.session_id.clone().unwrap());
+        let values = [("email".to_owned(), "dev@example.com".to_owned())].into();
+        let mut entry = Entry::ok(60_000, values);
+        entry.computed_at_ms = entry.computed_at_ms.saturating_sub(700_000);
+        cache.write(&scope, "account", &entry).unwrap();
+        assert!(!cache.lookup(&scope, "account", 600_000).fresh, "past the default refresh");
+        let (config, errs) = config::parse(
+            "[frame]\nstyle = \"none\"\n[[line]]\nmodules = [\"account\"]\n[modules.account]\nrefresh = 86400\n",
+            &SCHEMAS,
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        let clock =
+            Clock { workers: true, cache: Some(tmp.path().to_path_buf()), ..Clock::fixed() };
+        let out = render_plain_at(&payload, &config, Some(80), &clock);
+        assert!(out.contains("dev@example.com") && !out.contains('⟳'), "{out}");
+        assert!(!cache.lock_path(&scope, "account").exists(), "a worker was started");
     }
 
     #[test]

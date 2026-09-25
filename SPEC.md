@@ -1642,7 +1642,11 @@ per-module render cost.
   empty state in the docs and the in-process matrices without a cache
   directory (`tests/docs_sync.rs` asserts none appears), and the
   settings badges render on from keys the clock seeds in-process rather
-  than from any file.
+  than from any file. `render::render` is the only render that builds
+  its clock from the environment; every other entry point takes a
+  `Clock` (2026-09-25: a test helper that rendered on the environment's
+  clock took a lock in the developer's real cache and forked the test
+  binary as `account`'s worker on every run).
 - **Module matrix from the schema** (PLAN Phase 20; from FUTURE-SPEC § 15
   item 11): an in-crate rayon test generated from `ModuleSchema` renders
   every module × every preset × every icon set × `max_width ∈ {0, 1, 4,
