@@ -1502,6 +1502,12 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
     let has_cols = table.contains_key("col");
     let spacer = !has_cols && !ids("modules") && !ids("right");
     let named_box = matches!(table.get("box"), Some(Value::String(_)));
+    // What an unset key resolves to, so `←`/`→` and a picker start there.
+    let resolved = resolved_row(config, at);
+    let separator = resolved
+        .and_then(|r| r.separator.clone())
+        .unwrap_or_else(|| config.frame.chars.separator.clone());
+    let gap = resolved.map_or(config::DEFAULT_GAP, |r| r.gap);
     let mut fields = vec![
         Field::new(
             "separator",
@@ -1509,7 +1515,11 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
             SlotKind::Str,
             s("separator"),
         )
-        .valued(draft, raw("separator"), &config.frame.chars.separator)
+        .valued(
+            draft,
+            raw("separator").or(Some(Value::String(separator))),
+            &config.frame.chars.separator,
+        )
         .with_choices(hints.choices("separator")),
     ];
     if at.col.is_none() || table.contains_key("gap") {
@@ -1520,11 +1530,12 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
                 SlotKind::Int { min: 0, max: Some(16) },
                 s("gap"),
             )
-            .valued(draft, raw("gap"), "1"),
+            .valued(draft, raw("gap").or_else(|| Some(count(gap))), "1"),
         );
     }
     if !named_box || TITLE_KEYS.iter().any(|k| table.contains_key(*k)) {
-        fields.extend(title_fields(&s, &raw, hints, config));
+        let title = resolved.and_then(|r| r.title.as_ref());
+        fields.extend(title_fields(&s, &raw, title, draft, hints, config));
     }
     fields.push(
         Field::new(
@@ -1537,6 +1548,7 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
         .with_choices(box_choices(config)),
     );
     if spacer || has_cols || table.contains_key("blank") {
+        let blank = resolved.is_some_and(|r| r.blank);
         fields.push(
             Field::new(
                 "blank",
@@ -1544,7 +1556,7 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
                 SlotKind::Bool,
                 s("blank"),
             )
-            .valued(draft, raw("blank"), "false"),
+            .valued(draft, raw("blank").or(Some(Value::Boolean(blank))), "false"),
         );
     }
     // The groups and the lists of columns are the builder's.
@@ -1554,15 +1566,19 @@ fn row_fields(at: RowAt, draft: &Draft, config: &Config, hints: &Suggestions) ->
     fields
 }
 
+/// The title keys of a row or a box, `resolved` the title in effect.
 fn title_fields(
     s: &dyn Fn(&str) -> Slot,
     raw: &dyn Fn(&str) -> Option<Value>,
+    resolved: Option<&config::TitleCfg>,
+    draft: &Draft,
     hints: &Suggestions,
     config: &Config,
 ) -> Vec<Field> {
+    let effect = resolved.cloned().unwrap_or_default();
     vec![
         Field::new("title", "Plain text set into the rule.", SlotKind::Str, s("title"))
-            .valued_raw(raw("title"), "none")
+            .valued(draft, raw("title"), "none")
             .with_choices(hints.choices("title")),
         Field::new(
             "title_justify",
@@ -1570,34 +1586,41 @@ fn title_fields(
             SlotKind::Enum(vec!["left".into(), "center".into(), "right".into()]),
             s("title_justify"),
         )
-        .valued_raw(raw("title_justify"), "left"),
+        .valued(
+            draft,
+            raw("title_justify").or_else(|| Some(string(effect.justify.name()))),
+            "left",
+        ),
         Field::new(
             "title_pad",
             "Spaces on each side of the title.",
             SlotKind::Int { min: 0, max: Some(64) },
             s("title_pad"),
         )
-        .valued_raw(raw("title_pad"), "1"),
+        .valued(draft, raw("title_pad").or_else(|| Some(count(effect.pad))), "1"),
         Field::new(
             "title_color",
             "A role or literal for the title; the frame colour when unset.",
             SlotKind::Color,
             s("title_color"),
         )
-        .valued_raw(raw("title_color"), "frame")
+        .valued(draft, raw("title_color"), "frame")
         .with_choices(color_choices(config)),
     ]
 }
 
-impl Field {
-    /// With a value read straight from the file's table (row and box keys,
-    /// which the resolved config reshapes).
-    fn valued_raw(mut self, raw: Option<Value>, default: &str) -> Self {
-        self.set = raw.is_some();
-        self.current = raw.as_ref().map_or_else(|| "(unset)".to_owned(), current_text);
-        self.value = raw;
-        default.clone_into(&mut self.default);
-        self
+/// A count as a TOML integer.
+fn count(n: usize) -> Value {
+    Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// The resolved row, or a stack's inner row, at `at` (a column is none).
+fn resolved_row(config: &Config, at: RowAt) -> Option<&config::RowCfg> {
+    let row = config.rows.get(at.row)?;
+    match (at.col, at.inner) {
+        (None, _) => Some(row),
+        (Some(c), Some(i)) => row.cols.get(c)?.rows.get(i),
+        (Some(_), None) => None,
     }
 }
 
@@ -1605,15 +1628,19 @@ fn col_fields(at: RowAt, draft: &Draft, config: &Config) -> Vec<Field> {
     let Some(table) = draft.row(at).cloned() else { return Vec::new() };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::row(at, key);
+    // Unset, `justify` follows the column's place and `valign` is `top`.
+    let col = at.col.and_then(|c| config.rows.get(at.row)?.cols.get(c));
+    let justify = raw("justify").or_else(|| col.map(|c| string(c.justify.name())));
+    let valign = raw("valign").or_else(|| col.map(|c| string(c.valign.name())));
     let mut fields = vec![
         Field::new("width", "\"<n>fr\" (a share of what is left) | \"auto\" (the content) | a cell count.", SlotKind::Width, s("width"))
-            .valued_raw(raw("width"), "1fr"),
+            .valued(draft, raw("width"), "1fr"),
         Field::new("justify", "Where a lone modules group sits: left | center | right (default follows the position).", SlotKind::Enum(vec!["left".into(), "center".into(), "right".into()]), s("justify"))
-            .valued_raw(raw("justify"), "by position"),
+            .valued(draft, justify, "by position"),
         Field::new("valign", "Where a short stack sits in a taller row: top | center | bottom.", SlotKind::Enum(vec!["top".into(), "center".into(), "bottom".into()]), s("valign"))
-            .valued_raw(raw("valign"), "top"),
+            .valued(draft, valign, "top"),
         Field::new("box", "Box the whole column: none, true or a [box.<name>].", SlotKind::BoxRef, s("box"))
-            .valued_raw(raw("box"), "none")
+            .valued(draft, raw("box"), "none")
             .with_choices(box_choices(config)),
     ];
     // The groups and the stack's rows are the builder's.
@@ -1629,12 +1656,21 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
     };
     let raw = |key: &str| table.get(key).cloned();
     let s = |key: &str| Slot::table(&base, key);
-    let mut fields = title_fields(&s, &raw, hints, config);
+    let resolved = config.boxes.get(name);
+    let mut fields =
+        title_fields(&s, &raw, resolved.and_then(|b| b.title.as_ref()), draft, hints, config);
     let styles: Vec<String> = FrameStyle::ALL
         .iter()
         .filter(|f| **f != FrameStyle::Powerline)
         .map(|f| f.name().to_owned())
         .collect();
+    // Unset, the frame's style, rounded when that has no box shape (as the
+    // layout draws it).
+    let style = resolved.and_then(|b| b.style).unwrap_or(match config.frame.style {
+        FrameStyle::None | FrameStyle::Powerline => FrameStyle::Rounded,
+        other => other,
+    });
+    let fill = resolved.is_some_and(|b| b.fill);
     fields.push(
         Field::new(
             "style",
@@ -1642,7 +1678,7 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
             SlotKind::Enum(styles),
             s("style"),
         )
-        .valued_raw(raw("style"), "the frame's"),
+        .valued(draft, raw("style").or_else(|| Some(string(style.name()))), "the frame's"),
     );
     fields.push(
         Field::new(
@@ -1651,7 +1687,7 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
             SlotKind::Bool,
             s("fill"),
         )
-        .valued_raw(raw("fill"), "false"),
+        .valued(draft, raw("fill").or(Some(Value::Boolean(fill))), "false"),
     );
     fields.push(
         Field::new(
@@ -1660,7 +1696,7 @@ fn box_fields(name: &str, draft: &Draft, config: &Config, hints: &Suggestions) -
             SlotKind::Color,
             s("color"),
         )
-        .valued_raw(raw("color"), "frame")
+        .valued(draft, raw("color"), "frame")
         .with_choices(color_choices(config)),
     );
     let extra = extra_fields(&fields, Some(&table), &s, "", &[], draft);
@@ -1953,6 +1989,43 @@ mod tests {
             Ok(Some(Value::Array(vec![1.into(), 2.into()])))
         );
         assert!(SlotKind::Literal.parse("12h").is_err(), "a string is quoted");
+    }
+
+    /// frm-06: an unset row, column or box key steps and opens from the
+    /// value in effect, not from the minimum or the first entry.
+    #[test]
+    fn unset_layout_keys_step_from_the_value_in_effect() {
+        let step = |form: &mut Form, key: &str, k: Key| {
+            form.focus(key);
+            match form.handle(k).actions.first() {
+                Some(Action::Set(_, v)) => v.clone(),
+                other => panic!("{key}: {other:?}"),
+            }
+        };
+        let open = |form: &mut Form, key: &str| {
+            form.focus(key);
+            let Some(Layer::Choose(c)) = form.handle(Key::Enter).push else { panic!("a picker") };
+            c.items.get(c.cursor).map(|i| i.value.clone())
+        };
+        let (mut b, _) = built(
+            "[box.x]\n[[row]]\nbox = \"x\"\nmodules = [\"clock\"]\n",
+            &FormKind::Box("x".into()),
+        );
+        assert_eq!(b.fields.iter().find(|f| f.key == "style").unwrap().current, "rounded");
+        assert_eq!(step(&mut b, "style", Key::Right), Value::String("square".into()));
+        assert_eq!(open(&mut b, "style").as_deref(), Some("rounded"));
+        let (mut c, _) = built(
+            "[[row]]\n[[row.col]]\n[[row.col]]\n[[row.col]]\nmodules = [\"clock\"]\n",
+            &FormKind::Col(RowAt { row: 0, col: Some(2), inner: None }),
+        );
+        assert_eq!(open(&mut c, "justify").as_deref(), Some("right"));
+        assert_eq!(open(&mut c, "valign").as_deref(), Some("top"));
+        let (mut r, _) = built("[[row]]\nmodules = [\"clock\"]\n", &FormKind::Row(RowAt::row(0)));
+        assert_eq!(step(&mut r, "gap", Key::Right), Value::Integer(2));
+        assert_eq!(step(&mut r, "title_pad", Key::Right), Value::Integer(2));
+        assert_eq!(open(&mut r, "title_justify").as_deref(), Some("left"));
+        let gap = r.fields.iter().find(|f| f.key == "gap").unwrap();
+        assert!(!gap.set && gap.current == "1", "{gap:?}");
     }
 
     /// frm-05: a module colour's row shows the role or literal in effect,
