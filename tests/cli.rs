@@ -34,7 +34,10 @@ fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, b
         .env_remove("GARNISH_ANIMATE")
         // No managed settings file (SPEC § 9); a test that wants one
         // points the hook at its own through `extra`.
-        .env("GARNISH_MANAGED_SETTINGS", "");
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        // It moves the user settings file and the skills (SPEC § 7); a
+        // test that wants it sets it through `extra`.
+        .env_remove("CLAUDE_CONFIG_DIR");
     for (k, v) in extra {
         cmd.env(k, v);
     }
@@ -280,9 +283,11 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
             .env("GARNISH_CACHE_DIR", home.join("cache"))
             .env("GARNISH_NOW", "1738425600")
             .env("GARNISH_NO_SPAWN", "1")
-            .env("CLICOLOR_FORCE", "1")
             .env("GARNISH_MANAGED_SETTINGS", "")
+            // Colour on (`color = auto` without NO_COLOR), so `--color
+            // never` is what keeps the rows plain.
             .env_remove("NO_COLOR")
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("GARNISH_CONFIG");
         let out = cmd.output().unwrap();
         let out = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -644,6 +649,7 @@ fn tick(config: &Path, home: &Path, payload: &str, extra: &[(&str, &str)]) -> St
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -815,6 +821,7 @@ fn an_empty_path_variable_is_unset_not_a_path() {
             .env("NO_COLOR", "1")
             .env("COLUMNS", "84")
             .env_remove("GARNISH_ANIMATE")
+            .env_remove("CLAUDE_CONFIG_DIR")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -860,6 +867,43 @@ fn an_empty_path_variable_is_unset_not_a_path() {
     let (out, _, ok) = run(&["config", "path"], home, &[("XDG_CONFIG_HOME", "rel")]);
     assert!(ok && !out.contains("rel/garnish"), "{out}");
     assert!(out.trim_end().ends_with(".config/garnish/garnish.toml"), "{out}");
+}
+
+/// SPEC § 7: `CLAUDE_CONFIG_DIR` moves every `~/.claude` path, so `install`
+/// writes the settings file and the skills where Claude Code reads them,
+/// `skills install` defaults there, and the settings chain (`config show`,
+/// `doctor`, the tick) reads the user file from there; empty is unset.
+#[test]
+fn claude_config_dir_moves_the_user_settings_and_the_skills() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let moved = home.join("work-claude");
+    let env = [("CLAUDE_CONFIG_DIR", moved.to_str().unwrap())];
+    let (out, _, ok) = run(&["install", "--dry-run", "--absolute"], home, &env);
+    assert!(ok, "{out}");
+    let settings = moved.join("settings.json");
+    assert!(out.contains(&format!("would write {}", settings.display())), "{out}");
+    assert!(out.contains(&format!("to {}", moved.join("skills").display())), "{out}");
+    let (out, _, ok) =
+        run(&["install", "--dry-run", "--absolute"], home, &[("CLAUDE_CONFIG_DIR", "")]);
+    let default = home.join(".claude").join("settings.json");
+    assert!(ok && out.contains(&default.display().to_string()), "empty is unset: {out}");
+    let (out, _, ok) = run(&["skills", "install"], home, &env);
+    assert!(ok && out.contains("work-claude/skills: wrote 3"), "{out}");
+    assert!(!home.join(".claude").exists(), "nothing under ~/.claude");
+    // The chain reads the moved user file: its prefersReducedMotion
+    // freezes an unset `animate`, and without the variable it is not read.
+    std::fs::write(&settings, r#"{"prefersReducedMotion": true}"#).unwrap();
+    let cfg = home.join("g.toml");
+    std::fs::write(&cfg, "preset = \"minimal\"\n").unwrap();
+    let show = ["--config", cfg.to_str().unwrap(), "config", "show"];
+    let (shown, _, ok) = run(&show, home, &env);
+    assert!(ok && shown.contains("\nanimate = false\n"), "{shown}");
+    let (shown, _, ok) = run(&show, home, &[]);
+    assert!(ok && shown.contains("\nanimate = true\n"), "{shown}");
+    let (report, _, ok) = run(&["doctor"], home, &env);
+    assert!(ok && report.contains("work-claude/settings.json  ok"), "{report}");
+    assert!(report.contains("true (user)"), "{report}");
 }
 
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,

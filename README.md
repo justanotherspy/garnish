@@ -232,7 +232,9 @@ garnish doctor          # versions, settings, config, cache, failed refreshes, g
 ## Skills
 
 Three Claude Code skills ship with garnish under `skills/` and are written to
-`~/.claude/skills/` by `garnish install` (or `garnish skills install`):
+`~/.claude/skills/` by `garnish install` (or `garnish skills install`); with
+`CLAUDE_CONFIG_DIR` set, the skills and the settings file go under it, where
+Claude Code reads them:
 
 - **garnish-statusline** offers `garnish setup` first, or builds the
   config from a conversation (terminal, font, width, what matters, rows or

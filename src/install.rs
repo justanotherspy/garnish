@@ -22,11 +22,14 @@ pub struct Plan {
     pub padding: Option<u64>,
 }
 
-/// The default Claude Code user settings file.
+/// The default Claude Code user settings file: `settings.json` in
+/// `$CLAUDE_CONFIG_DIR`, else in `~/.claude`, where Claude Code reads it
+/// ([`crate::claude_settings::user_dir`]); the skills go next to it.
 #[must_use]
 pub fn default_settings_path() -> Option<PathBuf> {
     // No HOME, no default: never guess the current directory.
-    crate::claude_settings::home_dir().map(|h| h.join(".claude").join("settings.json"))
+    crate::claude_settings::user_dir(crate::claude_settings::home_dir().as_deref())
+        .map(|dir| dir.join("settings.json"))
 }
 
 /// Whether an executable named `name` is on `PATH`.

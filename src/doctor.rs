@@ -14,33 +14,36 @@ use crate::modules::SCHEMAS;
 ///
 /// The settings chain is the current directory's (Claude Code's project
 /// directory when `doctor` runs where the session was started) and the
-/// home's, the managed file first (the platform's, or what
-/// `GARNISH_MANAGED_SETTINGS` says).
+/// user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`), the managed file first
+/// (the platform's, or what `GARNISH_MANAGED_SETTINGS` says).
 #[must_use]
 pub fn report(config_path: Option<&Path>) -> String {
     let home = claude_settings::home_dir();
+    let user = claude_settings::user_dir(home.as_deref());
     let managed = claude_settings::managed_settings_path();
     report_with(
         config_path,
         &Cache::from_env(),
         managed.as_deref(),
         std::env::current_dir().ok().as_deref(),
-        home.as_deref(),
+        user.as_deref(),
     )
 }
 
 /// Build the report against explicit cache, managed-file, project and
-/// home locations.
+/// Claude user-directory locations.
 ///
 /// `managed` is `None` for a report that must not read the machine's
-/// organisation file, `home` when there is no home directory.
+/// organisation file, `user` (the directory holding the user
+/// `settings.json`, [`claude_settings::user_dir`]) when there is no home
+/// directory.
 #[must_use]
 pub fn report_with(
     config_path: Option<&Path>,
     cache: &Cache,
     managed: Option<&Path>,
     project: Option<&Path>,
-    home: Option<&Path>,
+    user: Option<&Path>,
 ) -> String {
     let mut o = String::new();
     let _ = writeln!(o, "garnish {}", env!("CARGO_PKG_VERSION"));
@@ -58,7 +61,7 @@ pub fn report_with(
     let _ = writeln!(o, "git      {}", git_version());
     let _ = writeln!(o);
     let loaded = config::load(config_path, &SCHEMAS);
-    let chain = read_chain(&claude_settings::settings_chain(managed, project, home));
+    let chain = read_chain(&claude_settings::settings_chain(managed, project, user));
     for row in settings_rows(&chain, project, &loaded.config, crate::time::animate_from_env()) {
         let _ = writeln!(o, "{row}");
     }
@@ -125,7 +128,8 @@ pub fn settings_rows(
             FileState::Absent => "absent".to_owned(),
             FileState::Unreadable(e) => format!("unreadable: {e}"),
             FileState::Invalid(e) => format!("{e}; garnish reads none of it"),
-            FileState::Keys(_) => "ok".to_owned(),
+            FileState::Keys(keys) => claude_settings::rejected(label, keys)
+                .map_or_else(|| "ok".to_owned(), |why| format!("{why}; garnish reads none of it")),
         };
         let shown = project
             .and_then(|dir| path.strip_prefix(dir).ok())
@@ -282,13 +286,15 @@ fn tui_row(chain: &[ChainEntry]) -> String {
 
 /// The first file of the chain that sets a key, with the file's label:
 /// Claude Code's own precedence for one key (managed > local > project >
-/// user).
+/// user), a file it rejects ([`claude_settings::rejected`]) skipped.
 fn resolved<T>(
     chain: &[ChainEntry],
     pick: impl Fn(&FileKeys) -> Option<T>,
 ) -> Option<(T, &'static str)> {
     chain.iter().find_map(|(label, _, state)| match state {
-        FileState::Keys(keys) => pick(keys).map(|value| (value, *label)),
+        FileState::Keys(keys) if claude_settings::rejected(label, keys).is_none() => {
+            pick(keys).map(|value| (value, *label))
+        }
         _ => None,
     })
 }
@@ -500,7 +506,14 @@ fn environment_section(o: &mut String) {
             } else {
                 v
             };
-            let _ = writeln!(o, "         {key}={v}");
+            // It moves Claude Code's own files, so it decides where the
+            // chain's user row, `install` and the skills look.
+            let moved = if key == claude_settings::CONFIG_DIR_ENV && !v.is_empty() {
+                " (Claude Code's user settings.json, skills and .claude.json live here)"
+            } else {
+                ""
+            };
+            let _ = writeln!(o, "         {key}={v}{moved}");
         }
     }
     let _ = writeln!(o);
@@ -881,9 +894,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         let proj = dir.path().join("proj");
-        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let user_dir = home.join(".claude");
+        std::fs::create_dir_all(&user_dir).unwrap();
         std::fs::create_dir_all(proj.join(".claude")).unwrap();
-        let user = home.join(".claude/settings.json");
+        let user = user_dir.join("settings.json");
         let project = proj.join(".claude/settings.json");
         let local = proj.join(".claude/settings.local.json");
         std::fs::write(
@@ -899,7 +913,8 @@ mod tests {
         std::fs::write(&local, "{ broken").unwrap();
         // No managed file: the test must not see the machine's.
         let chain = |p: Option<&Path>, h: Option<&Path>| {
-            read_chain(&claude_settings::settings_chain(None, p, h))
+            let user = claude_settings::user_dir_in(None, h);
+            read_chain(&claude_settings::settings_chain(None, p, user.as_deref()))
         };
         let read = chain(Some(&proj), Some(&home));
         let labels: Vec<&str> = read.iter().map(|(l, _, _)| *l).collect();
@@ -975,8 +990,11 @@ mod tests {
         std::fs::write(&managed, r#"{"tui": "FULL"}"#).unwrap();
         std::fs::write(&local, "{}").unwrap();
         std::fs::write(&user, r#"{"tui": "default"}"#).unwrap();
-        let with_managed =
-            read_chain(&claude_settings::settings_chain(Some(&managed), Some(&proj), Some(&home)));
+        let with_managed = read_chain(&claude_settings::settings_chain(
+            Some(&managed),
+            Some(&proj),
+            Some(&user_dir),
+        ));
         let rows = settings_rows(&with_managed, Some(&proj), &cfg, true);
         let text = rows.iter().find(|r| r.starts_with("tui ")).unwrap();
         assert!(text.contains("default (user): asks for the classic"), "{text}");
@@ -1093,8 +1111,8 @@ mod tests {
         let cache = Cache::at(dir.path().join("cache"));
         std::fs::create_dir_all(cache.root()).unwrap();
         std::fs::write(cache.root().join("debug.log"), "1 pid=1 spawn sync failed: x\n").unwrap();
-        let r =
-            report_with(Some(&dir.path().join("none.toml")), &cache, None, None, Some(dir.path()));
+        let user = dir.path().join(".claude");
+        let r = report_with(Some(&dir.path().join("none.toml")), &cache, None, None, Some(&user));
         assert!(r.contains("  user     ") && r.contains("  absent"), "{r}");
         assert!(r.contains("not configured (run `garnish install`)"), "{r}");
         assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");
@@ -1131,8 +1149,9 @@ mod tests {
             .unwrap();
         // No managed file: the test must not see the machine's.
         let rows_for = |config: &str| {
+            let user = home.join(".claude");
             let chain =
-                read_chain(&claude_settings::settings_chain(None, Some(&proj), Some(&home)));
+                read_chain(&claude_settings::settings_chain(None, Some(&proj), Some(&user)));
             let (cfg, errs) = config::parse(config, &SCHEMAS);
             assert!(errs.is_empty(), "{errs:?}");
             settings_rows(&chain, Some(&proj), &cfg, true)
@@ -1169,5 +1188,34 @@ mod tests {
         assert!(find(&rows, "voice.enabled").ends_with("false (project)"), "{rows:?}");
         // The key column is one width, so the values line up.
         assert!(rows.iter().skip(4).all(|r| r.get(23..24) == Some(" ")), "{rows:?}");
+    }
+
+    /// A file whose `tui` is neither name is one Claude Code rejects whole,
+    /// so its row is not `ok` and none of its keys resolve: the report said
+    /// "rejects that file" in the `tui` row while the file's own row said
+    /// `ok` and `prefersReducedMotion` came from it.
+    #[test]
+    fn a_rejected_file_is_neither_ok_nor_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let proj = dir.path().join("proj");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        std::fs::write(
+            proj.join(".claude/settings.local.json"),
+            r#"{"tui": "full", "prefersReducedMotion": true}"#,
+        )
+        .unwrap();
+        std::fs::write(home.join(".claude/settings.json"), r#"{"prefersReducedMotion": false}"#)
+            .unwrap();
+        let user = home.join(".claude");
+        let chain = read_chain(&claude_settings::settings_chain(None, Some(&proj), Some(&user)));
+        let (cfg, _) = config::parse("", &SCHEMAS);
+        let rows = settings_rows(&chain, Some(&proj), &cfg, true);
+        let text = rows.join("\n");
+        let local = rows.iter().find(|r| r.starts_with("  local ")).unwrap();
+        assert!(!local.ends_with(" ok") && local.contains("rejects this file"), "{text}");
+        let motion = rows.iter().find(|r| r.starts_with("prefersReducedMotion")).unwrap();
+        assert!(motion.ends_with("false (user)"), "{text}");
     }
 }

@@ -130,6 +130,10 @@ pub struct Clock {
     /// run, `None` for a pinned one (and for tests that must not see the
     /// machine's).
     pub managed: Option<std::path::PathBuf>,
+    /// `CLAUDE_CONFIG_DIR`, which moves the user settings file off
+    /// `~/.claude` ([`crate::claude_settings::user_dir`]); `None` when
+    /// unset, and for a pinned render.
+    pub claude_config_dir: Option<std::path::PathBuf>,
     /// The cache root, or `None` to take it from the environment.
     ///
     /// The last thing a render read from the process environment on its own.
@@ -166,6 +170,7 @@ impl Clock {
             animate: crate::time::animate_from_env(),
             settings: true,
             managed: crate::claude_settings::managed_settings_path(),
+            claude_config_dir: crate::claude_settings::config_dir_from_env(),
             cache: None,
             workers: true,
             settings_keys: None,
@@ -188,6 +193,7 @@ impl Clock {
             animate: false,
             settings: false,
             managed: None,
+            claude_config_dir: None,
             cache: None,
             workers: false,
             settings_keys: None,
@@ -196,16 +202,20 @@ impl Clock {
     }
 
     /// The settings files a render of `payload` may read, highest
-    /// precedence first: the managed file, the chain of the directory Claude
-    /// Code was launched in, the home; none under a pinned clock.
+    /// precedence first and labelled as `doctor` labels them: the managed
+    /// file, the chain of the directory Claude Code was launched in, the
+    /// user's; none under a pinned clock.
     #[must_use]
-    pub fn settings_files(&self, payload: &Payload) -> Vec<std::path::PathBuf> {
+    pub fn settings_chain(&self, payload: &Payload) -> Vec<(&'static str, std::path::PathBuf)> {
         if !self.settings {
             return Vec::new();
         }
         let project = payload.project_dir().map(Path::new);
-        let home = self.home.as_deref().map(Path::new);
-        crate::claude_settings::settings_files(self.managed.as_deref(), project, home)
+        let user = crate::claude_settings::user_dir_in(
+            self.claude_config_dir.as_deref(),
+            self.home.as_deref().map(Path::new),
+        );
+        crate::claude_settings::settings_chain(self.managed.as_deref(), project, user.as_deref())
     }
 }
 
@@ -281,7 +291,7 @@ pub fn render_tree_at(
         animate: false,
         dirs: std::cell::OnceCell::new(),
         head: std::cell::OnceCell::new(),
-        settings_files: clock.settings_files(payload),
+        settings_chain: clock.settings_chain(payload),
         settings: clock
             .settings_keys
             .clone()
@@ -1099,8 +1109,8 @@ mod tests {
         };
         // The docs and goldens render with the fixed clock: no settings file.
         assert!(!Clock::fixed().settings && Clock::fixed().managed.is_none());
-        assert_eq!(Clock::fixed().settings_files(&payload), Vec::<std::path::PathBuf>::new());
-        assert_eq!(clock(true, true).settings_files(&payload).len(), 3, "local, project, user");
+        assert_eq!(Clock::fixed().settings_chain(&payload), Vec::new());
+        assert_eq!(clock(true, true).settings_chain(&payload).len(), 3, "local, project, user");
         let cfg = |text: &str| {
             let (config, errs) = config::parse(text, &SCHEMAS);
             assert!(errs.is_empty(), "{errs:?}");

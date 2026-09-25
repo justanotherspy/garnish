@@ -237,7 +237,9 @@ override): `threshold = effective_window − 13_000`, or
 min(context_window_size, configured)` where `configured` comes from
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (env) > `autoCompactWindow` in settings
 (managed > `.claude/settings.local.json` > `.claude/settings.json` >
-`~/.claude/settings.json`) > model default (= window). `autoCompactEnabled =
+`~/.claude/settings.json`, which `CLAUDE_CONFIG_DIR` moves to
+`$CLAUDE_CONFIG_DIR/settings.json` as it moves every `~/.claude` path;
+empty is unset, § 5) > model default (= window). `autoCompactEnabled =
 false`, `DISABLE_AUTO_COMPACT=1` or `DISABLE_COMPACT=1` (which turns off
 compaction altogether) disables the marker. The buffer constant is
 configurable (`modules.context.compact_buffer_tokens`).
@@ -624,8 +626,9 @@ document decides the count for these four alone).
   TTL). The field name is what the community documents for the file
   (FUTURE-SPEC grades it C), so a file without it shows nothing rather
   than guessing. `style = "email" | "user"` picks the whole address or
-  the part before `@`. The settings chain of § 2.3 keeps ignoring
-  `CLAUDE_CONFIG_DIR` (PLAN's backlog).
+  the part before `@`. The settings chain of § 2.3 honours the same
+  variable for its user file (2026-09-25 review: `install` and the
+  skills wrote to `~/.claude` while Claude Code read the moved directory).
 - None of the four is in a built-in preset's rows: they are added by
   hand or through the `session-badges` gallery preset (§ 12). The
   generated pages show `sandbox` and `voice` on, from keys the pinned
@@ -1534,11 +1537,11 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 |---|---|
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help`; the tick passes its own `--config` ahead of it (§ 6) |
-| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
+| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json (`--settings`, else the user file of § 2.3, which `CLAUDE_CONFIG_DIR` moves) through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
 | `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
-| `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
+| `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (`$CLAUDE_CONFIG_DIR/skills/` when that is set, § 2.3; or `D`); `install` runs this too unless `--no-skills` |
 | `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain); a preview is not a tick, so it never reads the cache or spawns a worker (§ 14) |
 | `garnish docs [--out DIR]` | regenerate docs from schemas |
 | `garnish modules` | list module ids + summaries |
@@ -1746,7 +1749,8 @@ binary. Everything else is a **gallery preset**: a complete config file under
 
 Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
 in the repository, are embedded in the binary (`include_str!`) so a
-`cargo install` has them, and are written to `~/.claude/skills/<name>/` by
+`cargo install` has them, and are written to `~/.claude/skills/<name>/`
+(`$CLAUDE_CONFIG_DIR/skills/<name>/` when that is set, § 2.3) by
 `garnish install` (or `garnish skills install`). Each skill is plain
 Markdown with frontmatter (`name`, `description`) and instructions; none of
 them needs network access from garnish itself, they drive `gh` and the

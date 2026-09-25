@@ -92,7 +92,7 @@ fn render_modules(c: &mut Criterion) {
         animate: clock.animate,
         dirs: std::cell::OnceCell::new(),
         head: std::cell::OnceCell::new(),
-        settings_files: Vec::new(),
+        settings_chain: Vec::new(),
         settings: std::cell::OnceCell::new(),
         workers: clock.workers,
         config_file: None,
