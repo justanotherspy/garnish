@@ -327,8 +327,15 @@ impl App {
     /// opens its editor), a rule or cap opens the frame form, a separator
     /// its field, a title or box edge the row's form.
     pub(super) fn click_preview(&mut self, x: usize, y: usize) {
-        // The pane has a two-cell gutter for the row marker.
-        let Some(hit) = self.rendered.at(x.saturating_sub(2), y) else { return };
+        // The pane has a two-cell gutter for the row marker: a click there
+        // is on the line's row, not on the cell after the gutter.
+        let Some(x) = x.checked_sub(2) else {
+            if let Some(row) = self.rendered.lines.get(y).map(|p| p.row) {
+                self.builder.select_row(row);
+            }
+            return;
+        };
+        let Some(hit) = self.rendered.at(x, y) else { return };
         match hit.elem {
             Elem::Module(id) => {
                 let already = self.builder.selected_id() == Some(id.as_str());

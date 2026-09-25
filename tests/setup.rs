@@ -1247,6 +1247,25 @@ fn a_nan_in_the_file_is_equal_to_itself() {
     assert!(app.done(), "nothing unsaved: q quits at once");
 }
 
+/// app-19: a click in the preview's two-cell gutter (the `>` marker's) is
+/// not a click on the frame's cap: it selects the line's row.
+#[test]
+fn a_click_in_the_gutter_selects_the_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, TWO_ROWS).unwrap();
+    let mut app = for_test("", Some(file), home);
+    let _drawn = snapshot(&mut app, 80, 24);
+    for x in [0, 1] {
+        click(&mut app, x, 2);
+        assert_eq!(app.form_keys(), None, "x = {x}");
+    }
+    let shot = snapshot(&mut app, 80, 24);
+    assert!(shot.lines().nth(2).unwrap().contains("Opus"), "{shot}");
+    assert_eq!(shot.lines().position(|l| !l.starts_with("  ") && l.contains("Opus")), Some(2));
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
