@@ -1292,8 +1292,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the one-cell pad of a box under a frame with none is a space. Inside a
   box, a lone group keeps no fill cell and no pad on a side that faces the
   box's own side, whose pad already keeps it off the side (2026-09-25: a
-  module up to two cells narrower than the interior was cut); between two
-  columns it keeps both, which is what separates them with `gap = 0`. A title right after a cap drops its own leading pad
+  module up to two cells narrower than the interior was cut). Between two
+  columns in a box without a rule it keeps both only at `gap = 0`, where
+  nothing else separates them; with a gap, the gap's spaces do (decided
+  with Daniel 2026-09-25: the reservation cut a centred module at
+  `gap = 2`). Under a rule, inside a box or out, both stay: the column's
+  own rule would otherwise run into its text. A title right after a cap drops its own leading pad
   for the same reason (`├─ Repository ──┤`, not `├─  Repository`), and the
   cell goes back to the rule. A box's own top and bottom rules are static:
   `fill_pattern` belongs to the frame, and a travelling box edge would
