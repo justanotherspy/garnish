@@ -120,17 +120,12 @@ impl PercentStyle {
     /// threshold and a `below:N` / `above:N` rule compare, so they agree
     /// with the printed value at the boundaries whatever the style (SPEC
     /// § 3, § 4). `clamp` holds it to `0..=100`; off, it may pass 100
-    /// (`spend`). NaN and anything at or below zero are 0 (a negative
-    /// zero would print its sign).
+    /// (`spend`) up to [`crate::num::MAX_SHOWN`]. NaN and anything at or
+    /// below zero are 0 ([`crate::num::shown_amount`]).
     #[must_use]
     pub fn shown(self, p: f64, clamp: bool) -> f64 {
-        let p = if p.is_nan() || p <= 0.0 {
-            0.0
-        } else if clamp {
-            p.min(100.0)
-        } else {
-            p
-        };
+        let p = crate::num::shown_amount(p);
+        let p = if clamp { p.min(100.0) } else { p };
         match self {
             Self::Whole => crate::num::u64_to_f64(crate::num::round_to_u64(p)),
             // Rounded here rather than by the formatter, so the compared
@@ -172,13 +167,11 @@ impl CostStyle {
 
     /// The amount this style prints for `usd`, as a number: what `zero` in
     /// a `hide` list reads (SPEC § 3), rounded to the places printed
-    /// (`decimals` under `precise`, none under `whole`). NaN and anything
-    /// at or below zero are 0 (a negative zero would print its sign).
+    /// (`decimals` under `precise`, none under `whole`), and bounded like
+    /// every printed amount ([`crate::num::shown_amount`]).
     #[must_use]
     pub fn shown(self, usd: f64, decimals: usize) -> f64 {
-        if usd.is_nan() || usd <= 0.0 {
-            return 0.0;
-        }
+        let usd = crate::num::shown_amount(usd);
         let places = match self {
             Self::Precise => decimals.min(crate::config::MAX_DECIMALS),
             Self::Whole => 0,
@@ -312,5 +305,25 @@ mod tests {
         assert_eq!(CostStyle::Whole.format(1000.0, 2), "$1.0k");
         assert_eq!(CostStyle::Whole.format(999.4, 2), "$999");
         assert_eq!(PercentStyle::Precise.format(f64::NAN, false), "0.0%");
+    }
+
+    /// An absurd number prints as a bounded one, and the bound is what a
+    /// band compares too: `1e308` used to print 20 digits of `u64::MAX`, or
+    /// `inf%`, and a cost of `1e300` about 300 digits.
+    #[test]
+    fn absurd_amounts_print_bounded() {
+        for p in [1e308, f64::INFINITY] {
+            assert_eq!(PercentStyle::Whole.format(p, false), "99999%");
+            assert_eq!(PercentStyle::Precise.format(p, false), "99999.0%");
+            assert_eq!(PercentStyle::Whole.shown(p, false), crate::num::MAX_SHOWN);
+            assert_eq!(PercentStyle::Whole.format(p, true), "100%");
+        }
+        for usd in [1e300, f64::INFINITY] {
+            assert_eq!(CostStyle::Precise.format(usd, 2), "$100.0k");
+            assert_eq!(CostStyle::Whole.format(usd, 2), "$100.0k");
+            assert_eq!(CostStyle::Precise.shown(usd, 2), crate::num::MAX_SHOWN);
+            assert!(crate::ansi::display_width(&util::dollars(usd, 2)) <= 8);
+        }
+        assert_eq!(CostStyle::Precise.format(-f64::INFINITY, 2), "$0.00");
     }
 }

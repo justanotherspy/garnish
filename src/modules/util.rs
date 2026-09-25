@@ -99,12 +99,11 @@ pub fn percent_unclamped(p: f64) -> String {
     if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
 }
 
-/// Format dollars: `$0.42`, `$12.35`, `$1.2k`.
+/// Format dollars: `$0.42`, `$12.35`, `$1.2k`; the amount is bounded like
+/// every printed one ([`crate::num::shown_amount`]).
 #[must_use]
 pub fn dollars(usd: f64, decimals: usize) -> String {
-    // NaN and anything at or below zero are nothing (a negative zero would
-    // print its sign).
-    let usd = if usd.is_nan() || usd <= 0.0 { 0.0 } else { usd };
+    let usd = crate::num::shown_amount(usd);
     if usd >= 1000.0 {
         return format!("${:.1}k", usd / 1000.0);
     }

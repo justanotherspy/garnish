@@ -227,6 +227,12 @@ says which (§ 7).
 Auth-mode rule: `rate_limits` present ⇒ subscription (show limits); absent ⇒
 API key/gateway (show `cost`).
 
+garnish does not model `prompt_id`, `transcript_path` or
+`context_window.remaining_percentage` (no module will read a prompt id or
+the transcript, and the remainder is `100 − used_percentage`); the other
+fields no module reads yet are parsed and say so in `payload.rs`. An empty
+`cwd` or `workspace.current_dir` is no directory: the other one is used.
+
 ### 2.3 Autocompact threshold (approximation)
 
 Not in the payload. From the 2.1.260 binary (unchanged in 2.1.261 and
@@ -1310,7 +1316,14 @@ without an error report.
   look like a different program. Implemented in PLAN Phase 14: the file is
   read as a plain TOML table and each key is converted on its own; value
   errors carry the TOML path, syntax errors the line.)
-- malformed stdin → `⚠ garnish: bad payload`;
+- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`;
+  any JSON object renders. A known field of the wrong type is absent, alone,
+  and so is a list entry that is not a string and a numeric string that is
+  not finite (`inf`, `NaN`). (Decided 2026-09-25: a type change on one
+  field, which only one badge might read, used to blank every row.) A
+  number too large to print sensibly is printed at a bound instead: a
+  percentage past 100 (`spend`) and a cost stop at 99 999
+  (`num::MAX_SHOWN`), and the bands compare the bounded number;
 - internal error → `⚠ garnish: <msg>`.
 - **A file that fails to parse is never rewritten by any command** (PLAN
   Phase 19 for `install` and `config init --force`, Phase 22 for `setup`;
