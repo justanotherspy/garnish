@@ -7,6 +7,7 @@ use toml::Value;
 
 use super::{Action, App, Level, new_problem};
 use crate::config::is_bare_key;
+use crate::config::presets::TopPreset;
 use crate::setup::builder::Builder;
 use crate::setup::draft::{Draft, dropped_boxes};
 use crate::setup::form::{FormKind, Slot, SlotKind};
@@ -14,6 +15,15 @@ use crate::setup::pick::{Confirm, Layer, Question, Target};
 
 /// Why a box name was refused (SPEC § 4.3): the parser's own rule.
 const BOX_NAME_RULE: &str = "a box name is letters, digits, _ and - only";
+
+/// What else an edit did, as `; <note>` for each, for its status line.
+fn notes<const N: usize>(notes: [Option<String>; N]) -> String {
+    notes.into_iter().flatten().fold(String::new(), |mut s, n| {
+        s.push_str("; ");
+        s.push_str(&n);
+        s
+    })
+}
 
 impl App {
     pub(super) fn apply(&mut self, action: Action) {
@@ -28,20 +38,21 @@ impl App {
                     self.say(format!("{} is not set", slot.path()), Level::Info);
                     return;
                 }
+                // An unset `preset` is the default one, and the rows follow
+                // it as they follow a preset set.
+                let default = Value::String(TopPreset::Default.name().to_owned());
+                let swapped = self.swap_preset_rows(&slot, &default);
                 slot.unset(&mut self.draft);
                 // The last member leaving a box takes an unused
                 // `[box.<name>]` with it, as the builder's `b` does.
                 let dropped = if slot.key == "box" { self.prune_orphan_boxes() } else { None };
-                let problem = self.refresh();
+                let note = notes([swapped, dropped]);
                 let path = slot.path();
-                match (dropped, problem) {
-                    (_, Some(problem)) => {
-                        self.say(format!("{path} unset; ⚠ {problem}"), Level::Warn);
+                match self.refresh() {
+                    Some(problem) => {
+                        self.say(format!("{path} unset{note}; ⚠ {problem}"), Level::Warn);
                     }
-                    (Some(dropped), None) => {
-                        self.say(format!("{path} unset; {dropped}"), Level::Info);
-                    }
-                    (None, None) => self.say(format!("{path} unset"), Level::Info),
+                    None => self.say(format!("{path} unset{note}"), Level::Info),
                 }
             }
             // Only the picker's "new text module" entry types into this
@@ -72,11 +83,7 @@ impl App {
         let swapped = self.swap_preset_rows(slot, &value);
         slot.set(&mut self.draft, value);
         let dropped = if slot.key == "box" { self.prune_orphan_boxes() } else { None };
-        let note = [swapped, dropped].into_iter().flatten().fold(String::new(), |mut s, n| {
-            s.push_str("; ");
-            s.push_str(&n);
-            s
-        });
+        let note = notes([swapped, dropped]);
         match self.refresh() {
             Some(problem) => self.say(format!("{path} set{note}; ⚠ {problem}"), Level::Warn),
             None => self.say(format!("{path} set{note}"), Level::Info),

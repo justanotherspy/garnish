@@ -1743,7 +1743,8 @@ refused to move a box's last member elsewhere); `d` on the last key of
 a `[box.<name>]` or a `[modules.text.<name>]` leaves the table, empty,
 since its being there is what defines the box or the module (an emptied
 module table is pruned, an emptied box or text table is not); a module's `label` picker starts with the module's
-own name, bare and capitalised; changing the top-level `preset` swaps
+own name, bare and capitalised; changing the top-level `preset` (or
+unsetting it with `d`, which makes it the default one) swaps
 the rows for the new preset's when they were still exactly the old
 preset's (the builder writes a preset's rows into the file so they can
 be edited, which would otherwise pin them) and says which happened.

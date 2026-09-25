@@ -1213,6 +1213,22 @@ fn s_with_nothing_changed_writes_nothing() {
     assert!(app.status().unwrap().starts_with("saved"), "{:?}", app.status());
 }
 
+/// app-17: `d` on the top-level `preset` swaps rows that are still the
+/// old preset's for the default's, as setting it does.
+#[test]
+fn unsetting_the_preset_swaps_its_rows_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let file = home.join("garnish.toml");
+    std::fs::write(&file, "preset = \"compact\"\n").unwrap();
+    let mut app = for_test("", Some(file), home);
+    assert_eq!(app.draft().rows().len(), 2);
+    keys(&mut app, "1d");
+    assert!(app.draft().get(&["preset"]).is_none());
+    assert_eq!(app.draft().rows().len(), 4, "{:?}", app.status());
+    assert!(app.status().unwrap().contains("rows replaced"), "{:?}", app.status());
+}
+
 /// app-02: `b` moves a box's only member into another box, a box of its
 /// own or a new one, dropping the box it leaves; a typed name is read as
 /// the form reads it.
