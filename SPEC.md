@@ -242,8 +242,15 @@ says which (§ 7).
 | `pr.{number,url,review_state?,kind?}` | object? | open PR/MR; `review_state` approved/pending/changes_requested/draft; `kind = "mr"` for GitLab |
 | `worktree.{name,path,branch?,original_cwd,original_branch?}` | object? | Claude worktree session |
 
-Auth-mode rule: `rate_limits` present ⇒ subscription (show limits); absent ⇒
-API key/gateway (show `cost`).
+Auth-mode rule: `rate_limits` present, with any window in it (a gateway's
+`spend_limit` alone included) ⇒ treated as a subscription (the limit
+modules show, `cost` hides under its default `only_without_rate_limits =
+true`); absent ⇒ an API key, or a gateway that reports no spend limit
+(show `cost`). (Stated 2026-09-25: this section filed "gateway" under
+*absent* while the field row above says a gateway's spend limit arrives in
+`rate_limits`; `Payload::is_subscription` has always been
+`rate_limits.is_some()`. Whether a spend-only gateway session should show
+`cost` as well is open in PLAN's backlog.)
 
 garnish does not model `prompt_id`, `transcript_path` or
 `context_window.remaining_percentage` (no module will read a prompt id or

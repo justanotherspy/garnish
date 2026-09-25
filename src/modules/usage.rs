@@ -466,7 +466,7 @@ impl Module for CostModule {
                 OptSpec::new(
                     "only_without_rate_limits",
                     Kind::Bool,
-                    "Hide when the harness reports subscription rate limits.",
+                    "Hide when the payload carries `rate_limits` (a subscription's windows, or a gateway's spend limit alone).",
                     Value::Bool(true),
                 ),
                 OptSpec::new(

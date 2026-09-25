@@ -777,7 +777,7 @@ max_width = 0
 # show_icon = true
 # decimals (integer ≤ 8) — Decimal places. [minimal=2 default=2 full=2]
 # decimals = 2
-# only_without_rate_limits (bool) — Hide when the harness reports subscription rate limits. [minimal=true default=true full=true]
+# only_without_rate_limits (bool) — Hide when the payload carries `rate_limits` (a subscription's windows, or a gateway's spend limit alone). [minimal=true default=true full=true]
 # only_without_rate_limits = true
 # show_lines (bool) — Append lines added/removed. [minimal=false default=false full=true]
 # show_lines = false
