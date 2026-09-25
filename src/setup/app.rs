@@ -594,11 +594,23 @@ impl App {
             let marker = if Some(placed.row) == selected_row { "▶ " } else { "  " };
             let mut spans: Vec<Span<'static>> = vec![Span::styled(marker, Chrome::key())];
             for piece in &placed.line.pieces {
-                let owned = selected_id
-                    .is_some_and(|id| piece.elem.owners(0).iter().any(|(o, _)| o == id))
-                    || matches!(&piece.elem, Elem::Group(map) if selected_id.is_some_and(|id| map.iter().any(|(o, _)| o == id)));
-                let extra = owned.then_some(selection);
-                spans.extend(super::paint::line(&painter, &piece.segs, extra).spans);
+                let line = match (&piece.elem, selected_id) {
+                    (Elem::Module(id), Some(selected)) if id == selected => {
+                        super::paint::line(&painter, &piece.segs, Some(selection))
+                    }
+                    // A cut or scrolled run of modules: the selected one's
+                    // own cells only (SPEC § 14).
+                    (Elem::Group(map), Some(selected)) => {
+                        let cells: Vec<std::ops::Range<usize>> = map
+                            .iter()
+                            .filter(|(o, _)| o == selected)
+                            .map(|(_, r)| r.clone())
+                            .collect();
+                        super::paint::marked(&painter, &piece.segs, &cells, selection)
+                    }
+                    _ => super::paint::line(&painter, &piece.segs, None),
+                };
+                spans.extend(line.spans);
             }
             lines.push(Line::from(spans));
         }
@@ -723,6 +735,51 @@ mod tests {
             assert_eq!(hint_key(several), None, "{several:?}");
         }
         assert_eq!((wheel_key(-1), wheel_key(1)), (Key::Up, Key::Down));
+    }
+
+    /// app-23: a module selected inside a scrolled group is shown in
+    /// inverse video over its own cells, not over the whole group.
+    #[test]
+    fn a_selected_module_in_a_scrolled_group_is_marked_on_its_own_cells() {
+        let text = "icons = \"unicode\"\noverflow = \"ticker\"\n[[row]]\nmodules = [\"path\", \"model\", \"context\", \"limit5h\", \"limit7d\", \"session\", \"api\", \"cache\"]\nright = [\"clock\"]\n";
+        let mut app = crate::setup::for_test(text, None, Path::new("/home/dev"));
+        app.open_builder();
+        let draw = |app: &mut App| {
+            let Ok(mut terminal) =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20));
+            app.input(Input::Resize(60, 20));
+            let Ok(_) = terminal.draw(|f| app.draw(f));
+            terminal.backend().buffer().clone()
+        };
+        let _ = draw(&mut app);
+        let line = app.rendered.lines.first().unwrap().line.clone();
+        let (id, group) = line
+            .pieces
+            .iter()
+            .find_map(|p| match &p.elem {
+                Elem::Group(map) if !map.is_empty() => Some((map[0].0.clone(), map.clone())),
+                _ => None,
+            })
+            .expect("a scrolled group");
+        assert!(group.iter().any(|(o, _)| *o != id), "more than one module in the group");
+        assert!(app.builder.select_module(&id, None));
+        let buffer = draw(&mut app);
+        let owned: Vec<std::ops::Range<usize>> = app.rendered.lines[0]
+            .modules
+            .iter()
+            .filter(|(o, _)| *o == id)
+            .map(|(_, r)| r.clone())
+            .collect();
+        let y = app.pane_area.y;
+        let mut marked = 0;
+        for x in 2..60_u16 {
+            let cell = buffer.cell((x, y)).unwrap();
+            let reversed = cell.modifier.contains(Modifier::REVERSED);
+            let mine = owned.iter().any(|r| r.contains(&usize::from(x - 2)));
+            assert_eq!(reversed, mine, "cell {x} of {id}: {owned:?}");
+            marked += usize::from(reversed);
+        }
+        assert!(marked > 0);
     }
 
     /// app-01: a problem renumbered by an edit is the same problem; one

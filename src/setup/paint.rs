@@ -6,6 +6,8 @@
 //! span with that style, which is what makes the pane show the status line
 //! colour for colour.
 
+use std::ops::Range;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -65,6 +67,41 @@ pub fn line(painter: &Painter, segments: &[Segment], extra: Option<Style>) -> Li
             Span::styled(s.text().to_owned(), st)
         })
         .collect();
+    Line::from(spans)
+}
+
+/// A row of segments as one ratatui line, `extra` patched over `cells`.
+///
+/// The cells are counted from the row's first cell: a module's own cells
+/// inside a cut or scrolled group, whatever segments they fall in. A
+/// glyph two cells wide goes by its first.
+#[must_use]
+pub fn marked(
+    painter: &Painter,
+    segments: &[Segment],
+    cells: &[Range<usize>],
+    extra: Style,
+) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut at = 0_usize;
+    for seg in segments.iter().filter(|s| !s.text().is_empty()) {
+        let plain = style(painter, seg.style);
+        let mut run = String::new();
+        let mut run_on = false;
+        for c in seg.text().chars() {
+            let on = cells.iter().any(|r| r.contains(&at));
+            if on != run_on && !run.is_empty() {
+                let st = if run_on { plain.patch(extra) } else { plain };
+                spans.push(Span::styled(std::mem::take(&mut run), st));
+            }
+            run_on = on;
+            run.push(c);
+            at = at.saturating_add(ansi::display_width(c.encode_utf8(&mut [0; 4])));
+        }
+        if !run.is_empty() {
+            spans.push(Span::styled(run, if run_on { plain.patch(extra) } else { plain }));
+        }
+    }
     Line::from(spans)
 }
 
@@ -130,5 +167,24 @@ mod tests {
         let selected =
             line(&Painter::PLAIN, &segs, Some(Style::new().add_modifier(Modifier::REVERSED)));
         assert!(selected.spans.iter().all(|s| s.style.add_modifier.contains(Modifier::REVERSED)));
+    }
+
+    /// app-23: inside a cut or scrolled group, only the cells a module owns
+    /// are marked, whatever segments they fall in.
+    #[test]
+    fn marking_patches_only_the_cells_in_range() {
+        let segs = vec![Segment::plain("ab"), Segment::plain("c界d")];
+        let rev = Style::new().add_modifier(Modifier::REVERSED);
+        let got = |cells: &[Range<usize>]| -> Vec<(String, bool)> {
+            marked(&Painter::PLAIN, &segs, cells, rev)
+                .spans
+                .iter()
+                .map(|s| (s.content.to_string(), s.style.add_modifier.contains(Modifier::REVERSED)))
+                .collect()
+        };
+        let want = [("a", false), ("b", true), ("c界", true), ("d", false)];
+        assert_eq!(got(std::slice::from_ref(&(1..4))), want.map(|(t, r)| (t.to_owned(), r)));
+        let want = [("ab", true), ("c", false), ("界", true), ("d", false)];
+        assert_eq!(got(&[0..2, 3..4]), want.map(|(t, r)| (t.to_owned(), r)));
     }
 }
