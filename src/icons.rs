@@ -57,6 +57,18 @@ impl IconSet {
             Self::Nerd | Self::Unicode | Self::Emoji => ("⟳", "✗"),
         }
     }
+
+    /// What stands in for a value that is not there: `–`, or `-` where the
+    /// set is ASCII only. A module with nothing to show under
+    /// `hide_when_empty = false`, a failed one before its `✗`, `context`
+    /// before the first response, `cache` without a ratio (SPEC § 3).
+    #[must_use]
+    pub const fn placeholder(self) -> &'static str {
+        match self {
+            Self::Ascii => "-",
+            Self::Nerd | Self::Unicode | Self::Emoji => "–",
+        }
+    }
 }
 
 /// One glyph with a value per icon set.
@@ -149,13 +161,13 @@ mod tests {
         assert_eq!(IconSet::parse("comic"), None);
     }
 
-    /// Every cut and every stale mark stays inside the set it was asked for:
-    /// the ascii set is 7-bit, the others are not.
+    /// Every cut, every stale mark and the placeholder stay inside the set
+    /// they were asked for: the ascii set is 7-bit, the others are not.
     #[test]
     fn ascii_set_marks_are_ascii_and_the_others_are_not() {
         for set in IconSet::ALL {
             let (overdue, failed) = set.stale_glyphs();
-            let marks = [set.ellipsis(), overdue, failed];
+            let marks = [set.ellipsis(), overdue, failed, set.placeholder()];
             assert_eq!(
                 set == IconSet::Ascii,
                 marks.iter().all(|m| m.is_ascii()),

@@ -45,7 +45,7 @@ ship it befo  a rathe…       v0.2
 | `label` | string ≤ 4096 chars | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `text` | string ≤ 4096 chars | `""` | The text. ANSI/OSC sequences and control characters are stripped. |
 | `width` | integer ≤ 1024 | `0` | Box width in cells; 0 = the text's own width. |
 | `pad` | integer ≤ 1024 | `0` | Blank cells added on each side of the box. |

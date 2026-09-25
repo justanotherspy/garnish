@@ -429,7 +429,8 @@ colour, as in the § 4 example); a `▏` marker at the autocompact position;
 `colors.exceeds` (`danger`) when the payload says so (one flag plus the
 module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
-threshold. No token counter. `used_percentage` null → empty bar and `–`.
+threshold. No token counter. `used_percentage` null → empty bar and the
+placeholder (§ 3.6).
 The band is the number of thresholds the percentage has reached; a
 `thresholds` list out of ascending order (here and on the usage modules)
 is reported and the default stands in (2026-09-25: `[90, 50, 75]` at 80 %
@@ -532,7 +533,8 @@ passed prints none of them.
 | `clock` | local time + spinner | `HH:MM` | spinner + `HH:MM:SS` | + date, UTC offset | 0 |
 
 `cache` hit % = `prompt_cache.hit_ratio`; fallback to the last request's
-cache-read share from `current_usage`; `prompt_cache` absent → `–`.
+cache-read share from `current_usage`; `prompt_cache` absent → the
+placeholder (§ 3.6).
 Spinner frame = `now_secs mod frames.len()` (stateless).
 
 The tick's local zone (the `clock`'s, and the absolute reset times' of
@@ -574,6 +576,14 @@ renders dimmed with `✗` and the error is kept in the cache file for
 `garnish doctor`. A missing entry renders the module's placeholder.
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
+
+The placeholder, what stands in for a value that is not there (a module
+with nothing to show under `hide_when_empty = false`, a failed one before
+its `✗`, `context` before the first response, `cache` without a ratio), is
+`–`, and `-` in the ascii set, whose marks are all 7-bit like its
+ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
+2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
+on the first tick of every session.
 
 ### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
@@ -1839,7 +1849,8 @@ the empty one turns colour off.
   field is absent or zero.
 - The 13k compaction buffer mirrors Claude Code 2.1.260 internals and may
   drift; it is configurable and the marker can be disabled.
-- Cache TTL display uses `prompt_cache` only; when absent the module shows `–`.
+- Cache TTL display uses `prompt_cache` only; when absent the module shows
+  the placeholder (§ 3.6).
 - Session duration is `cost.total_duration_ms` and resets on `/clear`.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for

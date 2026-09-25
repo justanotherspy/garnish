@@ -305,7 +305,6 @@ pub fn render_tree_at(
     let cache =
         clock.cache.clone().map_or_else(crate::cache::Cache::from_env, crate::cache::Cache::at);
     let ctx = context(payload, config, clock, &cache, width);
-    let stale = config.icons.stale_glyphs();
     let ellipsis: String = config.icons.ellipsis().into();
     let layout = crate::layout::Layout {
         chars: &config.frame.chars,
@@ -335,7 +334,7 @@ pub fn render_tree_at(
         .enumerate()
         .map(|(index, row)| {
             let sep = config.separator_at(row, frame);
-            RowRender { index, ..render_row(&ctx, config, row, sep, stale, &ellipsis) }
+            RowRender { index, ..render_row(&ctx, config, row, sep, &ellipsis) }
         })
         .collect();
     if config.align {
@@ -485,7 +484,6 @@ fn render_row<'a>(
     config: &'a Config,
     row: &'a config::RowCfg,
     separator: &'a str,
-    stale: (&str, &str),
     ellipsis: &str,
 ) -> RowRender<'a> {
     let cols = row
@@ -499,7 +497,7 @@ fn render_row<'a>(
                     // An inner row's own separator wins over the outer row's,
                     // as a row's wins over the frame's (SPEC § 4.3).
                     let sep = inner.separator.as_deref().unwrap_or(separator);
-                    let mut rendered = render_row(ctx, config, inner, sep, stale, ellipsis);
+                    let mut rendered = render_row(ctx, config, inner, sep, ellipsis);
                     // …and its own `justify` wins over the column's, which is
                     // what places the stack when the inner row says nothing.
                     for c in &mut rendered.cols {
@@ -510,8 +508,8 @@ fn render_row<'a>(
                     rendered
                 })
                 .collect();
-            let (left_ids, left) = render_group(ctx, config, &col.left, stale, ellipsis);
-            let (right_ids, right) = render_group(ctx, config, &col.right, stale, ellipsis);
+            let (left_ids, left) = render_group(ctx, config, &col.left, ellipsis);
+            let (right_ids, right) = render_group(ctx, config, &col.right, ellipsis);
             ColRender { cfg: col, justify: col.justify, left, right, left_ids, right_ids, rows }
         })
         .collect();
@@ -652,7 +650,6 @@ fn render_group(
     ctx: &Ctx<'_>,
     config: &Config,
     ids: &[String],
-    stale: (&str, &str),
     ellipsis: &str,
 ) -> (Vec<String>, Vec<Vec<Segment>>) {
     ids.iter()
@@ -662,7 +659,7 @@ fn render_group(
             if let Some(name) = id.strip_prefix(modules::text::PREFIX) {
                 let cfg = config.texts.get(name).filter(|c| c.enabled)?;
                 let rendered = modules::text::render(ctx, cfg);
-                return Some((id.clone(), decorate(rendered, cfg, &config.theme, stale)));
+                return Some((id.clone(), decorate(rendered, cfg, &config.theme, config.icons)));
             }
             let entry = modules::entry(id)?;
             let cfg = config.modules.get(entry.schema.id)?;
@@ -686,7 +683,7 @@ fn render_group(
             if modules::hidden_by(&rendered, &cfg.hide) {
                 return None;
             }
-            let module = decorate(rendered, cfg, &config.theme, stale);
+            let module = decorate(rendered, cfg, &config.theme, config.icons);
             Some((id.clone(), cap_width(module, cfg.max_width, ellipsis)))
         })
         // A module that rendered nothing is not a column (SPEC § 4).
@@ -1608,6 +1605,41 @@ mod tests {
         assert_eq!(out.lines().count(), 1, "{out}");
         assert!(!out.contains('╭'));
         assert!(out.contains('$'), "{out}");
+    }
+
+    /// SPEC § 3.6: an ascii row is ascii whatever the payload. The
+    /// placeholder of an absent value (`hide_when_empty = false`, a null
+    /// `used_percentage` on the first tick of every session, a cache
+    /// without a ratio) was U+2013 in every set, so the `ascii-only`
+    /// gallery preset broke its own promise.
+    #[test]
+    fn an_ascii_row_is_ascii_for_every_payload() {
+        let preset = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/presets/ascii-only.toml"
+        ))
+        .unwrap();
+        let every: String =
+            std::iter::once("icons = \"ascii\"\n[frame]\nstyle = \"none\"\n".into())
+                .chain(SCHEMAS.iter().map(|s| {
+                    format!(
+                        "[[line]]\nmodules = [\"{0}\"]\n[modules.{0}]\nhide_when_empty = false\n",
+                        s.id
+                    )
+                }))
+                .collect();
+        for text in [preset.as_str(), every.as_str()] {
+            let loaded = loaded(text);
+            assert_eq!(loaded.errors, Vec::new());
+            for f in &crate::fixtures::FIXTURES {
+                let out = render_plain(&Payload::parse(f.text).unwrap(), &loaded, Some(100));
+                for l in out.lines() {
+                    assert!(l.is_ascii(), "{}: {l:?}", f.name);
+                }
+            }
+        }
+        let every = render_plain(&fixture("pre-first-response"), &loaded(&every), Some(100));
+        assert!(every.lines().any(|l| l.trim_end().ends_with("-------------------| -")), "{every}");
     }
 
     #[test]

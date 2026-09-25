@@ -720,18 +720,22 @@ pub fn detail(
 /// A *failed* module keeps its `✗` (SPEC § 3.6) even when it had nothing to
 /// say: `sync` at the default preset is built wholly from its cache entry,
 /// so a failed refresh leaves it with no segments at all, and hiding it
-/// then would report a broken git as an ordinary empty row. The placeholder
-/// `–` stands in for the value and the mark follows it.
+/// then would report a broken git as an ordinary empty row. The icon set's
+/// placeholder (`–`, `-` in the ascii set) stands in for the value and the
+/// mark follows it.
 ///
 /// An *overdue* module with nothing to say still hides, because its last
 /// value really was nothing and a `– ⟳` would flicker in every idle pause.
 /// Only a value that exists is dimmed and marked with `⟳`.
+///
+/// Every mark comes from `icons` ([`IconSet::placeholder`],
+/// [`IconSet::stale_glyphs`]), so an ascii-only row stays ascii.
 #[must_use]
 pub fn decorate(
     rendered: Rendered,
     cfg: &ModuleCfg,
     theme: &Theme,
-    stale_glyphs: (&str, &str),
+    icons: IconSet,
 ) -> Vec<Segment> {
     if rendered.is_empty() && rendered.freshness != Freshness::Failed && cfg.hides_empty() {
         return Vec::new();
@@ -744,23 +748,24 @@ pub fn decorate(
     if !cfg.label.is_empty() {
         out.push(muted(theme, format!("{} ", cfg.label)));
     }
-    let value = if rendered.is_empty() { vec![muted(theme, "–")] } else { rendered.segments };
+    let value = if rendered.is_empty() {
+        vec![muted(theme, icons.placeholder())]
+    } else {
+        rendered.segments
+    };
+    let (overdue, failed) = icons.stale_glyphs();
     match rendered.freshness {
         Freshness::Fresh => out.extend(value),
         Freshness::Stale => {
             out.extend(value.into_iter().map(dimmed));
-            if !stale_glyphs.0.is_empty() {
-                out.push(muted(theme, format!(" {}", stale_glyphs.0)));
-            }
+            out.push(muted(theme, format!(" {overdue}")));
         }
         Freshness::Failed => {
             out.extend(value.into_iter().map(dimmed));
-            if !stale_glyphs.1.is_empty() {
-                out.push(Segment::styled(
-                    format!(" {}", stale_glyphs.1),
-                    Style::fg(theme.role(crate::theme::Role::Danger)).dimmed(),
-                ));
-            }
+            out.push(Segment::styled(
+                format!(" {failed}"),
+                Style::fg(theme.role(crate::theme::Role::Danger)).dimmed(),
+            ));
         }
     }
     if !cfg.suffix.is_empty() {
@@ -825,7 +830,7 @@ mod tests {
     #[test]
     fn a_failed_module_with_no_value_still_carries_its_mark() {
         let theme = Theme::default();
-        let marks = ("⟳", "✗");
+        let marks = IconSet::Unicode;
         let cfg = module_cfg("sync", "");
         assert!(cfg.hide_when_empty, "the default that used to swallow the mark");
         let text =
@@ -834,6 +839,17 @@ mod tests {
         assert_eq!(text(Rendered::empty()), "", "a fresh empty module is hidden");
         assert_eq!(text(empty(Freshness::Stale)), "", "so is an overdue one with no value");
         assert_eq!(text(empty(Freshness::Failed)), "– ✗", "a broken one is never silent");
+        // mod-02: the ascii set's marks, the placeholder included, are ascii.
+        let ascii = |r: Rendered| {
+            crate::ansi::Painter::PLAIN.paint(&decorate(r, &cfg, &theme, IconSet::Ascii))
+        };
+        assert_eq!(ascii(empty(Freshness::Failed)), "- x");
+        let shown = module_cfg("sync", "hide_when_empty = false\n");
+        let plain = |r: Rendered, icons: IconSet| {
+            crate::ansi::Painter::PLAIN.paint(&decorate(r, &shown, &theme, icons))
+        };
+        assert_eq!(plain(Rendered::empty(), IconSet::Ascii), "-");
+        assert_eq!(plain(Rendered::empty(), IconSet::Nerd), "–");
         // A module that did render keeps its value, dimmed, with the mark.
         let value = || Rendered {
             segments: vec![Segment::plain("⇡2")],

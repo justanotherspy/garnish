@@ -514,7 +514,7 @@ pub static COMMON_OPTS: [OptSpec; 5] = [
     OptSpec::new(
         "hide_when_empty",
         Kind::Bool,
-        "Hide the module when it has nothing to show (else a dim `–`).",
+        "Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).",
         Value::Bool(true),
     ),
     OptSpec::new(

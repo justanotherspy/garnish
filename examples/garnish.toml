@@ -121,7 +121,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -165,7 +165,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -211,7 +211,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -261,7 +261,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -297,7 +297,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -351,7 +351,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -397,7 +397,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -435,7 +435,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -515,7 +515,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -547,7 +547,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -631,7 +631,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -715,7 +715,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -769,7 +769,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -815,7 +815,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -851,7 +851,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -889,7 +889,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -945,7 +945,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -987,7 +987,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1023,7 +1023,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1059,7 +1059,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1095,7 +1095,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1137,7 +1137,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1167,7 +1167,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1199,7 +1199,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1231,7 +1231,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0

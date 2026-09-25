@@ -125,7 +125,8 @@ impl Module for ContextModule {
             ));
         }
         if cfg.bool("show_percent") {
-            let text = pct.map_or_else(|| "–".to_owned(), |p| ctx.percent(cfg, p));
+            let text =
+                pct.map_or_else(|| ctx.icons.placeholder().to_owned(), |p| ctx.percent(cfg, p));
             let sp = if segs.is_empty() { "" } else { " " };
             segs.push(Segment::styled(format!("{sp}{text}"), Style::fg(fill_color).bolded()));
         }
