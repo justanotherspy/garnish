@@ -657,7 +657,21 @@ impl ModuleCfg {
     /// The animation frames of an icon (`<key>_frames`); empty when static.
     #[must_use]
     pub fn icon_frames(&self, key: &str) -> &[String] {
+        #[cfg(test)]
+        self.declared(self.icons.contains_key(key), "icon", key);
         self.icon_frames.get(key).map_or(&[], Vec::as_slice)
+    }
+
+    /// In a test build, a read of a key the schema does not declare fails.
+    ///
+    /// The typed readers answer an unknown key with a default (an empty
+    /// icon, the default colour, `false`), so a typo renders silently. The
+    /// key scan in `modules` catches a key spelled at the call site; this
+    /// catches every read a unit test reaches, a key picked at run time or
+    /// read through a helper included (the schema matrix reaches them all).
+    #[cfg(test)]
+    fn declared(&self, known: bool, what: &str, key: &str) {
+        assert!(known, "{}: {what} {key:?} is not in the schema", self.id);
     }
 
     /// Every icon that has animation frames, for `config show` and docs.
@@ -716,12 +730,16 @@ impl ModuleCfg {
     /// Boolean option (false when missing or of another kind).
     #[must_use]
     pub fn bool(&self, key: &str) -> bool {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         matches!(self.opts.get(key), Some(Value::Bool(true)))
     }
 
     /// Integer option as `u64` (0 when missing/negative).
     #[must_use]
     pub fn int(&self, key: &str) -> u64 {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::Int(i)) => u64::try_from(*i).unwrap_or(0),
             Some(Value::Float(f)) => crate::num::round_to_u64(*f),
@@ -738,6 +756,8 @@ impl ModuleCfg {
     /// Float option (0.0 when missing).
     #[must_use]
     pub fn float(&self, key: &str) -> f64 {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::Float(f)) => *f,
             Some(Value::Int(i)) => crate::num::u64_to_f64(u64::try_from(*i).unwrap_or(0)),
@@ -748,12 +768,16 @@ impl ModuleCfg {
     /// String option ("" when missing).
     #[must_use]
     pub fn str(&self, key: &str) -> &str {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         self.opts.get(key).and_then(Value::as_str).unwrap_or("")
     }
 
     /// Number-list option.
     #[must_use]
     pub fn nums(&self, key: &str) -> Vec<f64> {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::NumList(v)) => v.clone(),
             _ => Vec::new(),
@@ -763,6 +787,8 @@ impl ModuleCfg {
     /// String-list option.
     #[must_use]
     pub fn strs(&self, key: &str) -> Vec<String> {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::StrList(v)) => v.clone(),
             _ => Vec::new(),
@@ -778,12 +804,16 @@ impl ModuleCfg {
     /// Icon glyph ("" when unknown).
     #[must_use]
     pub fn icon(&self, key: &str) -> &str {
+        #[cfg(test)]
+        self.declared(self.icons.contains_key(key), "icon", key);
         self.icons.get(key).map_or("", String::as_str)
     }
 
     /// Color (default color when unknown).
     #[must_use]
     pub fn color(&self, key: &str) -> Color {
+        #[cfg(test)]
+        self.declared(self.colors.contains_key(key), "colour", key);
         self.colors.get(key).copied().unwrap_or_default()
     }
 }
@@ -878,15 +908,54 @@ mod tests {
         o.icon_frames.insert("ghost".into(), vec!["x".into()]);
         let cfg = ModuleCfg::resolve(&s, Preset::Full, IconSet::Nerd, &theme, &o);
         assert_eq!(cfg.icon_frames("leaf"), ["a", "b", "c"]);
-        assert!(cfg.icon_frames("ghost").is_empty(), "unknown keys are dropped");
+        assert!(!cfg.all_icon_frames().contains_key("ghost"), "unknown keys are dropped");
         assert_eq!(cfg.animated(|n| 2 % n).icon("leaf"), "c");
         assert_eq!(cfg.animated(|_| 0).icon("leaf"), "a");
         assert_eq!(cfg.icon("leaf"), "🌿", "the static glyph is untouched");
         assert_eq!(cfg.color("main"), Color::Rgb(1, 2, 3));
         assert_eq!(cfg.color_list("bands", &theme).len(), 2);
         assert_eq!(cfg.size("width"), 7);
-        assert_eq!(cfg.str("missing"), "");
+        assert_eq!(cfg.str("width"), "", "a string read of another kind is empty");
         assert_eq!(cfg.float("width"), 7.0);
+    }
+
+    /// mod-05: a test build refuses a read of a key the schema does not
+    /// declare, which a release build answers with a default, so a typo in
+    /// a module fails the unit tests that render it instead of drawing an
+    /// empty icon or the default colour.
+    #[test]
+    fn a_read_of_an_undeclared_key_fails_under_test() {
+        type Read = fn(&ModuleCfg);
+        let cfg = ModuleCfg::resolve(
+            &schema(),
+            Preset::Default,
+            IconSet::Nerd,
+            &Theme::default(),
+            &Overrides::default(),
+        );
+        let reads: [(&str, Read); 5] = [
+            ("option \"show_it\"", |c| {
+                let _ = c.bool("show_it");
+            }),
+            ("option \"widht\"", |c| {
+                let _ = c.size("widht");
+            }),
+            ("icon \"lef\"", |c| {
+                let _ = c.icon("lef");
+            }),
+            ("colour \"mian\"", |c| {
+                let _ = c.color("mian");
+            }),
+            ("option \"band\"", |c| {
+                let _ = c.color_list("band", &Theme::default());
+            }),
+        ];
+        for (what, read) in reads {
+            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read(&cfg)));
+            let message = refused.expect_err(what);
+            let text = message.downcast_ref::<String>().cloned().unwrap_or_default();
+            assert!(text.contains(what) && text.contains("not in the schema"), "{text}");
+        }
     }
 
     /// SPEC § 3: a hide state parses from and prints as its config spelling,

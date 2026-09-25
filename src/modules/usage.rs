@@ -250,12 +250,16 @@ impl Module for LimitModule {
         let clamp = self.0 != Window::Spend;
         let shown = ctx.percent_shown_with(cfg, used, clamp);
         // SPEC § 3.3: the pace is computed once, only when a switch wants it,
-        // and only for a window whose length is known.
-        let wants_pace = cfg.bool("pace")
-            || cfg.bool("pace_colors")
-            || cfg.bool("eta")
-            || cfg.bool("elapsed_marker")
-            || cfg.str("reset") == "elapsed";
+        // and only for a window whose length is known, the one kind of
+        // window whose schema has the switches. Every read of them below
+        // follows `pace`, so `spend` never asks for a key it lacks.
+        let wants_pace = |_: &u64| {
+            cfg.bool("pace")
+                || cfg.bool("pace_colors")
+                || cfg.bool("eta")
+                || cfg.bool("elapsed_marker")
+                || cfg.str("reset") == "elapsed"
+        };
         // A window whose reset has passed has no pace: the payload keeps the
         // old `resets_at` until the next response, and against it every
         // switch would read the usage as 100 % elapsed (SPEC § 3.3).
@@ -263,7 +267,7 @@ impl Module for LimitModule {
         let pace = self
             .0
             .length_secs()
-            .filter(|_| wants_pace)
+            .filter(wants_pace)
             .zip(w.resets_at.filter(|at| *at > now))
             .map(|(length, at)| pace(used, at, now, length));
         let color = match pace.and_then(|p| pace_band(shown, p.ratio)) {
@@ -289,13 +293,13 @@ impl Module for LimitModule {
         }
         let text = ctx.percent_with(cfg, used, clamp);
         segs.push(Segment::styled(text, Style::fg(color).bolded()));
-        if cfg.bool("pace")
-            && let Some(p) = pace
+        if let Some(p) = pace
+            && cfg.bool("pace")
         {
             segs.push(pace_segment(ctx, cfg, p.delta));
         }
-        if cfg.bool("eta")
-            && let Some(secs) = pace.and_then(|p| p.eta_secs)
+        if let Some(secs) = pace.and_then(|p| p.eta_secs)
+            && cfg.bool("eta")
         {
             let eta = format!(" {}{}", glyph_prefix(cfg, "eta"), ctx.duration(cfg, secs));
             segs.push(seg(cfg, eta, "eta"));
