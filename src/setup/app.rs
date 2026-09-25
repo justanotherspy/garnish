@@ -130,6 +130,14 @@ enum Screen {
     Install(Box<InstallScreen>),
 }
 
+/// A preview pane as drawn: the rows it took, the rows of its rendered
+/// lines (under its title and notes), and those lines' placement map.
+struct Pane {
+    rect: Rect,
+    lines: Rect,
+    rendered: Rendered,
+}
+
 /// How urgent a status line is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Level {
@@ -523,11 +531,11 @@ impl App {
             self.list_area = Rect::default();
             return;
         }
-        match self.screen.clone() {
+        match self.screen {
             Screen::Home => self.draw_home(frame, area),
             Screen::Picker(_) => self.draw_picker(frame, area),
             Screen::Builder => self.draw_builder(frame, area),
-            Screen::Install(screen) => self.draw_install(frame, area, &screen),
+            Screen::Install(_) => self.draw_install(frame, area),
         }
         for layer in &mut self.layers {
             match layer {
@@ -546,16 +554,18 @@ impl App {
     }
 
     /// The preview pane: a title line, then the rendered lines with a
-    /// marker beside those of the selected row. Returns the area used.
+    /// marker beside those of the selected row. It borrows the screen, so
+    /// `config` may be one of its own; [`App::keep_pane`] stores what the
+    /// clicks after it need.
     fn draw_pane(
-        &mut self,
+        &self,
         frame: &mut Frame<'_>,
         area: Rect,
         config: &Config,
         selected_row: Option<usize>,
         selected_id: Option<&str>,
         max_height: u16,
-    ) -> Rect {
+    ) -> Pane {
         let rendered = self.preview.render(config, usize::from(self.size.0));
         let painter = self.painter(config);
         let count = rendered.lines.len();
@@ -617,13 +627,20 @@ impl App {
         let height = cells(lines.len()).min(max_height).max(header.saturating_add(1));
         let rect = Rect { height, ..area };
         frame.render_widget(Paragraph::new(lines), rect);
-        self.pane_area = Rect {
+        let lines = Rect {
             y: rect.y.saturating_add(header),
             height: rect.height.saturating_sub(header),
             ..rect
         };
-        self.rendered = rendered;
-        rect
+        Pane { rect, lines, rendered }
+    }
+
+    /// Keep what a drawn pane's clicks are measured against; the rows it
+    /// took.
+    fn keep_pane(&mut self, pane: Pane) -> Rect {
+        self.pane_area = pane.lines;
+        self.rendered = pane.rendered;
+        pane.rect
     }
 
     /// The status line and, under it, the key hints, each hint recorded

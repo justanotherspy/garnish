@@ -68,7 +68,6 @@ impl App {
     }
 
     pub(super) fn draw_home(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let config = self.config.clone();
         let items = cells(HOME_ITEMS.len());
         // The pane gives way to the menu: its entries, the two lines naming
         // the file above them, and the status and hint rows below.
@@ -77,7 +76,8 @@ impl App {
             .checked_div(2)
             .unwrap_or(1)
             .min(area.height.saturating_sub(items.saturating_add(4)));
-        let pane = self.draw_pane(frame, area, &config, None, None, max);
+        let pane = self.draw_pane(frame, area, &self.config, None, None, max);
+        let pane = self.keep_pane(pane);
         let rect = Rect {
             y: area.y.saturating_add(pane.height),
             height: area.height.saturating_sub(pane.height).saturating_sub(2),

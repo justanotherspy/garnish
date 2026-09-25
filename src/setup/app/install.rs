@@ -61,12 +61,8 @@ impl App {
         }
     }
 
-    pub(super) fn draw_install(
-        &mut self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        screen: &InstallScreen,
-    ) {
+    pub(super) fn draw_install(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let Screen::Install(screen) = &self.screen else { return };
         let mut lines: Vec<Line<'static>> = vec![
             Line::from(Span::styled("Install into Claude Code", Chrome::title())),
             Line::from(""),

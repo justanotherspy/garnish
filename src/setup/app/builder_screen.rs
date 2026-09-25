@@ -420,11 +420,11 @@ impl App {
     }
 
     pub(super) fn draw_builder(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let config = self.config.clone();
         let selected_row = self.builder.item().map(|i| i.at.row);
-        let selected_id = self.builder.selected_id().map(str::to_owned);
+        let selected_id = self.builder.selected_id();
         let max = area.height.saturating_sub(6).checked_div(2).unwrap_or(1).max(2);
-        let pane = self.draw_pane(frame, area, &config, selected_row, selected_id.as_deref(), max);
+        let pane = self.draw_pane(frame, area, &self.config, selected_row, selected_id, max);
+        let pane = self.keep_pane(pane);
         let head_y = area.y.saturating_add(pane.height);
         let dirty = if self.draft.is_dirty() { " (unsaved)" } else { "" };
         let head = Line::from(vec![
@@ -443,8 +443,7 @@ impl App {
             height: area.height.saturating_sub(pane.height).saturating_sub(3),
             ..area
         };
-        let draft = self.draft.clone();
-        self.builder.draw(frame, list_rect, &draft);
+        self.builder.draw(frame, list_rect, &self.draft);
         self.list_area = list_rect;
         // Every hint is a button too, so the row keeps to what fits 80
         // columns; the rest of the keys are on the help page.

@@ -74,6 +74,15 @@ impl Picker {
         }
         self.shown.as_ref().map(|(_, d, c, p)| (d, c, p.as_slice()))
     }
+
+    /// The highlighted preset's config and problems, when [`Picker::shown`]
+    /// has resolved them since the last move.
+    fn resolved(&self) -> Option<(&Config, &[ConfigError])> {
+        self.shown
+            .as_ref()
+            .filter(|(i, ..)| *i == self.cursor)
+            .map(|(_, _, c, p)| (c, p.as_slice()))
+    }
 }
 
 impl App {
@@ -193,22 +202,23 @@ impl App {
     }
 
     pub(super) fn draw_picker(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let Screen::Picker(picker) = &mut self.screen else { return };
-        let Some((_, config, problems)) =
-            picker.shown().map(|(d, c, p)| (d.clone(), c.clone(), p.to_vec()))
-        else {
-            return;
-        };
+        if let Screen::Picker(picker) = &mut self.screen {
+            let _resolved = picker.shown();
+        }
+        let Screen::Picker(picker) = &self.screen else { return };
+        let Some((config, problems)) = picker.resolved() else { return };
+        let problems = problems.len();
         let item = picker.item().cloned();
         let (cursor, len) = (picker.cursor, picker.items.len());
         let pane = self.draw_pane(
             frame,
             area,
-            &config,
+            config,
             None,
             None,
             area.height.checked_div(2).unwrap_or(1),
         );
+        let pane = self.keep_pane(pane);
         // The facts first and the summary last on the info line, which is
         // cut at the right edge; the warnings get lines of their own.
         let mut info: Vec<Span<'static>> = Vec::new();
@@ -231,8 +241,8 @@ impl App {
                 }
             }
             info.push(Span::styled(format!("  {}", item.summary), Chrome::muted()));
-            if !problems.is_empty() {
-                notes.push(format!("⚠ {} problem(s)", problems.len()));
+            if problems > 0 {
+                notes.push(format!("⚠ {problems} problem(s)"));
             }
         }
         let mut info_lines = vec![Line::from(info)];
