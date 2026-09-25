@@ -6,7 +6,7 @@ Shows `output_style.name`. By default the `default` style is hidden; the `full` 
 
 **Sources:** `output_style.name`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

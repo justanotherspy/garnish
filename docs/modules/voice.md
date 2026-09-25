@@ -6,7 +6,7 @@ Shows while `voice.enabled` is `true` in Claude Code's settings chain (`/voice` 
 
 **Sources:** `.claude/settings.json voice.enabled (the settings chain)`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

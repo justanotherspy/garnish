@@ -6,7 +6,7 @@ The open PR (or GitLab MR) Claude Code found for the current branch, as a clicka
 
 **Sources:** `pr.number`, `pr.url`, `pr.review_state`, `pr.kind`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

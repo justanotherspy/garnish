@@ -1,5 +1,5 @@
 # garnish configuration — see docs/config.md for every key.
-# Top-level preset: default | minimal | full | compact
+# Top-level preset (default | minimal | full | compact): picks each module's preset; the rows and frame below were written from it and no longer follow it.
 preset = "default"
 # Icon set: nerd | unicode | emoji | ascii
 icons = "nerd"

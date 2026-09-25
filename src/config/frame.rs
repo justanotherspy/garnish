@@ -117,7 +117,7 @@ pub(super) struct RawFrame {
 
 /// Every key `[frame]` takes, in the order the "expected one of" message
 /// names them.
-pub(super) const FRAME_KEYS: [&str; 24] = [
+pub const FRAME_KEYS: [&str; 24] = [
     "style",
     "fill",
     "first",

@@ -6,7 +6,7 @@ The name set with `--name` or `/rename`, or the AI-generated title. Hidden when 
 
 **Sources:** `session_name`, `session_id`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -50,7 +50,7 @@ The name set with `--name` or `/rename`, or the AI-generated title. Hidden when 
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `name` | `U+F02B` | `❯` | `🔖` | `` | Name icon. |
+| `name` | `U+F02B` | `❯` | `🔖` | — | Name icon. |
 
 Also try (`name`: `U+F02E` `U+F292` `❯` `›`).
 

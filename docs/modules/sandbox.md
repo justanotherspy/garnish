@@ -6,7 +6,7 @@ Shows while `sandbox.enabled` is `true` in Claude Code's settings chain (the fir
 
 **Sources:** `.claude/settings.json sandbox.enabled (the settings chain)`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

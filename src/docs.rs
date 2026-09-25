@@ -48,10 +48,42 @@ fn vocab_cells<T: Vocab>() -> String {
     cells(&T::names())
 }
 
+/// Text as one GFM table cell: every pipe escaped, since GFM splits a row
+/// on each unescaped one, inside a code span too, and a line break made a
+/// space.
+fn cell(text: &str) -> String {
+    text.replace('|', "\\|").replace(['\r', '\n'], " ")
+}
+
+/// Text as a code span in a table cell: fenced with one backtick more than
+/// the longest run inside (and spaced when it starts or ends with one), an
+/// em dash for nothing, since an empty span prints its two backticks, and
+/// escaped as [`cell`] does.
+fn code_cell(text: &str) -> String {
+    if text.is_empty() {
+        return "—".to_owned();
+    }
+    let (mut longest, mut run) = (0_usize, 0_usize);
+    for c in text.chars() {
+        run = if c == '`' { run.saturating_add(1) } else { 0 };
+        longest = longest.max(run);
+    }
+    let fence = "`".repeat(longest.saturating_add(1));
+    let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
+    cell(&format!("{fence}{pad}{text}{pad}{fence}"))
+}
+
 /// The top-level keys of the config file, in schema order.
 fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
     comment(out, annotated, "garnish configuration — see docs/config.md for every key.");
-    comment(out, annotated, &format!("Top-level preset: {}", bar::<TopPreset>()));
+    comment(
+        out,
+        annotated,
+        &format!(
+            "Top-level preset ({}): picks each module's preset; the rows and frame below were written from it and no longer follow it.",
+            bar::<TopPreset>()
+        ),
+    );
     let _ = writeln!(out, "preset = {}", toml_string(cfg.preset.name()));
     comment(out, annotated, &format!("Icon set: {}", bar::<IconSet>()));
     let _ = writeln!(out, "icons = {}", toml_string(cfg.icons.name()));
@@ -114,11 +146,7 @@ fn write_top_level(out: &mut String, cfg: &Config, annotated: bool) {
         annotated,
         "Ticker: cells scrolled per tick (0.5 = every second tick) and the text between end and start",
     );
-    let _ = writeln!(
-        out,
-        "ticker_step = {}",
-        crate::config::schema::Value::Float(cfg.ticker_step).to_toml()
-    );
+    let _ = writeln!(out, "ticker_step = {}", Value::Float(cfg.ticker_step).to_toml());
     let _ = writeln!(out, "ticker_gap = {}", toml_string(&cfg.ticker_gap));
     comment(
         out,
@@ -606,71 +634,103 @@ fn toml_list(items: &[String]) -> String {
     format!("[{}]", items.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "))
 }
 
-/// The fixture that shows a module best.
+/// The fixture that shows a module best, where it is not the
+/// `subscription-full` every other sample renders from.
+const SAMPLE_FIXTURES: [(&str, &str); 8] = [
+    ("branch", "worktree-session"),
+    ("worktree", "worktree-session"),
+    ("pr", "pr-approved"),
+    ("spend", "spend-limit"),
+    ("cost", "api-key"),
+    ("vim", "vim"),
+    ("agent", "agent"),
+    ("style", "output-style"),
+];
+
+/// The modules that show a settings key (SPEC § 3.8), whose samples are
+/// rendered with the key on.
+const SETTINGS_BADGES: [&str; 2] = ["sandbox", "voice"];
+
+/// The module whose percentage is its share of the session, not the one it
+/// prints, for the `hide` row.
+const SHARE_MODULE: &str = "api";
+
 fn sample_fixture(id: &str) -> &'static str {
-    match id {
-        "branch" | "worktree" => "worktree-session",
-        "pr" => "pr-approved",
-        "spend" => "spend-limit",
-        "cost" => "api-key",
-        "vim" => "vim",
-        "agent" => "agent",
-        "style" => "output-style",
-        _ => "subscription-full",
-    }
+    SAMPLE_FIXTURES.iter().find(|(m, _)| *m == id).map_or("subscription-full", |(_, f)| f)
 }
 
 fn fixture(name: &str) -> Payload {
     crate::fixtures::payload(name)
 }
 
+/// The config a sample renders: a unit test requires every sample to parse
+/// without a problem, since a typo here would render the defaults silently
+/// and `UPDATE_DOCS=1` would commit them.
+fn sample_config(text: &str) -> Config {
+    config::parse(text, &SCHEMAS).0
+}
+
 /// The pinned clock a module's sample renders with: the settings badges
 /// (SPEC § 3.8) are shown on, from keys seeded in-process so no file is
 /// read (§ 9); every other module takes the fixed clock as it is.
 fn sample_clock(id: &str) -> Clock {
-    match id {
-        "sandbox" | "voice" => Clock {
+    if SETTINGS_BADGES.contains(&id) {
+        Clock {
             settings_keys: Some(vec![crate::claude_settings::FileKeys {
                 sandbox_enabled: Some(true),
                 voice_enabled: Some(true),
                 ..Default::default()
             }]),
             ..Clock::fixed()
-        },
-        _ => Clock::fixed(),
+        }
+    } else {
+        Clock::fixed()
     }
 }
 
-/// Render one module alone with a preset and icon set, as plain text.
-fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
-    let text = format!(
+/// The config one module's sample renders: the module alone, unframed.
+fn module_sample_text(id: &str, preset: Preset, icons: IconSet) -> String {
+    format!(
         "icons = {}\n[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [{}]\n[modules.{id}]\npreset = {}\n",
         toml_string(icons.name()),
         toml_string(id),
         toml_string(preset.name())
-    );
-    let (cfg, _) = config::parse(&text, &SCHEMAS);
+    )
+}
+
+/// Render one module alone with a preset and icon set, as plain text:
+/// empty when the module has nothing to show for its sample.
+fn module_sample(id: &str, preset: Preset, icons: IconSet) -> String {
+    let cfg = sample_config(&module_sample_text(id, preset, icons));
     let out = render_plain_at(&fixture(sample_fixture(id)), &cfg, Some(80), &sample_clock(id));
-    let line = out.lines().next().unwrap_or("").trim_end().to_owned();
-    if !line.is_empty() {
-        return line;
-    }
+    out.lines().next().unwrap_or("").trim_end().to_owned()
+}
+
+/// Why a module's samples print nothing: what it reads that a sample,
+/// rendered from a payload alone under the pinned clock, never has.
+fn sample_note(id: &str) -> &'static str {
     match id {
-        "sync" => "(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)".to_owned(),
-        "account" => {
-            "(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)".to_owned()
+        "sync" => {
+            "Nothing to show above (—): the counts come from a git repository with an upstream, which a sample never reads. In one, the default preset prints for example `⇡2 ⇣1` with unicode icons: two commits to push, one to pull."
         }
-        _ => "(nothing to show for this payload)".to_owned(),
+        "account" => {
+            "Nothing to show above (—): the worker reads `~/.claude.json`, which a sample never touches. Once it has, the module prints the sign-in's email address, or with `style = \"user\"` (the `minimal` preset) the part before the `@`."
+        }
+        _ => "Nothing to show above (—): the sample payload gives this module nothing to print.",
     }
+}
+
+/// The config of [`frame_sample`].
+fn frame_sample_text(style: FrameStyle) -> String {
+    format!(
+        "icons = \"unicode\"\n[frame]\nstyle = {}\n[[row]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[row]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"cache\"]\n",
+        toml_string(style.name())
+    )
 }
 
 /// Render a small two-line status line with a frame style.
 fn frame_sample(style: FrameStyle) -> String {
-    let text = format!(
-        "icons = \"unicode\"\n[frame]\nstyle = {}\n[[row]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[row]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"cache\"]\n",
-        toml_string(style.name())
-    );
-    let (cfg, _) = config::parse(&text, &SCHEMAS);
+    let cfg = sample_config(&frame_sample_text(style));
     render_plain_at(&fixture("subscription-full"), &cfg, Some(72), &Clock::fixed())
 }
 
@@ -711,38 +771,43 @@ pub fn module_page(schema: &ModuleSchema) -> String {
         "**Sources:** {}\n",
         schema.sources.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", ")
     );
+    // Every source a module reads is named above, the `.git` files or the
+    // settings chain of a module that renders every tick included.
     let refresh = if schema.refresh == 0 {
-        "every tick (payload only)".to_owned()
+        "every tick, nothing cached".to_owned()
     } else {
         format!("cached, refreshed in the background every {} s", schema.refresh)
     };
     let _ = writeln!(o, "**Refresh:** {refresh}\n");
 
+    let mut empty = false;
+    let mut sample = |preset: Preset, icons: IconSet| {
+        let text = module_sample(schema.id, preset, icons);
+        empty |= text.is_empty();
+        code_cell(&text)
+    };
     let _ = writeln!(o, "## Presets\n\n| preset | render |\n|---|---|");
     for p in Preset::ALL {
-        let _ = writeln!(
-            o,
-            "| `{}` | `{}` |",
-            p.name(),
-            module_sample(schema.id, p, IconSet::Unicode).replace('|', "\\|")
-        );
+        let _ = writeln!(o, "| `{}` | {} |", p.name(), sample(p, IconSet::Unicode));
     }
     let _ = writeln!(o, "\n## Icon sets (default preset)\n\n| icons | render |\n|---|---|");
     for set in IconSet::ALL {
-        let _ = writeln!(
-            o,
-            "| `{}` | `{}` |",
-            set.name(),
-            module_sample(schema.id, Preset::Default, set).replace('|', "\\|")
-        );
+        let _ = writeln!(o, "| `{}` | {} |", set.name(), sample(Preset::Default, set));
+    }
+    if empty {
+        let _ = writeln!(o, "\n{}", sample_note(schema.id));
     }
 
     module_reference(&mut o, schema);
     o
 }
 
-/// The config the text-module page renders: the SPEC § 3.7 example.
-const TEXT_SAMPLE: &str = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [\"text.motd\", \"text.clip\", \"text.tag\"]\n[modules.text.motd]\ntext = \"ship it before lunch, then write the docs\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\n[modules.text.clip]\ntext = \"a rather long note\"\nwidth = 8\noverflow = \"clip\"\n[modules.text.tag]\ntext = \"v0.2\"\nwidth = 8\njustify = \"right\"\npad = 1\ncolor = \"muted\"\n";
+/// The text-module page's example, the SPEC § 3.7 one, as the page shows it.
+const TEXT_SAMPLE: &str = "[[row]]\nmodules = [\"text.motd\", \"text.clip\", \"text.tag\"]\n[modules.text.motd]\ntext = \"ship it before lunch, then write the docs\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\n[modules.text.clip]\ntext = \"a rather long note\"\nwidth = 8\noverflow = \"clip\"\n[modules.text.tag]\ntext = \"v0.2\"\nwidth = 8\njustify = \"right\"\npad = 1\ncolor = \"muted\"\n";
+
+/// What [`TEXT_SAMPLE`] renders under and the page leaves out: unicode
+/// icons and no frame, so the boxes stand alone.
+const TEXT_SAMPLE_FRAME: &str = "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n";
 
 /// The `docs/modules/text.md` page for the `text.<name>` family (SPEC § 3.7).
 #[must_use]
@@ -754,37 +819,25 @@ pub fn text_page() -> String {
         o,
         "**Sources:** the config file only. **Refresh:** every tick; nothing to cache.\n"
     );
-    let (cfg, _) = config::parse(TEXT_SAMPLE, &SCHEMAS);
+    let cfg = sample_config(&format!("{TEXT_SAMPLE_FRAME}{TEXT_SAMPLE}"));
     let sample = render_plain_at(&fixture("subscription-full"), &cfg, Some(80), &Clock::fixed());
     let _ = writeln!(
         o,
-        "## Example\n\n```toml\n{}```\n\nrenders (frame 0; the first box scrolls in a live session) as\n\n```text\n{}\n```\n",
-        TEXT_SAMPLE
-            .trim_start_matches("icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n"),
+        "## Example\n\n```toml\n{TEXT_SAMPLE}```\n\nrenders (frame 0; the first box scrolls in a live session) as\n\n```text\n{}\n```\n",
         sample.trim_end()
     );
     let _ = writeln!(o, "## Options\n\n`[modules.text.<name>]`\n");
     let _ = writeln!(o, "| key | type | default | description |\n|---|---|---|---|");
     let _ = writeln!(o, "| `enabled` | bool | `true` | Render this module. |");
-    let _ = writeln!(o, "| `hide` | list of `empty` | `[]` | {} |", hide_doc(schema));
-    for opt in text_common_opts() {
+    let _ = writeln!(o, "| `hide` | list of `empty` | `[]` | {} |", cell(&hide_doc(schema)));
+    for opt in text_common_opts().chain(&schema.opts) {
         let _ = writeln!(
             o,
-            "| `{}` | {} | `{}` | {} |",
+            "| `{}` | {} | {} | {} |",
             opt.key,
             kind_column(opt),
-            opt.default.to_toml(),
-            opt.doc.replace('|', "\\|")
-        );
-    }
-    for opt in &schema.opts {
-        let _ = writeln!(
-            o,
-            "| `{}` | {} | `{}` | {} |",
-            opt.key,
-            kind_column(opt),
-            opt.default.to_toml().replace('|', "\\|"),
-            opt.doc.replace('|', "\\|")
+            code_cell(&opt.default.to_toml()),
+            cell(opt.doc)
         );
     }
     let _ = writeln!(
@@ -795,11 +848,17 @@ pub fn text_page() -> String {
         o,
         "## Colors\n\n`[modules.text.<name>.colors]`, or the shorthand `color = …` on the module (an explicit `colors.text` wins over the shorthand). A module name is letters, digits, `_` and `-` only, so `text.<name>` reads the same on a line and in `config show`.\n"
     );
+    color_table(&mut o, schema);
+    o
+}
+
+/// The `| key | default | description |` table of a schema's colours.
+fn color_table(o: &mut String, schema: &ModuleSchema) {
     let _ = writeln!(o, "| key | default | description |\n|---|---|---|");
     for color in &schema.colors {
-        let _ = writeln!(o, "| `{}` | `{}` | {} |", color.key, color.default, color.doc);
+        let _ =
+            writeln!(o, "| `{}` | {} | {} |", color.key, code_cell(color.default), cell(color.doc));
     }
-    o
 }
 
 /// The type column of an option row: the kind, and the schema's cap when
@@ -821,7 +880,7 @@ fn refresh_row(schema: &ModuleSchema) -> String {
     } else {
         ("`0`".to_owned(), "0".to_owned())
     };
-    format!("| `refresh` | {kind} | `{r}` | `{r}` | `{r}` | {} |", schema.refresh_doc())
+    format!("| `refresh` | {kind} | `{r}` | `{r}` | `{r}` | {} |", cell(schema.refresh_doc()))
 }
 
 /// The option, icon and color tables of a module page.
@@ -842,28 +901,19 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
         o,
         "| `hide` | list of {} | `[]` | `[]` | `[]` | {} |",
         schema.hide_states().iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", "),
-        hide_doc(schema)
+        cell(&hide_doc(schema))
     );
-    for opt in &COMMON_OPTS {
-        let value = opt.default.to_toml();
+    for opt in COMMON_OPTS.iter().chain(&schema.opts) {
+        let value = |p: Preset| code_cell(&opt.for_preset(p).to_toml());
         let _ = writeln!(
             o,
-            "| `{}` | {} | `{value}` | `{value}` | `{value}` | {} |",
+            "| `{}` | {} | {} | {} | {} | {} |",
             opt.key,
             kind_column(opt),
-            opt.doc.replace('|', "\\|")
-        );
-    }
-    for opt in &schema.opts {
-        let _ = writeln!(
-            o,
-            "| `{}` | {} | `{}` | `{}` | `{}` | {} |",
-            opt.key,
-            kind_column(opt),
-            opt.for_preset(Preset::Minimal).to_toml(),
-            opt.for_preset(Preset::Default).to_toml(),
-            opt.for_preset(Preset::Full).to_toml(),
-            opt.doc
+            value(Preset::Minimal),
+            value(Preset::Default),
+            value(Preset::Full),
+            cell(opt.doc)
         );
     }
     if !schema.icons.is_empty() {
@@ -876,13 +926,13 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
             let g = icon.glyph;
             let _ = writeln!(
                 o,
-                "| `{}` | `{}` | `{}` | `{}` | `{}` | {} |",
+                "| `{}` | {} | {} | {} | {} | {} |",
                 icon.key,
-                code_points(g.nerd),
-                g.unicode,
-                g.emoji,
-                g.ascii,
-                icon.doc
+                code_cell(&code_points(g.nerd)),
+                code_cell(g.unicode),
+                code_cell(g.emoji),
+                code_cell(g.ascii),
+                cell(icon.doc)
             );
         }
         // The alternatives the `setup` glyph picker offers (SPEC § 14), so
@@ -913,10 +963,7 @@ fn module_reference(o: &mut String, schema: &ModuleSchema) {
             "\n## Colors\n\n`[modules.{}.colors]` — a theme role or a literal color (`red`, `208`, `#ff8800`).\n",
             schema.id
         );
-        let _ = writeln!(o, "| key | default | description |\n|---|---|---|");
-        for color in &schema.colors {
-            let _ = writeln!(o, "| `{}` | `{}` | {} |", color.key, color.default, color.doc);
-        }
+        color_table(o, schema);
     }
 }
 
@@ -940,7 +987,7 @@ fn hide_doc(schema: &ModuleSchema) -> String {
         (Some(MeasureKind::Amount), _) => {
             "; `zero` when the amount prints as zero (`$0.00`, or `$0` under `cost = \"whole\"`)"
         }
-        (Some(MeasureKind::Percent), "api") => {
+        (Some(MeasureKind::Percent), id) if id == SHARE_MODULE => {
             "; `below:N` and `above:N` compare its share of the session, shown or not"
         }
         (Some(MeasureKind::Percent), _) => {
@@ -989,15 +1036,15 @@ pub fn config_page() -> String {
     let palette = crate::theme::palette(&theme);
     for role in Role::ALL {
         let def = palette.map_or("", |p| p.spec(role));
-        let _ = writeln!(o, "| `{}` | `{def}` | {} |", role.name(), role_doc(role));
+        let _ = writeln!(o, "| `{}` | {} | {} |", role.name(), code_cell(def), role_doc(role));
     }
     let _ = writeln!(o, "\n### Themes\n\n| theme | description |\n|---|---|");
     for p in &PALETTES {
-        let _ = writeln!(o, "| `{}` | {} |", p.name, p.doc);
+        let _ = writeln!(o, "| `{}` | {} |", p.name, cell(p.doc));
     }
 
     frame_section(&mut o);
-    presets_section(&mut o);
+    rows_section(&mut o);
     environment_section(&mut o);
     o
 }
@@ -1172,6 +1219,10 @@ fn frame_section(o: &mut String) {
         writeln!(o, "| `pad` | style-dependent | Text between prefix/content and content/rule. |");
     let _ = writeln!(
         o,
+        "| `top_left` `top_right` `bottom_left` `bottom_right` `side` | style-dependent (none for `none` and `powerline`) | A box's corners and side (`[box.<name>]` below), one cell each; a box without a `style` of its own draws with these. |"
+    );
+    let _ = writeln!(
+        o,
         "| `fill_pattern` | `\"\"` | One-cell glyphs repeated across the rule instead of `fill_char`; each tick the pattern shifts `fill_step` cells in `fill_direction`, so dots appear to travel along the rule. The rule's width never changes, only which glyph lands in each cell. Empty keeps the static rule. |"
     );
     let _ = writeln!(
@@ -1213,19 +1264,37 @@ fn frame_section(o: &mut String) {
     );
 }
 
+/// The config of [`align_sample`].
+fn align_sample_text(align: bool) -> String {
+    format!(
+        "icons = \"unicode\"\nalign = {align}\ndurations = \"fixed\"\n[[row]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[row]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"lines\"]\n[[row]]\nmodules = [\"session\", \"api\", \"cache\"]\nright = [\"cost\"]\n"
+    )
+}
+
 /// Three lines whose first modules differ in width, with and without `align`.
 fn align_sample(align: bool) -> String {
-    let text = format!(
-        "icons = \"unicode\"\nalign = {align}\ndurations = \"fixed\"\n[[row]]\nmodules = [\"model\", \"context\"]\nright = [\"clock\"]\n[[row]]\nmodules = [\"limit5h\", \"limit7d\"]\nright = [\"lines\"]\n[[row]]\nmodules = [\"session\", \"api\", \"cache\"]\nright = [\"cost\"]\n"
-    );
-    let (cfg, _) = config::parse(&text, &SCHEMAS);
+    let cfg = sample_config(&align_sample_text(align));
     render_plain_at(&fixture("subscription-full"), &cfg, Some(80), &Clock::fixed())
 }
 
-/// One sample config rendered at a width, for the layout sections.
-fn layout_sample(text: &str, columns: usize) -> String {
-    let (cfg, _) = config::parse(text, &SCHEMAS);
-    render_plain_at(&fixture("subscription-full"), &cfg, Some(columns), &Clock::fixed())
+/// The `[[row.col]]` example, as the page shows it.
+const COLUMNS_SAMPLE: &str = "[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n";
+
+/// The titles example, as the page shows it.
+const TITLES_SAMPLE: &str = "[[row]]\ntitle = \"Session\"\nmodules = []\n\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n";
+
+/// The `[box.<name>]` example, as the page shows it.
+const BOXES_SAMPLE: &str = "[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright   = [\"clock\"]\n\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n";
+
+/// What a layout sample renders under and the page leaves out.
+const LAYOUT_SAMPLE_ICONS: &str = "icons = \"unicode\"\n";
+
+/// One layout sample, shown as written and rendered at a width.
+fn layout_sample(o: &mut String, text: &str, columns: usize) {
+    let cfg = sample_config(&format!("{LAYOUT_SAMPLE_ICONS}{text}"));
+    let render =
+        render_plain_at(&fixture("subscription-full"), &cfg, Some(columns), &Clock::fixed());
+    let _ = writeln!(o, "```toml\n{text}```\n\n```text\n{render}\n```\n");
 }
 
 /// `[[row.col]]`: widths, `justify`, and stacks (SPEC § 4.3).
@@ -1235,14 +1304,7 @@ fn columns_section(o: &mut String) {
         "## `[[row.col]]`\n\nA row is columns side by side; a row written with `modules`/`right` and no `[[row.col]]` is one column filling the width, which is what every config above is. Columns share the row's width by `width`:\n\n| value | meaning |\n|---|---|\n| `\"<n>fr\"` | a share of the width left over once the others are placed (`\"1fr\"` by default, so three bare columns are thirds and six are sixths) |\n| `\"auto\"` | exactly the column's content, re-measured every tick — for values that hold still (a clock under `durations = \"fixed\"`, a module with `max_width`), not for branch names |\n| an integer | that many cells |\n\n`gap` is the empty cells between columns (1 by default; on a one-line row the rule runs through them, so a centred module floats on one continuous rule). `justify` ({justify}) places a column's `modules` when it has no `right` group; its default follows the column's position, so a three-column row reads left / centre / right without saying so. A column with both `modules` and `right` is the flex form of a plain row, laid out to the column's width. Content wider than its column is cut with `…` (or scrolled under `overflow = \"ticker\"`) and never spills into a neighbour, which is what keeps a layout's shape as the terminal is resized.\n",
         justify = vocab_cells::<Justify>()
     );
-    let _ = writeln!(
-        o,
-        "```toml\n[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n```\n\n```text\n{}\n```\n",
-        layout_sample(
-            "icons = \"unicode\"\n[[row]]\ngap = 2\n[[row.col]]\nmodules = [\"path\", \"branch\"]\n[[row.col]]\nmodules = [\"model\", \"effort\"]\n[[row.col]]\nmodules = [\"context\"]\n",
-            120,
-        )
-    );
+    layout_sample(o, COLUMNS_SAMPLE, 120);
     let _ = writeln!(
         o,
         "A column can hold a **stack** of rows instead of modules (`[[row.col.row]]`), and then the row is as tall as its tallest column; `valign` ({}) places a stack shorter than its row. An inner row takes every row key but `gap` and `[[row.col]]`: the tree is two levels deep and never deeper.\n",
@@ -1256,14 +1318,7 @@ fn titles_section(o: &mut String) {
         o,
         "## Titles\n\n`title` is plain text set into a row's rule in the frame colour, with `title_pad` spaces on each side (1 by default) and `title_color` for another role or literal. `title_justify` puts it right after the left cap, centred in the widest empty gap of the line, or right before the right cap. A title wider than its space is cut with `…` and never widens the line, and a row with only a title is a titled spacer that is always kept.\n"
     );
-    let _ = writeln!(
-        o,
-        "```toml\n[[row]]\ntitle = \"Session\"\nmodules = []\n\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n```\n\n```text\n{}\n```\n",
-        layout_sample(
-            "icons = \"unicode\"\n[[row]]\ntitle = \"Session\"\nmodules = []\n[[row]]\ntitle = \"Usage\"\ntitle_justify = \"right\"\nmodules = [\"limit5h\", \"limit7d\"]\n",
-            80,
-        )
-    );
+    layout_sample(o, TITLES_SAMPLE, 80);
 }
 
 /// `[box.<name>]` (SPEC § 4.3).
@@ -1280,17 +1335,12 @@ fn boxes_section(o: &mut String) {
                 .collect::<Vec<_>>()
         )
     );
-    let _ = writeln!(
-        o,
-        "```toml\n[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright   = [\"clock\"]\n\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n```\n\n```text\n{}\n```\n",
-        layout_sample(
-            "icons = \"unicode\"\n[box.repo]\ntitle = \"Repository\"\nstyle = \"double\"\n[[row]]\nbox = \"repo\"\nmodules = [\"path\", \"model\"]\nright = [\"clock\"]\n[[row]]\nbox = \"repo\"\nmodules = [\"context\"]\n",
-            60,
-        )
-    );
+    layout_sample(o, BOXES_SAMPLE, 60);
 }
 
-fn presets_section(o: &mut String) {
+/// `[[row]]`, its columns, titles and boxes, the top-level presets and the
+/// `[modules.<id>]` tables: the page's second half.
+fn rows_section(o: &mut String) {
     let _ = writeln!(
         o,
         "## `[[row]]`\n\nEach entry is one row of the status line. `modules` are left-aligned, `right` are right-aligned, `separator` overrides the frame separator for that row. Any module id may appear on any row, in any order; a module that has nothing to show is skipped, and a row whose modules all have nothing to show is dropped (`hide_empty_rows`). `modules = []` with no `right` is a spacer: an empty framed row that always stays. With `style = \"none\"` a spacer is whitespace only, and Claude Code drops whitespace-only rows from the script's output when colour is off (`color = \"never\"`, `NO_COLOR`; with colour on the rule's colour codes keep the row; `preview --color never` shows what the screen drops). `blank = true` on the spacer keeps it on screen either way by giving the row one invisible cell (a braille blank, U+2800, which the harness does not trim and a font with the clock spinner's braille should draw empty). It is off by default, so the harness's own rule stands unless you opt in; on a row with modules it is reported.\n\n`[[line]]` is the permanent alias of `[[row]]`: every config written before rows existed keeps working, and `config check` says nothing about it. A file uses one name or the other — carrying both arrays is reported and the `[[line]]` entries ignored, because TOML gives no order between two arrays of tables.\n"
@@ -1332,7 +1382,7 @@ fn presets_section(o: &mut String) {
 
     let _ = writeln!(
         o,
-        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh` (the seconds a cached module's value lives before its worker refreshes it; a module that renders from the payload every tick takes only `0`), `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
+        "## `[modules.<id>]`\n\nEvery module accepts `enabled`, `preset`, `refresh` (the seconds a cached module's value lives before its worker refreshes it; a module that renders from the payload every tick takes only `0`), `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → the module preset the top-level `preset` implies → the module's own `preset` → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).\n"
     );
 }
 
@@ -1370,6 +1420,14 @@ fn environment_section(o: &mut String) {
     let _ = writeln!(
         o,
         "| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's; empty means there is none. |"
+    );
+    let _ = writeln!(
+        o,
+        "| `GARNISH_STDIN_TTY` | `1` or `0` overrides the \"is stdin a terminal\" check of the bare `garnish`, which prints a pointer at `garnish setup` instead of waiting on a terminal (tests). |"
+    );
+    let _ = writeln!(
+        o,
+        "| `GARNISH_TEST_PANIC` | Debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row is testable (tests). |"
     );
     let _ = writeln!(
         o,
@@ -1416,14 +1474,15 @@ pub fn presets_page() -> String {
             "| [`{}`](#{}) | {} | {} | {} |",
             p.name,
             p.name,
-            p.summary,
+            cell(p.summary),
             p.columns,
-            p.needs.unwrap_or("—")
+            cell(p.needs.unwrap_or("—"))
         );
     }
     let payload = fixture("subscription-full");
     for p in crate::gallery::PRESETS.iter() {
-        let (cfg, _) = config::parse(&crate::gallery::body(p.source), &SCHEMAS);
+        // Every body parses without a problem: `gallery`'s own test.
+        let cfg = sample_config(&crate::gallery::body(p.source));
         let sample = render_plain_at(&payload, &cfg, Some(p.columns), &Clock::fixed());
         let needs = p.needs.map_or(String::new(), |n| format!(", needs {n}"));
         let author = p.author.map_or(String::new(), |a| format!(" · by @{a}"));
@@ -1452,12 +1511,17 @@ pub fn index_page() -> String {
     let _ = writeln!(o, "## Modules\n\n| module | shows | refresh |\n|---|---|---|");
     for s in SCHEMAS.iter() {
         let refresh = if s.refresh == 0 { "tick".to_owned() } else { format!("{} s", s.refresh) };
-        let _ = writeln!(o, "| [`{id}`](modules/{id}.md) | {} | {refresh} |", s.summary, id = s.id);
+        let _ = writeln!(
+            o,
+            "| [`{id}`](modules/{id}.md) | {} | {refresh} |",
+            cell(s.summary),
+            id = s.id
+        );
     }
     let _ = writeln!(
         o,
         "| [`text.<name>`](modules/text.md) | {} | tick |",
-        crate::modules::text::SCHEMA.summary
+        cell(crate::modules::text::SCHEMA.summary)
     );
     let _ = writeln!(
         o,
@@ -1563,7 +1627,7 @@ mod tests {
         for id in ["model", "context", "clock", "path", "branch", "pr", "cost", "vim", "agent"] {
             let a = module_sample(id, Preset::Default, IconSet::Unicode);
             assert_eq!(a, module_sample(id, Preset::Default, IconSet::Unicode));
-            assert!(!a.starts_with("(nothing"), "{id}: {a}");
+            assert!(!a.is_empty(), "{id}");
         }
         assert!(module_sample("clock", Preset::Default, IconSet::Unicode).contains("16:00:00"));
         assert!(
@@ -1705,6 +1769,163 @@ mod tests {
             assert_eq!(default_of(key), format!("`{want}`"), "{key}");
         }
         assert!(default_of("durations").starts_with(&format!("`{}`", d.durations.name())));
+    }
+
+    /// The cells of one table row, split where GFM splits them: on every
+    /// pipe not escaped with a backslash, inside a code span too.
+    fn split_cells(row: &str) -> Vec<String> {
+        let mut cells = vec![String::new()];
+        let mut escaped = false;
+        for c in row.chars() {
+            if c == '|' && !escaped {
+                cells.push(String::new());
+            } else {
+                cells.last_mut().unwrap().push(c);
+            }
+            escaped = c == '\\' && !escaped;
+        }
+        // What precedes the leading pipe and follows the trailing one.
+        cells.remove(0);
+        cells.pop();
+        cells
+    }
+
+    /// Whether every code span in a cell is closed: a run of backticks
+    /// opens one, and only a run of the same length closes it.
+    fn spans_close(cell: &str) -> bool {
+        let mut open: Option<usize> = None;
+        let mut run = 0_usize;
+        for c in cell.chars().chain(std::iter::once(' ')) {
+            if c == '`' {
+                run = run.saturating_add(1);
+                continue;
+            }
+            if run > 0 {
+                open = match open {
+                    None => Some(run),
+                    Some(n) if n == run => None,
+                    other => other,
+                };
+                run = 0;
+            }
+        }
+        open.is_none()
+    }
+
+    /// sch-02, sch-13, spec-10: every Markdown table of every generated
+    /// page keeps its header's column count and closes its code spans. A
+    /// pipe in a glyph (`|`, `|/-\`) or a summary (`+-|`) split its cell,
+    /// a placeholder nested a code span in another, and an empty glyph
+    /// printed as two backticks.
+    #[test]
+    fn every_generated_table_keeps_its_columns_and_code_spans() {
+        let mut pages: Vec<(&str, String)> = vec![
+            ("README.md", index_page()),
+            ("config.md", config_page()),
+            ("text.md", text_page()),
+            ("presets.md", presets_page()),
+        ];
+        pages.extend(SCHEMAS.iter().map(|s| (s.id, module_page(s))));
+        for (name, page) in &pages {
+            let (mut fenced, mut header) = (false, None);
+            for line in page.lines() {
+                if line.starts_with("```") {
+                    fenced = !fenced;
+                }
+                if fenced || !line.starts_with('|') {
+                    header = None;
+                    continue;
+                }
+                let cells = split_cells(line);
+                let columns = *header.get_or_insert(cells.len());
+                assert_eq!(cells.len(), columns, "{name}: {line}");
+                for c in &cells {
+                    assert!(spans_close(c), "{name}: an open code span in {c:?}\n{line}");
+                }
+            }
+        }
+        assert_eq!(split_cells("| `a \\| b` | c |"), [" `a \\| b` ", " c "]);
+        assert!(spans_close("``a`b``") && !spans_close("``") && !spans_close("`a"));
+        assert_eq!(code_cell(""), "—");
+        assert_eq!(code_cell("|/-\\"), "`\\|/-\\`");
+        assert_eq!(code_cell("a`b"), "``a`b``");
+        assert_eq!(code_cell("`"), "`` ` ``");
+        // A module a sample cannot show is `—` and one note under the
+        // tables, not a code span nested in a code span that guessed at a
+        // render every preset and icon set shared.
+        for id in ["account", "sync"] {
+            let page = module_page(SCHEMAS.iter().find(|s| s.id == id).unwrap());
+            let minimal = page.lines().find(|l| l.starts_with("| `minimal` |")).unwrap();
+            assert_eq!(minimal, "| `minimal` | — |", "{id}");
+            assert_eq!(page.matches("Nothing to show above").count(), 1, "{id}");
+        }
+    }
+
+    /// sch-12: every sample the pages render parses without a problem, so
+    /// a typo or a renamed key cannot render the defaults silently; and
+    /// every module and fixture a sample names by string exists.
+    #[test]
+    fn every_sample_parses_without_a_problem() {
+        let clean = |text: &str| {
+            let (_, errs) = config::parse(text, &SCHEMAS);
+            assert_eq!(errs, Vec::new(), "{text}");
+        };
+        for sample in [COLUMNS_SAMPLE, TITLES_SAMPLE, BOXES_SAMPLE] {
+            clean(&format!("{LAYOUT_SAMPLE_ICONS}{sample}"));
+        }
+        clean(&format!("{TEXT_SAMPLE_FRAME}{TEXT_SAMPLE}"));
+        clean(&align_sample_text(true));
+        clean(&align_sample_text(false));
+        for style in FrameStyle::ALL {
+            clean(&frame_sample_text(style));
+        }
+        for s in SCHEMAS.iter() {
+            for p in Preset::ALL {
+                for set in IconSet::ALL {
+                    clean(&module_sample_text(s.id, p, set));
+                }
+            }
+        }
+        for preset in config::presets::TopPreset::ALL {
+            for icons in IconSet::ALL {
+                let overlay =
+                    Overlay { preset: Some(preset), icons: Some(icons), ..Default::default() };
+                assert_eq!(config::parse_with("", &SCHEMAS, &overlay).1, Vec::new());
+            }
+        }
+        let known = |id: &str| SCHEMAS.iter().any(|s| s.id == id);
+        for (id, name) in SAMPLE_FIXTURES {
+            assert!(known(id), "{id}");
+            assert!(crate::fixtures::find(name).is_some(), "{name}");
+        }
+        assert!(SETTINGS_BADGES.iter().all(|id| known(id)));
+        let share = SCHEMAS.iter().find(|s| s.id == SHARE_MODULE).unwrap();
+        assert_eq!(share.measure, Some(crate::config::schema::MeasureKind::Percent));
+    }
+
+    /// sch-04, spec-09: the reference names every key the parser takes and
+    /// every environment hook `doctor` prints. The five box glyphs of
+    /// `[frame]` and `GARNISH_STDIN_TTY` were missing from hand-written
+    /// tables that nothing checked.
+    #[test]
+    fn every_config_key_and_hook_is_in_the_reference() {
+        let page = config_page();
+        let frame = page.split("\n## `[frame]`").nth(1).unwrap();
+        let frame = frame.split("\n## ").next().unwrap();
+        for key in config::FRAME_KEYS {
+            assert!(frame.contains(&format!("`{key}`")), "[frame] lacks {key}");
+        }
+        for key in config::TOP_KEYS {
+            assert!(
+                page.contains(&format!("`{key}`"))
+                    || page.contains(&format!("[{key}"))
+                    || page.contains(&format!("[[{key}")),
+                "the reference lacks {key}"
+            );
+        }
+        for hook in crate::doctor::TEST_HOOKS {
+            assert!(page.contains(&format!("`{hook}`")), "Environment lacks {hook}");
+        }
     }
 
     #[test]

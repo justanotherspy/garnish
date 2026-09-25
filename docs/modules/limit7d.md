@@ -6,7 +6,7 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 
 **Sources:** `rate_limits.seven_day.used_percentage`, `rate_limits.seven_day.resets_at`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -67,7 +67,7 @@ Percentage of the rolling seven-day window consumed and a countdown to `resets_a
 | `ahead` | `⇡` | `⇡` | `🔼` | `^` | Ahead-of-pace glyph. |
 | `behind` | `⇣` | `⇣` | `🔽` | `v` | Behind-pace glyph. |
 | `eta` | `U+F04E` | `⇥` | `⏩` | `eta` | Eta glyph. |
-| `marker` | `▏` | `▏` | `▏` | `|` | Elapsed marker on the bar. |
+| `marker` | `▏` | `▏` | `▏` | `\|` | Elapsed marker on the bar. |
 
 Also try (`window`: `U+F250` `U+F133` `⏳` `≣` `⌛`; `fill`: `█` `━` `▓` `#` `=`; `empty`: `░` `─` `▒` `.` `-`).
 

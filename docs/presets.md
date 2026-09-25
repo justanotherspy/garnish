@@ -5,7 +5,7 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | name | summary | columns | needs |
 |---|---|---|---|
 | [`animated-dots`](#animated-dots) | dots travelling along the rule, a pulsing separator and a cycling model icon | 100 | nerd-font |
-| [`ascii-only`](#ascii-only) | 7-bit ASCII throughout: ascii icons, a custom +-| frame, no colour codes at all | 100 | — |
+| [`ascii-only`](#ascii-only) | 7-bit ASCII throughout: ascii icons, a custom +-\| frame, no colour codes at all | 100 | — |
 | [`bars-and-limits`](#bars-and-limits) | 40-cell line-style context bar with window tag, mini bars on the limits | 130 | nerd-font |
 | [`boxed-panels`](#boxed-panels) | two titled boxes, one around the repo rows and one around usage | 120 | nerd-font |
 | [`compact-aligned`](#compact-aligned) | two rounded lines with stacked bars, Catppuccin Mocha | 110 | nerd-font |

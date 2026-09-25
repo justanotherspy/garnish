@@ -6,7 +6,7 @@ Shows `effort.level` (`low`, `medium`, `high`, `xhigh`, `max`). Hidden when the 
 
 **Sources:** `effort.level`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -49,7 +49,7 @@ Shows `effort.level` (`low`, `medium`, `high`, `xhigh`, `max`). Hidden when the 
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `effort` | `U+F0E4` | `⚙` | `🎯` | `` | Effort icon. |
+| `effort` | `U+F0E4` | `⚙` | `🎯` | — | Effort icon. |
 | `scale` | `▁▃▅▇█` | `▁▃▅▇█` | `▁▃▅▇█` | `.:=+#` | Five glyphs, one per level, lowest first. |
 
 Also try (`effort`: `U+F012` `U+F080` `⚙` `✱`).

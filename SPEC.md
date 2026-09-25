@@ -279,7 +279,10 @@ switching such a module to a cached one, which nothing did),
 `icons.<key>`, `colors.<key>`, `label`,
 `prefix`, `suffix`, `hide_when_empty`, `hide` (a list of states, below),
 `max_width`. Option resolution: built-in default →
-icon-set default → module preset → top-level preset → explicit key.
+icon-set default → the module preset the top-level `preset` implies →
+the module's own `preset` → explicit key (2026-09-25 review: this read
+as the top-level preset overriding the module's, the reverse of what the
+resolver does).
 
 `max_width` (PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps one module's
 rendered width: `0` (default) is unlimited, otherwise the decorated module

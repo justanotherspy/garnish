@@ -6,7 +6,7 @@ Shown when the current directory is inside a linked git worktree (`workspace.git
 
 **Sources:** `workspace.git_worktree`, `worktree.name`, `worktree.branch`, `worktree.original_branch`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 

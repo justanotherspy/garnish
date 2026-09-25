@@ -6,7 +6,7 @@ The base directory is the git top level when inside a repository, otherwise `wor
 
 **Sources:** `workspace.project_dir`, `workspace.current_dir`, `workspace.added_dirs`, `git top level`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -52,7 +52,7 @@ The base directory is the git top level when inside a repository, otherwise `wor
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `folder` | `U+F07B` | `❒` | `📁` | `` | Folder icon. |
+| `folder` | `U+F07B` | `❒` | `📁` | — | Folder icon. |
 | `added` | `U+F067` | `+` | `➕` | `+` | Added-directories glyph. |
 
 Also try (`folder`: `U+F07C` `U+F413` `U+F015` `❒` `❏`).
