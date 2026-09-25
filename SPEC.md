@@ -1129,11 +1129,13 @@ color = "accent"               # role or literal for the box's glyphs; default t
   `gap` cells per boundary. A column with `width = 24` takes 24 cells and
   `"auto"` takes its content's width (its modules joined by the
   separator; `max_width` applies; a box around it adds its two sides and
-  two pads, 2026-09-25: they were left out and the content was cut); an
-  `auto` column with nothing to show takes no cells and no gap, since a
-  gap only ever sits between two columns that are drawn (2026-09-25: its
-  gap was reserved, never drawn, and turned up as a stray rule cell after
-  the last column); what is left is the free width, shared
+  two pads, 2026-09-25: they were left out and the content was cut); a
+  column that takes no cells (`width = 0`, or an `auto` column with
+  nothing to show) takes no gap either, since a gap only ever sits
+  between two columns that are drawn (2026-09-25: its gap was reserved,
+  never drawn, and turned up as a stray rule cell after the last column;
+  the `width = 0` case was fixed after the `auto` one); what is left is
+  the free width, shared
   by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
   cells going one each to the first of them, so shares differ by at most
   one cell and always add up. Defaults: `"1fr"`, so three bare columns

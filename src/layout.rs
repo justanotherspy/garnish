@@ -610,14 +610,15 @@ impl Layout<'_> {
                 Width::Fr(_) => 0,
             })
             .collect();
-        // A gap sits between two columns that are drawn, and an `auto`
-        // column with nothing to show draws nothing: `row_body` skips it and
-        // its gap, so reserving that gap would leave its cells over.
+        // A gap sits between two columns that are drawn, and a column that
+        // takes no cells (`width = 0`, an `auto` one with nothing to show)
+        // draws nothing: `row_body` skips it and its gap, so reserving that
+        // gap would leave its cells over. An `fr` share is not known yet.
         let drawn = row
             .cols
             .iter()
             .zip(&want)
-            .filter(|(col, w)| col.width != Width::Auto || **w > 0)
+            .filter(|(col, w)| matches!(col.width, Width::Fr(_)) || **w > 0)
             .count();
         let gaps = row.gap.saturating_mul(drawn.saturating_sub(1));
         let available = width.saturating_sub(gaps);
@@ -674,7 +675,7 @@ impl Layout<'_> {
         let mut dropped = 0_usize;
         let mut after_one = false;
         for (col, take) in row.cols.iter().zip(desired.iter_mut()) {
-            if *take == 0 && col.width == Width::Auto {
+            if *take == 0 && !matches!(col.width, Width::Fr(_)) {
                 continue;
             }
             let cost = if after_one { row.gap } else { 0 };
@@ -2314,25 +2315,31 @@ mod tests {
         }
     }
 
-    /// SPEC § 4.3: an `auto` column with nothing to show takes no cells and
-    /// no gap. `share` used to reserve its gap, which `row_body` never drew,
-    /// so the cells turned up as a stray rule after the last column and a
+    /// SPEC § 4.3: a column that draws nothing (an `auto` column with
+    /// nothing to show, a `width = 0` one) takes no cells and no gap.
+    /// `share` used to reserve its gap, which `row_body` never drew, so the
+    /// cells turned up as a stray rule after the last column and a
     /// right-justified module ended against it: `⠋ 16:00:00─ ─╮`.
     #[test]
-    fn an_empty_auto_column_takes_no_gap() {
-        for width in [30_usize, 60, 101] {
+    fn a_column_that_draws_nothing_takes_no_gap() {
+        let nothing = [|| col(Width::Auto, ""), || col(Width::Cells(0), "⠋ 16:00:00")];
+        for (width, gap, empty) in [30_usize, 60, 101]
+            .into_iter()
+            .flat_map(|w| [1, 3].map(|g| (w, g)))
+            .flat_map(|(w, g)| nothing.map(|e| (w, g, e)))
+        {
             let f = Fixture::new(FrameStyle::Rounded, true, width);
             let l = f.layout();
             let last = || Col { justify: Justify::Right, ..col(Width::Fr(1), "end") };
             for cols in [
-                vec![col(Width::Auto, ""), col(Width::Fr(1), "a"), last()],
-                vec![col(Width::Fr(1), "a"), col(Width::Auto, ""), last()],
+                vec![empty(), col(Width::Fr(1), "a"), last()],
+                vec![col(Width::Fr(1), "a"), empty(), last()],
             ] {
-                let r = row(cols, 1);
+                let r = row(cols, gap);
                 let widths = l.share(&r, l.inner_width(&r, 0, 1), Fill::Rule);
                 let gaps = widths.iter().filter(|w| **w > 0).count().saturating_sub(1);
                 assert_eq!(
-                    widths.iter().sum::<usize>() + gaps,
+                    widths.iter().sum::<usize>() + gaps * gap,
                     l.inner_width(&r, 0, 1),
                     "the drawn columns and their gaps fill the row: {widths:?}"
                 );

@@ -1,0 +1,18 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# A `width = 0` column takes no cells, so it takes no gap either (SPEC
+# § 4.3): the session timer ends a pad before the cap, exactly as it does
+# with the empty column left out. Its gap used to be reserved and never
+# drawn, which left a stray rule after the timer and a hole before the cap:
+# `⏱ 1h12m─── ──`.
+
+[[row]]
+gap = 3
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+width = 0
+modules = ["clock"]
+[[row.col]]
+modules = ["session"]
