@@ -131,7 +131,10 @@ pub fn settings_rows(
             FileState::Keys(keys) => claude_settings::rejected(label, keys)
                 .map_or_else(|| "ok".to_owned(), |why| format!("{why}; garnish reads none of it")),
         };
+        // Only the project's own files are named relative to it: a user or
+        // managed file under it (a project at `/`) would lose its root.
         let shown = project
+            .filter(|_| matches!(*label, "local" | "project"))
             .and_then(|dir| path.strip_prefix(dir).ok())
             .map_or_else(|| tilde(path), |rel| rel.display().to_string());
         rows.push(format!("  {label:<8} {shown}  {status}"));
@@ -176,6 +179,7 @@ pub fn settings_rows(
         );
     }
     rows.push(row("  hideVimModeIndicator", &text));
+    rows.push(row("  padding", &padding_text(chain, config)));
     let text = match resolved(chain, |k| k.disable_all_hooks) {
         Some((true, from)) => {
             format!(
@@ -202,6 +206,24 @@ pub fn settings_rows(
     rows.push(row("voice.enabled", &voice));
     rows.push(row("tui", &tui_row(chain)));
     rows
+}
+
+/// The `statusLine.padding` row: the value and its file and, when the
+/// config's `padding` is not twice it, the value that fits. The harness
+/// pads both sides, so the box is `COLUMNS − 4 − 2N` wide (SPEC § 2.1) and
+/// a config short of `2N` draws every full-width row too wide.
+fn padding_text(chain: &[ChainEntry], config: &Config) -> String {
+    let Some((cells, from)) = resolved(chain, |k| k.padding) else { return "unset".to_owned() };
+    let fits = cells.saturating_mul(2);
+    let has = u64::try_from(config.padding).unwrap_or(u64::MAX);
+    let mut text = format!("{cells} ({from})");
+    let why = match has.cmp(&fits) {
+        std::cmp::Ordering::Less => "or rows are cut with …",
+        std::cmp::Ordering::Greater => "so the rows fill the box",
+        std::cmp::Ordering::Equal => return text,
+    };
+    let _ = write!(text, "; set `padding = {fits}` in the config, {why}");
+    text
 }
 
 /// A `sandbox.enabled` or `voice.enabled` row: the value and the file it
@@ -311,17 +333,22 @@ fn placed(config: &Config, id: &str) -> bool {
 /// Whether the config shows something that changes every second, which is
 /// what `statusLine.refreshInterval = 1` is for: a module whose value ticks
 /// whatever the animation switch says (the clock, the elapsed times, the
-/// cache's warm countdown, a limit's countdown while `show_reset` is on)
-/// or, while animations run (`animating`), an animation (SPEC § 4.2: the
+/// cache's warm countdown, a limit's reset while it counts, its `eta`) or,
+/// while animations run (`animating`), an animation (SPEC § 4.2: the
 /// ticker, a rule pattern, separator or icon frames, a text module whose
 /// text is wider than its box and not clipped).
 fn ticks_every_second(config: &Config, animating: bool) -> bool {
     const TICKING: [&str; 4] = ["clock", "session", "api", "cache"];
     const COUNTDOWNS: [&str; 3] = ["limit5h", "limit7d", "spend"];
+    // `reset = "absolute"` is a wall-clock time, which does not move; the
+    // `eta` is a duration, which does, whatever `show_reset` says.
+    let counts = |m: &config::schema::ModuleCfg| {
+        (m.bool("show_reset") && m.str("reset") != "absolute") || m.bool("eta")
+    };
     let ticking = TICKING.iter().any(|id| placed(config, id))
-        || COUNTDOWNS.iter().any(|id| {
-            placed(config, id) && config.modules.get(id).is_some_and(|m| m.bool("show_reset"))
-        });
+        || COUNTDOWNS
+            .iter()
+            .any(|id| placed(config, id) && config.modules.get(id).is_some_and(counts));
     let scrolls = |m: &config::schema::ModuleCfg| {
         let width = m.size("width");
         m.str("overflow") != "clip" && width > 0 && display_width(m.str("text")) > width
@@ -354,12 +381,21 @@ fn config_section(o: &mut String, loaded: &config::Loaded) {
             let _ = writeln!(o, "config   {} ok", tilde(p));
         }
         (Some(p), false) => {
-            // A syntax error is the one problem with a line and no path.
-            let syntax = loaded.errors.iter().any(|e| e.path.is_empty() && e.line.is_some());
-            if syntax {
+            // A whole-file problem has no key path: a syntax error has a
+            // line, a file that cannot be read none.
+            let whole = |line: bool| {
+                loaded.errors.iter().any(|e| e.path.is_empty() && e.line.is_some() == line)
+            };
+            if whole(true) {
                 let _ = writeln!(
                     o,
                     "config   {} does not parse; the built-in defaults are in effect",
+                    tilde(p)
+                );
+            } else if whole(false) {
+                let _ = writeln!(
+                    o,
+                    "config   {} cannot be read; the built-in defaults are in effect",
                     tilde(p)
                 );
             } else {
@@ -493,6 +529,7 @@ fn environment_section(o: &mut String) {
         "DISABLE_AUTO_COMPACT",
         "DISABLE_COMPACT",
         "CLAUDE_CODE_NO_FLICKER",
+        "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",
         "CLAUDE_CODE_DECSTBM",
         claude_settings::CONFIG_DIR_ENV,
     ]);
@@ -676,10 +713,8 @@ mod tests {
     /// `doctor` prints it when it is set) and in the SPEC § 9 table (so a
     /// reader can find out what it does). The source scan is the guard: a
     /// hook added with its own constant but no row here would otherwise be
-    /// invisible in a bug report.
-    ///
-    /// One-directional on SPEC: § 9 also lists hooks of the target state
-    /// (`GARNISH_STDIN_TTY`, Phase 22) that nothing reads yet.
+    /// invisible in a bug report. The other way too: a hook SPEC names or
+    /// [`TEST_HOOKS`] lists is one the code reads.
     #[test]
     fn every_garnish_hook_is_reported_and_specified() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -717,6 +752,67 @@ mod tests {
             assert!(TEST_HOOKS.contains(&hook.as_str()), "{hook} is not in doctor::TEST_HOOKS");
             assert!(spec.contains(&format!("`{hook}`")), "{hook} is not in SPEC § 9");
         }
+        for hook in TEST_HOOKS {
+            assert!(found.iter().any(|f| f == hook), "{hook} is listed but nothing reads it");
+        }
+        for part in spec.split("`GARNISH_").skip(1) {
+            let tail: String =
+                part.chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
+            let name = format!("GARNISH_{tail}");
+            assert!(
+                tail.is_empty() || found.contains(&name),
+                "SPEC names {name}, nothing reads it"
+            );
+        }
+    }
+
+    /// `statusLine.padding` is behind most rows cut with `…` (the box is
+    /// `COLUMNS − 4 − 2N` wide, SPEC § 2.1): the row names the file that
+    /// sets it and, when the config's `padding` is not twice it, the value
+    /// that fits.
+    #[test]
+    fn the_padding_row_names_the_config_value_that_fits() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join(".claude");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::write(user.join("settings.json"), r#"{"statusLine": {"padding": 1}}"#).unwrap();
+        let chain = read_chain(&claude_settings::settings_chain(None, None, Some(&user)));
+        let row_of = |config: &str| {
+            let (cfg, _) = config::parse(config, &SCHEMAS);
+            let rows = settings_rows(&chain, None, &cfg, true);
+            rows.into_iter().find(|r| r.starts_with("  padding ")).unwrap()
+        };
+        let text = row_of("");
+        assert!(
+            text.ends_with("1 (user); set `padding = 2` in the config, or rows are cut with …")
+        );
+        assert!(row_of("padding = 2\n").ends_with("1 (user)"), "it fits");
+        std::fs::write(user.join("settings.json"), "{}").unwrap();
+        let chain = read_chain(&claude_settings::settings_chain(None, None, Some(&user)));
+        let (cfg, _) = config::parse("padding = 4\n", &SCHEMAS);
+        let rows = settings_rows(&chain, None, &cfg, true);
+        assert!(
+            rows.iter().any(|r| r.starts_with("  padding ") && r.ends_with("unset")),
+            "{rows:?}"
+        );
+    }
+
+    /// A project at `/` (doctor run from the root directory) strips only
+    /// its own files' prefix: the user and managed files keep their whole
+    /// path, collapsed to `~` when under the home, never a bare
+    /// `home/<user>/…`.
+    #[test]
+    fn only_the_project_files_are_shown_relative_to_it() {
+        let chain = vec![
+            ("managed", PathBuf::from("/etc/m.json"), FileState::Absent),
+            ("local", PathBuf::from("/.claude/settings.local.json"), FileState::Absent),
+            ("user", PathBuf::from("/nobody-home/u/.claude/settings.json"), FileState::Absent),
+        ];
+        let (cfg, _) = config::parse("", &SCHEMAS);
+        let rows = settings_rows(&chain, Some(Path::new("/")), &cfg, true).join("\n");
+        assert!(rows.contains("  managed  /etc/m.json  absent"), "{rows}");
+        assert!(rows.contains("  local    .claude/settings.local.json  absent"), "{rows}");
+        assert!(rows.contains("  user     /nobody-home/u/.claude/settings.json  absent"), "{rows}");
     }
 
     #[test]
@@ -1046,10 +1142,16 @@ mod tests {
         assert!(!scroll("width = 20\n"), "fits its box");
         assert!(!scroll("width = 0\n"), "a box as wide as the text");
         assert!(suggests("[[line]]\nmodules = [\"limit5h\"]\n", true), "the default countdown");
-        assert!(!suggests(
-            "[[line]]\nmodules = [\"limit5h\"]\n[modules.limit5h]\nshow_reset = false\n",
-            true
-        ));
+        let limit = |options: &str| {
+            suggests(
+                &format!("[[line]]\nmodules = [\"limit5h\"]\n[modules.limit5h]\n{options}"),
+                true,
+            )
+        };
+        assert!(!limit("show_reset = false\n"));
+        assert!(!limit("reset = \"absolute\"\n"), "a wall-clock time does not tick");
+        assert!(limit("reset = \"elapsed\"\n"), "the elapsed time does");
+        assert!(limit("show_reset = false\neta = true\n"), "the eta counts down");
         // A value below 1 is dropped by Claude Code and says so; 1 fits;
         // `false` is a value.
         std::fs::write(&user, r#"{"statusLine": {"refreshInterval": 0.5}}"#).unwrap();
@@ -1118,6 +1220,9 @@ mod tests {
         assert!(r.contains("not configured (run `garnish install`)"), "{r}");
         assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");
         assert!(r.contains("(writable)"), "{r}");
+        // A file that cannot be read is not a file with one bad key.
+        assert!(r.contains("none.toml cannot be read; the built-in defaults are in effect"), "{r}");
+        assert!(!r.contains("problem(s)"), "{r}");
         for needle in [
             "garnish ",
             "claude settings",

@@ -258,6 +258,9 @@ pub struct FileKeys {
     pub refresh_interval: Option<f64>,
     /// `statusLine.hideVimModeIndicator`.
     pub hide_vim_mode: Option<bool>,
+    /// `statusLine.padding`: cells the harness pads the status line with
+    /// on each side (SPEC § 2.1).
+    pub padding: Option<u64>,
     /// `disableAllHooks`.
     pub disable_all_hooks: Option<bool>,
     /// `sandbox.enabled`: Bash commands run isolated (the `sandbox` badge,
@@ -306,6 +309,7 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                 refresh_interval: status_key("refreshInterval").and_then(serde_json::Value::as_f64),
                 hide_vim_mode: status_key("hideVimModeIndicator")
                     .and_then(serde_json::Value::as_bool),
+                padding: status_key("padding").and_then(serde_json::Value::as_u64),
                 disable_all_hooks: v.get("disableAllHooks").and_then(serde_json::Value::as_bool),
                 sandbox_enabled: switch("sandbox"),
                 voice_enabled: switch("voice"),
@@ -519,6 +523,8 @@ pub(crate) mod tests {
         assert_eq!(keys.status_line_command.as_deref(), Some("garnish"));
         assert_eq!(keys.refresh_interval, Some(2.0));
         assert_eq!(keys.hide_vim_mode, Some(true));
+        assert_eq!(keys.padding, None);
+        assert_eq!(keys_of(r#"{"statusLine": {"padding": 2}}"#).padding, Some(2));
         assert_eq!(keys.disable_all_hooks, Some(false));
         assert_eq!(keys.tui, Some(Tui::Fullscreen));
         assert_eq!(keys_of(r#"{"tui": "default"}"#).tui, Some(Tui::Default));

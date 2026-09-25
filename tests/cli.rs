@@ -859,9 +859,10 @@ fn managed_settings_hook_names_the_first_file_of_the_chain() {
     assert!(show(&[]).contains("\nanimate = true\n"), "the hook left empty: no managed file");
     let (report, _, ok) = run(&["--config", cfg.to_str().unwrap(), "doctor"], home, &hook);
     assert!(ok, "{report}");
-    // The file sits under the project directory (the test's home), so the
-    // report names it relative to that, as it does the project's own files.
-    assert!(report.contains("  managed  managed.json  ok"), "{report}");
+    // The file sits under the project directory (the test's home), but
+    // only the project's own files are named relative to it: this one is
+    // under the home, so it is `~/`.
+    assert!(report.contains("  managed  ~/managed.json  ok"), "{report}");
     assert!(report.contains("command=org-garnish (managed)"), "{report}");
     assert!(report.contains("true (managed)"), "{report}");
     assert!(report.contains("GARNISH_MANAGED_SETTINGS=~/managed.json"), "{report}");
