@@ -1430,9 +1430,12 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   worker takes it itself. `GARNISH_NO_SPAWN=1` logs intended spawns to
   `<root>/spawns.log` instead.
 - `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
-- GC: bounded sweep when a session dir is first created (session and repo
-  dirs idle > 24 h by wall-clock mtime, ≤ 50 per sweep; temp/stale/adopt
-  files older than 1 h); `garnish gc` for manual runs. It touches only what
+- GC: bounded sweep when a worker writes a module's first entry in a scope,
+  session or repo (session and repo dirs idle > 24 h by wall-clock mtime,
+  ≤ 50 per sweep; temp/stale/adopt files older than 1 h), never on the
+  tick; `garnish gc` for manual runs. (Corrected 2026-09-25: it used to
+  wait for a new session *directory*, which the lock always created first,
+  so the automatic sweep never ran for anyone.) It touches only what
   garnish would have made, since the root may be shared
   (`GARNISH_CACHE_DIR=~/.cache`): `sessions` and `repos` and each directory
   in them only as real directories (never through a link), a repo

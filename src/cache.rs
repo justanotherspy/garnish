@@ -501,6 +501,12 @@ impl Cache {
 
     /// Write an entry atomically. Creates the scope directory on demand.
     ///
+    /// The first entry a module writes in a scope also runs the bounded
+    /// sweep (SPEC § 6). Only workers write entries, so this keeps the
+    /// sweep off the tick; and it is the *entry* that is new, not the
+    /// directory, which the lock (taken first, by the tick on Linux) has
+    /// always created already, so a sweep keyed on it never ran.
+    ///
     /// # Errors
     /// Propagates I/O errors, and refuses under a refused root.
     pub fn write(&self, scope: &Scope, module: &str, entry: &Entry) -> std::io::Result<()> {
@@ -509,12 +515,12 @@ impl Cache {
         }
         let path = self.entry_path(scope, module);
         let dir = path.parent().map_or_else(|| self.root.clone(), Path::to_path_buf);
-        let created = !dir.exists();
+        let first = !path.exists();
         create_private_dir(&dir)?;
         let tmp = dir.join(format!(".{}.tmp.{}", sanitize(module), std::process::id()));
         // Removed on every failure path, as `lock` and `install::replace_file`
         // do: otherwise a full disk leaves one temp file per failed refresh,
-        // and only a brand-new session directory or `garnish gc` sweeps them.
+        // and only a first entry's sweep or `garnish gc` removes them.
         let _cleanup = TmpFile(tmp.clone());
         {
             let mut f = create_fresh(&tmp)?;
@@ -522,7 +528,7 @@ impl Cache {
             f.sync_data().ok();
         }
         fs::rename(&tmp, &path)?;
-        if created && matches!(scope, Scope::Session(_)) {
+        if first {
             self.gc_sessions(GC_MAX_AGE_MS, GC_MAX_PER_SWEEP);
         }
         Ok(())
@@ -978,7 +984,7 @@ mod tests {
             let scope = Scope::Session(format!("old{i}"));
             cache.write(&scope, "m", &Entry::ok(1, BTreeMap::new())).unwrap();
         }
-        // Age them only after all exist: creating a session dir sweeps idle ones.
+        // Age them only after all exist: a first entry sweeps idle ones.
         let old = std::time::SystemTime::now() - std::time::Duration::from_hours(48);
         for i in 0..5 {
             let dir = cache
@@ -999,7 +1005,7 @@ mod tests {
         assert_eq!(cache.gc_sessions(GC_MAX_AGE_MS, 50), 3);
         assert!(cache.entry_path(&Scope::Session("fresh".into()), "m").exists());
         assert_eq!(cache.gc_sessions(GC_MAX_AGE_MS, 50), 0);
-        // Creating a brand-new session dir sweeps idle ones automatically.
+        // A brand-new session's first entry sweeps idle ones automatically.
         let scope = Scope::Session("stale".into());
         cache.write(&scope, "m", &Entry::ok(1, BTreeMap::new())).unwrap();
         let old = std::time::SystemTime::now() - std::time::Duration::from_hours(48);
@@ -1219,6 +1225,42 @@ mod tests {
         assert!(repos.join("00000000000000aa/notes.txt").exists());
         assert!(target.join("x.tmp.1").exists());
         assert!(elsewhere.join("victim/m.cache").exists());
+    }
+
+    /// SPEC § 6's automatic sweep, in production order: the lock is taken
+    /// first (by the tick on Linux, by the worker elsewhere), and taking
+    /// it creates the scope directory, so a sweep keyed on a new
+    /// *directory* never ran for any scope. It is keyed on the first
+    /// *entry* instead, which only a worker writes, for either scope.
+    #[test]
+    fn gc_runs_when_a_worker_writes_a_scope_s_first_entry() {
+        let (_d, cache) = temp();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_hours(48);
+        // Laid out by hand, so making them sweeps nothing.
+        let aged = |scope: &Scope| {
+            let entry = cache.entry_path(scope, "m");
+            fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            fs::write(&entry, Entry::ok(1, BTreeMap::new()).to_text()).unwrap();
+            fs::File::options().write(true).open(&entry).unwrap().set_modified(old).unwrap();
+            entry.parent().unwrap().to_path_buf()
+        };
+        let idle_repo = aged(&Scope::Repo(key_hash(&["idle"])));
+        let idle_session = aged(&Scope::Session("idle".into()));
+        for (i, scope) in
+            [Scope::Repo(key_hash(&["new"])), Scope::Session("new".into())].iter().enumerate()
+        {
+            let _guard = match cache.lock(scope, "m") {
+                LockOutcome::Acquired(g) => g,
+                other => panic!("{other:?}"),
+            };
+            cache.write(scope, "m", &Entry::ok(1, BTreeMap::new())).unwrap();
+            let gone = [&idle_repo, &idle_session][i];
+            assert!(!gone.exists(), "{} survived the first entry of {scope:?}", gone.display());
+        }
+        // A rewrite of an existing entry does not sweep again.
+        let idle_again = aged(&Scope::Session("idle-again".into()));
+        cache.write(&Scope::Session("new".into()), "m", &Entry::ok(1, BTreeMap::new())).unwrap();
+        assert!(idle_again.exists());
     }
 
     /// Text from outside reaches `doctor`'s terminal: an escape sequence or

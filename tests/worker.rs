@@ -940,6 +940,39 @@ fn gc_subcommand_sweeps_idle_sessions() {
     assert!(live.exists(), "a live session dir survives gc under a future clock");
 }
 
+/// SPEC § 6: the bounded sweep runs on its own, off the tick, when a
+/// worker writes a scope's first entry. It never ran: it waited for a new
+/// session *directory*, and the lock (taken first, by the tick on Linux)
+/// always made that directory before the entry was written.
+#[test]
+fn gc_runs_when_a_worker_writes_its_first_entry() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let t = std::time::SystemTime::now() - Duration::from_hours(48);
+    let mut idle = Vec::new();
+    for dir in ["sessions/ancient", "repos/00000000000000aa"] {
+        let dir = env.cache.join(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("m.cache"), "v1 1 1 ok\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join("m.cache"))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+        idle.push(dir);
+    }
+    // The tick spawns (and on Linux takes the lock, making the scope's
+    // directory); the worker then writes the first entry.
+    let (_, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok);
+    assert!(idle.iter().all(|d| d.exists()), "the tick never sweeps");
+    run_workers(&env, &["sync"]);
+    for dir in &idle {
+        assert!(!dir.exists(), "{} survived", dir.display());
+    }
+}
+
 #[test]
 fn worker_failed_entry_is_not_retried_every_tick_and_branch_change_invalidates() {
     let env = setup();
