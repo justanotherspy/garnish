@@ -1344,9 +1344,25 @@ pub(crate) fn env_path(key: &str) -> Option<PathBuf> {
     std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+/// An XDG base directory variable (`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`,
+/// `XDG_RUNTIME_DIR`): [`env_path`], and `None` for a relative value too.
+///
+/// The XDG Base Directory spec calls a relative value invalid and says to
+/// ignore it, and garnish must: a relative base is the working directory's,
+/// which for a tick is the session's repository, so `XDG_CONFIG_HOME=.config`
+/// made a checkout's own `.config/garnish/garnish.toml` the config.
+pub(crate) fn xdg_path(key: &str) -> Option<PathBuf> {
+    xdg_base(env_path(key))
+}
+
+/// [`xdg_path`]'s rule for a value already looked up.
+pub(crate) fn xdg_base(value: Option<PathBuf>) -> Option<PathBuf> {
+    value.filter(|p| p.is_absolute())
+}
+
 /// The XDG base for garnish's own files: `XDG_CONFIG_HOME`, else `~/.config`.
 fn config_home() -> Option<PathBuf> {
-    env_path("XDG_CONFIG_HOME")
+    xdg_path("XDG_CONFIG_HOME")
         .or_else(|| crate::claude_settings::home_dir().map(|h| h.join(".config")))
 }
 
@@ -1372,6 +1388,19 @@ pub fn default_path() -> Option<PathBuf> {
     // Without a home there is no default: guessing `.` would write into
     // whatever directory garnish happens to run from (a repository, say).
     Some(config_home()?.join("garnish").join("garnish.toml"))
+}
+
+/// The file a command that writes a config writes: [`locate`], else
+/// [`default_path`].
+///
+/// `config init`, `setup` and `install`'s default config all go there;
+/// `None` without a home and without `--config` or `GARNISH_CONFIG` (SPEC
+/// § 5: never guess the current directory). Writing the default path while `~/.garnish.toml` is the config would
+/// create a file that [`locate`] prefers, and the user's config would stop
+/// applying without a word.
+#[must_use]
+pub fn write_target(explicit: Option<&Path>) -> Option<PathBuf> {
+    locate(explicit).or_else(default_path)
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported

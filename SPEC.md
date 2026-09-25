@@ -636,7 +636,15 @@ document decides the count for these four alone).
 
 Location: `--config` > `$GARNISH_CONFIG` > `$XDG_CONFIG_HOME/garnish/garnish.toml`
 (default `~/.config/garnish/garnish.toml`) > `~/.garnish.toml` > built-in
-defaults. Config is re-read every tick (it is tiny); no daemon.
+defaults. Config is re-read every tick (it is tiny); no daemon. A command
+that writes a config (`config init`, `setup`, `install`'s default file)
+writes the file this order finds and the XDG path only when there is
+none, so a new file never hides an existing `~/.garnish.toml` (2026-09-25
+review: `install` wrote the XDG default and the user's config silently
+stopped applying). An empty variable is unset (§ 5), and a relative
+`XDG_CONFIG_HOME` (like a relative `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR`
+for the cache root, § 6) is ignored, as the XDG Base Directory spec says:
+it would name a file in the session's repository.
 
 ```toml
 preset = "default"        # default | minimal | full | compact

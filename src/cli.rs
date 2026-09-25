@@ -486,16 +486,6 @@ pub(crate) fn refusal(r: Refusal) -> color_eyre::Report {
     }
 }
 
-/// Where a written config goes: `--config`, then `GARNISH_CONFIG`, then the
-/// default location; `None` without a home directory (SPEC § 5: never
-/// guess the current directory).
-fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
-    explicit
-        .map(Path::to_path_buf)
-        .or_else(|| config::env_path(config::CONFIG_ENV))
-        .or_else(config::default_path)
-}
-
 /// The per-tick diagnostic line of SPEC § 5, written only with
 /// `GARNISH_DEBUG` set: what the tick was given and what it produced, which
 /// is what a report of "the status line looks wrong" needs and a screenshot
@@ -590,7 +580,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     match action {
         ConfigAction::Path => {
-            let Some(p) = config::locate(config_path).or_else(|| config_target(config_path)) else {
+            let Some(p) = config::write_target(config_path) else {
                 return Err(refusal(Refusal::NoHome {
                     flag: "--config <FILE>",
                     what: "the config is",
@@ -666,13 +656,14 @@ pub fn preset_text(preset: &str) -> Result<String> {
     Ok(crate::gallery::body(p.source))
 }
 
-/// Where the config a command writes goes (`--config`, `GARNISH_CONFIG`,
-/// the default), or a [`Quiet`] refusal without a home directory.
+/// Where the config a command writes goes ([`config::write_target`]: the
+/// file the tick reads, else the default location), or a [`Quiet`] refusal
+/// without a home directory.
 ///
 /// # Errors
 /// [`Quiet`] after the one-line note, without a home.
 pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
-    config_target(explicit).ok_or_else(|| {
+    config::write_target(explicit).ok_or_else(|| {
         refusal(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" })
     })
 }

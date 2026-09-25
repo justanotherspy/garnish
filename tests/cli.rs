@@ -848,4 +848,65 @@ fn an_empty_path_variable_is_unset_not_a_path() {
     std::fs::write(trap.join("garnish.toml"), marker("TRAP")).unwrap();
     let out = render(&[("XDG_CONFIG_HOME", "")]);
     assert!(!out.contains("TRAP"), "the working directory became the config: {out:?}");
+
+    // A *relative* XDG_CONFIG_HOME is the same trap, and the XDG Base
+    // Directory spec says to ignore one: the candidate is taken from the
+    // working directory, which for a tick is the session's repository.
+    let rel = home.join("rel").join("garnish");
+    std::fs::create_dir_all(&rel).unwrap();
+    std::fs::write(rel.join("garnish.toml"), marker("RELATIVE")).unwrap();
+    let out = render(&[("XDG_CONFIG_HOME", "rel")]);
+    assert!(!out.contains("RELATIVE"), "a relative base named a config: {out:?}");
+    let (out, _, ok) = run(&["config", "path"], home, &[("XDG_CONFIG_HOME", "rel")]);
+    assert!(ok && !out.contains("rel/garnish"), "{out}");
+    assert!(out.trim_end().ends_with(".config/garnish/garnish.toml"), "{out}");
+}
+
+/// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,
+/// and the commands that write a config write *that* file rather than
+/// creating an XDG one that would hide it from the next tick.
+#[test]
+fn a_home_dot_file_is_the_config_the_writing_commands_see() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let dot = home.join(".garnish.toml");
+    let xdg = home.join(".config/garnish/garnish.toml");
+    let marker = "[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"DOTFILE\"\n";
+    std::fs::write(&dot, marker).unwrap();
+    let (out, _, ok) = run(&["config", "path"], home, &[]);
+    assert!(ok && out.trim_end() == dot.to_str().unwrap(), "{out}");
+    // `install` keeps it, and writes no default config over it.
+    let (out, _, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok && !out.contains("default config"), "{out}");
+    assert!(!xdg.exists(), "an XDG config would hide ~/.garnish.toml");
+    let payload = include_str!("fixtures/payloads/subscription-full.json");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+    cmd.current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("GARNISH_CACHE_DIR", home.join("cache"))
+        .env("GARNISH_NO_SPAWN", "1")
+        .env("GARNISH_MANAGED_SETTINGS", "")
+        .env_remove("GARNISH_CONFIG")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let tick = String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned();
+    assert!(tick.contains("DOTFILE"), "{tick}");
+    // `config init` refuses to replace it, naming it.
+    let (_, err, ok) = run(&["config", "init"], home, &[]);
+    assert!(!ok && err.contains(".garnish.toml exists"), "{err}");
+    // `setup --preset` edits it in place, with the backup next to it.
+    let (out, _, ok) = run(&["setup", "--preset", "compact"], home, &[]);
+    assert!(ok && out.contains(".garnish.toml (backup: "), "{out}");
+    assert!(std::fs::read_to_string(&dot).unwrap().contains("preset = \"compact\""));
+    let backups = std::fs::read_dir(home)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".garnish.toml.bak-"))
+        .count();
+    assert_eq!(backups, 1);
+    assert!(!xdg.exists(), "no XDG config was created");
 }

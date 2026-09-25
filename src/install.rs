@@ -414,12 +414,7 @@ impl Steps {
         // statusLine.padding doubled (SPEC § 2.1).
         let padding = options.padding.map(|p| p.saturating_mul(2));
         let config = if options.write_config {
-            let target = options
-                .config_path
-                .clone()
-                .or_else(|| crate::config::env_path(crate::config::CONFIG_ENV))
-                .or_else(crate::config::default_path);
-            let Some(path) = target else {
+            let Some(path) = crate::config::write_target(options.config_path.as_deref()) else {
                 return Err(Refusal::NoHome { flag: "--config <FILE>", what: "the config goes" });
             };
             if path.exists() {
