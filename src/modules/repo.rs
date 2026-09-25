@@ -26,6 +26,15 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long the worker lets `git fetch` run (network; opt-in only).
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
+// A `sync` worker holds its lock through a fetch and a count and never
+// re-stamps it, so the lock must outlive both with room to spare, or the
+// next tick reclaims it mid-fetch and a second fetch starts beside the
+// first (where pids cannot be checked, the age is all a lock has).
+const _: () = assert!(
+    std::time::Duration::from_millis(crate::cache::LOCK_STALE_MS.unsigned_abs()).as_millis()
+        > FETCH_TIMEOUT.as_millis().saturating_add(GIT_TIMEOUT.as_millis()).saturating_add(5_000)
+);
+
 /// The `path` module's `style` choices (SPEC § 3.1).
 pub const PATH_STYLES: &[&str] = &["full", "fish"];
 
@@ -697,11 +706,11 @@ impl Module for SyncModule {
             if due {
                 values.insert("fetch_attempt".to_owned(), now.to_string());
                 if let Err(e) = git::fetch(&dirs.toplevel, &remote, FETCH_TIMEOUT) {
-                    // The same bound `Entry::err` puts on a failed entry: this
-                    // one rides in an `ok` entry the tick parses every render,
-                    // and a fetch talks to a server that can say anything.
-                    let e: String = e.chars().take(crate::cache::MAX_ERROR_CHARS).collect();
-                    values.insert("fetch_error".to_owned(), e);
+                    // The same reduction `Entry::err` gives a failed entry:
+                    // this one rides in an `ok` entry the tick parses every
+                    // render, and a fetch talks to a server that can say
+                    // anything.
+                    values.insert("fetch_error".to_owned(), crate::cache::bounded_text(&e));
                 }
             } else if let Some(t) = last_attempt {
                 values.insert("fetch_attempt".to_owned(), t.to_string());

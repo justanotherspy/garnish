@@ -1357,13 +1357,28 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 ## 6. Cache & workers
 
 - Root: `$GARNISH_CACHE_DIR` > `$XDG_RUNTIME_DIR/garnish` > `$XDG_CACHE_HOME/garnish`
-  > `~/.cache/garnish` (macOS `~/Library/Caches/garnish`).
+  > `~/.cache/garnish` (macOS `~/Library/Caches/garnish`) > the temp
+  directory's `garnish-<uid>`, created `0700` and **refused** (no cache: no
+  entry read or written, no lock, no worker, and `doctor` says why) unless
+  it is a real directory this user owns that nobody else can write to
+  (review 2026-09-25, decided with Daniel: the old `/tmp/garnish` was shared
+  by every user, so another could read and plant entries or aim the sweep
+  and the temp-file writes through a link; the uid comes from a file the
+  process creates, there being no `libc`). Directories garnish creates are
+  `0700` and its files `0600`: an entry may carry the account's email.
 - `<root>/sessions/<session_id>/<module>.cache`; git data in
-  `<root>/repos/<hash(git-common-dir + worktree path)>/<module>.cache` so
-  sessions in one worktree share it. Never keyed on `transcript_path`.
+  `<root>/repos/<hash(git common dir + per-worktree git dir)>/<module>.cache`
+  so sessions in one worktree share it. Never keyed on `transcript_path`.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
-  or the error text. Malformed = miss. Written as `.<module>.tmp.<pid>` in
-  the entry's directory + rename. `account` (§ 3.8) keeps
+  or the error text. Malformed = miss, and so is anything that is not a
+  regular file of at most 64 KiB (a FIFO would block the tick in `open`;
+  locks are read the same way). The error text, and `fetch_error`, are
+  plain text of at most 500 characters: control characters and escape
+  sequences are dropped, since `doctor` prints them to a terminal. Written
+  as `.<module>.tmp.<pid>` in the entry's directory + rename; every
+  temporary name is unlinked first and created exclusively, so a link
+  planted at one is never followed. `ttl_ms` is informational: freshness is
+  always the reader's TTL. `account` (§ 3.8) keeps
   `<root>/sessions/<session_id>/account.cache` with an `email` line; an
   absent `.claude.json` is an `ok` entry without the line.
 - Tick: fresh → render; past TTL → spawn worker unless `<module>.lock` is
@@ -1375,12 +1390,20 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 - Lock = file `pid epoch_ms`, created by `hard_link` from a pre-written temp
   file and re-stamped by `rename` (never truncated in place). Live when
   younger than 2 s (hand-over window), else while the pid exists (Linux,
-  `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
-  Stale locks are reclaimed by an atomic rename so racing ticks cannot both
-  win. A guard only unlinks a lock that still carries its own pid.
-  (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid reuse; the
-  60 s / 15 s age limit above already bounds a lock's life whatever its
-  pid, so nothing was added.)
+  `/proc`) and it is younger than 60 s (30 s where pids cannot be checked:
+  longer than a `sync` worker's 20 s fetch plus 2 s count, which a
+  compile-time assertion keeps true, or the next tick reclaimed a lock
+  mid-fetch and a second fetch started). A stale lock is reclaimed by an
+  atomic rename, and the moved file is read back: one that is not the lock
+  judged dead was another process's fresh lock and is linked back, so at
+  most one process wins each reclaim. A guard only unlinks a lock that
+  still carries its own pid. A root where no lock can be taken (a
+  filesystem without hard links) is logged by the tick (`GARNISH_DEBUG`),
+  recorded by the worker as a failed entry (a rename still works, so the
+  row shows `✗` and the TTL spaces the retries), and named by `doctor`'s
+  probe. (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid
+  reuse; the 60 s / 30 s age limit above already bounds a lock's life
+  whatever its pid, so nothing was added.)
 - Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
   `process_group(0)`, spawned without wait. On Linux the tick takes the lock
   and passes `--lock-held`; elsewhere the worker takes it itself.
@@ -1388,7 +1411,13 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 - `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
 - GC: bounded sweep when a session dir is first created (session and repo
   dirs idle > 24 h by wall-clock mtime, ≤ 50 per sweep; temp/stale/adopt
-  files older than 1 h); `garnish gc` for manual runs.
+  files older than 1 h); `garnish gc` for manual runs. It touches only what
+  garnish would have made, since the root may be shared
+  (`GARNISH_CACHE_DIR=~/.cache`): `sessions` and `repos` and each directory
+  in them only as real directories (never through a link), a repo
+  directory only when its name is a 16-digit hash and a session one only
+  when it is a sanitised id, and either only when every file in it has one
+  of garnish's own names.
 - **No child process on a warm tick.** Branch/upstream/HEAD are read from
   `.git` files (loose refs, `packed-refs` scanned as bytes with early exit,
   worktree `gitdir`, symref chains capped at 5). Every such read is a

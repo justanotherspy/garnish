@@ -393,8 +393,10 @@ impl Ctx<'_> {
         let ttl_ms = cfg.refresh.saturating_mul(1000);
         let mut lookup = self.cache.lookup(scope, cfg.id, ttl_ms);
         let mismatched = lookup.entry.as_ref().is_some_and(|e| !valid(e));
-        if mismatched {
+        if mismatched && lookup.fresh {
+            // `lookup` reads the lock only for an entry that is not fresh.
             lookup.fresh = false;
+            lookup.in_progress = self.cache.lock_is_live(&self.cache.lock_path(scope, cfg.id));
         }
         let failed = lookup.entry.as_ref().filter(|e| e.status == crate::cache::Status::Err);
         if lookup.fresh {
@@ -425,14 +427,22 @@ impl Ctx<'_> {
             cwd: std::path::PathBuf::from(self.payload.current_dir().unwrap_or(".")),
         };
         if cfg!(target_os = "linux") {
-            if let LockOutcome::Acquired(mut guard) = self.cache.lock(scope, cfg.id) {
-                match crate::spawn::spawn(&job, self.cache.root(), true) {
-                    crate::spawn::Spawned::Process | crate::spawn::Spawned::Logged => {
-                        guard.disarm();
+            match self.cache.lock(scope, cfg.id) {
+                LockOutcome::Acquired(mut guard) => {
+                    match crate::spawn::spawn(&job, self.cache.root(), true) {
+                        crate::spawn::Spawned::Process | crate::spawn::Spawned::Logged => {
+                            guard.disarm();
+                        }
+                        crate::spawn::Spawned::Failed(e) => {
+                            crate::debug::log(&format!("spawn {} failed: {e}", cfg.id));
+                        }
                     }
-                    crate::spawn::Spawned::Failed(e) => {
-                        crate::debug::log(&format!("spawn {} failed: {e}", cfg.id));
-                    }
+                }
+                LockOutcome::Held => {}
+                // A cache on a filesystem without hard links: nothing can
+                // lock there, which `doctor` also reports.
+                LockOutcome::Unavailable(e) => {
+                    crate::debug::log(&format!("lock {} unavailable: {e}", cfg.id));
                 }
             }
         } else if let crate::spawn::Spawned::Failed(e) =
@@ -488,6 +498,30 @@ pub fn run_refresh(module: &dyn Module, ctx: &RefreshCtx<'_>) -> std::io::Result
         Ok(values) => CacheEntry::ok(ttl_ms, values),
         Err(e) => CacheEntry::err(ttl_ms, e),
     };
+    ctx.cache.write(&scope, ctx.cfg.id, &entry)?;
+    Ok(entry)
+}
+
+/// Record that a worker could not take its module's lock, as a failed
+/// entry, and return it.
+///
+/// A cache on a filesystem without hard links (exFAT, some SMB mounts)
+/// refuses every lock, and a worker that gave up without a word left no
+/// entry, so the next tick spawned another: one failing process per tick.
+/// An entry needs only a rename, so it can still be written: the row shows
+/// `✗`, `doctor` names the cause, and the TTL spaces the retries.
+///
+/// # Errors
+/// Propagates cache write errors.
+pub fn record_lock_failure(
+    module: &dyn Module,
+    ctx: &RefreshCtx<'_>,
+    error: &std::io::Error,
+) -> std::io::Result<CacheEntry> {
+    let scope = module.scope(ctx.session, ctx.cwd);
+    let ttl_ms = ctx.cfg.refresh.saturating_mul(1000);
+    let root = ctx.cache.root().display();
+    let entry = CacheEntry::err(ttl_ms, format!("cannot take the lock under {root}: {error}"));
     ctx.cache.write(&scope, ctx.cfg.id, &entry)?;
     Ok(entry)
 }
@@ -791,6 +825,28 @@ mod tests {
         };
         assert_eq!(text(value()), "⇡2 ⟳");
         assert!(decorate(value(), &cfg, &theme, marks).first().is_some_and(|s| s.style.dim));
+    }
+
+    /// A worker that cannot lock (a cache on a filesystem without hard
+    /// links) records why as a failed entry, which a rename alone can
+    /// write: the row shows `✗`, `doctor` names it, and the TTL keeps the
+    /// next tick from spawning another worker at once.
+    #[test]
+    fn cache_a_worker_that_cannot_lock_records_a_failed_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::at(dir.path().join("cache"));
+        let cfg = module_cfg("branch", "");
+        let ctx = RefreshCtx { session: "s", cwd: dir.path(), cfg: &cfg, cache: &cache };
+        let error = std::io::Error::other("Operation not permitted");
+        let written = record_lock_failure(&repo::BranchModule, &ctx, &error).unwrap();
+        let scope = repo::BranchModule.scope("s", dir.path());
+        let read = cache.read(&scope, "branch").unwrap();
+        assert_eq!(read, written);
+        assert_eq!(read.status, crate::cache::Status::Err);
+        assert!(
+            read.error.contains("cannot take the lock") && read.error.contains("not permitted")
+        );
+        assert!(read.is_fresh(cfg.refresh.saturating_mul(1000)), "fresh for its TTL: no storm");
     }
 
     /// The string literals that are direct arguments of the call starting at

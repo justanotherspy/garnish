@@ -280,7 +280,9 @@ pub fn render_tree_at(
             .settings_keys
             .clone()
             .map_or_else(std::cell::OnceCell::new, std::cell::OnceCell::from),
-        workers: clock.workers,
+        // A refused root (SPEC § 6) is no cache at all: render as a pinned
+        // tick does, never spawning a worker that could not write.
+        workers: clock.workers && cache.refused().is_none(),
     };
     // SPEC § 4.2, strongest first: `GARNISH_ANIMATE=0` freezes, an explicit
     // `animate` decides, else Claude Code's prefersReducedMotion freezes,

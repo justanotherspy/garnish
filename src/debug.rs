@@ -25,7 +25,10 @@ pub fn enabled() -> bool {
 /// Append one line to the debug log when enabled.
 pub fn log(message: &str) {
     if enabled() {
-        append(crate::cache::Cache::from_env().root(), message);
+        let cache = crate::cache::Cache::from_env();
+        if cache.refused().is_none() {
+            append(cache.root(), message);
+        }
     }
 }
 
