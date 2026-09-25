@@ -1276,6 +1276,35 @@ fn install_passes_an_explicit_config_and_a_reinstall_keeps_it() {
     assert!(ok && out.contains("\"command\": \"garnish --config '"), "{out}");
 }
 
+/// SPEC § 7: a reinstall keeps an environment prefix (`NAME=value` words,
+/// after a leading `env` or not) with the arguments. A command carrying
+/// one read as not running garnish, and a reinstall reset it to the bare
+/// program, which reads another config.
+#[test]
+fn a_reinstall_keeps_an_environment_prefix_and_the_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let work = home.join("work.toml");
+    let marker = "[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"WORKFILE\"\n";
+    std::fs::write(&work, marker).unwrap();
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    for prefix in ["GARNISH_ANIMATE=0 ", "env GARNISH_ANIMATE=0 "] {
+        let old = format!("{prefix}/old/bin/garnish --config {}", work.display());
+        let status = serde_json::json!({"statusLine": {"type": "command", "command": old}});
+        std::fs::write(&settings, status.to_string()).unwrap();
+        let (out, err, ok) =
+            run(&["install", "--no-skills", "--no-config", "--absolute"], home, &[]);
+        assert!(ok, "{out}{err}");
+        let text = std::fs::read_to_string(&settings).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let command = v["statusLine"]["command"].as_str().unwrap();
+        assert!(command.starts_with(prefix) && !command.contains("/old/bin/"), "{command}");
+        assert!(command.ends_with(&format!(" --config {}", work.display())), "{command}");
+        assert!(sh_tick(command, home).contains("WORKFILE"), "{command}");
+    }
+}
+
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,
 /// and the commands that write a config write *that* file rather than
 /// creating an XDG one that would hide it from the next tick.
