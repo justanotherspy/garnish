@@ -10,8 +10,8 @@
 use std::ops::Range;
 
 use crate::ansi::{
-    Color, Segment, Style, cluster_width, display_width, kept_width, scroll, scroll_period,
-    segments_width, truncate,
+    Color, Segment, Style, cluster_width, display_width, scroll, scroll_period, segments_width,
+    truncate,
 };
 use crate::config::{BoxCfg, BoxRef, Justify, SeparatorColor, VAlign, Width};
 use crate::frame::{FrameChars, FrameStyle, Rule, Ticker};
@@ -243,6 +243,11 @@ enum Draft {
     /// cells a packed row would not draw at all are these, and only these
     /// are dropped from the end of such a row.
     Space(usize, Elem),
+    /// No cells: this line belongs to a `blank = true` inner row, so once
+    /// it is finished it keeps the braille cell if it is whitespace only
+    /// (SPEC § 4.1). Only the finished line can tell: the outer row's caps,
+    /// a box's sides or another column may already keep it on screen.
+    Blank,
 }
 
 impl Draft {
@@ -254,6 +259,7 @@ impl Draft {
         match self {
             Self::Done(p) => segments_width(&p.segs),
             Self::Rule(n) | Self::Space(n, _) => *n,
+            Self::Blank => 0,
         }
     }
 }
@@ -352,7 +358,8 @@ impl Layout<'_> {
         out.push((first, vec![self.edge_line(&chars, true, title, &cfg)]));
         for (at, row) in &block.rows {
             let height = self.row_height(row);
-            let body = self.row_body(row, inner, height, Fill::from_box(&cfg), Fit::default());
+            let body =
+                self.row_body(row, inner, height, Fill::from_box(&cfg), Fit::default().in_box());
             let lines =
                 body.into_iter().map(|d| self.wrap_box(d, &chars, &cfg, pad, row.blank)).collect();
             out.push((*at, lines));
@@ -529,6 +536,7 @@ impl Layout<'_> {
                         if j == last { r.max(outer_r) } else { r },
                     ),
                     trailing: inherit.trailing && j == last,
+                    sides: (inherit.sides.0 && j == 0, inherit.sides.1 && j == last),
                 };
                 self.col_lines(col, *w, height, row, fill, fit)
             })
@@ -768,8 +776,7 @@ impl Layout<'_> {
         };
         let interior = height.saturating_sub(2);
         // Inside its own box a column is padded by the box, not by the row.
-        let inside = Fit { pads: (0, 0), ..fit };
-        let body = self.col_body(col, inner, interior, row, Fill::from_box(&cfg), inside);
+        let body = self.col_body(col, inner, interior, row, Fill::from_box(&cfg), fit.in_box());
         let mut lines = vec![self.edge_drafts(&chars, width, true, cfg.title.as_ref(), &cfg)];
         for drafts in body {
             lines.push(self.side_drafts(drafts, &chars, &cfg, pad));
@@ -870,8 +877,7 @@ impl Layout<'_> {
         // block's first row stands in when the box has no title of its own.
         let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
         let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
-        // Inside the box its sides stand between the rows and any rule.
-        let inside = Fit { pads: (0, 0), ..fit };
+        let inside = fit.in_box();
         for (_, inner) in &block.rows {
             let body = self.row_body(
                 inner,
@@ -893,11 +899,9 @@ impl Layout<'_> {
         if let (Some(title), Some(first)) = (inner.title, lines.first_mut()) {
             self.place_title(first, title, fill);
         }
-        // A blank inner row carries the cell that keeps its line on screen
-        // (SPEC § 4.1): the outer row cannot add it for one of its columns.
         if inner.blank {
             for line in &mut lines {
-                mark_blank(line);
+                line.insert(0, Draft::Blank);
             }
         }
         lines
@@ -912,6 +916,17 @@ impl Layout<'_> {
             Fill::Rule => Draft::Rule(n),
             Fill::Spaces | Fill::Packed => Draft::Space(n, elem),
         }
+    }
+
+    /// `n` cells of the frame's `pad`: its own text, unstyled, wherever the
+    /// frame pads (after a cap, around a group, beside a column's text,
+    /// inside a box's sides). Spaces when `n` is not its width: a box pads
+    /// by one cell under a frame whose pad is empty, and a column narrower
+    /// than its pads keeps only what fits.
+    fn pad(&self, n: usize) -> Draft {
+        let pad = &self.chars.pad;
+        let text = if display_width(pad) == n { pad.clone() } else { " ".repeat(n) };
+        Draft::Done(Piece { elem: Elem::Pad, segs: vec![Segment::plain(text)] })
     }
 
     /// One cell of filler, in cells: the rule glyph may be wider than one.
@@ -986,8 +1001,13 @@ impl Layout<'_> {
         let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
         let (segs, map) = self.ticker.as_ref().filter(|_| scrolls).map_or_else(
             || {
-                let kept = kept_width(budget, self.ellipsis);
-                (truncate(&segs, budget, self.ellipsis), cut_map(&owned, kept, budget))
+                let cut = truncate(&segs, budget, self.ellipsis);
+                // The map follows the cut as made: a two-cell cluster at the
+                // cut leaves it a cell short of `budget`.
+                let end = segments_width(&cut);
+                let mark = display_width(crate::ansi::fit(self.ellipsis, budget));
+                let map = cut_map(&owned, end.saturating_sub(mark), end);
+                (cut, map)
             },
             |ticker| {
                 let period = scroll_period(&segs, &ticker.gap, true);
@@ -1019,11 +1039,11 @@ impl Layout<'_> {
         let inner = width.saturating_sub(before).saturating_sub(after);
         let mut drafts: Vec<Draft> = Vec::new();
         if before > 0 {
-            drafts.push(Draft::Space(before, Elem::Pad));
+            drafts.push(self.pad(before));
         }
         drafts.extend(self.compose_cells(group, inner, fill, fit));
         if after > 0 {
-            drafts.push(Draft::Space(after, Elem::Pad));
+            drafts.push(self.pad(after));
         }
         drafts
     }
@@ -1097,33 +1117,45 @@ impl Layout<'_> {
                 width.saturating_sub(left_w).saturating_sub(left_pad).saturating_sub(right_block);
             let mut drafts: Vec<Draft> = left_pieces.into_iter().map(Draft::Done).collect();
             if left_pad > 0 {
-                drafts.push(Draft::spaces(Elem::Pad, left_pad));
+                drafts.push(self.pad(left_pad));
             }
             drafts.push(Self::filler(rule, fill, Elem::Rule));
-            drafts.push(Draft::spaces(Elem::Pad, pad_w));
+            drafts.push(self.pad(pad_w));
             drafts.extend(right_pieces.into_iter().map(Draft::Done));
             return drafts;
         }
 
         // A lone group: the rule on one side, or both when it is centred.
-        let sides = if justify == Justify::Center { 2 } else { 1 };
+        // A side facing the rule or a neighbour keeps a cell of fill and a
+        // pad; inside a box, a side against the box's own side needs
+        // neither, the box's pad already keeps the text off it.
+        let (fills_left, fills_right) = match justify {
+            Justify::Left => (false, true),
+            Justify::Right => (true, false),
+            Justify::Center => (true, true),
+        };
+        let keeps = |fills: bool, box_side: bool| fills && !(fill == Fill::Spaces && box_side);
+        let (keep_left, keep_right) =
+            (keeps(fills_left, fit.sides.0), keeps(fills_right, fit.sides.1));
+        let reserve = |keep: bool| if keep { cell.saturating_add(pad_w) } else { 0 };
+        let budget = width.saturating_sub(reserve(keep_left)).saturating_sub(reserve(keep_right));
         let pieces = self.group_pieces(left, left_ids, separator);
-        let budget = width.saturating_sub(cell.saturating_add(pad_w).saturating_mul(sides));
         let pieces = self.fit_group(pieces, budget, cut, true);
         let text_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
-        let pad_w = if text_w == 0 { 0 } else { pad_w };
-        let space = width.saturating_sub(text_w).saturating_sub(pad_w.saturating_mul(sides));
+        let pad = |keep: bool| if keep && text_w > 0 { pad_w } else { 0 };
+        let (pad_left, pad_right) = (pad(keep_left), pad(keep_right));
+        let space = width.saturating_sub(text_w).saturating_sub(pad_left).saturating_sub(pad_right);
         let (before, after) = split(space, justify);
         let mut drafts: Vec<Draft> = Vec::new();
         if before > 0 || justify != Justify::Left {
             drafts.push(Self::filler(before, fill, Elem::Rule));
         }
-        if pad_w > 0 && justify != Justify::Left {
-            drafts.push(Draft::spaces(Elem::Pad, pad_w));
+        if pad_left > 0 {
+            drafts.push(self.pad(pad_left));
         }
         drafts.extend(pieces.into_iter().map(Draft::Done));
-        if pad_w > 0 && justify != Justify::Right {
-            drafts.push(Draft::spaces(Elem::Pad, pad_w));
+        if pad_right > 0 {
+            drafts.push(self.pad(pad_right));
         }
         drafts.push(Self::filler(after, fill, Elem::Rule));
         drafts
@@ -1231,11 +1263,23 @@ struct Fit {
     /// share whatever `truncate` says, or it would spill into a neighbour
     /// (SPEC § 4.3).
     trailing: bool,
+    /// Whether each end of the column lies against a box's side, whose pad
+    /// already keeps the text off it: a lone group there needs no fill cell
+    /// and no pad of its own.
+    sides: (bool, bool),
 }
 
 impl Default for Fit {
     fn default() -> Self {
-        Self { exact: false, pads: (0, 0), trailing: true }
+        Self { exact: false, pads: (0, 0), trailing: true, sides: (false, false) }
+    }
+}
+
+impl Fit {
+    /// The fit of what is drawn inside a box: its sides stand at both ends,
+    /// so no rule pad is kept there.
+    const fn in_box(self) -> Self {
+        Self { pads: (0, 0), sides: (true, true), ..self }
     }
 }
 
@@ -1395,11 +1439,11 @@ impl Layout<'_> {
             }));
         }
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(self.pad(pad));
         }
         out.extend(drafts);
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(self.pad(pad));
         }
         if !chars.side.is_empty() {
             out.push(Draft::Done(Piece {
@@ -1475,17 +1519,25 @@ impl Layout<'_> {
         // Right after the frame's cap there is already a pad, and doubling
         // it reads as a typo: `├─ Repository ──┤`, not `├─  Repository`.
         let capped = drafts.get(..at).is_some_and(|before| {
-            before.iter().all(|d| {
-                matches!(d, Draft::Done(p) if matches!(p.elem, Elem::Cap | Elem::Pad | Elem::BoxEdge))
+            before.iter().all(|d| match d {
+                Draft::Done(p) => matches!(p.elem, Elem::Cap | Elem::Pad | Elem::BoxEdge),
+                Draft::Blank => true,
+                Draft::Rule(_) | Draft::Space(_, _) => false,
             })
         });
         let pad_before = if capped && before == 0 { 0 } else { pad };
         // The cell that pad would have taken goes back to the rule, so the
         // title never changes the line's width.
         let after = after.saturating_add(pad.saturating_sub(pad_before));
+        // The cells around the title stay what the run was: a gap or a
+        // padding line is spaces on a multi-line row (SPEC § 4.3).
+        let around = |n: usize| match drafts.get(at) {
+            Some(Draft::Space(_, elem)) => Draft::Space(n, elem.clone()),
+            _ => Self::filler(n, fill, Elem::Rule),
+        };
         let mut replacement: Vec<Draft> = Vec::new();
         if before > 0 {
-            replacement.push(Self::filler(before, fill, Elem::Rule));
+            replacement.push(around(before));
         }
         if pad_before > 0 {
             replacement.push(Draft::spaces(Elem::Pad, pad_before));
@@ -1495,7 +1547,7 @@ impl Layout<'_> {
             replacement.push(Draft::spaces(Elem::Pad, pad));
         }
         if after > 0 {
-            replacement.push(Self::filler(after, fill, Elem::Rule));
+            replacement.push(around(after));
         }
         // A title never widens the line: it only ever replaces rule cells
         // with the same number of cells. There is no assertion here on
@@ -1518,9 +1570,10 @@ impl Layout<'_> {
             .iter()
             .map(|d| match d {
                 Draft::Rule(n) => *n,
-                Draft::Done(_) | Draft::Space(_, _) => 0,
+                Draft::Done(_) | Draft::Space(_, _) | Draft::Blank => 0,
             })
             .sum();
+        let blank = blank || drafts.iter().any(|d| matches!(d, Draft::Blank));
         let style = Style::fg(self.theme.role(Role::Frame));
         let pattern = self.rule.as_ref().filter(|r| !r.cells.is_empty() && total >= r.cells.len());
         let fill_w = display_width(&self.chars.fill).max(1);
@@ -1540,7 +1593,7 @@ impl Layout<'_> {
                 Draft::Space(n, elem) if n > 0 => {
                     pieces.push(Piece { elem, segs: vec![Segment::plain(" ".repeat(n))] });
                 }
-                Draft::Space(_, _) | Draft::Rule(0) => {}
+                Draft::Space(_, _) | Draft::Rule(0) | Draft::Blank => {}
                 Draft::Rule(n) => {
                     let text = pattern.map_or_else(
                         || self.chars.fill.repeat(n.checked_div(fill_w).unwrap_or(0)),
@@ -1585,7 +1638,7 @@ impl Layout<'_> {
                 segs: vec![Segment::styled(prefix, style)],
             }));
             if pad > 0 {
-                line.push(Draft::spaces(Elem::Pad, pad));
+                line.push(self.pad(pad));
             }
         }
         line.extend(drafts);
@@ -1607,7 +1660,7 @@ impl Layout<'_> {
                 line.push(Self::filler(spare, fill, Elem::Rule));
             }
             if padded {
-                line.push(Draft::spaces(Elem::Pad, pad));
+                line.push(self.pad(pad));
             }
             line.push(Draft::Done(Piece {
                 elem: Elem::Cap,
@@ -1622,24 +1675,6 @@ impl Layout<'_> {
             }
         }
         self.paint(line, row.blank)
-    }
-}
-
-/// Turn the first one-cell space of a blank row into the braille cell that
-/// keeps the line on screen (SPEC § 4.1). The width never changes, and the
-/// config only lets a spacer ask for it, so there is nothing else on the
-/// row to hide behind.
-fn mark_blank(drafts: &mut [Draft]) {
-    let at = drafts.iter().position(|d| matches!(d, Draft::Space(n, _) if *n > 0));
-    let Some((at, Draft::Space(n, elem))) = at.and_then(|i| drafts.get(i).map(|d| (i, d.clone())))
-    else {
-        return;
-    };
-    let mut text = String::from(crate::render::BLANK_CELL);
-    text.push_str(&" ".repeat(n.saturating_sub(1)));
-    let piece = Draft::Done(Piece { elem, segs: vec![Segment::plain(text)] });
-    if let Some(slot) = drafts.get_mut(at) {
-        *slot = piece;
     }
 }
 
@@ -2493,6 +2528,145 @@ mod tests {
         let right = Row { title: Some(&t), ..row(vec![col(Width::Fr(1), "x")], 1) };
         let out = line(&right);
         assert!(out.contains("Repo"), "{out}");
+    }
+
+    /// SPEC § 4.3: `blank` on an inner row follows the § 4.1 rule, a line
+    /// that would be whitespace only gets the braille cell and a line with
+    /// a visible frame or box needs none. The inner row used to mark every
+    /// one of its lines before the outer row had drawn its caps or sides.
+    #[test]
+    fn a_blank_inner_row_marks_only_a_line_that_is_whitespace() {
+        let stack = || Col {
+            content: Content::Stack(vec![
+                row(vec![col(Width::Fr(1), "model")], 1),
+                Row { blank: true, ..row(vec![col(Width::Fr(1), "")], 1) },
+                row(vec![col(Width::Fr(1), "clock")], 1),
+            ]),
+            ..col(Width::Fr(1), "")
+        };
+        let blank = crate::render::BLANK_CELL;
+        let lines = |style: FrameStyle, boxed: Option<&'static BoxRef>| -> Vec<String> {
+            let f = Fixture::new(style, false, 40);
+            let l = f.layout();
+            let r = row(vec![Col { boxed, ..stack() }], 1);
+            l.lines(std::slice::from_ref(&r)).into_iter().flatten().map(|l| show(&l)).collect()
+        };
+        for (style, boxed) in [(FrameStyle::Rounded, None), (FrameStyle::None, Some(&BoxRef::Anon))]
+        {
+            let out = lines(style, boxed);
+            assert!(out.iter().all(|l| !l.contains(blank)), "{style:?}: {out:?}");
+        }
+        // No frame and nothing packed after it: the line is the cell alone,
+        // as a blank spacer row is.
+        let out = lines(FrameStyle::None, None);
+        assert_eq!(out.get(1).map(String::as_str), Some(blank.to_string().as_str()), "{out:?}");
+    }
+
+    /// `[frame] pad` is text (docs/config.md: "Text between prefix/content
+    /// and content/rule"), drawn wherever the frame pads: after the prefix,
+    /// around the groups, before the cap, beside a column's text and inside
+    /// a box's sides. Phase 21 drew its width in spaces instead, so `pad =
+    /// "·"` showed as a space.
+    #[test]
+    fn a_frame_pad_is_drawn_as_its_text() {
+        let mut f = Fixture::new(FrameStyle::Rounded, true, 30);
+        f.chars.pad = "·".to_owned();
+        let (left, right) = ([Segment::plain("left")], [Segment::plain("R")]);
+        let s = f.compose(0, 2, &left, &right, " │ ");
+        assert_eq!(s, format!("╭─·left·{}·R·─╮", "─".repeat(17)));
+        let l = f.layout();
+        let r = row(vec![col(Width::Fr(1), "a"), col(Width::Fr(1), "b")], 1);
+        let boxed = Row { boxed: Some(&BoxRef::Anon), ..row(vec![col(Width::Fr(1), "c")], 1) };
+        let lines: Vec<String> =
+            l.lines(&[r, boxed]).into_iter().flatten().map(|line| show(&line)).collect();
+        assert!(lines[0].starts_with("──·a·─"), "{lines:?}");
+        assert!(lines[2].starts_with("│·c "), "{lines:?}");
+        assert!(lines[2].ends_with(" ·│"), "{lines:?}");
+    }
+
+    /// SPEC § 14: the module a cut lands in owns the ellipsis and nothing
+    /// past it. When a two-cell glyph straddles the cut, the cut ends a cell
+    /// early, and the map used to hand that module the cell after the piece.
+    #[test]
+    fn a_cut_before_a_wide_glyph_maps_no_cell_past_the_piece() {
+        let f = Fixture::new(FrameStyle::None, false, 40);
+        let l = f.layout();
+        let group = vec![vec![Segment::plain("aaaaa")], vec![Segment::plain("漢bbb")]];
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        for budget in 6..=9_usize {
+            let pieces = l.fit_group(l.group_pieces(&group, &ids, " "), budget, true, false);
+            let piece = pieces.first().unwrap();
+            let Elem::Group(map) = &piece.elem else { panic!("not cut: {pieces:?}") };
+            let end = segments_width(&piece.segs);
+            assert_eq!(map.last().map(|(_, r)| r.end), Some(end), "budget {budget}: {map:?}");
+        }
+    }
+
+    /// SPEC § 4.3 Pads: inside a box a lone group needs no pad and no fill
+    /// cell on a side that faces the box's side, whose own pad already keeps
+    /// the text off it. Both were reserved, so a module up to two cells
+    /// narrower than the interior was cut: `│ ❖ O… │`. Between two columns
+    /// the reservation stays: with `gap = 0` it is what keeps them apart.
+    #[test]
+    fn a_lone_group_in_a_box_may_fill_its_interior() {
+        // 14 cells: two sides and two pads leave an interior of 10.
+        let f = Fixture::new(FrameStyle::Rounded, true, 14);
+        let l = f.layout();
+        for text in ["0123456789", "012345678", "01234567"] {
+            for justify in [Justify::Left, Justify::Center, Justify::Right] {
+                let r = Row {
+                    boxed: Some(&BoxRef::Anon),
+                    ..row(vec![Col { justify, ..col(Width::Fr(1), text) }], 1)
+                };
+                for line in l.lines(std::slice::from_ref(&r)).into_iter().flatten() {
+                    assert_eq!(line.width(), 14, "{}", show(&line));
+                    assert!(!show(&line).contains('…'), "{justify:?}: {}", show(&line));
+                }
+            }
+        }
+        let f = Fixture::new(FrameStyle::Rounded, true, 30);
+        let l = f.layout();
+        let long = "abcdefghijklmnopqrstuvwxyz";
+        let r = Row {
+            boxed: Some(&BoxRef::Anon),
+            ..row(vec![col(Width::Fr(1), long), col(Width::Fr(1), long)], 0)
+        };
+        let lines = l.lines(std::slice::from_ref(&r));
+        let body = lines.first().and_then(|r| r.get(1)).map_or_default(show);
+        assert!(!body.contains("…a"), "the columns touch: {body}");
+        assert!(body.ends_with("… │"), "the last column fills to the box's pad: {body}");
+    }
+
+    /// SPEC § 4.3: on a multi-line row gap cells and padding lines are
+    /// spaces, and a title set into one keeps them spaces. The cells around
+    /// the title were always built as rule, so a centred title landing in a
+    /// short column's padding line drew a rule across it.
+    #[test]
+    fn a_title_in_a_run_of_spaces_keeps_them_spaces() {
+        let f = Fixture::new(FrameStyle::Rounded, true, 60);
+        let l = f.layout();
+        let t = crate::config::TitleCfg {
+            text: "Panel".to_owned(),
+            justify: Justify::Center,
+            pad: 1,
+            color: None,
+        };
+        let short = Col { valign: VAlign::Bottom, ..col(Width::Fr(1), "model") };
+        let stack = Col {
+            content: Content::Stack(vec![
+                row(vec![col(Width::Fr(1), "r0")], 1),
+                row(vec![col(Width::Fr(1), "r1")], 1),
+            ]),
+            ..col(Width::Fr(1), "")
+        };
+        let r = Row { title: Some(&t), ..row(vec![short, stack], 2) };
+        let lines = l.lines(std::slice::from_ref(&r));
+        let first = lines.first().and_then(|r| r.first()).map_or_default(show);
+        let (before, after) = first.split_once("Panel").unwrap_or_default();
+        let before = before.trim_start_matches(['╭', '─']);
+        let between = after.split_once("r0").map_or("", |(b, _)| b);
+        assert!(!before.contains('─') && !between.contains('─'), "{first}");
+        assert!(!between.is_empty(), "{first}");
     }
 
     /// SPEC § 4.3: a title is cut to the room it has and never widens the

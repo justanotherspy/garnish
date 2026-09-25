@@ -1151,7 +1151,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   only (§ 2.1); `blank` on the outer `[[row]]` of a multi-line row keeps
   every one of its lines (the braille cell on any line that would be
   whitespace only, padding lines included), while on an inner row it
-  follows the § 4.1 rule.
+  follows the § 4.1 rule, judged on the finished line (2026-09-25: the
+  inner row marked its lines before the outer row had drawn its caps, a
+  box's sides or its other columns, so a framed line got the cell too).
 - **Titles.** `title` is plain text (reduced like every config string,
   § 5) set into the row's rule in the frame colour with `title_pad`
   spaces on each side; `title_color` picks another role or literal.
@@ -1161,7 +1163,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the widest of them, a left one in the first run wide enough to hold it
   and a right one in the last, and either falls back to the widest run
   when no run at its end can hold it (the alternative is a title cut to
-  its ellipsis in a one-cell gap). A title needs no rule: with `fill = false` or `style = "none"`
+  its ellipsis in a one-cell gap). The cells around a title stay what the
+  run was: rule, or the spaces of a gap or a padding line on a multi-line
+  row (2026-09-25: they were always drawn as rule). A title needs no rule: with `fill = false` or `style = "none"`
   it is the same text at the same place with `title_pad` spaces around
   it. On a multi-line row the title goes into the first line. On a
   `box = true` row the `title*` keys title that anonymous box (the one
@@ -1245,7 +1249,14 @@ color = "accent"               # role or literal for the box's glyphs; default t
   they would to the same modules unstacked. A box's
   interior pad is the frame's `pad`, or one cell when the frame has none,
   so a box never has its content against its side and a `style = "none"`
-  box indents by it. A title right after a cap drops its own leading pad
+  box indents by it. Every one of these pads is the `pad` string itself,
+  unstyled, as the frame drew it before columns existed (2026-09-25:
+  Phase 21 drew its width in spaces, so `pad = "·"` showed as a space);
+  the one-cell pad of a box under a frame with none is a space. Inside a
+  box, a lone group keeps no fill cell and no pad on a side that faces the
+  box's own side, whose pad already keeps it off the side (2026-09-25: a
+  module up to two cells narrower than the interior was cut); between two
+  columns it keeps both, which is what separates them with `gap = 0`. A title right after a cap drops its own leading pad
   for the same reason (`├─ Repository ──┤`, not `├─  Repository`), and the
   cell goes back to the rule. A box's own top and bottom rules are static:
   `fill_pattern` belongs to the frame, and a travelling box edge would

@@ -1,0 +1,20 @@
+# fixture: subscription-full
+# columns: 80
+# icons: unicode
+# A centred title on a two-line row lands in the widest run of its first
+# line, the short column's padding line (SPEC § 4.3). Padding lines and
+# gaps on a multi-line row are spaces, and the cells around the title stay
+# spaces; they used to be drawn as rule.
+
+[[row]]
+title = "Panel"
+title_justify = "center"
+gap = 2
+[[row.col]]
+valign = "bottom"
+modules = ["model"]
+[[row.col]]
+[[row.col.row]]
+modules = ["session"]
+[[row.col.row]]
+modules = ["clock"]
