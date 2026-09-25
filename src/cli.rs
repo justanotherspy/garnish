@@ -464,9 +464,11 @@ fn run_command() -> Result<()> {
 
 /// The tick: the payload on stdin rendered to stdout.
 ///
-/// The render path never fails and never prints nothing (SPEC § 5):
-/// unreadable or non-UTF-8 stdin becomes a warning line, and a closed
-/// stdout (EPIPE) is not worth an error report.
+/// The render path never fails (SPEC § 5): unreadable or non-UTF-8 stdin
+/// becomes a warning line, and a closed stdout (EPIPE) is not worth an
+/// error report. A render whose rows all hid prints one empty line, which
+/// Claude Code trims to nothing and so clears the status line until a
+/// module has something to show.
 fn render_stdin(config_path: Option<&Path>) {
     let mut bytes = Vec::with_capacity(8 * 1024);
     let input = match std::io::stdin().read_to_end(&mut bytes) {

@@ -143,7 +143,8 @@ impl Line {
 pub struct Row<'a> {
     /// The row's columns, left to right; never empty.
     pub cols: Vec<Col<'a>>,
-    /// Empty cells between columns.
+    /// Cells between two drawn columns: the rule on a one-line row under a
+    /// rule, spaces otherwise.
     pub gap: usize,
     /// The separator between this row's modules.
     pub separator: &'a str,
