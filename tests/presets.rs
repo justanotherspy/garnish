@@ -378,6 +378,43 @@ fn every_preset_has_a_header_validates_and_renders() {
     );
 }
 
+/// SPEC § 4.3: the layout presets pin their shares, titles and stacks at
+/// two widths, their declared one and 40 columns wider. At both a preset
+/// is uncut, has the same lines, and every line that fills the box at the
+/// declared width fills the wider box too, so the shares grew with it.
+#[test]
+fn the_layout_presets_hold_at_a_second_width() {
+    for stem in ["grid-three", "grid-six", "boxed-panels", "dashboard-panels"] {
+        let text = std::fs::read_to_string(root().join(format!("presets/{stem}.toml"))).unwrap();
+        let columns: usize = garnish::gallery::header(&text, "columns").unwrap().parse().unwrap();
+        let cfg = config_of(&text);
+        let second = columns.saturating_add(40);
+        let widths = |width: usize| -> Vec<usize> {
+            let lines = tree(&cfg, width, NOW);
+            let shown = plain(&lines);
+            let rows: Vec<String> = shown.lines().map(str::to_owned).collect();
+            let label = format!("{stem}@{width}");
+            let mut failures = fit_failures(&label, width, &rows);
+            let wide = tree(&cfg, width.saturating_add(200), NOW);
+            failures.extend(cut_failures(&label, &lines, &wide));
+            assert_eq!(failures, Vec::<String>::new(), "{shown}");
+            rows.iter().map(String::as_str).map(display_width).collect()
+        };
+        let (declared, wider) = (widths(columns), widths(second));
+        assert_eq!(declared.len(), wider.len(), "{stem}: the lines differ at a second width");
+        let full = |width: usize| width.saturating_sub(4);
+        assert!(
+            declared.contains(&full(columns)),
+            "{stem}: no line fills the box at {columns}: {declared:?}"
+        );
+        for (at, (d, w)) in declared.iter().zip(&wider).enumerate() {
+            if *d == full(columns) {
+                assert_eq!(*w, full(second), "{stem}: line {at} fills {columns} but not {second}");
+            }
+        }
+    }
+}
+
 /// sch-08: the cut detector finds a cut by structure, so an ascii cut
 /// (`..`, which the `…` check cannot see) counts: `ascii-only` at 72
 /// columns, where its second and third rows are cut, is reported, and at

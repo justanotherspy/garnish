@@ -1330,7 +1330,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
 - **Cost.** Layout is arithmetic over the segment lists the modules
   already render; nothing new is read or spawned. Presets `grid-three`,
   `grid-six`, `boxed-panels` and `dashboard-panels` pin the shares, the
-  titles and the stacks at two widths each.
+  titles and the stacks at two widths each (`tests/presets.rs`: their
+  declared width and 40 columns wider, uncut, with the same lines, and
+  every line that fills the box filling the wider one).
 
 Two samples, each drawn at its box width (§ 2.1: a 40-cell box is a
 44-column terminal). A titled box around two rows, in a 40-cell box; four
@@ -1701,7 +1703,10 @@ per-module render cost.
 
 ## 9. Testing strategy
 
-- **Unit**: each module × preset × icon set × theme with a frozen clock;
+- **Unit**: each module × preset × icon set × `max_width`, and each
+  switch of its options, with a frozen clock (the default theme; a theme
+  is a palette over the same roles, painted by the `theme-nord` config
+  golden);
   absent/null fields; band edges; duration/countdown formatting; threshold
   math; ANSI width/truncation; frame assembly; preset resolution order;
   schema completeness (a scan of `src/modules/*.rs` checks that every
