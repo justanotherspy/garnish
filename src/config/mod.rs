@@ -423,7 +423,7 @@ impl ColorChoice {
 
 /// Whether `NO_COLOR` asks for no colour: set *and not empty*, as
 /// no-color.org defines it (an empty value is the shell's "unset", the
-/// rule [`env_path`] applies to a path).
+/// rule garnish applies to every path variable too).
 #[must_use]
 pub fn no_color_env() -> bool {
     no_color_from(std::env::var_os("NO_COLOR").as_deref())
