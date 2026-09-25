@@ -488,7 +488,8 @@ impl Builder {
         Ok(format!("added {id}{landed}"))
     }
 
-    /// Remove the selected module, or the selected line when no chip is.
+    /// Remove the selected module, or the selected line when no chip is;
+    /// the last `[[row]]` stays.
     ///
     /// # Errors
     /// Why nothing was removed, for the status bar.
@@ -505,6 +506,11 @@ impl Builder {
             return Ok(format!("removed {}", chip.id));
         }
         let siblings = draft.siblings_mut(item.at).ok_or("no such row")?;
+        // No `[[row]]` at all means the preset's rows (SPEC § 4), which the
+        // list cannot show and the next `a` would write back.
+        if item.kind == ItemKind::Row && siblings.len() <= 1 {
+            return Err("a status line needs a row; space makes it a spacer".into());
+        }
         let index = item.index();
         if index < siblings.len() {
             siblings.remove(index);
@@ -1109,6 +1115,25 @@ mod tests {
         b.move_line(true);
         assert!(b.above(&d).is_none());
         assert!(b.box_with_above(&mut d, "x").unwrap_err().contains("column"));
+    }
+
+    /// app-08: the last `[[row]]` is not deleted: an empty row list means
+    /// the preset's rows to the parser, which the list could not show and
+    /// the next `a` would write back.
+    #[test]
+    fn the_last_row_stays() {
+        let mut d = Draft::from_text("[[row]]\nmodules = [\"clock\"]\n");
+        let mut b = Builder::default();
+        b.rebuild(&d);
+        let err = b.delete(&mut d).unwrap_err();
+        assert!(err.contains("spacer"), "{err}");
+        assert_eq!(d.rows().len(), 1);
+        // Its module still goes, and a second row can go.
+        b.move_chip(true);
+        b.delete(&mut d).unwrap();
+        b.insert(&mut d, true).unwrap();
+        b.delete(&mut d).unwrap();
+        assert_eq!(d.rows().len(), 1);
     }
 
     #[test]

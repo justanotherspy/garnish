@@ -605,10 +605,13 @@ fn an_empty_title_removes_the_key_and_a_refused_text_module_leaves_nothing() {
     keys(&mut app, "<bs><bs><bs><bs><enter>");
     assert!(!app.draft().get(&["row"]).is_some_and(|r| r.to_string().contains("title")));
     // A text module that cannot be placed (no row at all) is not created
-    // and no editor opens.
+    // and no editor opens; `x` on the last row is refused.
     let mut empty = for_test("[[row]]\nmodules = [\"clock\"]\n", None, Path::new("/home/dev"));
     empty.open_builder();
     keys(&mut empty, "x");
+    assert!(empty.status().unwrap().contains("needs a row"), "{:?}", empty.status());
+    let mut empty = for_test("row = []\n", None, Path::new("/home/dev"));
+    empty.open_builder();
     keys(&mut empty, "m<up><enter>");
     keys(&mut empty, "motd<enter>");
     assert!(empty.status().unwrap().contains("no row"), "{:?}", empty.status());

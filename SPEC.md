@@ -1784,7 +1784,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
 - **Builder.** The preview pane stays at the top of every builder screen
   and re-renders on every change. Below it, the `[[row]]` list: each row
   shows its columns as chips (§ 4.3; a plain row is one column) and its
-  height in lines; keys add, insert, delete, clone and move rows, add a
+  height in lines; keys add, insert, delete (all but the last row, since
+  a file without `[[row]]` takes the preset's, which the list cannot
+  show), clone and move rows, add a
   column and set its `width` and `justify`, turn a column into a stack,
   move a module within a column or into the next one (a new one past the
   edge), mark a row as a spacer, give it a title, box a row, box it
