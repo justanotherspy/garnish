@@ -1468,9 +1468,6 @@ mod tests {
         assert!(index_page().contains("[`context`](modules/context.md)"));
     }
 
-    /// `config show` of a config with text modules parses back to the same
-    /// `Config`: names are bare keys and the `color` shorthand is written as
-    /// `colors.text`.
     /// Every animation key survives `config show`: frames, steps, direction
     /// and pattern come back as the same `Config`.
     #[test]
@@ -1486,6 +1483,9 @@ mod tests {
         assert_eq!(config_toml(&again, false), shown, "show is idempotent");
     }
 
+    /// `config show` of a config with text modules parses back to the same
+    /// `Config`: names are bare keys and the `color` shorthand is written as
+    /// `colors.text`.
     #[test]
     fn resolved_config_round_trips_text_modules() {
         let text = "[[line]]\nmodules = [\"path\", \"text.motd\"]\nright = [\"text.tag\"]\n[modules.text.motd]\ntext = \"ship it\"\nwidth = 12\noverflow = \"scroll-wrap\"\ngap = \" · \"\nstep = 0.5\nlabel = \"motd\"\n[modules.text.tag]\ntext = \"v0.2\"\ncolor = \"muted\"\njustify = \"right\"\n";

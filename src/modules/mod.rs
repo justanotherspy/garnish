@@ -603,7 +603,7 @@ pub fn icon(cfg: &ModuleCfg, icon_key: &str, color_key: &str) -> Vec<Segment> {
 }
 
 /// A module's leading icon: its `show_icon` option and its `icon` colour,
-/// which is how all seventeen of them open.
+/// which is how every module with a leading icon opens.
 ///
 /// The one place the option and the colour key are spelled, so a module
 /// cannot quietly ignore `show_icon` or reach for a different colour.

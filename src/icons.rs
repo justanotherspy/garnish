@@ -109,7 +109,8 @@ pub const fn glyph(
 ///
 /// The `setup` glyph picker lists them after the four sets, and each module
 /// page lists them as *also try*. Every glyph here passes the width guard
-/// the built-in sets pass (one cell, no variation selector).
+/// the built-in sets pass (one or two cells; a spinner entry is a string of
+/// one-cell frames).
 #[must_use]
 pub fn suggestions(module: &str, key: &str) -> &'static [&'static str] {
     // Nerd Font glyphs are written as escapes so an editor cannot drop

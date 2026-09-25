@@ -3,12 +3,12 @@
 # now: 1738425600
 # icons: unicode
 # color: always
-# The one golden rendered with colour on (SPEC § 9): it pins the painter's
+# The first golden rendered with colour on (SPEC § 9): it pins the painter's
 # escape sequences (one SGR around every styled segment, a reset after
 # each), the OSC 8 link around the pull request number, and, under a frame
 # with no caps, that a spacer keeps the rule's colour codes around its
 # spaces, so the harness's raw-byte trim (SPEC § 2.1) keeps the row that
-# `--color never` loses. Every other golden renders plain.
+# `--color never` loses. The payload goldens all render plain.
 
 [frame]
 style = "none"
