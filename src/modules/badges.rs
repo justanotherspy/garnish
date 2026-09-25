@@ -208,7 +208,7 @@ const REREAD_AFTER: Duration = Duration::from_millis(100);
 /// # Errors
 /// A file that cannot be read, is longer than [`MAX_CLAUDE_JSON_BYTES`] or
 /// is not a JSON object: the text of a failed entry, retried once per TTL.
-/// A file that does not parse is read once more first ([`REREAD_AFTER`]).
+/// A file that does not parse is read once more first, 100 ms later.
 pub fn read_account(path: &Path) -> Result<BTreeMap<String, String>, String> {
     // One byte past the cap, as `claude_settings::read_file` reads a
     // settings file: an over-long file is told from one at the cap, and
