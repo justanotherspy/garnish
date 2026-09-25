@@ -1818,9 +1818,12 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   `hide`, `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
   the module's own options, then `icons.*` for the active icon set and
   `colors.*`), showing the default, the current value and the doc string;
-  enums cycle, booleans toggle, integers edit with their `max` shown,
-  colours offer the theme's roles and accept a literal, icons accept any
-  string and show the cell count `doctor` would. A text module's editor is
+  enums cycle, booleans toggle, integers edit with their `max` shown (in
+  the input's title, `max_width (0–1024)`, since 2026-09-25: the bound
+  had shown only in the refusal of a value over it), colours offer the
+  theme's roles and accept a literal, icons accept any string and show
+  the cell count `doctor` would (in the glyph picker, see the differences
+  above). A text module's editor is
   the same screen over the text schema. Separate screens set the top-level
   keys (`preset`, `icons`, `theme`, `color`, `frame`
   style/fill/separator/`separator_color`, `align`, `durations`, the

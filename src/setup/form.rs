@@ -573,6 +573,16 @@ impl Form {
         };
         match &field.kind {
             SlotKind::Bool | SlotKind::Tri => Self::step(field, true),
+            // Typed with its bounds in sight (SPEC § 14: "with their max
+            // shown"), not learnt from a refusal.
+            SlotKind::Int { min, max } => {
+                let bounds = match max {
+                    Some(max) => format!(" ({min}–{max})"),
+                    None if *min > 0 => format!(" (at least {min})"),
+                    None => String::new(),
+                };
+                input(format!("{}{bounds}", field.key), typed)
+            }
             SlotKind::Enum(vals) => {
                 open(field.key.clone(), vals.iter().map(|v| Choice::plain(v)).collect(), None)
             }
@@ -589,8 +599,7 @@ impl Form {
                 }
                 out
             }
-            SlotKind::Int { .. }
-            | SlotKind::Float
+            SlotKind::Float
             | SlotKind::StrList
             | SlotKind::Frames
             | SlotKind::Literal
@@ -1816,6 +1825,15 @@ mod tests {
             matches!(form.handle(Key::Enter).push, Some(Layer::Input(_))),
             "an integer opens an input"
         );
+        // frm-09: an integer is typed with its bounds in sight.
+        form.focus("max_width");
+        let Some(Layer::Input(input)) = form.handle(Key::Enter).push else { panic!("an input") };
+        let max = crate::config::MAX_CELLS.to_string();
+        assert!(input.title.contains(&format!("0–{max}")), "{}", input.title);
+        let (mut top, _) = built("", &FormKind::Top);
+        top.focus("stale_after");
+        let Some(Layer::Input(input)) = top.handle(Key::Enter).push else { panic!("an input") };
+        assert!(input.title.contains("at least 1"), "{}", input.title);
         form.focus("enabled");
         let out = form.handle(Key::Enter);
         assert!(matches!(out.actions.first(), Some(Action::Set(_, Value::Boolean(false)))));
