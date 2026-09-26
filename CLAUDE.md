@@ -251,10 +251,10 @@ claim, which embeds the numeric owner and repository IDs
   tick and (once) subagent is a turn; at 15 a review of a two-file diff
   died unwritten. The cap is 100, and Sonnet 5 at `--effort high` is what
   pays for it (about 2.5x cheaper per token than Opus 5). `claude_args` is
-  a block scalar the action parses as shell words; the pinned action
-  (v1.0.234) drops a line whose first non-blank character is `#`, but the
-  notes stay above the block anyway, where no parser can take one for an
-  argument.
+  a block scalar the action parses as shell words; the action (read in
+  v1.0.234 and v1.0.235) drops a line whose first non-blank character is
+  `#`, but the notes stay above the block anyway, where no parser can
+  take one for an argument.
 - **`track_progress: true`** posts a tracking comment and the review
   writes its summary *into* it (`update_claude_comment`); a summary is
   the last such write with no `- [ ]` left in it, which is what
