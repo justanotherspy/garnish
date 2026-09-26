@@ -206,7 +206,7 @@ const MAX_BRANCH_CHARS: usize = 4096;
 /// Propagates git failures (an unborn detached `HEAD` among them).
 pub fn head_from_git(cwd: &Path, timeout: Duration) -> Result<Head, String> {
     let args = ["symbolic-ref", "-q", "--short", "HEAD"];
-    let asked = git_call(git_program()?, cwd, &args, &[], timeout, Stdout::Read)?;
+    let asked = git_call(git_program()?, cwd, &args, timeout, Stdout::Read)?;
     let first_line = |bytes: &[u8]| {
         String::from_utf8_lossy(bytes).lines().next().unwrap_or("").trim().to_owned()
     };
@@ -1023,12 +1023,24 @@ pub fn ref_exists(dirs: &Dirs, refname: &str, timeout: Duration) -> Result<bool,
 ///   which the user opts into (`fetch_interval`); [`fetch`] turns off the
 ///   maintenance and submodule recursion it would start, and PLAN's
 ///   backlog carries the decision on the rest;
-/// - lazy fetching in a partial clone is off through `GIT_NO_LAZY_FETCH`
-///   (git 2.44 and later; an older git ignores it).
+/// - lazy fetching in a partial clone, which runs the promisor remote's
+///   `uploadpack` from the same file, is off through `GIT_NO_LAZY_FETCH`
+///   (honoured since the May 2024 security releases, 2.39.4 onward on
+///   every maintained line, and by distribution gits that took the fix;
+///   an older git ignores it), and every call but [`fetch`] refuses every
+///   transport besides ([`NO_TRANSPORT`]), which any git honours.
 ///
 /// The user typing `git status` in that checkout would run all of these
 /// too; what is new is that garnish runs git on a *timer*, unasked.
 const NO_COMMAND_HOOKS: [&str; 2] = ["-c", "core.fsmonitor="];
+
+/// `GIT_ALLOW_PROTOCOL` empty: no transport at all, on every git call but
+/// [`fetch`] (review 2026-09-25). None of them needs one, and a lazy fetch
+/// in a hostile partial clone would otherwise start the repository's own
+/// `uploadpack` on a git too old for `GIT_NO_LAZY_FETCH`; the variable,
+/// unlike `protocol.<name>.allow`, is out of that repository's reach.
+/// `fetch` keeps whatever the user set.
+const NO_TRANSPORT: (&str, &str) = ("GIT_ALLOW_PROTOCOL", "");
 
 /// Variables that point git at a repository, index or object store other
 /// than the one it would find from its working directory. A worker started
@@ -1252,9 +1264,23 @@ pub fn run_program(
     Ok(Finished { status, stdout, truncated, stderr })
 }
 
-/// `git <args>` through [`run_program`] with the command hooks cleared,
-/// its failures described in terms of the caller's own `args`.
+/// `git <args>` through [`run_program`] with the command hooks cleared and
+/// no transport ([`NO_TRANSPORT`]), its failures described in terms of the
+/// caller's own `args`.
 fn git_call(
+    program: &Path,
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+    want: Stdout,
+) -> Result<Finished, String> {
+    let (key, value) = NO_TRANSPORT;
+    git_with(program, cwd, args, &[(key, std::ffi::OsStr::new(value))], timeout, want)
+}
+
+/// [`git_call`] with `env` in place of [`NO_TRANSPORT`]: for [`fetch`],
+/// the one call that reaches another repository.
+fn git_with(
     program: &Path,
     cwd: &Path,
     args: &[&str],
@@ -1284,7 +1310,7 @@ fn git_failed(args: &[&str], finished: Finished) -> String {
 /// git's stderr (or a message naming the command) when it cannot be run,
 /// times out, exits non-zero, or writes more than [`MAX_STDOUT`].
 pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
-    let finished = git_call(git_program()?, cwd, args, &[], timeout, Stdout::Read)?;
+    let finished = git_call(git_program()?, cwd, args, timeout, Stdout::Read)?;
     if !finished.status.success() {
         return Err(git_failed(args, finished));
     }
@@ -1298,7 +1324,7 @@ pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, S
 /// plumbing: 0 = no difference, 1 = difference), with the message to
 /// record for any other exit.
 fn git_answer(cwd: &Path, args: &[&str], timeout: Duration) -> Result<Answer, String> {
-    let finished = git_call(git_program()?, cwd, args, &[], timeout, Stdout::Discard)?;
+    let finished = git_call(git_program()?, cwd, args, timeout, Stdout::Discard)?;
     Ok(match finished.status.code() {
         Some(0) => Answer::No,
         Some(1) => Answer::Yes,
@@ -1378,8 +1404,7 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
                     // HEAD names no commit yet: everything in the index is staged.
                     Answer::Yes => {
                         let args = ["ls-files", "--cached", "-z"];
-                        let listed =
-                            git_call(git_program()?, cwd, &args, &[], timeout, Stdout::Read)?;
+                        let listed = git_call(git_program()?, cwd, &args, timeout, Stdout::Read)?;
                         if !listed.status.success() {
                             return Err(git_failed(&args, listed));
                         }
@@ -1456,7 +1481,7 @@ pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> 
         ("SSH_ASKPASS_REQUIRE", std::ffi::OsStr::new("force")),
         ("SSH_ASKPASS", failing_program().as_os_str()),
     ];
-    let finished = git_call(git_program()?, cwd, &args, &env, timeout, Stdout::Discard)?;
+    let finished = git_with(git_program()?, cwd, &args, &env, timeout, Stdout::Discard)?;
     if finished.status.success() { Ok(()) } else { Err(git_failed(&args, finished)) }
 }
 
@@ -2244,7 +2269,7 @@ mod tests {
         timeout: Duration,
         want: Stdout,
     ) -> Result<String, String> {
-        let finished = git_call(program, cwd, args, &[], timeout, want)?;
+        let finished = git_call(program, cwd, args, timeout, want)?;
         if finished.status.success() {
             Ok(String::from_utf8_lossy(&finished.stdout).into_owned())
         } else {

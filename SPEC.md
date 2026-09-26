@@ -1671,10 +1671,14 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   relative entry would find a `git` the checkout ships, since the child
   resolves the name after its `chdir`); every call clears `core.fsmonitor`,
   sets `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0` and
-  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone), and removes
-  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the other variables that
-  point git elsewhere, so git finds the repository from the directory as the
-  tick did.
+  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone, which would run
+  the repository's own `uploadpack`; honoured since the May 2024 security
+  releases), and removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
+  the other variables that point git elsewhere, so git finds the
+  repository from the directory as the tick did. Every call but `fetch`
+  also sets `GIT_ALLOW_PROTOCOL` empty, refusing every transport on any
+  git, since none of them needs one and an older git ignores
+  `GIT_NO_LAZY_FETCH` (review 2026-09-25); `fetch` keeps the user's.
 - **The dirty check never reads a worktree file** (decided 2026-09-25 with
   Daniel): `git status` hashes every file whose stat data no longer
   matches the index, through the `clean`/`process` filter driver the

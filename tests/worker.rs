@@ -580,6 +580,118 @@ fn worker_git_ignores_an_inherited_git_dir() {
     assert!(entry.contains("ahead=1\n") && entry.contains("behind=0\n"), "{entry}");
 }
 
+/// Every git call the workers make, as a shim on `PATH` saw it: its
+/// arguments, then its environment, one `NAME=value` a line.
+fn recorded_git_calls(env: &Env, extra_env: &[(&str, &str)]) -> Vec<(String, Vec<String>)> {
+    let shim = env.work.parent().unwrap().join("recording-shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    let log = env.work.parent().unwrap().join("calls.log");
+    std::fs::write(
+        shim.join("git"),
+        format!(
+            "#!/bin/sh\n{{ echo \"CALL $*\"; env; echo END; }} >> '{}'\ncase \"$*\" in *rev-list*) echo '0 0' ;; esac\nexit 0\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+    let mut vars = extra_env.to_vec();
+    vars.push(("PATH", path.as_str()));
+    let w = env.work.to_str().unwrap().to_owned();
+    for module in ["branch", "sync"] {
+        let args = ["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
+        let (_, err, ok) = garnish(env, &args, None, &vars);
+        assert!(ok, "{module}: {err}");
+    }
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    text.split("END\n")
+        .filter_map(|call| {
+            let (first, rest) = call.split_once('\n')?;
+            Some((
+                first.strip_prefix("CALL ")?.to_owned(),
+                rest.lines().map(str::to_owned).collect(),
+            ))
+        })
+        .collect()
+}
+
+/// Nothing the harness exported that points git at another repository,
+/// index or object store reaches a worker's git, whichever of the names
+/// it is (the list is spelt out here, so dropping one from the code's
+/// list fails this test), and every call but `fetch` refuses every
+/// transport: in a partial clone, a git that ignores `GIT_NO_LAZY_FETCH`
+/// (one older than the May 2024 security releases) lazily fetched a
+/// missing object by running the repository's own `uploadpack` (review
+/// 2026-09-25). `fetch`, which the user opts into, keeps the user's own
+/// `GIT_ALLOW_PROTOCOL`.
+#[test]
+fn worker_git_sees_no_discovery_variable_and_no_transport_but_fetch() {
+    let env = setup();
+    config(
+        &env,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"branch\", \"sync\"]\n[modules.branch]\npreset = \"full\"\n[modules.sync]\nfetch_interval = 300\n",
+    );
+    let stripped = [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    ];
+    let mut exported: Vec<(&str, &str)> =
+        stripped.iter().map(|name| (*name, "/elsewhere")).collect();
+    exported.push(("GIT_ALLOW_PROTOCOL", "file"));
+    let calls = recorded_git_calls(&env, &exported);
+    assert!(calls.iter().any(|(args, _)| args.contains("diff-index")), "{calls:?}");
+    assert!(calls.iter().any(|(args, _)| args.contains("rev-list")), "{calls:?}");
+    assert!(calls.iter().any(|(args, _)| args.contains(" fetch ")), "{calls:?}");
+    // Only the variables asked about are ever printed: the rest of the
+    // environment is the runner's, and a CI log is public.
+    let value = |vars: &[String], name: &str| {
+        vars.iter().find_map(|v| v.strip_prefix(&format!("{name}=")).map(str::to_owned))
+    };
+    for (args, vars) in &calls {
+        for name in stripped {
+            assert_eq!(value(vars, name), None, "{name} reached `git {args}`");
+        }
+        assert_eq!(value(vars, "GIT_NO_LAZY_FETCH").as_deref(), Some("1"), "`git {args}`");
+        let protocol = if args.contains(" fetch ") { "file" } else { "" };
+        assert_eq!(value(vars, "GIT_ALLOW_PROTOCOL").as_deref(), Some(protocol), "`git {args}`");
+    }
+}
+
+/// The attack itself, on the installed git: a partial clone whose HEAD
+/// tree is missing and whose promisor remote names a program as its
+/// `uploadpack`. The default worker (`fetch_interval = 0`) asks for the
+/// dirty state, which needs the tree; no guard may let git fetch it.
+#[test]
+fn worker_a_partial_clone_never_runs_the_repository_upload_pack() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let head_tree =
+        Command::new("git").args(["rev-parse", "HEAD:"]).current_dir(&env.work).output().unwrap();
+    let tree = String::from_utf8_lossy(&head_tree.stdout).trim().to_owned();
+    let (dir, file) = tree.split_at(2);
+    std::fs::remove_file(env.work.join(".git/objects").join(dir).join(file)).unwrap();
+    let marker = env.work.parent().unwrap().join("MARKER");
+    let payload = env.work.parent().unwrap().join("payload.sh");
+    std::fs::write(&payload, format!("#!/bin/sh\necho ran >> '{}'\nexit 1\n", marker.display()))
+        .unwrap();
+    std::fs::set_permissions(&payload, std::fs::Permissions::from_mode(0o755)).unwrap();
+    git(&env.work, &["config", "core.repositoryformatversion", "1"]);
+    git(&env.work, &["config", "extensions.partialClone", "origin"]);
+    git(&env.work, &["config", "remote.origin.promisor", "true"]);
+    git(&env.work, &["config", "remote.origin.uploadpack", payload.to_str().unwrap()]);
+    run_workers(&env, &["branch", "sync"]);
+    assert!(!marker.exists(), "the repository's uploadpack ran from a worker");
+}
+
 /// SPEC § 6: `fetch_interval` runs `git fetch` in the worker, once per
 /// interval, so a commit pushed elsewhere shows as `behind` without any
 /// fetch by hand.
