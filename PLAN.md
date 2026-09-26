@@ -60,7 +60,7 @@ design, SPEC § 14 says so and why.
 | Consolidation | nine gallery presets showing the rest of the vocabulary (28 in all); the review workflow collecting the pull request in job shell with a short prompt and `Bash` whole; the skills shortened and pointed at `setup`; *also try* glyphs on the module pages; `WORKLOG.md` split from this file; `PLAN.md`, `SPEC.md`, `CLAUDE.md`, `README.md`, the guide and `CHANGELOG.md` brought to the code | 09-19 |
 | 23 Usage views and formats | `hide` lists derived from a module's measure (`MeasureKind`, `HideRule`, `Rendered.measure`, one check in `render_group`); the `[format]` table with per-module `tokens`/`percent`/`cost` overrides and `parens = "dim"` through one `detail()` helper; `pace`, `pace_colors`, `eta`, `reset = "elapsed"` and `elapsed_marker` on the two limit windows; `[frame] separator_color` with `inherit`; the `version`, `sandbox`, `voice` and `account` modules (25 ids; `account` is the first cached module outside the repo group, `Clock.workers` keeps pinned renders off the cache, `Clock.settings_keys` seeds the badges' docs samples); `doctor` rows for the two settings keys; four gallery presets (32 in all); seven config goldens; three adversarial reviews | 09-19 |
 | Setup refinements | after Daniel's first use: undo/redo over a history of tables (`Draft.saved` makes dirty a comparison), the hint bar as clickable buttons, pickers opening on the value in effect with `custom…` starting from it, an input cursor; six form bugs found by a walk of every preset's forms (trimmed strings, `[colors]` roles, `blank` and title keys where illegal, orphaned `[box]` tables, silent breakage of another key); `C`/`]`/`[`/`m` growing columns from the cursor, `B` boxing a row with the one above, the module's name as its first `label` suggestion, `preset` swapping its own rows; one adversarial review | 09-20 |
-| Review 2026-09-25 | a read-only review of the whole codebase by 12 area reviewers, each verified adversarially, then fixed batch by batch: bounded regular-file reads of every `.git` file, a plumbing dirty check that never runs filter drivers, `git` from absolute `PATH` only, a private temp cache root and a GC that runs; the reftable fallback, gone upstreams, honest fetch clocks, `--config` to the workers; `config/mod.rs` and `setup/app.rs` split by concern, one `Vocab` per enum, `*_KEYS` tripwires, `refresh` only for cached modules; per-field payload leniency, TZ read as one zone file; `write_target`, `CLAUDE_CONFIG_DIR`, `install` keeping `--config`, the `⚠ garnish:` row on a panic or a bad flag; the per-row trim held, every column exactly its share; about 80 setup and layout fixes; the review workflow's token and trigger, the release build without a cache or setup script; ten modules `pub(crate)`; link and module-name checks on the docs; 319 → 501 tests | 09-25 |
+| Review 2026-09-25 | a read-only review of the whole codebase by 12 area reviewers, each verified adversarially, then fixed batch by batch: bounded regular-file reads of every `.git` file, a plumbing dirty check that never runs filter drivers, `git` from absolute `PATH` only, a private temp cache root and a GC that runs; the reftable fallback, gone upstreams, honest fetch clocks, `--config` to the workers; `config/mod.rs` and `setup/app.rs` split by concern, one `Vocab` per enum, `*_KEYS` tripwires, `refresh` only for cached modules; per-field payload leniency, TZ read as one zone file; `write_target`, `CLAUDE_CONFIG_DIR`, `install` keeping `--config`, the `⚠ garnish:` row on a panic or a bad flag; the per-row trim held, every column exactly its share; about 80 setup and layout fixes; the review workflow's token and trigger, the release build without a cache or setup script; ten modules `pub(crate)`; link and module-name checks on the docs; then a final adversarial review of both pull requests and a verification of its fixes (the review's isolation switched on whole, every command following the config the status line command passes, the reftable and entry-belt spawn storms, a streamed `.git/config` parser with a `warm-bigconfig` bench); 319 → 538 tests | 09-25 |
 
 ## Backlog
 
@@ -165,9 +165,9 @@ Open items only; closed ones are in `WORKLOG.md`.
     item above); some setup pickers offer entries the parser then refuses
     in context (the `box` picker on an inner row of a boxed column,
     `fill_pattern` under `fill = false`, an empty `custom…`), each refused
-    cleanly; at the narrowest boxes (`COLUMNS` 10–17, a box of 10–13
-    cells) a `custom` frame whose caps and a wide `pad` exceed the box is
-    recut to `…`; absurd payload numbers still print
+    cleanly; at `COLUMNS=10` a `custom` frame whose caps and a wide `pad`
+    exceed the box is recut to `…` (2 of 20 000 fuzz seeds, from 17 before
+    the layout follow-up); absurd payload numbers still print
     long durations, countdowns and token counts (percent and cost are
     bounded); without `--absolute` a reinstall replaces an absolute
     program word with the bare `garnish`, and `setup --preset P --install`
@@ -184,6 +184,17 @@ Open items only; closed ones are in `WORKLOG.md`.
     skipper is slower than a plain parse on a crafted 1 MiB file of short
     backslash-continued lines (11 ms against 7, bounded by the cap; every
     other hostile shape measured got faster)
+  - layout, Daniel's call each (from the layout follow-up): a `width = 0`
+    unboxed stack column keeps its stack's height (collapsing it would
+    collapse an emptied `auto` stack too, which SPEC § 4.3 keeps so the
+    layout does not reflow); a last column whose right-justified text is
+    cut to nothing (`width = 1`) still counts as ending in content
+    (`⏱ 1h12m ────────── ──`), and deciding that from the drawn cells would
+    change the pad beside a boxed last column; inside a `fill = true` box a
+    row whose `fr` columns are all squeezed out puts the freed rule right
+    after the last column's text; under uneven `custom` caps, heights use
+    the narrowest cap pair, so a box that fits only on the wider lines is
+    drawn as empty cells
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)

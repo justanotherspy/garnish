@@ -997,3 +997,56 @@ was built, what the reviews found and what was decided, not how.
     within budget: warm mean 2.5–2.6 ms (p99 3.0–4.7 ms) for `default`,
     `full`, every module and the new `warm-tz`; cold 4.6 ms; a sync
     refresh 14.3 ms.
+  - *The final adversarial review* (2026-09-25 evening, four reviewers
+    over both PRs, then fixed by one agent per area):
+    - #85: setting the review's environment scrub on its own made the CLI
+      refuse to start for want of bubblewrap (high); the action's
+      isolation is now switched on whole. The token still reached
+      `.git/config`, the report step ran git in the model's checkout, the
+      edit tools were only left off the allowlist, the release smoke test
+      missed `⚠ config:` rows, `verify` took any custom policy, and a
+      script test died before its summary.
+    - Area B: a failed reftable worker respawned on every tick (high); a
+      newline in a merge ref or a 64 KiB branch name did the same; the
+      config parser cost up to 5 ms a tick on a big `.git/config`; lazy
+      fetch on an older git ran the repository's `uploadpack`;
+      `--short` named a branch `heads/main`; doctor's probe followed a
+      planted link; a FIFO swapped in after the check hung the open.
+    - Area C: `config path`, `setup` and `install` ignored the `--config`
+      the status line command passes; `"rate_limits": []` counted as a
+      subscription; a stderr nobody reads blanked the line;
+      `render --bogus` exited 2; `config show` wrote boxes no row joined;
+      a reinstall dropped an environment prefix.
+    - Area D: removing a title in setup left its decorations (a `⚠
+      config:` row); a `width = 0` column, `align` over a flex column, a
+      side-less custom box and empty custom caps each drew wrong.
+    - Kept on purpose: the three tightened rules (Daniel), absurd
+      durations (C9), the per-row cap pad (D6), context-refused picker
+      entries (D8); all in PLAN's backlog.
+  - *Verifying the fixes* (a workflow: a verifier per area tried to break
+    each fix, and two skeptics had to reproduce every failure it
+    claimed; 18 claims confirmed, 3 refuted):
+    - C1 was incomplete: the readers and the writers followed the user
+      file's command where a project's wins, a settings file past 1 MiB
+      lost the command, and `$HOME.x` or `--config=$HOME/x` read wrongly.
+      Now `CommandFrom::Chain`, the command `install` already parsed, and
+      a home directory spliced where `$HOME` stands.
+    - B10 regressed: pinning `core.trustctime=true` showed a clean tree as
+      dirty for good under a user's `trustctime = false`. Reverted, with a
+      test that such a tree reads clean.
+    - B3's speed-up had no guard: `bench/run.sh` gained `warm-bigconfig`.
+    - D2 and D5 were partial, and D5's filler ran into right-hand text; a
+      box too narrow to draw still added two lines. All fixed, with four
+      new config goldens; SPEC § 4.3 said an inner row takes `justify`,
+      which the parser never allowed.
+    - #85: the report step's fallback turned every API failure green,
+      `Task` was only left off the allowlist and still ran, and the stated
+      reason for disallowing the edit tools was wrong. All fixed.
+    - The nit asking to print an unresolved `--config` in backticks was
+      refuted (`{:?}` is garnish's convention, is the settings file's own
+      JSON spelling, and lets no escape byte through), and reverted.
+    - The workflow's worktrees start at `main`, not the PR head; the
+      verifiers noticed and exported the head themselves. Their scratch
+      builds (2.7 GB each) filled the disk twice: delete them as each
+      agent finishes.
+    - 501 → 538 tests.

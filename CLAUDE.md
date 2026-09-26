@@ -178,6 +178,13 @@ documents *first*, with the reason, then start coding.
   `CALL $*` and the variables asked about to a log is how a test sees the
   child's arguments and environment (`recorded_git_calls`); print only
   the variables asked about, since a whole environment lands in a CI log.
+  A scratch export of the crate (`git archive` into a directory) built
+  with the same `CARGO_TARGET_DIR` clobbers the checkout's artifacts,
+  since cargo's metadata hash leaves the path out: give the export
+  another `version` in its own `Cargo.toml` (the dependencies stay
+  shared). And `benches/tick.rs` points its payload at
+  `CARGO_MANIFEST_DIR`, so a git checkout pays for git reads an export
+  skips: compare builds made the same way.
 - **The payload is read field by field.** A scalar field takes
   `#[serde(deserialize_with = "or_none")]`, a struct-typed one
   `object_or_none` (serde reads a struct from a JSON array by position,

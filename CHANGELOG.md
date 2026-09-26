@@ -135,12 +135,15 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   ligature scripts.
 - Inside a box without a rule, two columns a `gap` apart keep their full
   width, so a module is no longer cut two cells early.
-- A `width = 0` column takes no gap, so no stray rule cell follows the
-  last column; `align = true` stacks the separators of a column that has
-  a `right` group from its left end; a `custom` box too narrow for its
-  corners draws nothing instead of cutting the whole line to `…`; a tall
-  row under `custom` caps that leave a later line's right cap empty fills
-  the box on every line.
+- A column that draws nothing (`width = 0`, or an `fr` column squeezed to
+  no cells) takes no gap, so no stray rule cell follows the last column
+  and no hole opens before the cap; `align = true` stacks the separators
+  of a column that has a `right` group from its left end; a box too
+  narrow for its corners or sides draws nothing and adds no lines to its
+  row, instead of cutting the whole line to `…` or leaving two empty
+  framed lines; a tall row under `custom` caps that leave a later line's
+  right cap narrower or empty fills the box on every line, and its rule
+  never runs into a right group's text.
 - A bad payload says why on stderr and in the `GARNISH_DEBUG` log.
 
 *Config*
