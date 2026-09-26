@@ -173,9 +173,7 @@ Open items only; closed ones are in `WORKLOG.md`.
     program word with the bare `garnish`, and `setup --preset P --install`
     always writes the bare word; an explicit `--config` reinstall drops the
     old command's prefix and arguments; `exec garnish …` and `env -i
-    garnish …` read as not garnish; `install` follows the command of the
-    file it rewrites, so in a project whose own `statusLine.command` wins,
-    `install` and the other commands can name different configs; one
+    garnish …` read as not garnish; one
     nested-box mistake is reported twice (the nesting and "no row joins
     this box"); a worker given a `--config` that names a missing file runs
     on the defaults without saying so (it could record a failure);
@@ -195,6 +193,17 @@ Open items only; closed ones are in `WORKLOG.md`.
     after the last column's text; under uneven `custom` caps, heights use
     the narrowest cap pair, so a box that fits only on the wider lines is
     drawn as empty cells
+  - config location, Daniel's call (follow-up review of 2026-09-26): the
+    commands that write a config (`config init`, `setup`, `install`)
+    follow the managed and user settings' command only, so a checkout's
+    `.claude/` never chooses a file garnish writes, while the readers
+    (`config path`, `check`, `show`, `preview`, `doctor`) follow the
+    command Claude Code runs here; inside a project whose own settings
+    pass another `--config`, `config path` names that file and `config
+    init` writes the user's. The alternative is to follow the project's
+    command in the writers too and print which settings file chose it;
+    also open: `$HOME$HOME`, `~/$HOME` and `${HOME-x}` name one file to
+    `sh` and are refused as naming none
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)

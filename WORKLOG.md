@@ -1050,3 +1050,33 @@ was built, what the reviews found and what was decided, not how.
       builds (2.7 GB each) filled the disk twice: delete them as each
       agent finishes.
     - 501 → 538 tests.
+
+- **2026-09-26** — A second verification pass over the fixes of the
+  first (one verifier per group, two skeptics per new claim), then its
+  fixes. `main` moved to 9145f22 (Renovate #87, claude-code-action
+  v1.0.235) and was merged into #85 and #86; the review workflow on #86 is
+  byte-identical to `main`'s again.
+  - *#85*: every earlier fix held (reproduced through the action's own
+    argument parser, the pinned Agent SDK and CLI, and a mock API). New:
+    `Skill` still forked a subagent and `Workflow`, `CronCreate` and
+    `ScheduleWakeup` were still offered, because leaving a tool off the
+    allowlist does not remove it; now disallowed. Nothing tested the
+    report step or the disallowed list, so `scripts/test-scripts.sh` now
+    runs the step's shell out of the YAML with a stand-in `gh` and checks
+    the list. The action drops a `#` line in `claude_args` (CLAUDE.md
+    said it passed one through), and the allowlist named `TodoWrite` and
+    `LS`, which the pinned CLI no longer has.
+  - *config location*: the writers had started following a checkout's
+    own `.claude/` settings, so a cloned repository chose where `config
+    init` and `setup` wrote. Decided (the conservative side, Daniel's to
+    revisit, PLAN backlog): writers follow the managed and user files'
+    command only, readers the command Claude Code runs here. A command
+    run by hand reads a settings file whole (64 MiB bound), so past the
+    tick's 1 MiB cap `config path`, `config init` and `doctor` agree with
+    `install`; `doctor` reads the chain as Claude Code does, and the keys
+    the tick reads skip a file past its cap. `shell_words` split at
+    Unicode whitespace (a pasted non-breaking space cut the path) and
+    spliced an unquoted `$HOME` that `sh` would split; both fixed, a second
+    `$HOME` is refused, and a quoted `--config` is cut to 200 characters.
+    The rejected-file skip and the `$HOME` spellings are now tested
+    through the binary.
