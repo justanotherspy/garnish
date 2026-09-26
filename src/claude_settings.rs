@@ -299,6 +299,25 @@ impl FileKeys {
     }
 }
 
+/// A settings `env` value as the string Claude Code puts in the
+/// environment: JavaScript's `String()` of it (verification of 2026-09-26,
+/// 2.1.283: `["/p"]` is `/p`, `5` is `5`, `null` is `null`, an object is
+/// `[object Object]`), so a non-string value is as present as a string.
+fn js_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => "null".to_owned(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|item| if item.is_null() { String::new() } else { js_string(item) })
+            .collect::<Vec<_>>()
+            .join(","),
+        serde_json::Value::Object(_) => "[object Object]".to_owned(),
+    }
+}
+
 /// Parse one settings file's text into the keys garnish reads. An empty
 /// (or whitespace-only) file sets none of them and is not a problem: a
 /// fresh `touch`ed file is what Claude Code and `install` treat as `{}`.
@@ -345,9 +364,7 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                     |env| {
                         env.iter()
                             .filter(|(key, _)| key.starts_with("GARNISH_"))
-                            .filter_map(|(key, value)| {
-                                value.as_str().map(|value| (key.clone(), value.to_owned()))
-                            })
+                            .map(|(key, value)| (key.clone(), js_string(value)))
                             .collect()
                     },
                 ),
@@ -966,16 +983,28 @@ pub mod tests {
         assert_eq!(settings_chain(None, None, None), Vec::new());
     }
 
-    /// The `GARNISH_*` entries of a file's `env` block are kept, strings
-    /// only, and nothing else of it.
+    /// The `GARNISH_*` entries of a file's `env` block are kept, each as the
+    /// string Claude Code makes of it (JavaScript's `String()`), and nothing
+    /// else of it.
     #[test]
     fn the_garnish_entries_of_the_env_block_are_read() {
         let keys = keys_of(
             r#"{"env": {"GARNISH_CONFIG": "/x.toml", "GARNISH_ANIMATE": 0, "PATH": "/bin"}}"#,
         );
-        assert_eq!(keys.garnish_env, [("GARNISH_CONFIG".to_owned(), "/x.toml".to_owned())]);
         assert_eq!(keys.env("GARNISH_CONFIG"), Some("/x.toml"));
+        assert_eq!(keys.env("GARNISH_ANIMATE"), Some("0"));
         assert_eq!(keys.env("PATH"), None);
         assert_eq!(keys_of(r#"{"env": []}"#).garnish_env, []);
+        for (json, want) in [
+            (r#"["/p.toml"]"#, "/p.toml"),
+            (r#"["/a", "/b"]"#, "/a,/b"),
+            ("null", "null"),
+            ("true", "true"),
+            (r#"{"a": 1}"#, "[object Object]"),
+            ("[null, 1]", ",1"),
+        ] {
+            let keys = keys_of(&format!(r#"{{"env": {{"GARNISH_CONFIG": {json}}}}}"#));
+            assert_eq!(keys.env("GARNISH_CONFIG"), Some(want), "{json}");
+        }
     }
 }

@@ -111,31 +111,42 @@ fn own_env_sets(name: &str, value: &std::ffi::OsStr) -> bool {
     })
 }
 
-/// Most drop-in files of the managed settings directory garnish reads.
-const MAX_DROP_INS: usize = 64;
+/// Most entries of the managed drop-in directory garnish looks at: an
+/// organisation's own directory, bounded only against a runaway one.
+const MAX_DROP_IN_ENTRIES: usize = 4096;
 
-/// The settings files that are the person's (or their organisation's) own
-/// wherever garnish runs: the managed file the platform names, the
-/// `managed-settings.d/*.json` drop-ins beside it (which Claude Code
-/// applies too), and the user file; never a file a variable names, which
-/// the session may have from a checkout.
-fn own_settings_files() -> Vec<PathBuf> {
-    use crate::claude_settings as cs;
-    let managed = cs::platform_managed_settings();
-    let mut drop_ins: Vec<PathBuf> = managed
+/// The `managed-settings.d/*.json` drop-ins beside the managed file
+/// `managed`, which Claude Code applies on top of it, in name order (the
+/// last one wins a key it shares with another).
+fn drop_ins(managed: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = managed
         .parent()
         .and_then(|dir| std::fs::read_dir(dir.join("managed-settings.d")).ok())
         .map_or_else(Vec::new, |entries| {
             entries
+                .take(MAX_DROP_IN_ENTRIES)
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-                .take(MAX_DROP_INS)
                 .collect()
         });
-    drop_ins.sort();
+    files.sort();
+    files
+}
+
+/// The settings files that are the person's (or their organisation's) own
+/// wherever garnish runs: the managed file the platform names with its
+/// drop-ins, and the user file; never a file a variable names, which the
+/// session may have from a checkout.
+fn own_settings_files() -> Vec<PathBuf> {
+    use crate::claude_settings as cs;
     let user = cs::user_dir(cs::home_dir().as_deref()).map(|dir| dir.join("settings.json"));
-    std::iter::once(managed).chain(drop_ins).chain(user).collect()
+    own_settings_files_in(&cs::platform_managed_settings(), user)
+}
+
+/// [`own_settings_files`] for an explicit managed file and user file.
+fn own_settings_files_in(managed: &Path, user: Option<PathBuf>) -> Vec<PathBuf> {
+    std::iter::once(managed.to_path_buf()).chain(drop_ins(managed)).chain(user).collect()
 }
 
 /// The managed settings file for a command run by hand.
@@ -215,13 +226,16 @@ pub enum WriteTarget {
     /// Nothing names the file, and there is no home directory to put it
     /// under (SPEC § 5: never guess the current directory).
     NoHome,
-    /// The garnish `statusLine.command` of `settings` passes `--config` a
-    /// value that stands for no one file garnish can find (a relative
-    /// path, or an expansion it does not follow): `word`, as written.
+    /// The settings file `settings` names the config by a value that
+    /// stands for no one file garnish can find (a relative path, or an
+    /// expansion it does not follow): `word`, as written, under `key`.
     Unresolved {
         /// The settings file.
         settings: PathBuf,
-        /// The value, as the command spells it.
+        /// The key naming it: `statusLine.command` (its `--config`) or
+        /// `env.GARNISH_CONFIG`.
+        key: &'static str,
+        /// The value, as the file spells it.
         word: String,
     },
     /// A settings file that is not the person's own names the config.
@@ -287,7 +301,9 @@ pub enum ReadTarget {
     Unresolved {
         /// The settings file.
         settings: PathBuf,
-        /// The value, as the command spells it.
+        /// The key naming it.
+        key: &'static str,
+        /// The value, as the file spells it.
         word: String,
     },
     /// As [`WriteTarget::Checkout`].
@@ -311,8 +327,8 @@ pub fn read_target(flag: Option<&Path>) -> ReadTarget {
     };
     match target {
         Some(WriteTarget::File(p)) => ReadTarget::File(p),
-        Some(WriteTarget::Unresolved { settings, word }) => {
-            ReadTarget::Unresolved { settings, word }
+        Some(WriteTarget::Unresolved { settings, key, word }) => {
+            ReadTarget::Unresolved { settings, key, word }
         }
         Some(WriteTarget::Checkout(checkout)) => ReadTarget::Checkout(checkout),
         Some(WriteTarget::NoHome) | None => lookup().map_or(ReadTarget::Defaults, ReadTarget::File),
@@ -335,6 +351,23 @@ struct ChainFile {
     own: bool,
 }
 
+/// The managed layer of the chain: the managed file ([`hand_managed`]) and,
+/// when it is the platform's, the drop-ins beside it, highest precedence
+/// first (the last drop-in by name, then the others, then the file).
+fn managed_layer() -> Vec<PathBuf> {
+    let platform = crate::claude_settings::platform_managed_settings();
+    hand_managed().map_or_else(Vec::new, |managed| layer_of(managed, &platform))
+}
+
+/// [`managed_layer`] for the managed file `managed` when the platform's
+/// is `platform`.
+fn layer_of(managed: PathBuf, platform: &Path) -> Vec<PathBuf> {
+    let mut layer = if managed == platform { drop_ins(&managed) } else { Vec::new() };
+    layer.reverse();
+    layer.push(managed);
+    layer
+}
+
 /// The settings chain of the current directory, each file read whole, as
 /// Claude Code reads it (the cap on a settings file protects the tick, and
 /// only a command run by hand is here: final review of 2026-09-25), a file
@@ -344,10 +377,13 @@ fn chain_files() -> Vec<ChainFile> {
     let home = cs::home_dir();
     let project = std::env::current_dir().ok();
     let user = cs::user_dir(home.as_deref());
-    let managed = hand_managed();
-    let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
+    let managed = managed_layer();
+    let chain = managed.iter().map(|file| ("managed", file.clone())).chain(cs::settings_chain(
+        None,
+        project.as_deref(),
+        user.as_deref(),
+    ));
     let mut files: Vec<ChainFile> = chain
-        .into_iter()
         .filter_map(|(label, path)| {
             match cs::read_file_up_to(&path, cs::MAX_COMMAND_SETTINGS_BYTES) {
                 cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
@@ -359,24 +395,36 @@ fn chain_files() -> Vec<ChainFile> {
             }
         })
         .collect();
-    // A managed file that a checkout's `env` block named through the hook
-    // is the checkout's (when the hook is in use at all: `hand_managed`
-    // puts the platform's file in its place inside a session).
     let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
-    let hook_in_use = hook
-        .as_deref()
-        .is_some_and(|hook| managed.as_deref() == Some(Path::new(hook)) && !hook.is_empty());
+    let platform = cs::platform_managed_settings();
+    demote_hooked(&mut files, hook.as_deref(), managed.last().map(PathBuf::as_path), &platform);
+    files
+}
+
+/// A managed file that a checkout's `env` block named through the hook is
+/// the checkout's: when the hook is in use at all (`managed`, the file the
+/// layer ends in, is the hook's; inside a session `hand_managed` puts the
+/// platform's in its place), it names a file other than the platform's
+/// own `platform`, and a file that is not the person's own sets it.
+fn demote_hooked(
+    files: &mut [ChainFile],
+    hook: Option<&std::ffi::OsStr>,
+    managed: Option<&Path>,
+    platform: &Path,
+) {
+    use crate::claude_settings as cs;
+    let Some(hook) = hook.filter(|hook| !hook.is_empty()) else { return };
+    if managed != Some(Path::new(hook)) || Path::new(hook) == platform {
+        return;
+    }
     let names_hook = |file: &ChainFile| {
-        file.keys
-            .env(cs::MANAGED_SETTINGS_ENV)
-            .is_some_and(|set| hook.as_deref() == Some(std::ffi::OsStr::new(set)))
+        file.keys.env(cs::MANAGED_SETTINGS_ENV).is_some_and(|set| std::ffi::OsStr::new(set) == hook)
     };
-    if hook_in_use && files.iter().any(|file| !file.own && names_hook(file)) {
+    if files.iter().any(|file| !file.own && names_hook(file)) {
         for file in files.iter_mut().filter(|file| file.label == "managed") {
             file.own = false;
         }
     }
-    files
 }
 
 /// The config the garnish `statusLine.command` of `from` has its ticks
@@ -389,7 +437,10 @@ fn chain_files() -> Vec<ChainFile> {
 /// Through the chain it is the command Claude Code runs here or, when that
 /// one runs another program, the person's own garnish command, which still
 /// names the config their status line reads elsewhere; its `env` value is
-/// the first the chain sets, as Claude Code's precedence has it.
+/// the first the chain sets, as Claude Code's precedence has it (the
+/// person's own files alone in the second case, since no tick runs here).
+/// For `install` the `env` value is the managed layer's, else the one the
+/// file it rewrites sets ([`installed_env_target`]).
 fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
@@ -399,7 +450,7 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
             let own = users(settings, user.as_deref(), home.as_deref());
             command
                 .and_then(|command| flag_target(settings, command, own, home.as_deref()))
-                .or_else(|| env.and_then(|value| env_target(settings, own, value)))
+                .or_else(|| installed_env_target(settings, env))
         }
         CommandFrom::Chain => {
             let files = chain_files();
@@ -410,17 +461,45 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
                     .is_some_and(|command| crate::install::runs_garnish(command, home.as_deref()))
             };
             let runs = files.iter().find(|file| file.keys.status_line_command.is_some())?;
-            let file = if garnish(runs) {
-                runs
-            } else {
-                files.iter().find(|file| file.own && garnish(file))?
-            };
+            let here = garnish(runs);
+            let file =
+                if here { runs } else { files.iter().find(|file| file.own && garnish(file))? };
             let command = file.keys.status_line_command.as_deref()?;
             flag_target(&file.path, command, file.own, home.as_deref()).or_else(|| {
-                let set = files.iter().find_map(|f| f.keys.env(CONFIG_ENV).map(|v| (f, v)))?;
-                env_target(&set.0.path, set.0.own, set.1)
+                let (file, value) = files
+                    .iter()
+                    .filter(|file| here || file.own)
+                    .find_map(|file| file.keys.env(CONFIG_ENV).map(|value| (file, value)))?;
+                env_target(&file.path, file.own, value)
             })
         }
+    }
+}
+
+/// The `GARNISH_CONFIG` a command `install` writes into `settings` gets
+/// from an `env` block; `None` when no block sets one.
+///
+/// The managed layer's value wins, since Claude Code puts that layer above
+/// every other file; else `env`, the one `settings` itself sets.
+/// `install`'s default config and `setup --install`'s note follow it
+/// (verification of 2026-09-26: a managed `env` value was the ticks'
+/// config while `install` wrote the lookup's).
+#[must_use]
+pub fn installed_env_target(settings: &Path, env: Option<&str>) -> Option<WriteTarget> {
+    use crate::claude_settings as cs;
+    let home = cs::home_dir();
+    let managed = managed_layer().into_iter().find_map(|file| {
+        match cs::read_file_up_to(&file, cs::MAX_COMMAND_SETTINGS_BYTES) {
+            cs::FileState::Keys(keys) => keys.env(CONFIG_ENV).map(|value| (file, value.to_owned())),
+            _ => None,
+        }
+    });
+    if let Some((file, value)) = managed {
+        env_target(&file, true, &value)
+    } else {
+        let user = cs::user_dir(home.as_deref());
+        let own = users(settings, user.as_deref(), home.as_deref());
+        env.and_then(|value| env_target(settings, own, value))
     }
 }
 
@@ -440,7 +519,7 @@ fn flag_target(
         }
         crate::install::CommandConfig::File(p) => Some(WriteTarget::File(p)),
         crate::install::CommandConfig::Unresolved(word) => {
-            Some(WriteTarget::Unresolved { settings, word })
+            Some(WriteTarget::Unresolved { settings, key: "statusLine.command", word })
         }
     }
 }
@@ -457,7 +536,7 @@ fn env_target(settings: &Path, own: bool, value: &str) -> Option<WriteTarget> {
     Some(if own && path.is_absolute() {
         WriteTarget::File(path)
     } else if own {
-        WriteTarget::Unresolved { settings, word: value.to_owned() }
+        WriteTarget::Unresolved { settings, key: "env.GARNISH_CONFIG", word: value.to_owned() }
     } else {
         let settings = Some(settings);
         WriteTarget::Checkout(Checkout { settings, key: "env.GARNISH_CONFIG", path })
@@ -674,5 +753,98 @@ mod tests {
         assert_eq!(errs[0].path, "unknown_top");
         assert!(errs[0].message.contains("unknown key"), "{}", errs[0].message);
         assert_eq!(c.preset, TopPreset::Minimal, "the valid key next to it still counts");
+    }
+
+    fn chain_file(label: &'static str, json: &str, own: bool) -> ChainFile {
+        let keys = crate::claude_settings::parse_settings_json(json).unwrap();
+        ChainFile { label, path: PathBuf::from(format!("/{label}.json")), keys, own }
+    }
+
+    /// Verification of 2026-09-26: the managed file the hook names is the
+    /// checkout's only when the hook is in use, names a file other than the
+    /// platform's, and a file that is not the person's own sets it.
+    #[test]
+    fn a_hooked_managed_file_is_a_checkouts_only_when_a_checkout_names_it() {
+        let hook = std::ffi::OsStr::new("/org.json");
+        let platform = Path::new("/etc/claude-code/managed-settings.json");
+        let names = r#"{"env": {"GARNISH_MANAGED_SETTINGS": "/org.json"}}"#;
+        let files = |checkout_names: bool| {
+            vec![
+                chain_file("managed", "{}", true),
+                chain_file("project", if checkout_names { names } else { "{}" }, false),
+                chain_file("user", if checkout_names { "{}" } else { names }, true),
+            ]
+        };
+        let managed_own = |hook: Option<&std::ffi::OsStr>, managed: &Path, checkout: bool| {
+            let mut files = files(checkout);
+            demote_hooked(&mut files, hook, Some(managed), platform);
+            files.iter().filter(|f| f.label == "managed").all(|f| f.own)
+        };
+        assert!(!managed_own(Some(hook), Path::new("/org.json"), true));
+        assert!(
+            managed_own(Some(hook), Path::new("/org.json"), false),
+            "the person's own names it"
+        );
+        assert!(managed_own(None, Path::new("/org.json"), true), "no hook");
+        assert!(managed_own(Some(std::ffi::OsStr::new("")), Path::new("/org.json"), true));
+        assert!(managed_own(Some(hook), platform, true), "the session put the platform's in place");
+        let platform_hook = platform.as_os_str();
+        assert!(managed_own(Some(platform_hook), platform, true), "the platform's is never theirs");
+    }
+
+    /// Verification of 2026-09-26: the managed layer's drop-ins are every
+    /// `*.json` beside the managed file, in name order, however many and in
+    /// whatever order the directory lists them.
+    #[test]
+    fn the_own_settings_files_are_the_managed_file_its_drop_ins_and_the_user_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let managed = dir.path().join("managed-settings.json");
+        let drop_dir = dir.path().join("managed-settings.d");
+        std::fs::create_dir(&drop_dir).unwrap();
+        for i in 0..400 {
+            std::fs::write(drop_dir.join(format!("x{i:03}.json")), "{}").unwrap();
+        }
+        std::fs::write(drop_dir.join("10-garnish.json"), "{}").unwrap();
+        std::fs::write(drop_dir.join("notes.txt"), "").unwrap();
+        let user = dir.path().join("settings.json");
+        let files = own_settings_files_in(&managed, Some(user.clone()));
+        assert_eq!(files.len(), 403, "every drop-in, and no other file");
+        assert_eq!(files.first(), Some(&managed));
+        assert_eq!(files.get(1), Some(&drop_dir.join("10-garnish.json")), "name order");
+        assert_eq!(files.get(401), Some(&drop_dir.join("x399.json")));
+        assert_eq!(files.last(), Some(&user));
+        let alone = dir.path().join("elsewhere/managed-settings.json");
+        assert_eq!(own_settings_files_in(&alone, None), std::slice::from_ref(&alone));
+        // The chain's managed layer puts them highest precedence first: the
+        // last by name wins, the managed file loses to every drop-in, and a
+        // managed file the hook names brings none.
+        let layer = layer_of(managed.clone(), &managed);
+        assert_eq!(layer.len(), 402);
+        assert_eq!(layer.first(), Some(&drop_dir.join("x399.json")));
+        assert_eq!(layer.get(400), Some(&drop_dir.join("10-garnish.json")));
+        assert_eq!(layer.last(), Some(&managed));
+        assert_eq!(layer_of(managed.clone(), &alone), [managed]);
+    }
+
+    /// Verification of 2026-09-26: an empty `GARNISH_CONFIG` names nothing,
+    /// as for the tick, whoever's file sets it; a relative one of the
+    /// person's own is unresolved under its key.
+    #[test]
+    fn an_env_value_names_a_file_only_when_it_is_the_persons_and_absolute() {
+        let settings = Path::new("/home/u/.claude/settings.json");
+        assert_eq!(env_target(settings, true, ""), None);
+        assert_eq!(env_target(settings, false, ""), None);
+        assert_eq!(
+            env_target(settings, true, "/c.toml"),
+            Some(WriteTarget::File("/c.toml".into()))
+        );
+        assert!(matches!(
+            env_target(settings, true, "~/c.toml"),
+            Some(WriteTarget::Unresolved { key: "env.GARNISH_CONFIG", .. })
+        ));
+        assert!(matches!(
+            env_target(settings, false, "/c.toml"),
+            Some(WriteTarget::Checkout(Checkout { key: "env.GARNISH_CONFIG", .. }))
+        ));
     }
 }

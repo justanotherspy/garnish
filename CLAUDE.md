@@ -178,7 +178,11 @@ documents *first*, with the reason, then start coding.
   `CALL $*` and the variables asked about to a log is how a test sees the
   child's arguments and environment (`recorded_git_calls`); print only
   the variables asked about, since a whole environment lands in a CI log.
-  A scratch export of the crate (`git archive` into a directory) built
+  No test that runs the binary can reach the platform's managed settings
+  file (`/etc/claude-code/…`, root's), so logic that depends on it takes
+  the paths as parameters and is unit-tested pure (`demote_hooked`,
+  `layer_of`, `own_settings_files_in`); two mutations of it survived the
+  whole suite until then. A scratch export of the crate (`git archive` into a directory) built
   with the same `CARGO_TARGET_DIR` clobbers the checkout's artifacts,
   since cargo's metadata hash leaves the path out: give the export
   another `version` in its own `Cargo.toml` (the dependencies stay

@@ -104,7 +104,7 @@ impl App {
                 }));
                 match &steps.config {
                     ConfigStep::Skipped
-                    | ConfigStep::Unresolved(_)
+                    | ConfigStep::Unresolved { .. }
                     | ConfigStep::Checkout(_)
                     | ConfigStep::Elsewhere { .. } => {}
                     ConfigStep::Exists { path, .. } => {
@@ -165,8 +165,10 @@ impl App {
 }
 
 /// `text` with every path that starts with `home` (a directory ending in
-/// `/`) shown as `~/…`: only where a path can start, at the start of the
-/// text or after a blank or a quote, never inside a longer path.
+/// `/`) shown as `~/…`: only where a path starts, at the start of the text
+/// or after a blank, never inside a longer path, and never inside quotes,
+/// where a `~` pasted into a shell names no home (verification of
+/// 2026-09-26: the pasted advice made a `~` directory).
 fn tilde_paths(text: &str, home: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -182,7 +184,7 @@ fn tilde_paths(text: &str, home: &str) -> String {
         let Some(c) = chars.next() else { break };
         out.push(c);
         rest = chars.as_str();
-        starts_path = matches!(c, ' ' | '\'' | '"');
+        starts_path = c == ' ';
     }
     out
 }
@@ -192,14 +194,15 @@ mod tests {
     use super::tilde_paths;
 
     /// Verification of 2026-09-26: the home is shortened only where a path
-    /// starts, so a path that merely contains it keeps its name.
+    /// starts, so a path that merely contains it keeps its name, and never
+    /// in quoted advice meant to be pasted.
     #[test]
     fn a_note_shows_only_paths_under_the_home_with_a_tilde() {
         let home = "/home/u/";
         let note = "note: reads /home/u/a.toml, not /mnt/snap/home/u/g.toml; `garnish --config '/home/u/b' install`";
         assert_eq!(
             tilde_paths(note, home),
-            "note: reads ~/a.toml, not /mnt/snap/home/u/g.toml; `garnish --config '~/b' install`"
+            "note: reads ~/a.toml, not /mnt/snap/home/u/g.toml; `garnish --config '/home/u/b' install`"
         );
         assert_eq!(tilde_paths("/home/u/x", home), "~/x");
         assert_eq!(tilde_paths("/home/user/x", home), "/home/user/x");

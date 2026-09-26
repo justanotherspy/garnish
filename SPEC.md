@@ -742,19 +742,31 @@ stopped applying). `GARNISH_CONFIG` counts only as an absolute path: a
 relative one would name a file in whatever directory the tick runs in,
 the session's repository (Claude Code passes a settings `env` value
 unexpanded, so `"~/g.toml"` is relative), so the tick ignores it and a
-command run by hand refuses it. Without `--config` and `GARNISH_CONFIG`, a garnish
+command run by hand refuses it. A relative `--config` on the tick is
+ignored the same way (`sh` leaves the `~` of `--config=~/g.toml` alone),
+with a `⚠ config:` row saying so; `preview` and the other commands run by
+hand take it in their own directory (verification of 2026-09-26: the
+tick read a `~/g.toml` the session's repository shipped). Without
+`--config` and `GARNISH_CONFIG`, a garnish
 `statusLine.command` that passes its own `--config` (or, without one, a
 `GARNISH_CONFIG=` assignment before the program, else the
 `GARNISH_CONFIG` a settings file's `env` block gives it, the first the
 chain sets) names the file instead, since that is the one its ticks
-read. The command is the one
+read. The chain's managed layer is the managed file and, when that is
+the platform's, the `managed-settings.d/*.json` drop-ins beside it,
+which Claude Code applies above it (the last by name first). An `env`
+value of any JSON type counts, as the string JavaScript's `String()`
+makes of it and Claude Code puts in the environment (`["/p"]` is `/p`,
+`5` is `5`, `null` is `null`), and an empty one names no file, as for
+the tick. The command is the one
 Claude Code runs from the current directory, the first file of the
 settings chain (§ 2.3) that sets one, as `doctor` shows it, for every
 command run by hand: `config path` prints the file, `config check`,
 `config show`, `preview` and `doctor` read it, and `config init` and
 `setup` write it. When that command runs another program, the person's
 own garnish command (the managed or user file's) still names their
-config. A settings file is the person's own when it is the managed file
+config, with the `env` value of their own files alone, since no tick of
+it runs here. A settings file is the person's own when it is the managed file
 or sits in their settings directory (`CLAUDE_CONFIG_DIR`, else
 `~/.claude`, also `~/.claude` itself, by its path or the one it links
 to); any other local or project file is a checkout's, a repository
@@ -775,7 +787,8 @@ settings (the user file, the platform's managed file or a
 `GARNISH_MANAGED_SETTINGS` likewise, else the platform's managed file
 stands, in `doctor`'s chain too; outside one, a `GARNISH_CONFIG` the
 current directory's checkout files set is refused too. For `install` the command is the one in the file it
-rewrites (`--settings`, else the user file); `install` keeps it, writing
+rewrites (`--settings`, else the user file), and its `env` value the
+managed layer's, else that file's own; `install` keeps it, writing
 the default config there when it is missing and checking its `padding`
 against that file, but writes no config a `--settings` file that is not
 the person's own names (it says why). `setup --install` says so when the

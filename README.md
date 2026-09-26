@@ -135,7 +135,9 @@ cloned repository must not choose a file garnish reads or writes: each
 refuses on one line, and `garnish --config FILE …` says which you mean;
 inside a Claude Code session a `GARNISH_CONFIG` counts only when your own
 `~/.claude/settings.json` sets it, and anywhere only as an absolute path,
-since Claude Code does not expand `~` in a settings value).
+since Claude Code does not expand `~` in a settings value; the status
+line ignores a relative `--config` too, and says so on a `⚠ config:`
+row).
 The equivalent by hand:
 
 ```json

@@ -813,8 +813,8 @@ fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
     match config::read_target(explicit) {
         config::ReadTarget::File(path) => Ok(Some(path)),
         config::ReadTarget::Defaults => Ok(None),
-        config::ReadTarget::Unresolved { settings, word } => {
-            Err(refusal(Refusal::UnresolvedConfig { settings, word }))
+        config::ReadTarget::Unresolved { settings, key, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, key, word }))
         }
         config::ReadTarget::Checkout(checkout) => Err(refusal(Refusal::CheckoutConfig(checkout))),
     }
@@ -827,8 +827,8 @@ fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBu
         config::WriteTarget::NoHome => {
             Err(refusal(Refusal::NoHome { flag: "--config <FILE>", what }))
         }
-        config::WriteTarget::Unresolved { settings, word } => {
-            Err(refusal(Refusal::UnresolvedConfig { settings, word }))
+        config::WriteTarget::Unresolved { settings, key, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, key, word }))
         }
         config::WriteTarget::Checkout(checkout) => Err(refusal(Refusal::CheckoutConfig(checkout))),
     }

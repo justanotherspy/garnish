@@ -71,9 +71,10 @@ pub fn report_with(
     let (config_path, unresolved) = match config_file {
         config::ReadTarget::File(p) => (Some(p.clone()), None),
         config::ReadTarget::Defaults => (config::lookup(), None),
-        config::ReadTarget::Unresolved { settings, word } => {
+        config::ReadTarget::Unresolved { settings, key, word } => {
             let refusal = crate::install::Refusal::UnresolvedConfig {
                 settings: settings.clone(),
+                key,
                 word: word.clone(),
             };
             (config::lookup(), Some(refusal.to_string()))

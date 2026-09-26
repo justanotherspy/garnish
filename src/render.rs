@@ -29,7 +29,8 @@ pub struct Request<'a> {
     /// Whether a cached module may look its entry up and spawn a worker:
     /// the tick does, `preview` never (SPEC § 14: a preview is not a
     /// tick, so it neither reads the cache nor forks; a cached module
-    /// shows its not-yet-refreshed state).
+    /// shows its not-yet-refreshed state). It marks the tick for the
+    /// relative `--config` rule too ([`render`]).
     pub workers: bool,
 }
 
@@ -51,7 +52,25 @@ pub fn render(req: &Request<'_>) -> String {
             return "⚠ garnish: bad payload\n".to_owned();
         }
     };
-    let loaded = config::load_with(req.config_path, &SCHEMAS, &req.overlay);
+    // A relative `--config` on the tick names a file in whatever directory
+    // the harness runs it in, the session's repository, which could ship
+    // one (verification of 2026-09-26): the tick reads the lookup's file
+    // and says why. A person running `preview` means their own directory.
+    let loaded = req.config_path.filter(|p| req.workers && p.is_relative()).map_or_else(
+        || config::load_with(req.config_path, &SCHEMAS, &req.overlay),
+        |relative| {
+            let mut loaded = config::load_exactly(config::lookup().as_deref(), &SCHEMAS);
+            loaded.errors.push(config::ConfigError {
+                path: String::new(),
+                message: format!(
+                    "--config {:?} is a relative path, so the built-in lookup's config is used; pass an absolute one",
+                    relative.display().to_string()
+                ),
+                line: None,
+            });
+            loaded
+        },
+    );
     let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
     let clock = Clock { workers: req.workers, config_file, ..Clock::from_env() };
     render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, &clock)

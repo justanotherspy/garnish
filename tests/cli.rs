@@ -1743,6 +1743,11 @@ fn a_settings_env_block_names_the_config_the_ticks_read() {
     let args = ["setup", "--preset", "minimal", "--install"];
     let (out, err, ok) = run_in(&proj, &args, &home, &[]);
     assert!(ok && mine.exists() && !err.contains("reads "), "{out}{err}");
+    // `install` writes its default config there too (verification of
+    // 2026-09-26: a mutation dropping the value was not caught).
+    std::fs::remove_file(&mine).unwrap();
+    let (out, err, ok) = run_in(&proj, &["install", "--no-skills", "--absolute"], &home, &[]);
+    assert!(ok && mine.exists(), "{out}{err}");
     // A checkout's block is refused.
     settings(
         &proj,
@@ -1760,6 +1765,10 @@ fn a_settings_env_block_names_the_config_the_ticks_read() {
     );
     let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &[]);
     assert!(!ok && err.contains("\"~/g.toml\"") && err.contains("no one file"), "{out}{err}");
+    assert!(err.contains("env.GARNISH_CONFIG") && err.contains("expands nothing"), "{err}");
+    let (out, err, ok) = run_in(&proj, &["install", "--no-skills", "--absolute"], &home, &[]);
+    assert!(ok && err.contains("note: env.GARNISH_CONFIG names the config"), "{out}{err}");
+    assert!(err.contains("expands nothing") && !home.join("~").exists(), "{out}{err}");
     std::fs::remove_file(home.join(".claude/settings.json")).unwrap();
     let (out, err, ok) =
         run_in(&proj, &["config", "path"], &home, &[("GARNISH_CONFIG", "rel.toml")]);
@@ -1775,6 +1784,63 @@ fn a_settings_env_block_names_the_config_the_ticks_read() {
     let tick =
         sh_tick(&format!("GARNISH_CONFIG=rel.toml {}", env!("CARGO_BIN_EXE_garnish")), &home);
     assert!(tick.contains("XDGFILE") && !tick.contains("RELFILE"), "{tick}");
+    // A relative `--config` too, and the row says why (verification of
+    // 2026-09-26: `--config=~/g.toml`, which `sh` does not expand, read a
+    // `~/g.toml` the session's repository shipped).
+    let tick = sh_tick(&format!("{} --config=rel.toml", env!("CARGO_BIN_EXE_garnish")), &home);
+    assert!(tick.contains("XDGFILE") && !tick.contains("RELFILE"), "{tick}");
+    assert!(
+        tick.contains("⚠ config:") && tick.contains("\"rel.toml\" is a relative path"),
+        "{tick}"
+    );
+    // `preview`, run by hand, means the person's own directory.
+    let payload = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/payloads/subscription-full.json");
+    let args = ["--config", "rel.toml", "preview", payload.to_str().unwrap(), "--width", "100"];
+    let (out, err, ok) = run_in(&home, &args, &home, &[]);
+    assert!(ok && out.contains("RELFILE") && !out.contains("⚠"), "{out}{err}");
+}
+
+/// Verification of 2026-09-26: an `env` value of any JSON type counts as
+/// Claude Code's `String()` of it, the first file that sets it wins even
+/// when empty, and a project that runs another program has no say in the
+/// config the person's own command reads elsewhere.
+#[test]
+fn every_env_value_counts_in_the_chain_as_claude_code_reads_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let proj = dir.path().join("proj");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(proj.join(".claude")).unwrap();
+    let settings = |dir: &Path, command: &str, env: serde_json::Value| {
+        let json = serde_json::json!({"env": {"GARNISH_CONFIG": env},
+            "statusLine": {"type": "command", "command": command}});
+        std::fs::write(dir.join(".claude/settings.json"), json.to_string()).unwrap();
+    };
+    let path = || run_in(&proj, &["config", "path"], &home, &[]);
+    let mine = home.join("u.toml");
+    settings(&home, "garnish", serde_json::json!(mine));
+    let victim = home.join(".profile");
+    for value in [serde_json::json!([victim]), serde_json::json!(5), serde_json::json!(null)] {
+        settings(&proj, "garnish", value.clone());
+        let (out, err, ok) = path();
+        assert!(
+            !ok && err.contains("proj/.claude/settings.json: env.GARNISH_CONFIG"),
+            "{value}: {out}{err}"
+        );
+    }
+    // An empty value names nothing: the tick reads the lookup's file.
+    settings(&proj, "garnish", serde_json::json!(""));
+    let (out, err, ok) = path();
+    let xdg = home.join(".config/garnish/garnish.toml");
+    assert!(ok && out.trim_end() == xdg.to_str().unwrap(), "{out}{err}");
+    // Another program here: the user's own command and `env` decide.
+    settings(&proj, "echo hi", serde_json::json!(victim));
+    let (out, err, ok) = path();
+    assert!(ok && out.trim_end() == mine.to_str().unwrap(), "{out}{err}");
+    settings(&proj, "echo hi", serde_json::json!(""));
+    let (out, err, ok) = path();
+    assert!(ok && out.trim_end() == mine.to_str().unwrap(), "{out}{err}");
 }
 
 /// A home reached through a link is still the person's: a session started

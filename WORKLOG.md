@@ -1123,7 +1123,26 @@ was built, what the reviews found and what was decided, not how.
     it. The platform file standing in for an ignored hook was still
     demoted as the checkout's, and `doctor` showed the hook's file;
     `managed-settings.d` drop-ins now vouch; the screen tilded a home
-    inside a longer path; five untested mutations now have tests.
+    inside a longer path; five untested mutations now have tests. A
+    seventh verifier (Claude Code 2.1.283 again, `/etc` scenarios in a
+    private mount namespace) also found no checkout choosing the file,
+    and nine smaller things, fixed: an `env` value of another JSON type
+    was skipped where Claude Code takes its `String()` (`["/p"]` is
+    `/p`), so a lower file's value was named (`js_string`); the
+    `managed-settings.d` drop-ins vouched in a session but were not in the
+    chain, so `config path` answered two ways (now the managed layer,
+    `layer_of`, all of them, sorted, no longer the first 64 the directory
+    lists); `install` and the `setup --install` note ignored a managed
+    `env` value (`installed_env_target`); a project running another
+    program still had its `env` decide the person's config elsewhere; an
+    `env` value was reported as `statusLine.command`'s (`Unresolved` has
+    a `key`); the screen tilded a path inside quotes, which pasted made a
+    `~` directory; and a relative `--config` in the person's own command
+    (`--config=~/g.toml`, which `sh` leaves alone) made the tick read the
+    repository's file: the tick now reads the lookup's with a `⚠
+    config:` row. The two mutations only a platform managed file could
+    show (`demote_hooked`, the drop-ins) are unit tests now, beside an
+    empty value and `install` following the user's `env`.
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was

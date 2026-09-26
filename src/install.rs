@@ -258,6 +258,16 @@ fn garnish_at(words: &[Word], command: &str) -> Option<usize> {
 /// worth (as `doctor` cuts the command it echoes).
 const MAX_SHOWN_WORD_CHARS: usize = 200;
 
+/// Why a value under the settings key `key` names no file, when it is an
+/// `env` value: its `~` or `$HOME` is as literal as the rest.
+fn expands_nothing(key: &str) -> &'static str {
+    if key.starts_with("env.") {
+        " (Claude Code expands nothing in a settings value, `~` included)"
+    } else {
+        ""
+    }
+}
+
 /// `word` cut to [`MAX_SHOWN_WORD_CHARS`], with `…` when something was cut;
 /// quoted with `{:?}` by the caller, which also keeps a control character
 /// from reaching the terminal.
@@ -781,13 +791,16 @@ pub enum Refusal {
     },
     /// A file that exists where one is to be created, without `--force`.
     Exists(PathBuf),
-    /// The garnish `statusLine.command` passes `--config` a value that
-    /// stands for no one file ([`CommandConfig::Unresolved`]), so there is
-    /// no telling which config its ticks read.
+    /// A settings file names the config by a value that stands for no one
+    /// file (a `--config` of [`CommandConfig::Unresolved`], or a relative
+    /// `env.GARNISH_CONFIG`), so there is no telling which config its ticks
+    /// read.
     UnresolvedConfig {
         /// The settings file.
         settings: PathBuf,
-        /// The value, as the command spells it.
+        /// The key naming it: `statusLine.command` or `env.GARNISH_CONFIG`.
+        key: &'static str,
+        /// The value, as the file spells it.
         word: String,
     },
     /// A settings file that is not the person's own names the config: a
@@ -804,11 +817,12 @@ impl std::fmt::Display for Refusal {
                 write!(f, "HOME is not set; pass {flag} to say where {what}")
             }
             Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
-            Self::UnresolvedConfig { settings, word } => write!(
+            Self::UnresolvedConfig { settings, key, word } => write!(
                 f,
-                "{}: statusLine.command names the config {:?}, which is no one file garnish can find; pass --config <FILE> to say which",
+                "{}: {key} names the config {:?}, which is no one file garnish can find{}; pass --config <FILE> to say which",
                 settings.display(),
-                shown_word(word)
+                shown_word(word),
+                expands_nothing(key)
             ),
             Self::CheckoutConfig(c) => {
                 let shown = shown_word(&c.path.to_string_lossy());
@@ -848,11 +862,16 @@ impl std::error::Error for Refusal {}
 pub enum ConfigStep {
     /// `--no-config`.
     Skipped,
-    /// The command passes `--config` a value that stands for no one file
-    /// ([`CommandConfig::Unresolved`], as written): no default config is
-    /// written, since it could land where the command never reads, and
-    /// the report says so.
-    Unresolved(String),
+    /// The settings file names the config by a value that stands for no one
+    /// file (`config::WriteTarget::Unresolved`): no default config is
+    /// written, since it could land where the command never reads, and the
+    /// report says so.
+    Unresolved {
+        /// The key naming it: `statusLine.command` or `env.GARNISH_CONFIG`.
+        key: &'static str,
+        /// The value, as written.
+        word: String,
+    },
     /// The settings file is not the person's own and its command names
     /// this config (`config::WriteTarget::Checkout`): no default config is
     /// written, since garnish never writes a file such a file chooses, and
@@ -1003,7 +1022,7 @@ impl Steps {
                         what: "the config goes",
                     });
                 }
-                WriteTarget::Unresolved { word, .. } => ConfigStep::Unresolved(word),
+                WriteTarget::Unresolved { key, word, .. } => ConfigStep::Unresolved { key, word },
                 WriteTarget::Checkout(checkout) => ConfigStep::Checkout(checkout.path),
             }
         } else {
@@ -1015,10 +1034,11 @@ impl Steps {
             let reads = match command_config(&command, home.as_deref()) {
                 Some(CommandConfig::File(reads)) => Some(reads),
                 Some(CommandConfig::Unresolved(_)) => None,
-                None => env.filter(|value| !value.is_empty()).map(PathBuf::from).map_or_else(
-                    || crate::config::lookup().or_else(crate::config::default_path),
-                    |set| Some(set).filter(|p| p.is_absolute()),
-                ),
+                None => match crate::config::installed_env_target(&plan.settings, env) {
+                    Some(WriteTarget::File(set)) => Some(set),
+                    Some(_) => None,
+                    None => crate::config::lookup().or_else(crate::config::default_path),
+                },
             };
             match (&options.config_written, reads) {
                 (Some(written), Some(reads)) if !same_file(written, &reads) => {
@@ -1075,7 +1095,7 @@ impl Steps {
             }
             ConfigStep::Exists { .. }
             | ConfigStep::Skipped
-            | ConfigStep::Unresolved(_)
+            | ConfigStep::Unresolved { .. }
             | ConfigStep::Checkout(_)
             | ConfigStep::Elsewhere { .. } => {}
         }
@@ -1107,9 +1127,10 @@ impl Steps {
                 "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
                 path.display()
             )),
-            ConfigStep::Unresolved(word) => notes.push(format!(
-                "note: statusLine.command names the config {:?}, which is no one file garnish can find, so no default config is written; pass --config <FILE> to say which",
-                shown_word(word)
+            ConfigStep::Unresolved { key, word } => notes.push(format!(
+                "note: {key} names the config {:?}, which is no one file garnish can find{}, so no default config is written; pass --config <FILE> to say which",
+                shown_word(word),
+                expands_nothing(key)
             )),
             ConfigStep::Checkout(path) => notes.push(format!(
                 "note: {} is not your own settings file, and garnish never writes the config {:?} it names, so no default config is written; pass --config <FILE> to say which",
@@ -1367,14 +1388,14 @@ mod tests {
     #[test]
     fn a_quoted_config_word_is_cut() {
         let long = "x".repeat(5000);
-        let note = Refusal::UnresolvedConfig { settings: PathBuf::from("/s.json"), word: long }
-            .to_string();
+        let settings = PathBuf::from("/s.json");
+        let key = "statusLine.command";
+        let note =
+            Refusal::UnresolvedConfig { settings: settings.clone(), key, word: long }.to_string();
         assert!(note.chars().count() < 400, "{} characters", note.chars().count());
         assert!(note.contains(&format!("\"{}…\"", "x".repeat(MAX_SHOWN_WORD_CHARS))), "{note}");
-        let short = Refusal::UnresolvedConfig {
-            settings: PathBuf::from("/s.json"),
-            word: "\"~/w\u{1b}.toml\"".to_owned(),
-        };
+        let short =
+            Refusal::UnresolvedConfig { settings, key, word: "\"~/w\u{1b}.toml\"".to_owned() };
         assert!(short.to_string().contains(r#"the config "\"~/w\u{1b}.toml\"""#), "{short}");
         // `install`'s note too.
         let dir = tempfile::tempdir().unwrap();
