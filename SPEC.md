@@ -1598,7 +1598,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   whatever its pid, so nothing was added.)
 - Worker: `garnish [--config C] refresh --module M --session S --cwd D`,
   null stdio, `process_group(0)`, spawned without wait. `--config` names the
-  file the tick loaded (absolute), when it loaded one, so the worker reads
+  file the tick loaded (absolute, and as bytes: a path that is not UTF-8
+  reaches the worker intact, where a lossy one named no file and the
+  worker read the defaults), when it loaded one, so the worker reads
   the same options: a `--config` on the status line command is not in the
   environment the worker inherits, and it used to re-resolve the config
   and take `sync.fetch_interval` from another file (review 2026-09-25).

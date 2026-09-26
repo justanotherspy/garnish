@@ -1158,6 +1158,42 @@ fn spawn_worker_outlives_the_ticks_process_group() {
     panic!("the worker never wrote sync.cache: {:?}", repo_cache_files(&env));
 }
 
+/// A config path is any bytes, and the worker a tick spawns must read the
+/// file the tick read: the path went through a lossy conversion, so the
+/// worker looked for a name with U+FFFD in it, read the defaults, and an
+/// opted-in `fetch_interval` never fetched (review 2026-09-25).
+#[test]
+fn spawn_a_worker_reads_a_config_whose_path_is_not_utf8() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let env = setup();
+    config(&env, ONE_LINE);
+    let own = env.work.parent().unwrap().join(std::ffi::OsStr::from_bytes(b"caf\xe9.toml"));
+    let text = "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\nfetch_interval = 1\n";
+    if std::fs::write(&own, text).is_err() {
+        return; // a filesystem that takes UTF-8 names only (APFS)
+    }
+    let mut child = cmd(&env, &[])
+        .arg("--config")
+        .arg(&own)
+        .env_remove("GARNISH_NO_SPAWN")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload(&env.work).as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(20) {
+        if repo_cache_files(&env).iter().any(|f| f == "sync.cache") {
+            let entry = sync_entry(&env);
+            assert!(entry.contains("fetch_attempt="), "the worker read another config: {entry}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("the worker never wrote sync.cache: {:?}", repo_cache_files(&env));
+}
+
 #[test]
 fn cache_leftover_temp_and_truncated_entries_are_ignored() {
     let env = setup();
