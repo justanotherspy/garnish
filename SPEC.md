@@ -1296,7 +1296,16 @@ color = "accent"               # role or literal for the box's glyphs; default t
   cap's pad, as the free width does (above); a line with an empty cap
   keeps the pad when it has the cells for it (2026-09-26: they went
   between the text and the pad, and a line with no cap had no pad, so
-  the rule touched the text: `⏱ 1h12m--`). On a one-line row, `fill` draws the rule glyph (or the
+  the rule touched the text: `⏱ 1h12m--`). A row's height is measured
+  on the room it is laid out to, the caps of the lines it lands on,
+  which depend on the heights before it, so the rows are measured again
+  until none moves (2026-09-26: a row was measured on the narrowest pair
+  of the whole frame and laid out on its own, so a box that fitted only
+  on its own lines was drawn at full height and cut, losing its bottom
+  edge and the rows after it). A frame whose heights never settle (a
+  row whose box fits under the narrow `single` caps, but not under the
+  `first` and `last` its three lines would take) is measured and laid
+  out on the narrowest pair. On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is

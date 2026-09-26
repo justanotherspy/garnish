@@ -283,20 +283,31 @@ impl Layout<'_> {
         // The frame's caps are decided over the lines that carry them: a
         // box draws its own ends, so its lines are not counted (SPEC § 4.3).
         let fill = self.frame_fill();
-        let framed: usize = blocks
+        let framed: Vec<&Row<'_>> = blocks
             .iter()
             .filter(|b| b.boxed.is_none())
-            .map(|b| {
-                b.rows
-                    .iter()
-                    .map(|(_, r)| self.row_height(r, self.frame_room(r), fill))
-                    .sum::<usize>()
-            })
-            .sum();
+            .flat_map(|b| b.rows.iter().map(|(_, r)| *r))
+            .collect();
+        let plan = self.frame_plan(&framed, fill);
+        let count: usize = plan.iter().map(|(_, height)| *height).sum();
+        let mut plan = plan.into_iter();
         let mut out: Vec<Vec<Line>> = vec![Vec::new(); rows.len()];
         let mut index = 0_usize;
         for block in blocks {
-            for (at, lines) in self.block_lines(&block, &mut index, framed) {
+            let tagged = block.boxed.map_or_else(
+                || {
+                    let mut tagged = Vec::with_capacity(block.rows.len());
+                    for (at, row) in &block.rows {
+                        let Some((room, height)) = plan.next() else { break };
+                        tagged.push((*at, self.frame_row(row, room, height, (index, count), fill)));
+                        index = index.saturating_add(height);
+                    }
+                    tagged
+                },
+                // A box replaces the frame's caps with its own edges.
+                |boxed| self.boxed_block(&block, boxed),
+            );
+            for (at, lines) in tagged {
                 if let Some(slot) = out.get_mut(at) {
                     slot.extend(lines);
                 }
@@ -305,62 +316,79 @@ impl Layout<'_> {
         out
     }
 
-    /// The lines of one block, each tagged with the configured row it
-    /// belongs to.
-    fn block_lines(
+    /// Each row of the frame's room and height, in order: the cells its
+    /// columns share, and the lines it takes when laid out to them.
+    ///
+    /// A row's lines take the caps of where they land among the frame's
+    /// (`first`, `middle`, `last`), and a `custom` frame's need not be one
+    /// width: a row is laid out to the room the widest pair on its lines
+    /// leaves, so no line overflows and the others fill the difference with
+    /// rule cells. Where its lines land depends on the heights, and a
+    /// height on the room (a box adds its two lines only where it fits,
+    /// SPEC § 4.3), so every row starts on the fewest cells any pair of
+    /// caps leaves ([`Self::frame_room`]) and each round measures it again
+    /// on the caps its lines land on, until no row moves; under a style,
+    /// whose caps are one width, the first round moves none. A height
+    /// changes only where a box starts or stops fitting, so this settles
+    /// within a few rounds or never: a row whose box fits under the narrow
+    /// `single` caps but not under the `first` and `last` ones its three
+    /// lines would take has no height that holds, and a frame that does
+    /// not settle keeps the first measure, laid out to those cells.
+    fn frame_plan(&self, rows: &[&Row<'_>], fill: Fill) -> Vec<(usize, usize)> {
+        const ROUNDS: usize = 8;
+        let start = || -> Vec<(usize, usize)> {
+            rows.iter()
+                .map(|row| {
+                    let room = self.frame_room(row);
+                    (room, self.row_height(row, room, fill))
+                })
+                .collect()
+        };
+        let mut plan = start();
+        for _ in 0..ROUNDS {
+            let count: usize = plan.iter().map(|(_, height)| *height).sum();
+            let mut index = 0_usize;
+            let mut settled = true;
+            for (row, (room, height)) in rows.iter().zip(plan.iter_mut()) {
+                let lines = index..index.saturating_add(*height);
+                index = lines.end;
+                let fits = lines.map(|i| self.inner_width(row, i, count)).min().unwrap_or(*room);
+                if fits != *room {
+                    settled = false;
+                    *room = fits;
+                    *height = self.row_height(row, fits, fill);
+                }
+            }
+            if settled {
+                return plan;
+            }
+        }
+        start()
+    }
+
+    /// One row of the frame laid out to `room` cells and `height` lines,
+    /// its first line being line `index` of the `count` that carry caps.
+    fn frame_row(
         &self,
-        block: &Block<'_, '_>,
-        index: &mut usize,
-        framed: usize,
-    ) -> Vec<(usize, Vec<Line>)> {
-        block.boxed.map_or_else(
-            || {
-                block
-                    .rows
-                    .iter()
-                    .map(|(at, row)| {
-                        let fill = self.frame_fill();
-                        let height = self.row_height(row, self.frame_room(row), fill);
-                        // A tall row's lines take different caps (`first`
-                        // then `middle`), and a `custom` frame's need not
-                        // be the same width: the columns share the room the
-                        // *widest* pair leaves, so no line overflows and the
-                        // others fill the difference with rule cells.
-                        let inner = (0..height)
-                            .map(|i| self.inner_width(row, index.saturating_add(i), framed))
-                            .min()
-                            .unwrap_or_else(|| self.inner_width(row, *index, framed));
-                        let widths = self.share(row, inner, fill);
-                        let ends = self.ends_in_content(row, &widths);
-                        let lines = self
-                            .row_columns(row, &widths, height, fill, Fit::default())
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, drafts)| {
-                                // A row's title goes into its first line
-                                // alone, however tall the row is. A boxed
-                                // row's belongs to its box, which draws it
-                                // on its top edge; none reaches this arm.
-                                let title = row.title.filter(|_| i == 0);
-                                let line = self.wrap_frame(
-                                    drafts,
-                                    (*index, framed),
-                                    row,
-                                    fill,
-                                    title,
-                                    ends,
-                                );
-                                *index = index.saturating_add(1);
-                                line
-                            })
-                            .collect();
-                        (*at, lines)
-                    })
-                    .collect()
-            },
-            // A box replaces the frame's caps with its own edges.
-            |boxed| self.boxed_block(block, boxed),
-        )
+        row: &Row<'_>,
+        room: usize,
+        height: usize,
+        (index, count): (usize, usize),
+        fill: Fill,
+    ) -> Vec<Line> {
+        let widths = self.share(row, room, fill);
+        let ends = self.ends_in_content(row, &widths);
+        self.row_columns(row, &widths, height, fill, Fit::default())
+            .into_iter()
+            .enumerate()
+            .map(|(i, drafts)| {
+                // A row's title goes into its first line alone, however tall
+                // the row is. A boxed row's belongs to its box, which draws
+                // it on its top edge; none reaches here.
+                let title = row.title.filter(|_| i == 0);
+                self.wrap_frame(drafts, (index.saturating_add(i), count), row, fill, title, ends)
+            })
+            .collect()
     }
 
     /// The lines of a block drawn inside a box, each tagged with the
@@ -386,10 +414,10 @@ impl Layout<'_> {
         out
     }
 
-    /// The cells a row's columns share, once the frame's caps of its first
-    /// line are taken off (the caps of a style are the same width on every
-    /// line; a `custom` frame whose caps differ has the difference filled
-    /// with rule cells before the cap).
+    /// The cells line `index` of the `count` that carry the frame's caps
+    /// leaves a row's columns, once its caps are taken off (the caps of a
+    /// style are the same width on every line; a `custom` frame whose caps
+    /// differ has the difference filled with rule cells before the cap).
     fn inner_width(&self, row: &Row<'_>, index: usize, count: usize) -> usize {
         let (prefix, cap) = self.chars.ends(index, count);
         let pad = display_width(&self.chars.pad);
@@ -411,11 +439,10 @@ impl Layout<'_> {
     }
 
     /// The cells a row of the frame can count on whichever of the frame's
-    /// lines it lands on: the fewest any pair of caps leaves. Its height is
-    /// measured on these, before its lines are placed among the frame's
-    /// (a box too narrow to draw adds none, SPEC § 4.3); under a style,
-    /// whose caps are all one width, they are exactly the cells it is laid
-    /// out to.
+    /// lines it lands on: the fewest any pair of caps leaves, where
+    /// [`Self::frame_plan`] starts and what it falls back to. Under a style,
+    /// whose caps are all one width, they are exactly the cells the row is
+    /// laid out to.
     fn frame_room(&self, row: &Row<'_>) -> usize {
         [(0, 1), (0, 3), (1, 3), (2, 3)]
             .into_iter()
@@ -918,28 +945,34 @@ impl Layout<'_> {
         fit: Fit,
     ) -> Vec<Vec<Draft>> {
         let Some(boxed) = col.boxed else {
-            return self.col_body(col, width, height, row, fill, fit);
+            return Self::placed(col, self.col_content(col, width, row, fill, fit), width, height);
         };
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
         // Too narrow to draw at all: the column keeps its share and renders
         // nothing, and `col_height` gave it no edge lines (SPEC § 4.3). Its
         // cells are empty cells like any other: rule on a one-line row under
-        // a rule, spaces on a taller one. A row too short for the edges is
-        // one measured where the box did not fit (on the fewest cells a
-        // custom frame's caps leave) and laid out where it does: it is not
-        // drawn there either, rather than drawn as a top edge alone.
-        let Some((inner, pad)) = self.box_interior(&chars, width).filter(|_| height > 2) else {
+        // a rule, spaces on a taller one.
+        let empty = || {
             let empty =
                 if height > 1 { Draft::Space(width, Elem::Pad) } else { Self::filler(width, fill) };
-            return (0..height.max(1)).map(|_| vec![empty.clone()]).collect();
+            (0..height.max(1)).map(|_| vec![empty.clone()]).collect()
         };
-        let interior = height.saturating_sub(2);
+        let Some((inner, pad)) = self.box_interior(&chars, width) else {
+            return empty();
+        };
         // Inside its own box a column is padded by the box, not by the row.
-        let body = self.col_body(col, inner, interior, row, Fill::from_box(&cfg), fit.in_box());
-        let mut lines = self.box_lines(&cfg, &chars, width, pad, cfg.title.as_ref(), body);
-        lines.truncate(height.max(1));
-        lines
+        let content = self.col_content(col, inner, row, Fill::from_box(&cfg), fit.in_box());
+        // A row is measured at the width it is laid out to (`frame_plan`
+        // for a row of the frame), so its height holds every line of a box
+        // that fits there. Were it ever short, the box would be empty cells
+        // too, never a top edge alone or a box cut through its content.
+        let interior = height.saturating_sub(2);
+        if content.len().max(1) > interior {
+            return empty();
+        }
+        let body = Self::placed(col, content, inner, interior);
+        self.box_lines(&cfg, &chars, width, pad, cfg.title.as_ref(), body)
     }
 
     /// The cells inside a box of `width`, and the pad each side of them.
@@ -966,17 +999,16 @@ impl Layout<'_> {
         }
     }
 
-    /// A column's content lines, padded to `height` by `valign`.
-    fn col_body(
+    /// A column's content lines: its groups' one line, or its stack's.
+    fn col_content(
         &self,
         col: &Col<'_>,
         width: usize,
-        height: usize,
         row: &Row<'_>,
         fill: Fill,
         fit: Fit,
     ) -> Vec<Vec<Draft>> {
-        let content: Vec<Vec<Draft>> = match &col.content {
+        match &col.content {
             Content::Groups { left, right, left_ids, right_ids } => {
                 let group = Group {
                     left,
@@ -992,7 +1024,17 @@ impl Layout<'_> {
                 .iter()
                 .flat_map(|block| self.stack_block(block, width, fill, fit))
                 .collect(),
-        };
+        }
+    }
+
+    /// A column's `content` lines, `width` cells each, padded to `height`
+    /// by `valign`.
+    fn placed(
+        col: &Col<'_>,
+        content: Vec<Vec<Draft>>,
+        width: usize,
+        height: usize,
+    ) -> Vec<Vec<Draft>> {
         // A padding line is the column's cells as spaces, whatever the fill
         // mode: they place the columns to its right, and a packed row drops
         // them again at the end of the line, where nothing follows.
@@ -3270,6 +3312,112 @@ mod tests {
                         || (t.starts_with(' ') && t.chars().skip(1).all(|c| c == '─'))),
                     "the rule touches the text: {text:?}"
                 );
+            }
+        }
+    }
+
+    /// SPEC § 4.3: under a `custom` frame whose caps differ, a row of the
+    /// frame is measured on the caps of the lines it lands on. It was
+    /// measured on the narrowest pair (here the wide `right_last`, which only
+    /// the last row carries) and laid out on its own, so a box that fitted
+    /// only there was drawn at full height and cut to the smaller measure:
+    /// its bottom edge and the rows after it were gone
+    /// (`| ⠋ 16:00… | ]` with no `+---+` under it), or its top edge stood
+    /// alone.
+    #[test]
+    fn a_row_is_measured_on_the_caps_its_lines_land_on() {
+        let wide = "]".repeat(12);
+        let chars = FrameChars {
+            first: "[".to_owned(),
+            middle: "|".to_owned(),
+            last: "[".to_owned(),
+            single: "[".to_owned(),
+            right_first: "]".to_owned(),
+            right_middle: "]".to_owned(),
+            right_last: wide.clone(),
+            right_single: "]".to_owned(),
+            fill: "-".to_owned(),
+            pad: " ".to_owned(),
+            top_left: "A".to_owned(),
+            top_right: "B".to_owned(),
+            bottom_left: "C".to_owned(),
+            bottom_right: "D".to_owned(),
+            side: "|".to_owned(),
+            ..FrameChars::for_style(FrameStyle::Rounded)
+        };
+        let bare = |text: &str| row(vec![col(Width::Fr(1), text)], 1);
+        let boxed = |text: &str| Row { boxed: Some(&BoxRef::Anon), ..bare(text) };
+        let shapes = [
+            // A stack with a boxed row, and a boxed column holding a stack.
+            Col {
+                content: Content::Stack(vec![bare("x"), boxed("y"), bare("z")]),
+                ..col(Width::Fr(1), "")
+            },
+            Col {
+                boxed: Some(&BoxRef::Anon),
+                content: Content::Stack(vec![bare("x"), bare("y"), bare("z")]),
+                ..col(Width::Fr(1), "")
+            },
+        ];
+        let lines_of = |l: &Layout<'_>, rows: &[Row<'_>]| -> Vec<Vec<String>> {
+            l.lines(rows).iter().map(|lines| lines.iter().map(show).collect()).collect()
+        };
+        for (width, shape) in (16_usize..=48).flat_map(|w| shapes.clone().map(|s| (w, s))) {
+            let mut f = Fixture::new(FrameStyle::Custom, true, width);
+            f.chars = chars.clone();
+            let l = f.layout();
+            let rows = [row(vec![col(Width::Cells(12), "m"), shape], 1), bare("p")];
+            let lines = lines_of(&l, &rows);
+            let text = lines.iter().flatten().cloned().collect::<Vec<_>>().join("\n");
+            for line in l.lines(&rows).iter().flatten() {
+                assert_eq!(line.width(), width, "{width}:\n{text}");
+            }
+            let top = lines.first().cloned().unwrap_or_default();
+            let count = |c: char| top.iter().filter(|line| line.contains(c)).count();
+            assert_eq!(
+                count('A'),
+                count('C'),
+                "a box is drawn whole or not at all, {width}:\n{text}"
+            );
+            assert_eq!(count('x'), count('z'), "no row of the stack is cut away, {width}:\n{text}");
+            // The first row carries `first` and `middle` caps, one cell
+            // each, and never the last line's: its stack column has what
+            // the pads, the caps, the fixed column and the gap leave, and
+            // its box, two sides wide, is drawn wherever that holds it.
+            let share = width.saturating_sub(2 + 1 + 12 + 1);
+            assert_eq!(count('A'), usize::from(share >= 2), "{width}:\n{text}");
+            assert!(lines.get(1).is_some_and(|p| p.iter().all(|l| l.ends_with(&wide))), "{text}");
+        }
+        // A row that never settles: one line under the narrow `single` caps
+        // holds its box, and the three lines the box needs carry `first`
+        // and `last` caps too wide for it. It keeps the first measure, on
+        // the fewest cells any pair of caps leaves, and is laid out there:
+        // one line, no box, the rest of the line rule before the cap.
+        let tall = FrameChars { right_first: wide.clone(), right_middle: wide, ..chars };
+        for width in 16_usize..=48 {
+            let mut f = Fixture::new(FrameStyle::Custom, true, width);
+            f.chars = tall.clone();
+            let l = f.layout();
+            let r = row(
+                vec![
+                    col(Width::Cells(12), "m"),
+                    Col { boxed: Some(&BoxRef::Anon), ..col(Width::Fr(1), "x") },
+                ],
+                1,
+            );
+            let lines = lines_of(&l, std::slice::from_ref(&r)).concat();
+            let text = lines.join("\n");
+            let fits_single = width.saturating_sub(2 + 1 + 12 + 1) >= 2;
+            let fits_tall = width.saturating_sub(2 + 12 + 12 + 1) >= 2;
+            let want = if fits_tall { 3 } else { 1 };
+            assert_eq!(lines.len(), want, "{width} (single caps fit: {fits_single}):\n{text}");
+            assert_eq!(
+                lines.iter().filter(|l| l.contains('A')).count(),
+                lines.iter().filter(|l| l.contains('C')).count(),
+                "{width}:\n{text}"
+            );
+            for line in l.lines(std::slice::from_ref(&r)).iter().flatten() {
+                assert_eq!(line.width(), width, "{width}:\n{text}");
             }
         }
     }
