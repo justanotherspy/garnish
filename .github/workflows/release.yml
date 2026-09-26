@@ -15,7 +15,10 @@ permissions:
   contents: read
 
 # One release at a time, whatever the tag: two in flight would race for
-# the tap's main branch. A release is never cancelled half-way.
+# the tap's main branch. A release in progress is never cancelled, but
+# GitHub keeps only one *pending* run per group: while a release waits at
+# the approval gate, a second tag waits behind it and a third tag cancels
+# the second before its verify job starts (re-run that tag's workflow).
 concurrency:
   group: release
   cancel-in-progress: false
@@ -35,6 +38,7 @@ jobs:
   verify:
     name: verify tag
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -54,6 +58,13 @@ jobs:
           crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
           if [ "$version" != "$crate" ]; then
             echo "::error::tag $TAG does not match Cargo.toml version $crate"
+            exit 1
+          fi
+          # The build runs with --locked, so a lock left at the old version
+          # would fail every build job after the pre-release exists.
+          lock="$(awk '/^name = "garnish"$/ { getline; sub(/^version = "/, ""); sub(/"$/, ""); print; exit }' Cargo.lock)"
+          if [ "$version" != "$lock" ]; then
+            echo "::error::Cargo.lock records garnish $lock, not $version; commit the lock that make check rewrote"
             exit 1
           fi
           commit="$(git rev-parse "$TAG^{commit}")"
@@ -81,6 +92,47 @@ jobs:
             echo "::error::the 'release' environment has no required reviewer; the cask would be published unapproved"
             exit 1
           fi
+          # The rest of what CLAUDE.md § Release process says must be true of
+          # the environment: an administrator cannot skip the approval, and
+          # only v* tags may deploy to it.
+          if [ "$(printf '%s' "$env_json" | jq '.can_admins_bypass')" != false ]; then
+            echo "::error::the 'release' environment lets administrators bypass its reviewer; turn 'Allow administrators to bypass' off"
+            exit 1
+          fi
+          if [ "$(printf '%s' "$env_json" | jq '.deployment_branch_policy.custom_branch_policies // false')" != true ]; then
+            echo "::error::the 'release' environment accepts deployments from any branch; restrict it to v* tags"
+            exit 1
+          fi
+          # A custom policy exists; it must be exactly the v* tag rule, not a
+          # branch (main, say) that could deploy an untagged build.
+          policies="$(gh api "repos/$GITHUB_REPOSITORY/environments/release/deployment-branch-policies" \
+            --jq '[.branch_policies[] | {name, type}]')"
+          if [ "$(printf '%s' "$policies" | jq -c .)" != '[{"name":"v*","type":"tag"}]' ]; then
+            echo "::error::the 'release' environment's deployment policy is $policies; it must be the one tag rule v*"
+            exit 1
+          fi
+      # Asked of the API, since a shallow or refspec fetch can turn a tag into
+      # a lightweight ref locally. GitHub verifies a signature only against a
+      # signing key registered on the tagger's account, so the signature
+      # informs rather than gates: the v* tag ruleset requiring signatures is
+      # what refuses an unsigned tag at push time.
+      - name: The tag must be annotated
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")"
+          if [ "$(printf '%s' "$ref" | jq -r '.object.type')" != tag ]; then
+            echo "::error::$TAG is a lightweight tag; a release is a signed annotated tag (git tag -s)"
+            exit 1
+          fi
+          object="$(printf '%s' "$ref" | jq -r '.object.sha')"
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object" --jq '.verification.verified')" = true ]; then
+            echo "$TAG carries a signature GitHub verified"
+          else
+            echo "::warning::GitHub did not verify the signature on $TAG"
+          fi
 
   # The pre-release the build jobs attach their archives to. Notes are the
   # CHANGELOG section, the same text as the tag message. A re-run keeps an
@@ -89,6 +141,7 @@ jobs:
     name: github pre-release
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -115,6 +168,7 @@ jobs:
     name: build ${{ matrix.target }}
     needs: [verify, release]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     permissions:
       contents: write
     strategy:
@@ -133,18 +187,49 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The same toolchain as CI (rust-toolchain.toml), plus the target.
-      - run: ./scripts/setup.sh
-      - run: rustup target add "${{ matrix.target }}"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ${{ matrix.target }}
+      # The same toolchain as CI (rust-toolchain.toml), plus the target, and
+      # nothing else: this job holds contents: write and builds what ships,
+      # so it runs neither scripts/setup.sh (nextest, shellcheck) nor a
+      # cache another workflow could have written (a default-branch job's
+      # cache is readable from a tag run; every first attempt is a cold
+      # fat-LTO build anyway).
+      - name: Toolchain and target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if ! command -v rustup > /dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --default-toolchain none
+            echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
+            export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+          fi
+          rustup toolchain install --profile minimal
+          rustup target add "$TARGET"
       # Built once here with --locked so the smoke test below sees the real
       # binary; the upload action's own --locked build is then a no-op.
       - run: cargo build --release --locked --target "${{ matrix.target }}"
       # The x86_64 macOS binary is built on an arm runner and cannot run there.
-      - if: matrix.target != 'x86_64-apple-darwin'
-        run: "target/${{ matrix.target }}/release/garnish --version"
+      # CI never builds the release profile (fat LTO, panic = abort, strip),
+      # so the binary that ships renders one line before it is uploaded.
+      - name: Smoke-test the release binary
+        if: matrix.target != 'x86_64-apple-darwin'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bin="target/$TARGET/release/garnish"
+          "$bin" --version
+          out="$(GARNISH_NOW=1738425600 GARNISH_NO_SPAWN=1 \
+            GARNISH_CACHE_DIR="$RUNNER_TEMP/garnish-cache" GARNISH_MANAGED_SETTINGS='' \
+            COLUMNS=120 "$bin" < tests/fixtures/payloads/subscription-full.json)"
+          printf '%s\n' "$out"
+          # Both warning rows, in either icon set: `⚠ garnish:` (the render
+          # failed) and `⚠ config:` (a config the runner should not have).
+          if [ -z "$out" ] || printf '%s\n' "$out" | grep -qE '(⚠|!) (garnish|config): '; then
+            echo "::error::the release binary did not render the fixture cleanly"
+            exit 1
+          fi
       - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
         with:
           bin: garnish
@@ -164,6 +249,7 @@ jobs:
     name: render and check cask
     needs: [verify, build]
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -268,6 +354,7 @@ jobs:
     name: mark latest
     needs: [build, publish]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

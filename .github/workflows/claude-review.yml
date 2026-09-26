@@ -7,8 +7,10 @@ name: Claude Review
 #
 #   - the pull request was opened by justanotherspy;
 #   - it is open and not a draft (checked against live state below);
-#   - somebody wrote @claude in a comment or a review, or added the
-#     `claude-review` label.
+#   - justanotherspy wrote @claude in a comment or a review, or added the
+#     `claude-review` label. Anyone can comment on a public pull request,
+#     and a stranger's @claude used to start a run that cancelled the review
+#     in progress (the concurrency group below).
 #
 # The job collects everything the review needs (the pull request, its diff,
 # its CI state) into files with plain job shell, then hands the action a short
@@ -29,11 +31,12 @@ on:
 # version comments current).
 jobs:
   review:
-    # Bot authors are excluded because the review talks on the events it
-    # listens to: its tracking comment and its summary come back here as
-    # `issue_comment: created`.
+    # Only justanotherspy starts a review (github.actor is whoever commented,
+    # reviewed or labelled). Bot authors stay excluded as well because the
+    # review talks on the events it listens to: its tracking comment and its
+    # summary come back here as `issue_comment: created`.
     if: |
-      (
+      github.actor == 'justanotherspy' && ((
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request != null &&
         github.event.issue.user.login == 'justanotherspy' &&
@@ -53,7 +56,7 @@ jobs:
         github.event_name == 'pull_request' &&
         github.event.pull_request.user.login == 'justanotherspy' &&
         github.event.label.name == 'claude-review'
-      )
+      ))
     # One review per pull request at a time. The group stays on the job: a
     # workflow-level group is claimed before any `if` runs, so a run that
     # then skips every job would still cancel the review in progress.
@@ -93,17 +96,22 @@ jobs:
 
       # The pull request's head, named explicitly: three of the four triggers
       # are comment events whose GITHUB_REF is the default branch. Full
-      # history, so the merge base resolves.
+      # history, so the merge base resolves. The checkout keeps no
+      # credentials: the repository is public and nothing here pushes (the
+      # action adds a credential helper that reads the token from its own
+      # environment, so .git/config never holds one).
       - name: Checkout the pull request
         if: steps.gate.outputs.review == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/pull/${{ github.event.issue.number || github.event.pull_request.number }}/head
           fetch-depth: 0
+          persist-credentials: false
 
       # Everything the review reads, written by job shell where no permission
       # system stands: the pull request itself, the diff against the merge
-      # base, and the CI state of the head commit.
+      # base with the branch it targets (the layer below, for a stacked pull
+      # request, not the default branch), and the CI state of the head commit.
       - name: Collect the pull request for the review
         if: steps.gate.outputs.review == 'true'
         env:
@@ -112,7 +120,8 @@ jobs:
           set -euo pipefail
           dir="$RUNNER_TEMP/review"
           mkdir -p "$dir"
-          git fetch origin "$BASE_BRANCH"
+          base_ref="$(gh pr view "$PR" --repo "$REPO" --json baseRefName --jq .baseRefName)"
+          git fetch origin "refs/heads/$base_ref"
           base="$(git merge-base FETCH_HEAD HEAD)"
           gh pr view "$PR" --repo "$REPO" \
             --json number,title,body,author,baseRefName,headRefName,additions,deletions,changedFiles \
@@ -131,7 +140,7 @@ jobs:
           git diff "$base" HEAD > "$dir/diff.patch"
           # Non-zero when a check is failing or pending; the table is what matters.
           gh pr checks "$PR" --repo "$REPO" > "$dir/checks.txt" 2>&1 || true
-          echo "Collected $(wc -l < "$dir/diff.patch") lines of diff against $BASE_BRANCH ($base) into $dir:"
+          echo "Collected $(wc -l < "$dir/diff.patch") lines of diff against $base_ref ($base) into $dir:"
           ls -l "$dir"
 
       - name: Review
@@ -146,6 +155,23 @@ jobs:
           anthropic_service_account_id: svac_01So6woBVPFG4GmNRJT2QKVz
           # The federation rule spans every workspace, so one must be named.
           anthropic_workspace_id: wrkspc_01FrtuNtJAYdwk63f9DRj7UY
+
+          # The job's own token, not the Claude GitHub App token the action
+          # otherwise mints from the OIDC token, which carries contents:
+          # write. This one is capped by the job's permissions above
+          # (contents: read).
+          github_token: ${{ github.token }}
+          # The owner has write access, so this bypasses no check; what it
+          # turns on is the action's isolation for the model's commands:
+          # bubblewrap and a PID namespace, the subprocess environment scrub
+          # (the OIDC request variables and the tokens stay out of Bash), and
+          # a credential helper instead of the token in the remote URL. Set
+          # without this input, the scrub alone makes the CLI refuse to start
+          # for want of bubblewrap.
+          allowed_non_write_users: justanotherspy
+          # The prompt carries the pull request's comments; anyone can write
+          # one, so only the owner's reach the model.
+          include_comments_by_actor: justanotherspy
 
           # A tracking comment on every trigger; the summary is written into it.
           track_progress: true
@@ -176,47 +202,56 @@ jobs:
 
             Do not run `cargo`, `make` or the tests: CI does, and a build here costs minutes for nothing. You have no subagents; review the diff yourself. When the turn budget runs low, fold the remaining findings into the summary rather than posting them one by one, and never end without the summary.
 
-          # `claude_args` is a block scalar: every line reaches the CLI verbatim,
-          # so notes go here, not inside it. Sonnet 5 at high effort keeps a
-          # 100-turn ceiling in the price range of a short Opus run. `Task` is
-          # deliberately absent: a delegate the parent stops waiting for is how
-          # six reviews posted nothing, and no prompt rule prevented it. The
-          # file tools, `Bash` whole and the GitHub MCP tools are allowed: the
-          # job holds `contents: read`, the checkout is disposable, and an
-          # allowlist of verbs refused compound commands whatever it carried.
+          # Notes go here, not inside the `claude_args` block (the action drops
+          # a whole-line `#` there, but a note is easier kept apart). Sonnet 5
+          # at high effort keeps a 100-turn ceiling in the price range of a
+          # short Opus run. The read tools, `Bash` whole and the GitHub MCP
+          # tools are allowed: the token the action holds is the job's
+          # (contents: read, pull-requests and issues write), the checkout is
+          # disposable, and an allowlist of verbs refused compound commands
+          # whatever it carried. A tool left off the allowlist is still offered
+          # to the model, and some run unrefused, so every one a review must
+          # not use is disallowed, which takes it off the list: `Task`,
+          # `Skill` (which forks a subagent), `Workflow` and the scheduling
+          # tools, because a delegate the parent stops waiting for is how six
+          # reviews posted nothing, and no prompt rule prevented it; the edit
+          # tools, because the isolation runs the CLI in `default` permission
+          # mode, where any edit would be a refusal that turns the check red
+          # (`MultiEdit` is for CLIs older than the pinned one, which has none).
           claude_args: |
             --model claude-sonnet-5
             --effort high
             --max-turns 100
-            --allowedTools "Bash,Read,Write,Edit,Grep,Glob,LS,TodoWrite,mcp__github_inline_comment,mcp__github_inline_comment__create_inline_comment,mcp__github_comment,mcp__github_comment__update_claude_comment,mcp__github_ci,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,mcp__github"
+            --allowedTools "Bash,Read,Grep,Glob,mcp__github_inline_comment,mcp__github_inline_comment__create_inline_comment,mcp__github_comment,mcp__github_comment__update_claude_comment,mcp__github_ci,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,mcp__github"
+            --disallowedTools "Task,Skill,Workflow,CronCreate,ScheduleWakeup,Write,Edit,MultiEdit,NotebookEdit"
 
       # The action reports success whenever Claude returned a result, so a
       # review that posted nothing, or spent its turns being refused, went
       # green. This reads the execution file the action writes and makes both
       # red, with the reason in the job summary. It runs the base branch's copy
-      # of the script, because the checkout is the untrusted head and this
-      # step holds the job's token.
+      # of the script, fetched through the API rather than through the
+      # checkout: the checkout is the untrusted head the model had its hands
+      # on (a planted hook or `insteadOf` would run or redirect a git command
+      # here), and this step holds the job's token.
       - name: Report what the review was refused
         if: always() && steps.gate.outputs.review == 'true'
         env:
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          # The action skips itself, writing no execution file, when this
-          # workflow file differs from the default branch's copy (a pull
-          # request that edits it) or when it failed before Claude started;
-          # neither is a refused review.
+          # No execution file means the action failed before Claude started;
+          # that is not a refused review, and the action's own step is red.
           if [ -z "${EXECUTION_FILE:-}" ]; then
-            echo "The action wrote no execution file, so there was no review to report on (it skips itself on a pull request that edits this workflow)." \
+            echo "The action wrote no execution file, so there was no review to report on (it failed before Claude started)." \
               | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # The script is on the default branch, so a failed fetch (a 5xx, a
+          # rate limit) is a failure of this step, never a quiet green.
           script="$RUNNER_TEMP/review-denials.sh"
-          git fetch --depth 1 origin "$BASE_BRANCH"
-          if ! git show "FETCH_HEAD:scripts/review-denials.sh" > "$script"; then
-            echo "No scripts/review-denials.sh on $BASE_BRANCH yet; nothing to report." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
+          gh api "repos/$REPO/contents/scripts/review-denials.sh?ref=$BASE_BRANCH" \
+            -H 'Accept: application/vnd.github.raw' > "$script"
           chmod +x "$script"
           "$script" "${EXECUTION_FILE:-}" | tee -a "$GITHUB_STEP_SUMMARY"

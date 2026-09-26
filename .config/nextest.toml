@@ -4,11 +4,13 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 fail-fast = false
 
 # Tests that share GARNISH_CACHE_DIR or PATH shims must not run concurrently.
+# They are named cache_*, spawn_*, worker_* or gc_* (CLAUDE.md § Conventions);
+# a unit test's name is `module::tests::fn`, hence the `::` alternative.
 [test-groups]
 serial = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'test(/^(cache|spawn|worker|gc)_/) | test(/serial/)'
+filter = 'test(/(^|::)(cache|spawn|worker|gc)_/)'
 test-group = 'serial'
 
 # The two render matrices (400+ renders each) took over 60 s on a loaded
@@ -16,8 +18,3 @@ test-group = 'serial'
 [[profile.default.overrides]]
 filter = 'test(golden_renders_match) | test(config_goldens_match) | test(every_fixture_renders_every_preset_without_panicking) | test(schema_matrix_holds_the_shared_invariants)'
 slow-timeout = { period = "60s", terminate-after = 3 }
-
-[profile.ci]
-retries = 0
-fail-fast = false
-failure-output = "immediate-final"

@@ -29,8 +29,13 @@ jobs:
   linux:
     name: linux (nightly)
     runs-on: ubuntu-latest
+    # nextest bounds each test; nothing else bounds doctests, downloads or a
+    # hung package manager short of GitHub's six-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The same prerequisites as every other host: the toolchain pinned in
       # rust-toolchain.toml and cargo-nextest (SESSION_HOST=ci picks the
       # prebuilt binary).
@@ -46,11 +51,17 @@ jobs:
   macos:
     name: macos (nightly)
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: ./scripts/setup.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: make check 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
+      # The release and review scripts under the BSD userland they must
+      # also run on (the release's render job is a macOS runner).
+      - run: ./scripts/test-scripts.sh
       - if: failure()
         run: ./scripts/ci-annotate.sh ci.log
 
@@ -60,8 +71,11 @@ jobs:
     name: bench (informational)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: ./scripts/setup.sh --bench
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: ./bench/run.sh

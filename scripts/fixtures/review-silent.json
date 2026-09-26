@@ -1,0 +1,22 @@
+[
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "name": "mcp__github_comment__update_claude_comment",
+          "input": { "body": "## Review\n\n- [x] read the diff\n- [ ] write the summary" }
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "subtype": "error_max_turns",
+    "is_error": true,
+    "num_turns": 100,
+    "total_cost_usd": 2.5,
+    "permission_denials": []
+  }
+]

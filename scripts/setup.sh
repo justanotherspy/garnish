@@ -11,7 +11,7 @@
 # The host class comes from SESSION_HOST (scripts/session-host.sh) and
 # decides *how* a tool is installed, never *whether*:
 #
-#   ci      prebuilt cargo-nextest from get.nexte.st; shellcheck, hyperfine
+#   ci      pinned, checksummed cargo-nextest from get.nexte.st; shellcheck, hyperfine
 #           and jq from the runner's package manager (apt on Linux, brew on
 #           macOS)
 #   popos   cargo install --locked (devup's cargobins section then keeps
@@ -32,7 +32,7 @@ for arg in "$@"; do
   case "$arg" in
     --bench) want_bench=1 ;;
     --all) want_bench=1; want_all=1 ;;
-    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "setup: unknown flag $arg" >&2; exit 2 ;;
   esac
 done
@@ -117,13 +117,39 @@ fi
 rustc --version
 
 # --- cargo-nextest ---------------------------------------------------------
+# CI takes a pinned prebuilt binary and checks it before running it: a
+# download of "latest" executed unverified is a supply-chain door into every
+# job that runs this script. The release has no published checksums, so these
+# are the sha256 of the release assets as downloaded when the pin was set;
+# bump the version and all three together.
+nextest_version=0.9.146
+nextest_sha256() {
+  case "$1" in
+    linux) echo 682c21b777c333e96fd532e114d3a5a894e0729ab88d94c0a9f20f8419695428 ;;
+    linux-arm) echo b2e33d7c72de7ade0ff7b3a948ac37516b24f8a836b7a8870c1f634a94be9de9 ;;
+    mac) echo 39785160b3c2f6ed9a765049cf4fa79f3b39aa02eb7598a5a0e2a1a0b9ffb9a8 ;;
+  esac
+}
+sha256_of() {
+  if have sha256sum; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
 cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
 if have cargo-nextest; then
   log "cargo-nextest present: $(cargo nextest --version | head -n 1)"
 elif [ "$host" = ci ]; then
-  log "cargo-nextest (prebuilt from get.nexte.st)"
+  log "cargo-nextest $nextest_version (prebuilt from get.nexte.st, checksummed)"
   mkdir -p "$cargo_bin"
-  curl -LsSf "https://get.nexte.st/latest/$(os)" | tar zxf - -C "$cargo_bin"
+  archive="$(mktemp)"
+  curl -LsSf -o "$archive" "https://get.nexte.st/$nextest_version/$(os)"
+  want="$(nextest_sha256 "$(os)")"
+  got="$(sha256_of "$archive")"
+  if [ "$got" != "$want" ]; then
+    echo "setup: cargo-nextest $nextest_version for $(os) has sha256 $got, expected $want; refusing to install it" >&2
+    rm -f "$archive"
+    exit 1
+  fi
+  tar zxf "$archive" -C "$cargo_bin"
+  rm -f "$archive"
 else
   log "cargo install cargo-nextest"
   cargo install --locked cargo-nextest

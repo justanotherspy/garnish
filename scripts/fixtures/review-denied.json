@@ -1,0 +1,27 @@
+[
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "tool_use",
+          "name": "mcp__github_comment__update_claude_comment",
+          "input": { "body": "## Review\n\n- [x] read the diff\n\nNo findings." }
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 7,
+    "total_cost_usd": 0.4321,
+    "permission_denials": [
+      { "tool_name": "Bash", "tool_use_id": "a", "tool_input": { "command": "FOO=secret-value git diff HEAD~1" } },
+      { "tool_name": "Bash", "tool_use_id": "b", "tool_input": { "command": "/abs/path/tool --flag x" } },
+      { "tool_name": "Bash", "tool_use_id": "c", "tool_input": { "command": "TOKEN=abc123 curl -s x | /abs/other/y z" } },
+      { "tool_name": "WebFetch", "tool_use_id": "d", "tool_input": { "url": "https://example.com" } }
+    ]
+  }
+]
