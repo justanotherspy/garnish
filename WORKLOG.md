@@ -1128,3 +1128,7 @@ was built, what the reviews found and what was decided, not how.
     where a dropped `fr` column's gap goes, and CLAUDE.md has the
     composer's real path. The in-process tick got slightly faster (each
     row's height measured once, not twice: dashboard 70 → 64 µs).
+  - `make bench` at 5e95caf, the machine otherwise idle: every scenario
+    within budget. Warm means 2.57–2.89 ms (p99 3.2–4.4 ms), the new
+    `warm-bigconfig` the slowest at 2.89 ms; cold 4.5 ms; refresh-sync
+    15.2 ms.
