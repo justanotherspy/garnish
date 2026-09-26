@@ -210,7 +210,7 @@ claim, which embeds the numeric owner and repository IDs
   write (terse, under 120 words a comment, a suggestion block over
   prose), and never to end without the summary.
 - **The read tools, `TodoWrite`, `Bash` whole and the GitHub MCP tools
-  are allowed; the edit tools are disallowed and `Task` is absent.** Bash
+  are allowed; `Task` and the edit tools are disallowed.** Bash
   whole is safe only because of what is in its reach, so that is pinned
   down: the action is given the job's own token (`github_token`), capped by
   the job's `contents: read`. Without it the action mints a Claude GitHub
@@ -225,19 +225,23 @@ claim, which embeds the numeric owner and repository IDs
   helper instead of a token in `.git/config` (review of 2026-09-25, ci-02
   and its final review). `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` must never be
   set on its own: without the isolation step's bubblewrap the CLI refuses
-  to start. Tag mode runs in `acceptEdits`, which allows the edit tools
-  inside the workspace whatever `--allowedTools` says, so they are named
-  in `--disallowedTools`. The Claude GitHub App is no longer needed by the
+  to start, and with it the CLI runs in `default` permission mode, not tag
+  mode's `acceptEdits`. **A tool left off `--allowedTools` is still on the
+  model's list**, and calling it is a refusal (a red check) or, for
+  `Task`, simply runs (the final review launched one under the fixed
+  flags), so what a review must not use is named in `--disallowedTools`,
+  which takes it off the list. The Claude GitHub App is no longer needed by the
   workflow; uninstalling it from the repository removes the `contents:
   write` token the id token could be exchanged for. The checkout is
   disposable, and an allowlist of verbs cannot
   work: it matches on a prefix (`git --no-pager diff` is not `git diff`),
   and **a compound command is refused even when every part of it is
   allowed** (`git diff … | wc -l` with both on the list). `Task` is
-  absent on purpose: six runs ended with the parent stopping while a
+  disallowed on purpose: six runs ended with the parent stopping while a
   subagent was still working, and three prompt rules against it were
   ignored. **An instruction the model does not follow is not a control;
-  removing the capability is.**
+  removing the capability is**, and leaving a tool off an allowlist does
+  not remove it.
 - **Turns are the binding constraint.** Every inline comment, checklist
   tick and (once) subagent is a turn; at 15 a review of a two-file diff
   died unwritten. The cap is 100, and Sonnet 5 at `--effort high` is what
@@ -263,7 +267,9 @@ claim, which embeds the numeric owner and repository IDs
   base branch's copy of the script, fetched through the contents API from
   outside the checkout, because the checkout is the untrusted head the
   model had its hands on (a planted hook or `insteadOf` would run or
-  redirect a git command there) and that step holds the job's token.
+  redirect a git command there) and that step holds the job's token. A
+  fetch that fails fails the step: a fallback to "nothing to report" once
+  turned every API error into a green review.
   Never enable `show_full_output` to get the same thing: it dumps every
   tool result into a world-readable log. Trust the report; distrust the
   theory: of four explanations written between the third run and the
@@ -274,8 +280,8 @@ claim, which embeds the numeric owner and repository IDs
   holding the group; the review's own tracking comment created exactly
   such a run and cancelled it. The `if` also excludes bot authors, since
   the review talks on the events it listens to.
-- **A pull request that edits the workflow file cannot be reviewed by
-  it.** The action exchanged its OIDC token for the GitHub App token only
+- **Keep a change to the review workflow in its own pull request.** The
+  action once exchanged its OIDC token for the GitHub App token only
   when the workflow file was byte-identical to the copy on the default
   branch, and otherwise went green in about twelve seconds having done
   nothing (`Workflow validation failed`; the tell is the duration). That

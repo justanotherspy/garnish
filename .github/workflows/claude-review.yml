@@ -204,22 +204,23 @@ jobs:
 
           # `claude_args` is a block scalar: every line reaches the CLI verbatim,
           # so notes go here, not inside it. Sonnet 5 at high effort keeps a
-          # 100-turn ceiling in the price range of a short Opus run. `Task` is
-          # deliberately absent: a delegate the parent stops waiting for is how
-          # six reviews posted nothing, and no prompt rule prevented it. The
+          # 100-turn ceiling in the price range of a short Opus run. The
           # read tools, `Bash` whole and the GitHub MCP tools are allowed: the
           # token the action holds is the job's (contents: read, pull-requests
           # and issues write), the checkout is disposable, and an allowlist of
-          # verbs refused compound commands whatever it carried. The edit
-          # tools are disallowed outright: tag mode runs in acceptEdits, which
-          # allows them inside the workspace whatever the allowlist says, and
-          # a review has no use for them.
+          # verbs refused compound commands whatever it carried. A tool left
+          # off the allowlist is still offered to the model, so the ones a
+          # review must not use are disallowed, which takes them off its list:
+          # `Task`, because a delegate the parent stops waiting for is how six
+          # reviews posted nothing, and no prompt rule prevented it; the edit
+          # tools, because the isolation runs the CLI in `default` permission
+          # mode, where any edit would be a refusal that turns the check red.
           claude_args: |
             --model claude-sonnet-5
             --effort high
             --max-turns 100
             --allowedTools "Bash,Read,Grep,Glob,LS,TodoWrite,mcp__github_inline_comment,mcp__github_inline_comment__create_inline_comment,mcp__github_comment,mcp__github_comment__update_claude_comment,mcp__github_ci,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,mcp__github"
-            --disallowedTools "Write,Edit,MultiEdit,NotebookEdit"
+            --disallowedTools "Task,Write,Edit,MultiEdit,NotebookEdit"
 
       # The action reports success whenever Claude returned a result, so a
       # review that posted nothing, or spent its turns being refused, went
@@ -244,12 +245,10 @@ jobs:
               | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # The script is on the default branch, so a failed fetch (a 5xx, a
+          # rate limit) is a failure of this step, never a quiet green.
           script="$RUNNER_TEMP/review-denials.sh"
-          if ! gh api "repos/$REPO/contents/scripts/review-denials.sh?ref=$BASE_BRANCH" \
-            -H 'Accept: application/vnd.github.raw' > "$script"; then
-            echo "No scripts/review-denials.sh on $BASE_BRANCH yet; nothing to report." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
+          gh api "repos/$REPO/contents/scripts/review-denials.sh?ref=$BASE_BRANCH" \
+            -H 'Accept: application/vnd.github.raw' > "$script"
           chmod +x "$script"
           "$script" "${EXECUTION_FILE:-}" | tee -a "$GITHUB_STEP_SUMMARY"
