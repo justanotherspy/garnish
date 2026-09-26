@@ -486,11 +486,14 @@ fn cache_section(o: &mut String, cache: &Cache) {
 /// Whether workers can use the cache root: it takes a file, and a hard
 /// link to one, which is how a lock is taken (`link` is `hard_link`, or a
 /// test's stand-in). A filesystem without hard links (exFAT, some SMB
-/// mounts) is writable and still locks nothing.
+/// mounts) is writable and still locks nothing. The root is made as the
+/// cache makes it (`0700`), and the probe as the cache makes a temporary
+/// file: never through a link planted at its predictable name.
 fn probe(root: &Path, link: impl Fn(&Path, &Path) -> std::io::Result<()>) -> String {
     let probe = root.join(format!(".probe.{}", std::process::id()));
     let linked = root.join(format!(".probe.{}.link", std::process::id()));
-    let writable = std::fs::create_dir_all(root).is_ok() && std::fs::write(&probe, b"").is_ok();
+    let writable = crate::cache::create_private_dir(root).is_ok()
+        && crate::cache::create_fresh(&probe).is_ok();
     let state = if !writable {
         "NOT writable".to_owned()
     } else if let Err(e) = link(&probe, &linked) {
@@ -894,6 +897,34 @@ mod tests {
         let blocked = dir.path().join("file");
         std::fs::write(&blocked, "").unwrap();
         assert_eq!(probe(&blocked.join("cache"), |a, b| std::fs::hard_link(a, b)), "NOT writable");
+    }
+
+    /// The probe writes a file at a name anyone who can write the root can
+    /// predict, so it goes the way every temporary file in the cache goes:
+    /// unlinked first and created exclusively, never through a link. It
+    /// used `fs::write`, which followed a planted link and truncated its
+    /// target; and a root it had to create came out with the umask's mode,
+    /// where the cache's own are `0700` (review 2026-09-25).
+    #[test]
+    fn the_probe_never_follows_a_planted_link() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("cache");
+        std::fs::create_dir_all(&root).unwrap();
+        let precious = dir.path().join("precious");
+        std::fs::write(&precious, "keep me").unwrap();
+        let name = format!(".probe.{}", std::process::id());
+        std::os::unix::fs::symlink(&precious, root.join(&name)).unwrap();
+        let state = probe(&root, |a, b| std::fs::hard_link(a, b));
+        assert_eq!(state, "writable");
+        assert_eq!(std::fs::read_to_string(&precious).unwrap(), "keep me", "through the link");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0, "the probes are removed");
+        let fresh = dir.path().join("new").join("cache");
+        assert_eq!(probe(&fresh, |a, b| std::fs::hard_link(a, b)), "writable");
+        for made in [dir.path().join("new"), fresh] {
+            let mode = std::fs::metadata(&made).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "{}", made.display());
+        }
     }
 
     #[test]

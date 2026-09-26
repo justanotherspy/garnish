@@ -116,7 +116,7 @@ fn private_root(base: &Path) -> Result<PathBuf, (PathBuf, String)> {
 
 /// Create `dir` and its missing parents `0700`: an entry may carry the
 /// account's email address, and nobody else needs to list the rest.
-fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
 }
 
@@ -124,7 +124,7 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 /// name (a leftover of a killed process, or a link planted to aim the
 /// write at another file) is unlinked first, and `create_new` refuses the
 /// name if anything reappears, rather than following it.
-fn create_fresh(path: &Path) -> std::io::Result<fs::File> {
+pub(crate) fn create_fresh(path: &Path) -> std::io::Result<fs::File> {
     let _ = fs::remove_file(path);
     fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
 }
