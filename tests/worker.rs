@@ -517,6 +517,46 @@ fn worker_a_quoted_upstream_counts_like_any_other() {
     assert!(!out.contains('✗') && !out.contains('"'), "{out}");
 }
 
+/// A `merge` value with a `\n` escape names a ref git cannot have (a ref
+/// name holds no control character). The worker's entry wrote the line
+/// break as a space, the tick compared it with the line break, and no
+/// entry ever matched: a worker on every tick and `⟳` for good (review
+/// 2026-09-25). Such a value is no upstream, and nothing is spawned for it.
+#[test]
+fn worker_an_upstream_with_a_line_break_is_no_upstream() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let config_file = env.work.join(".git").join("config");
+    let text = std::fs::read_to_string(&config_file).unwrap();
+    let hostile = text.replace("merge = refs/heads/main", "merge = \"refs/heads/ma\\nin\"");
+    assert_ne!(hostile, text);
+    std::fs::write(&config_file, hostile).unwrap();
+    let sync_spawns =
+        |env: &Env| spawns(env).iter().filter(|l| l.contains("--module sync")).count();
+    for _ in 0..2 {
+        let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert!(out.contains('\u{f127}') && !out.contains('⟳'), "{out}");
+    }
+    assert_eq!(sync_spawns(&env), 0, "{:?}", spawns(&env));
+}
+
+/// A `HEAD` naming a branch longer than any ref git can write made an entry
+/// past the entry cap, which reads back as a miss: a worker on every tick
+/// (review 2026-09-25). A name past `MAX_BRANCH_CHARS` is no head at all.
+#[test]
+fn worker_a_branch_name_past_the_cap_spawns_nothing() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let name = "a".repeat(65_515);
+    std::fs::write(env.work.join(".git").join("HEAD"), format!("ref: refs/heads/{name}\n"))
+        .unwrap();
+    for _ in 0..2 {
+        let (out, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert!(ok && !out.contains("aaaa") && !out.contains('⟳'), "{out}");
+    }
+    assert!(spawns(&env).is_empty(), "{:?}", spawns(&env));
+}
+
 /// The tick reads the payload's repository from `.git` directly; the
 /// worker's git follows `GIT_DIR` and friends first. A harness started
 /// with one exported (by a hook, an alias) made `sync` count another
@@ -538,6 +578,118 @@ fn worker_git_ignores_an_inherited_git_dir() {
     assert!(ok, "{err}");
     let entry = sync_entry(&env);
     assert!(entry.contains("ahead=1\n") && entry.contains("behind=0\n"), "{entry}");
+}
+
+/// Every git call the workers make, as a shim on `PATH` saw it: its
+/// arguments, then its environment, one `NAME=value` a line.
+fn recorded_git_calls(env: &Env, extra_env: &[(&str, &str)]) -> Vec<(String, Vec<String>)> {
+    let shim = env.work.parent().unwrap().join("recording-shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    let log = env.work.parent().unwrap().join("calls.log");
+    std::fs::write(
+        shim.join("git"),
+        format!(
+            "#!/bin/sh\n{{ echo \"CALL $*\"; env; echo END; }} >> '{}'\ncase \"$*\" in *rev-list*) echo '0 0' ;; esac\nexit 0\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+    let mut vars = extra_env.to_vec();
+    vars.push(("PATH", path.as_str()));
+    let w = env.work.to_str().unwrap().to_owned();
+    for module in ["branch", "sync"] {
+        let args = ["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
+        let (_, err, ok) = garnish(env, &args, None, &vars);
+        assert!(ok, "{module}: {err}");
+    }
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    text.split("END\n")
+        .filter_map(|call| {
+            let (first, rest) = call.split_once('\n')?;
+            Some((
+                first.strip_prefix("CALL ")?.to_owned(),
+                rest.lines().map(str::to_owned).collect(),
+            ))
+        })
+        .collect()
+}
+
+/// Nothing the harness exported that points git at another repository,
+/// index or object store reaches a worker's git, whichever of the names
+/// it is (the list is spelt out here, so dropping one from the code's
+/// list fails this test), and every call but `fetch` refuses every
+/// transport: in a partial clone, a git that ignores `GIT_NO_LAZY_FETCH`
+/// (one older than the May 2024 security releases) lazily fetched a
+/// missing object by running the repository's own `uploadpack` (review
+/// 2026-09-25). `fetch`, which the user opts into, keeps the user's own
+/// `GIT_ALLOW_PROTOCOL`.
+#[test]
+fn worker_git_sees_no_discovery_variable_and_no_transport_but_fetch() {
+    let env = setup();
+    config(
+        &env,
+        "preset = \"minimal\"\n[[line]]\nmodules = [\"branch\", \"sync\"]\n[modules.branch]\npreset = \"full\"\n[modules.sync]\nfetch_interval = 300\n",
+    );
+    let stripped = [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    ];
+    let mut exported: Vec<(&str, &str)> =
+        stripped.iter().map(|name| (*name, "/elsewhere")).collect();
+    exported.push(("GIT_ALLOW_PROTOCOL", "file"));
+    let calls = recorded_git_calls(&env, &exported);
+    assert!(calls.iter().any(|(args, _)| args.contains("diff-index")), "{calls:?}");
+    assert!(calls.iter().any(|(args, _)| args.contains("rev-list")), "{calls:?}");
+    assert!(calls.iter().any(|(args, _)| args.contains(" fetch ")), "{calls:?}");
+    // Only the variables asked about are ever printed: the rest of the
+    // environment is the runner's, and a CI log is public.
+    let value = |vars: &[String], name: &str| {
+        vars.iter().find_map(|v| v.strip_prefix(&format!("{name}=")).map(str::to_owned))
+    };
+    for (args, vars) in &calls {
+        for name in stripped {
+            assert_eq!(value(vars, name), None, "{name} reached `git {args}`");
+        }
+        assert_eq!(value(vars, "GIT_NO_LAZY_FETCH").as_deref(), Some("1"), "`git {args}`");
+        let protocol = if args.contains(" fetch ") { "file" } else { "" };
+        assert_eq!(value(vars, "GIT_ALLOW_PROTOCOL").as_deref(), Some(protocol), "`git {args}`");
+    }
+}
+
+/// The attack itself, on the installed git: a partial clone whose HEAD
+/// tree is missing and whose promisor remote names a program as its
+/// `uploadpack`. The default worker (`fetch_interval = 0`) asks for the
+/// dirty state, which needs the tree; no guard may let git fetch it.
+#[test]
+fn worker_a_partial_clone_never_runs_the_repository_upload_pack() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let head_tree =
+        Command::new("git").args(["rev-parse", "HEAD:"]).current_dir(&env.work).output().unwrap();
+    let tree = String::from_utf8_lossy(&head_tree.stdout).trim().to_owned();
+    let (dir, file) = tree.split_at(2);
+    std::fs::remove_file(env.work.join(".git/objects").join(dir).join(file)).unwrap();
+    let marker = env.work.parent().unwrap().join("MARKER");
+    let payload = env.work.parent().unwrap().join("payload.sh");
+    std::fs::write(&payload, format!("#!/bin/sh\necho ran >> '{}'\nexit 1\n", marker.display()))
+        .unwrap();
+    std::fs::set_permissions(&payload, std::fs::Permissions::from_mode(0o755)).unwrap();
+    git(&env.work, &["config", "core.repositoryformatversion", "1"]);
+    git(&env.work, &["config", "extensions.partialClone", "origin"]);
+    git(&env.work, &["config", "remote.origin.promisor", "true"]);
+    git(&env.work, &["config", "remote.origin.uploadpack", payload.to_str().unwrap()]);
+    run_workers(&env, &["branch", "sync"]);
+    assert!(!marker.exists(), "the repository's uploadpack ran from a worker");
 }
 
 /// SPEC § 6: `fetch_interval` runs `git fetch` in the worker, once per
@@ -739,15 +891,31 @@ fn worker_reads_the_config_file_its_tick_read() {
 /// Run the workers `modules` as their logged spawns would (on Linux the
 /// tick handed each its lock).
 fn run_workers(env: &Env, modules: &[&str]) {
+    run_workers_with(env, modules, &[]);
+}
+
+/// [`run_workers`] with `extra_env` in the workers' environment.
+fn run_workers_with(env: &Env, modules: &[&str], extra_env: &[(&str, &str)]) {
     let w = env.work.to_str().unwrap().to_owned();
     for module in modules {
         let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
         if cfg!(target_os = "linux") {
             args.push("--lock-held");
         }
-        let (_, err, ok) = garnish(env, &args, None, &[]);
+        let (_, err, ok) = garnish(env, &args, None, extra_env);
         assert!(ok, "{module}: {err}");
     }
+}
+
+/// A `PATH` whose first `git` fails every call, as a git that cannot read
+/// the repository does (too old for its format, a `safe.directory`
+/// refusal).
+fn failing_git_path(env: &Env) -> String {
+    let shim = env.work.parent().unwrap().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    std::fs::write(shim.join("git"), "#!/bin/sh\necho 'fatal: nope' >&2\nexit 128\n").unwrap();
+    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default())
 }
 
 /// SPEC § 6: a repository whose refs are not files (reftable) has no HEAD
@@ -781,22 +949,57 @@ fn worker_refs_that_are_not_files_fall_back_to_the_worker() {
     assert!(out.contains("main") && out.contains('⟳'), "{out}");
     assert_eq!(spawns(&env).len(), 4, "{:?}", spawns(&env));
     // A worker whose git fails leaves nothing to name, and still its mark.
-    let shim = env.work.parent().unwrap().join("shim");
-    std::fs::create_dir_all(&shim).unwrap();
-    std::fs::write(shim.join("git"), "#!/bin/sh\necho 'fatal: nope' >&2\nexit 128\n").unwrap();
-    std::fs::set_permissions(shim.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
-    let w = env.work.to_str().unwrap().to_owned();
-    for module in ["branch", "sync"] {
-        let mut args = vec!["refresh", "--module", module, "--session", "sess-worker", "--cwd", &w];
-        if cfg!(target_os = "linux") {
-            args.push("--lock-held");
-        }
-        let (_, err, ok) = garnish(&env, &args, None, &[("PATH", path.as_str())]);
-        assert!(ok, "{err}");
-    }
+    let failing = failing_git_path(&env);
+    run_workers_with(&env, &["branch", "sync"], &[("PATH", failing.as_str())]);
     let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
     assert_eq!(out.matches('✗').count(), 2, "{out}");
+}
+
+/// The reftable fallback asked `symbolic-ref --short`, which spells a
+/// branch that shares its name with a tag `heads/main`: the row showed
+/// that, and `sync` looked `[branch "heads/main"]` up and found no
+/// upstream (review 2026-09-25). The full name, less `refs/heads/`, is the
+/// branch.
+#[test]
+fn worker_a_reftable_branch_named_like_a_tag_keeps_its_name() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    git(&env.work, &["tag", "main"]);
+    let tables = env.work.join(".git").join("reftable").join("tables.list");
+    std::fs::create_dir_all(tables.parent().unwrap()).unwrap();
+    std::fs::write(&tables, "t\n").unwrap();
+    let (_, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok);
+    run_workers(&env, &["branch", "sync"]);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains(" main ") && !out.contains("heads/"), "{out}");
+    assert!(out.contains("⇡1") && !out.contains('\u{f127}'), "{out}");
+}
+
+/// A reftable worker that fails (a git before 2.45 meeting the
+/// `refStorage` extension, a `safe.directory` refusal, the timeout) writes
+/// a failed entry, and a failed entry carries no `tables` stamp. The
+/// fallback's check compared the stamp alone, so the failure was never
+/// fresh and every tick spawned another worker (review 2026-09-25): a
+/// failed entry is fresh for its TTL like any other.
+#[test]
+fn worker_a_failed_reftable_worker_is_fresh_for_its_ttl() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    let tables = env.work.join(".git").join("reftable").join("tables.list");
+    std::fs::create_dir_all(tables.parent().unwrap()).unwrap();
+    std::fs::write(&tables, "").unwrap();
+    let (_, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok);
+    assert_eq!(spawns(&env).len(), 2, "{:?}", spawns(&env));
+    let failing = failing_git_path(&env);
+    run_workers_with(&env, &["branch", "sync"], &[("PATH", failing.as_str())]);
+    for _ in 0..3 {
+        let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+        assert_eq!(out.matches('✗').count(), 2, "{out}");
+        assert!(!out.contains('⟳'), "{out}");
+    }
+    assert_eq!(spawns(&env).len(), 2, "a failed entry spawns nothing: {:?}", spawns(&env));
 }
 
 /// The real reftable format, where the installed git has it (2.45 and
@@ -948,6 +1151,42 @@ fn spawn_worker_outlives_the_ticks_process_group() {
             let entry = sync_entry(&env);
             assert!(entry.lines().next().unwrap().ends_with(" ok"), "{entry}");
             assert!(entry.contains("ahead=1"), "{entry}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("the worker never wrote sync.cache: {:?}", repo_cache_files(&env));
+}
+
+/// A config path is any bytes, and the worker a tick spawns must read the
+/// file the tick read: the path went through a lossy conversion, so the
+/// worker looked for a name with U+FFFD in it, read the defaults, and an
+/// opted-in `fetch_interval` never fetched (review 2026-09-25).
+#[test]
+fn spawn_a_worker_reads_a_config_whose_path_is_not_utf8() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let env = setup();
+    config(&env, ONE_LINE);
+    let own = env.work.parent().unwrap().join(std::ffi::OsStr::from_bytes(b"caf\xe9.toml"));
+    let text = "preset = \"minimal\"\n[[line]]\nmodules = [\"sync\"]\n[modules.sync]\nfetch_interval = 1\n";
+    if std::fs::write(&own, text).is_err() {
+        return; // a filesystem that takes UTF-8 names only (APFS)
+    }
+    let mut child = cmd(&env, &[])
+        .arg("--config")
+        .arg(&own)
+        .env_remove("GARNISH_NO_SPAWN")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload(&env.work).as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(20) {
+        if repo_cache_files(&env).iter().any(|f| f == "sync.cache") {
+            let entry = sync_entry(&env);
+            assert!(entry.contains("fetch_attempt="), "the worker read another config: {entry}");
             return;
         }
         std::thread::sleep(Duration::from_millis(100));

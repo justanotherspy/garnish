@@ -512,7 +512,7 @@ impl Module for BranchModule {
             let scope = Scope::Repo(d.cache_key());
             if fallback {
                 let stamp = git::reftable_stamp(d);
-                ctx.cached(cfg, &scope, |e| e.get("tables") == stamp.as_deref())
+                ctx.cached(cfg, &scope, |e| reftable_current(e, stamp.as_deref()))
             } else {
                 // The name the row shows is the key, however it was found; a
                 // worker that could not read HEAD records none, which any
@@ -619,6 +619,17 @@ fn head_key(head: &Head) -> String {
     }
 }
 
+/// Whether a reftable worker's entry is for the ref store as the tick
+/// stats it (`stamp`): its `tables` value matches, or it failed.
+///
+/// A failed entry keeps no values, `tables` among them, so it is taken
+/// whatever the stamp says: it is fresh for its TTL like any other, where
+/// a check on the stamp alone spawned a worker on every tick for as long
+/// as git kept failing (review 2026-09-25).
+fn reftable_current(entry: &crate::cache::Entry, stamp: Option<&str>) -> bool {
+    entry.status == crate::cache::Status::Err || entry.get("tables") == stamp
+}
+
 /// The head a reftable worker asked git for (`branch`, `detached`).
 fn asked_head(entry: &crate::cache::Entry) -> Option<Head> {
     let name = entry.get("branch")?.to_owned();
@@ -721,7 +732,7 @@ impl Module for SyncModule {
             None if dirs.uses_reftable() => {
                 let stamp = git::reftable_stamp(dirs);
                 let (lookup, freshness) =
-                    ctx.cached(cfg, &scope, |e| e.get("tables") == stamp.as_deref());
+                    ctx.cached(cfg, &scope, |e| reftable_current(e, stamp.as_deref()));
                 let Some(entry) = lookup.entry.as_ref() else { return Rendered::empty() };
                 if entry.get("no_upstream") == Some("1") {
                     return Rendered { segments: no_upstream(cfg), freshness, measure: None };
@@ -1027,6 +1038,21 @@ mod tests {
     use crate::config::schema::{Overrides, Preset};
     use crate::icons::IconSet;
     use crate::theme::{Role, Theme};
+
+    /// A reftable entry is for the ref store the tick stats when its stamp
+    /// matches; a failed one, which keeps no stamp, is taken whatever the
+    /// stamp says, or a worker that keeps failing is respawned every tick.
+    #[test]
+    fn a_failed_reftable_entry_is_current_whatever_the_stamp() {
+        use crate::cache::Entry;
+        let stamped = |t: &str| Entry::ok(1000, [("tables".to_owned(), t.to_owned())].into());
+        assert!(reftable_current(&stamped("1.2"), Some("1.2")));
+        assert!(!reftable_current(&stamped("1.2"), Some("1.3")));
+        assert!(!reftable_current(&stamped("1.2"), None));
+        assert!(!reftable_current(&Entry::ok(1000, BTreeMap::new()), Some("1.2")));
+        assert!(reftable_current(&Entry::err(1000, "fatal: nope"), Some("1.2")));
+        assert!(reftable_current(&Entry::err(1000, "fatal: nope"), None));
+    }
 
     #[test]
     fn fetch_age_hint_separates_glyph_and_age() {

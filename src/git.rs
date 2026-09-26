@@ -6,6 +6,7 @@
 //! (ahead/behind counts, dirty state, fetching) runs in the background worker
 //! through the `git` binary.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -143,7 +144,8 @@ pub enum Head {
 }
 
 /// Read HEAD. `None` for reftable repositories, whose `HEAD` file is a
-/// placeholder (`ref: refs/heads/.invalid`) rather than the real head.
+/// placeholder (`ref: refs/heads/.invalid`) rather than the real head, and
+/// for a name git cannot have written (`writable_name`).
 #[must_use]
 pub fn head(dirs: &Dirs) -> Option<Head> {
     if dirs.uses_reftable() {
@@ -153,9 +155,22 @@ pub fn head(dirs: &Dirs) -> Option<Head> {
     let line = text.lines().next()?.trim();
     if let Some(r) = line.strip_prefix("ref:") {
         let r = r.trim();
-        return Some(Head::Branch(r.strip_prefix("refs/heads/").unwrap_or(r).to_owned()));
+        let name = r.strip_prefix("refs/heads/").unwrap_or(r);
+        return writable_name(name).then(|| Head::Branch(name.to_owned()));
     }
-    (!line.is_empty()).then(|| Head::Detached(line.to_owned()))
+    (!line.is_empty() && writable_name(line)).then(|| Head::Detached(line.to_owned()))
+}
+
+/// Whether git could have written `name` as a ref name or a config value
+/// naming one: no ASCII control character (`check-ref-format` refuses
+/// them) and at most [`MAX_BRANCH_CHARS`] characters.
+///
+/// A name that is neither cannot survive the worker's cache entry as it
+/// is (a line break is stored as a space, one past the cap makes an entry
+/// read as a miss), so the tick, comparing the entry with the name it
+/// read, never found it and spawned a worker on every render.
+fn writable_name(name: &str) -> bool {
+    !name.bytes().any(|b| b.is_ascii_control()) && name.chars().nth(MAX_BRANCH_CHARS).is_none()
 }
 
 /// A stamp that changes whenever a reftable repository's refs do, `HEAD`
@@ -178,25 +193,34 @@ pub fn reftable_stamp(dirs: &Dirs) -> Option<String> {
     }
 }
 
-/// Characters of a branch name the worker records: git's own limit on a
-/// ref name is the path length, and the entry has a cap to stay under.
+/// Characters of a branch name (or an upstream's remote or merge value)
+/// garnish takes: git's own limit on a ref name is the path length, and
+/// the worker's cache entry has a cap to stay under.
 const MAX_BRANCH_CHARS: usize = 4096;
 
 /// `HEAD` asked of git, for a repository whose refs are not files
-/// (reftable): `symbolic-ref -q --short HEAD` for a branch, and when that
-/// says it is detached, `rev-parse --verify HEAD` for the commit.
+/// (reftable).
+///
+/// `symbolic-ref -q HEAD` for a branch, named as [`head`] names one
+/// (`refs/heads/` dropped), and when that says it is detached,
+/// `rev-parse --verify HEAD` for the commit. Not `--short`, which spells a
+/// branch that shares its name with a tag `heads/<name>`: the row showed
+/// that, and `sync` found no `[branch "heads/<name>"]` upstream (review
+/// 2026-09-25).
 ///
 /// # Errors
 /// Propagates git failures (an unborn detached `HEAD` among them).
 pub fn head_from_git(cwd: &Path, timeout: Duration) -> Result<Head, String> {
-    let args = ["symbolic-ref", "-q", "--short", "HEAD"];
-    let asked = git_call(git_program()?, cwd, &args, &[], timeout, Stdout::Read)?;
+    let args = ["symbolic-ref", "-q", "HEAD"];
+    let asked = git_call(git_program()?, cwd, &args, timeout, Stdout::Read)?;
     let first_line = |bytes: &[u8]| {
         String::from_utf8_lossy(bytes).lines().next().unwrap_or("").trim().to_owned()
     };
     match asked.status.code() {
         Some(0) => {
-            let name: String = first_line(&asked.stdout).chars().take(MAX_BRANCH_CHARS).collect();
+            let full = first_line(&asked.stdout);
+            let short = full.strip_prefix("refs/heads/").unwrap_or(&full);
+            let name: String = short.chars().take(MAX_BRANCH_CHARS).collect();
             if name.is_empty() {
                 Err("git symbolic-ref printed no branch".to_owned())
             } else {
@@ -263,10 +287,10 @@ const MAX_PACKED_REFS_BYTES: u64 = 16 * 1024 * 1024;
 /// suspicious name at all. Resolving both sides and comparing catches every
 /// shape of that. Git has not written a symbolic ref as a symlink since
 /// `core.prefersymlinkrefs` was deprecated, so nothing legitimate is refused.
-/// The [`MAX_REF_BYTES`] cap is also what keeps a hostile `.git/HEAD` from
-/// becoming a branch name the size of the file: `head` takes the whole
-/// first line, and every render that cuts it (`branch.max_length`) works
-/// over its clusters.
+/// The [`MAX_REF_BYTES`] cap bounds the read of a hostile `.git/HEAD`,
+/// and [`head`] refuses a first line past [`MAX_BRANCH_CHARS`], so no
+/// branch name is the size of the file for every render that cuts it
+/// (`branch.max_length`) to walk over its clusters.
 fn read_ref_file(base: &Path, name: &str) -> Option<String> {
     String::from_utf8(read_ref_bytes(base, name, MAX_REF_BYTES)?).ok()
 }
@@ -283,11 +307,13 @@ fn read_ref_bytes(base: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
 /// times on a warm tick, where the old code did none. It is resolved once
 /// per directory and only the target is resolved per read.
 fn read_under(root: &Path, name: &str, max: u64) -> Option<Vec<u8>> {
+    read_bounded(&contained(root, name)?, max)
+}
+
+/// `root/name` resolved, when it stays inside `root` (itself resolved).
+fn contained(root: &Path, name: &str) -> Option<PathBuf> {
     let path = root.join(name).canonicalize().ok()?;
-    if !path.starts_with(root) {
-        return None;
-    }
-    read_bounded(&path, max)
+    path.starts_with(root).then_some(path)
 }
 
 /// Resolve a full ref name (`refs/heads/main`) to a commit id.
@@ -375,6 +401,12 @@ pub fn head_commit(dirs: &Dirs, head: &Head) -> Option<String> {
 /// never the whole file.
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
+/// Bytes of `.git/config` read at a time. The tick reads the whole file
+/// every second, and a buffer the size of a 500 KB config is fresh memory
+/// the kernel faults in page by page each time, which cost as much as the
+/// parse; one of this size is faulted in once and reused.
+const CONFIG_CHUNK: usize = 64 * 1024;
+
 /// The upstream of a branch: `(remote, remote-tracking ref)` such as
 /// `("origin", "refs/remotes/origin/main")`.
 ///
@@ -382,30 +414,35 @@ const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 /// (`refs/heads/*:refs/remotes/<remote>/*`), as `git clone` writes it.
 #[must_use]
 pub fn upstream(dirs: &Dirs, branch: &str) -> Option<(String, String)> {
-    // Through the same contained, bounded reader as every ref: `config` sits
-    // under the git directory and is as symlinkable as `HEAD` is.
-    let bytes = read_ref_bytes(&dirs.common_dir, "config", MAX_CONFIG_BYTES)?;
-    upstream_in(&String::from_utf8_lossy(&bytes), branch)
+    // Through the same containment as every ref: `config` sits under the
+    // git directory and is as symlinkable as `HEAD` is.
+    let path = contained(&dirs.common_dir.canonicalize().ok()?, "config")?;
+    let (file, _) = crate::claude_settings::open_regular(&path).ok()??;
+    upstream_read(std::io::Read::take(file, MAX_CONFIG_BYTES), branch, CONFIG_CHUNK)
 }
 
-/// [`upstream`] over the text of a config file: `branch.<name>.remote`
-/// (the last one, as git keeps it) and `branch.<name>.merge` (the first,
-/// which is what `@{upstream}` follows).
-fn upstream_in(text: &str, branch: &str) -> Option<(String, String)> {
+/// [`upstream`] over a config file's text read `chunk` bytes at a time:
+/// `branch.<name>.remote` (the last one, as git keeps it) and
+/// `branch.<name>.merge` (the first, which is what `@{upstream}` follows);
+/// `None` when either is a value git cannot have written for a ref
+/// ([`writable_name`]), or the text cannot be read.
+fn upstream_read(
+    reader: impl std::io::Read,
+    branch: &str,
+    chunk: usize,
+) -> Option<(String, String)> {
     let mut remote: Option<String> = None;
     let mut merge: Option<String> = None;
-    let wanted = |section: &str, sub: Option<&str>| {
-        section.eq_ignore_ascii_case("branch") && sub == Some(branch)
-    };
-    for entry in config_entries(text, wanted) {
-        match (entry.key.to_ascii_lowercase().as_str(), entry.value) {
-            ("remote", Some(v)) => remote = Some(v),
-            ("merge", Some(v)) if merge.is_none() => merge = Some(v),
-            _ => {}
+    read_section(reader, b"branch", branch.as_bytes(), chunk, |key, value| {
+        let Some(value) = value else { return };
+        if key.eq_ignore_ascii_case(b"remote") {
+            remote = Some(value);
+        } else if key.eq_ignore_ascii_case(b"merge") && merge.is_none() {
+            merge = Some(value);
         }
-    }
-    let remote = remote?;
-    let merge = merge?;
+    })?;
+    let remote = remote.filter(|r| writable_name(r))?;
+    let merge = merge.filter(|m| writable_name(m))?;
     let short = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
     if remote == "." {
         return Some((remote, format!("refs/heads/{short}")));
@@ -414,162 +451,498 @@ fn upstream_in(text: &str, branch: &str) -> Option<(String, String)> {
 }
 
 /// One `key = value` of a git config file.
-struct ConfigEntry {
+struct ConfigEntry<'a> {
     /// The key, as written; git compares it without case.
-    key: String,
+    key: &'a [u8],
     /// The value, unquoted and unescaped; `None` for a bare key.
     value: Option<String>,
 }
 
-/// The entries of a git config text in the sections `wanted` accepts
-/// (given the section name as written and the subsection), in order,
-/// parsed as git parses them (config.c `get_base_var`, `get_value`,
-/// `parse_value`): a value may be quoted anywhere in it, knows the escapes
-/// `\"`, `\\`, `\t`, `\n`, `\b` and a backslash-newline continuation, ends
-/// at a `;` or `#` outside quotes, and loses its leading and trailing
-/// blanks. git refuses the whole file over one malformed line; here that
-/// line alone is skipped.
-fn config_entries(text: &str, wanted: impl Fn(&str, Option<&str>) -> bool) -> Vec<ConfigEntry> {
-    let mut out = Vec::new();
-    let mut chars = text.chars().peekable();
-    let mut in_wanted = false;
-    while let Some(c) = chars.next() {
-        match c {
-            c if c.is_whitespace() => {}
-            '#' | ';' => skip_line(&mut chars),
-            '[' => {
-                if let Some((section, sub)) = config_header(&mut chars) {
-                    in_wanted = wanted(&section, sub.as_deref());
+/// Read the git config text `reader` gives, `chunk` bytes at a time, and
+/// call `each` with the key and value of every entry of the section
+/// `[<section> "<sub>"]` ([`SectionParse`]), in order; `None` when a read
+/// fails.
+///
+/// Each piece parsed ends at a line break that ends a line not ending in a
+/// backslash, where no value, comment or header can go on, and the rest
+/// moves to the front of the buffer for the next read to follow, so the
+/// pieces parse as the whole text would. The buffer grows by `chunk` only
+/// when a whole one holds no such line break.
+fn read_section(
+    mut reader: impl std::io::Read,
+    section: &[u8],
+    sub: &[u8],
+    chunk: usize,
+    mut each: impl FnMut(&[u8], Option<String>),
+) -> Option<()> {
+    let chunk = chunk.max(1);
+    let mut parse = SectionParse::new(section, sub);
+    let mut buf = vec![0; chunk];
+    let mut filled = 0;
+    let mut first = true;
+    loop {
+        if filled == buf.len() {
+            buf.resize(buf.len().saturating_add(chunk), 0);
+        }
+        let got = loop {
+            match reader.read(buf.get_mut(filled..)?) {
+                Ok(got) => break got,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+        };
+        let kept = filled;
+        filled = filled.saturating_add(got);
+        let text = buf.get(..filled)?;
+        let cut = if got == 0 { filled } else { safe_cut(text, kept) };
+        let whole = text.get(..cut)?;
+        // A byte-order mark leads the file, and git skips it.
+        let whole =
+            if first { whole.strip_prefix(b"\xef\xbb\xbf").unwrap_or(whole) } else { whole };
+        first &= cut == 0;
+        parse.feed(whole, &mut each);
+        if buf.get(cut..filled).is_some() {
+            buf.copy_within(cut..filled, 0);
+        }
+        filled = filled.saturating_sub(cut);
+        if got == 0 {
+            return Some(());
+        }
+    }
+}
+
+/// Where `buf` may be cut: after its last line break that ends a line not
+/// ending in a backslash, looking only at the breaks from `from` on (those
+/// before were looked at already); 0 when there is none.
+fn safe_cut(buf: &[u8], from: usize) -> usize {
+    let mut end = buf.len();
+    loop {
+        let Some(nl) = buf.get(from..end).and_then(|s| s.iter().rposition(|b| *b == b'\n')) else {
+            return 0;
+        };
+        let at = from.saturating_add(nl);
+        match buf.get(..=at) {
+            Some(line) if !ends_in_backslash(line) => return at.saturating_add(1),
+            _ => end = at,
+        }
+    }
+}
+
+/// The entries of one section of a git config, `[<section> "<sub>"]` (the
+/// section name in any case), parsed as git parses them (config.c
+/// `get_base_var`, `get_value`, `parse_value`): a value may be quoted
+/// anywhere in it, knows the escapes `\"`, `\\`, `\t`, `\n`, `\b` and a
+/// backslash-newline continuation, ends at a `;` or `#` outside quotes,
+/// and loses its leading and trailing blanks; blanks are git's four
+/// (`isspace`) and a CRLF is a line break. git refuses the whole file over
+/// one malformed line; here that line alone is skipped.
+///
+/// `sync` reads the config on every tick, and it holds a section per
+/// tracked branch (review 2026-09-25: parsing every entry of a 500 KB
+/// config cost 3 ms a tick). So the text is bytes, of which only the
+/// values kept are decoded (lossily: a stray byte costs what it touches);
+/// a header is parsed only when its first bytes do not already rule it
+/// out ([`surely_other`]), and a section nobody wants is jumped over by
+/// [`next_header`] without being parsed or allocating. The syntax is all
+/// ASCII, and no byte of a multi-byte UTF-8 character is, so reading
+/// bytes changes nothing.
+struct SectionParse<'a> {
+    /// The section's name.
+    section: &'a [u8],
+    /// The subsection's.
+    sub: &'a [u8],
+    /// Whether a header may be ruled out by [`surely_other`]: not when the
+    /// subsection holds a quote or a backslash, which only escapes spell.
+    quick: bool,
+    /// Whether the text fed so far ends inside the section.
+    inside: bool,
+}
+
+impl<'a> SectionParse<'a> {
+    /// A parse of the section `[<section> "<sub>"]`, before any text.
+    fn new(section: &'a [u8], sub: &'a [u8]) -> Self {
+        let quick = !section.contains(&b'.') && !sub.iter().any(|b| matches!(b, b'"' | b'\\'));
+        Self { section, sub, quick, inside: false }
+    }
+
+    /// Parse `text`, which starts where a token may and ends where nothing
+    /// goes on past it (see [`read_section`]), calling `each` with the key
+    /// and value of every entry in the section.
+    fn feed(&mut self, text: &[u8], each: &mut impl FnMut(&[u8], Option<String>)) {
+        let mut rest = text;
+        loop {
+            rest = skip_blanks(rest);
+            let Some(&first) = rest.first() else { break };
+            if let Some(after) = rest.strip_prefix(b"[") {
+                if self.quick && surely_other(after, self.section, self.sub) {
+                    self.inside = false;
+                    rest = next_header_past(after);
+                } else if let Some(header) = config_header(after) {
+                    self.inside = header.section.eq_ignore_ascii_case(self.section)
+                        && header.sub.as_deref() == Some(self.sub);
+                    rest = header.rest;
                 } else {
-                    in_wanted = false;
-                    skip_line(&mut chars);
+                    self.inside = false;
+                    rest = after_line(after);
                 }
+            } else if !self.inside {
+                rest = next_header(rest);
+            } else if first.is_ascii_alphabetic() {
+                let (entry, next) = config_entry(rest, true);
+                if let Some(entry) = entry {
+                    each(entry.key, entry.value);
+                }
+                rest = next;
+            } else {
+                rest = after_line(rest);
             }
-            c if c.is_ascii_alphabetic() => {
-                let mut key = String::from(c);
-                while let Some(k) = chars.next_if(|k| k.is_ascii_alphanumeric() || *k == '-') {
-                    key.push(k);
-                }
-                while chars.next_if(|b| matches!(b, ' ' | '\t' | '\r')).is_some() {}
-                let value = match chars.peek() {
-                    None | Some('\n') => Some(None),
-                    Some('=') => {
-                        chars.next();
-                        config_value(&mut chars).map(Some)
-                    }
-                    Some(_) => {
-                        skip_line(&mut chars);
-                        None
-                    }
-                };
-                if let Some(value) = value.filter(|_| in_wanted) {
-                    out.push(ConfigEntry { key, value });
-                }
-            }
-            _ => skip_line(&mut chars),
-        }
-    }
-    out
-}
-
-/// Consume through the end of the line.
-fn skip_line(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    for c in chars.by_ref() {
-        if c == '\n' {
-            break;
         }
     }
 }
 
-/// A section header after its `[`: `(section, subsection)`, with the old
-/// `[section.sub]` form's subsection lowercased as git does; `None` when
-/// malformed.
-fn config_header(
-    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Option<(String, Option<String>)> {
-    let mut name = String::new();
-    loop {
-        match chars.next()? {
-            ']' => {
-                return Some(match name.split_once('.') {
-                    Some((s, sub)) => (s.to_owned(), Some(sub.to_ascii_lowercase())),
-                    None => (name, None),
-                });
-            }
-            c if c.is_whitespace() => break,
-            c if c.is_ascii_alphanumeric() || c == '-' || c == '.' => name.push(c),
-            _ => return None,
+/// git's `isspace`: a blank of the config syntax.
+const fn is_config_space(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+/// `s` past its leading blanks.
+fn skip_blanks(s: &[u8]) -> &[u8] {
+    let blanks = s.iter().take_while(|b| is_config_space(**b)).count();
+    s.get(blanks..).unwrap_or_default()
+}
+
+/// The next byte of a config text as git's `get_next_char` reads it (a
+/// CRLF is one line break), and the text after it.
+const fn next_config_byte(s: &[u8]) -> Option<(u8, &[u8])> {
+    match s {
+        [b'\r', b'\n', rest @ ..] => Some((b'\n', rest)),
+        [b, rest @ ..] => Some((*b, rest)),
+        [] => None,
+    }
+}
+
+/// Where `byte` first occurs in `hay`, eight bytes at a time: a config is
+/// searched a section (some 70 bytes) at a time, where a byte loop, or
+/// `core`'s `memchr` with its byte-wise head and tail, was the better part
+/// of reading a 500 KB config.
+///
+/// Each word is XOR-ed with `byte` repeated, which zeroes the bytes that
+/// match, and `(w - 0x01…) & !w & 0x80…` flags a zero byte: the lowest
+/// flag is always a true one (a borrow only runs upwards from a zero
+/// byte), and a little-endian word's lowest byte comes first.
+fn find_byte(hay: &[u8], byte: u8) -> Option<usize> {
+    const ONES: u64 = u64::from_le_bytes([0x01; 8]);
+    const HIGHS: u64 = u64::from_le_bytes([0x80; 8]);
+    let repeated = u64::from_le_bytes([byte; 8]);
+    let (words, tail) = hay.as_chunks::<8>();
+    for (i, word) in words.iter().enumerate() {
+        let word = u64::from_le_bytes(*word) ^ repeated;
+        let zeros = word.wrapping_sub(ONES) & !word & HIGHS;
+        if zeros != 0 {
+            let within = usize::try_from(zeros.trailing_zeros().checked_div(8)?).ok()?;
+            return i.checked_mul(8)?.checked_add(within);
         }
     }
-    while chars.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
-    if chars.next()? != '"' {
-        return None;
+    let within = tail.iter().position(|b| *b == byte)?;
+    words.len().checked_mul(8)?.checked_add(within)
+}
+
+/// The text after the line `s` starts in.
+fn after_line(s: &[u8]) -> &[u8] {
+    find_byte(s, b'\n').and_then(|nl| s.get(nl.saturating_add(1)..)).unwrap_or_default()
+}
+
+/// Whether `lines`, which ends with a line break (or is empty), ends with
+/// a line whose last character is a backslash: the only way git joins a
+/// line to the next is a `\` right before the break (a CRLF included).
+fn ends_in_backslash(lines: &[u8]) -> bool {
+    let line = lines.strip_suffix(b"\n").unwrap_or(lines);
+    line.strip_suffix(b"\r").unwrap_or(line).ends_with(b"\\")
+}
+
+/// Whether the header `after` (the text after its `[`) is surely not
+/// `[<section> "<sub>"]`, told from its first bytes: its name is not the
+/// section's, it has no subsection, or its subsection differs from `sub`
+/// before any backslash (or it is malformed, which is no match either).
+/// `false` when unsure (the old `[section.sub]` form, an escape), and then
+/// the header is parsed. The caller keeps a `sub` holding a quote or a
+/// backslash, which only escapes can spell, away from here.
+fn surely_other(after: &[u8], section: &[u8], sub: &[u8]) -> bool {
+    let Some((name, rest)) = after.split_at_checked(section.len()) else { return true };
+    if !name.eq_ignore_ascii_case(section) {
+        return true;
     }
-    let mut sub = String::new();
+    match rest.first() {
+        Some(b'.') => false,
+        Some(b' ' | b'\t' | b'\r') => {
+            let blanks = rest.iter().take_while(|b| matches!(b, b' ' | b'\t' | b'\r')).count();
+            let Some(body) = rest.get(blanks..).and_then(|r| r.strip_prefix(b"\"")) else {
+                return true;
+            };
+            let same = body.iter().zip(sub).take_while(|(a, b)| a == b).count();
+            match body.get(same) {
+                Some(b'"') => same < sub.len(),
+                Some(b'\\') => false,
+                _ => true,
+            }
+        }
+        _ => true,
+    }
+}
+
+/// The text from the next section header on, given `s` at a place where a
+/// token may start (not inside a value): everything in between belongs to
+/// a section nobody asked for.
+fn next_header(s: &[u8]) -> &[u8] {
+    scan_headers(s, true).unwrap_or_default()
+}
+
+/// [`next_header`] from inside a header nobody wants, `after` being the
+/// text after its `[`, which was never parsed: the header is parsed only
+/// when what follows it on its line may matter (another `[`, or a `\` at
+/// the end that may join the next line to it).
+fn next_header_past(after: &[u8]) -> &[u8] {
+    scan_headers(after, false).unwrap_or_else(|| {
+        next_header(config_header(after).map_or_else(|| after_line(after), |h| h.rest))
+    })
+}
+
+/// The text from the next header on, from `s`: a place where a token may
+/// start when `at_token`, else the rest of a header's line that was not
+/// parsed, in which case `None` says the header must be.
+///
+/// A header can only open a line (after blanks) or follow another header,
+/// and a line starts a token unless the line before it ends in a
+/// backslash. So the search is for a `[` (a byte search, which strides
+/// over the section) with only blanks before it on its line: when the line
+/// before does not end in `\`, that is the header. When it does, whether
+/// the `\` joins the lines depends on the value it ends (a comment, a
+/// quote, an escaped backslash), so the lines are parsed from the first of
+/// the run of such lines, which does start a token. Every byte is searched
+/// once and parsed at most once: the search resumes past a line whose `[`
+/// has something before it, and past whatever the parse consumed.
+fn scan_headers(s: &[u8], at_token: bool) -> Option<&[u8]> {
+    let mut from = s;
+    let mut at_token = at_token;
+    let mut offset = 0;
     loop {
-        match chars.next()? {
-            '"' => break,
-            '\n' => return None,
-            '\\' => match chars.next()? {
-                '\n' => return None,
+        let Some(found) = from.get(offset..).and_then(|t| find_byte(t, b'[')) else {
+            return Some(&[]);
+        };
+        let at = offset.saturating_add(found);
+        let (before, header) = from.split_at_checked(at)?;
+        let lead = before.iter().rev().take_while(|b| matches!(b, b' ' | b'\t' | b'\r')).count();
+        let (earlier, _) = before.split_at_checked(before.len().saturating_sub(lead))?;
+        if !(earlier.ends_with(b"\n") || (earlier.is_empty() && at_token)) {
+            if !at_token && find_byte(before, b'\n').is_none() {
+                // On the line of the header that was not parsed, where it
+                // may follow that header's `]`.
+                return None;
+            }
+            // Every later `[` on this line has this one before it.
+            offset = find_byte(header, b'\n').map_or(from.len(), |nl| at.saturating_add(nl));
+            continue;
+        }
+        if !ends_in_backslash(earlier) {
+            return Some(header);
+        }
+        let run = start_of_run(earlier);
+        if run == 0 && !at_token {
+            return None;
+        }
+        let rest = skip_tokens(from.get(run..)?, header.len());
+        if rest.starts_with(b"[") {
+            return Some(rest);
+        }
+        from = rest;
+        at_token = true;
+        offset = 0;
+    }
+}
+
+/// Where the run of lines ending in a backslash that `lines` ends with
+/// begins (a byte offset into `lines`): the first line of the run, which
+/// starts a token because the line before it does not end in `\`, or the
+/// start of `lines`, which the caller knows starts one.
+fn start_of_run(lines: &[u8]) -> usize {
+    let mut end = lines.len();
+    loop {
+        let Some(head) = lines.get(..end) else { return 0 };
+        let body = head.strip_suffix(b"\n").unwrap_or(head);
+        let start = body.iter().rposition(|b| *b == b'\n').map_or(0, |nl| nl.saturating_add(1));
+        match lines.get(..start) {
+            Some(prev) if start > 0 && ends_in_backslash(prev) => end = start,
+            _ => return start,
+        }
+    }
+}
+
+/// Tokens of a section nobody wants, parsed from `s` (where a token may
+/// start) and skipped without an allocation, up to a header (returned
+/// from its `[`) or to the first token that starts past the point `until`
+/// bytes before the end of `s`.
+fn skip_tokens(s: &[u8], until: usize) -> &[u8] {
+    let mut rest = s;
+    loop {
+        rest = skip_blanks(rest);
+        let Some(&first) = rest.first() else { return rest };
+        if first == b'[' || rest.len() < until {
+            return rest;
+        }
+        rest = if first.is_ascii_alphabetic() {
+            config_entry(rest, false).1
+        } else {
+            after_line(rest)
+        };
+    }
+}
+
+/// A section header, as [`config_header`] reads it.
+struct Header<'a> {
+    /// The section name, as written.
+    section: &'a [u8],
+    /// The subsection: the old `[section.sub]` form's lowercased, as git
+    /// does, and borrowed when it needs no change.
+    sub: Option<Cow<'a, [u8]>>,
+    /// The text after the `]`.
+    rest: &'a [u8],
+}
+
+/// A section header after its `[`; `None` when malformed.
+fn config_header(s: &[u8]) -> Option<Header<'_>> {
+    let name_len =
+        s.iter().take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.')).count();
+    let (name, rest) = s.split_at_checked(name_len)?;
+    match next_config_byte(rest)? {
+        (b']', after) => {
+            let Some(dot) = find_byte(name, b'.') else {
+                return Some(Header { section: name, sub: None, rest: after });
+            };
+            let (section, sub) = name.split_at_checked(dot)?;
+            let sub = sub.get(1..)?;
+            let sub = if sub.iter().any(u8::is_ascii_uppercase) {
+                Cow::Owned(sub.to_ascii_lowercase())
+            } else {
+                Cow::Borrowed(sub)
+            };
+            return Some(Header { section, sub: Some(sub), rest: after });
+        }
+        (b'\n', _) => return None,
+        (c, _) if is_config_space(c) => {}
+        _ => return None,
+    }
+    let blanks = rest.iter().take_while(|b| matches!(b, b' ' | b'\t' | b'\r')).count();
+    let body = rest.get(blanks..)?.strip_prefix(b"\"")?;
+    let (raw, after) = body.split_at_checked(find_byte(body, b'"')?)?;
+    let (sub, rest) = if raw.iter().any(|b| matches!(b, b'\\' | b'\n')) {
+        let mut sub = Vec::new();
+        let mut rest = body;
+        loop {
+            let (c, next) = next_config_byte(rest)?;
+            rest = next;
+            match c {
+                b'"' => break,
+                b'\n' => return None,
+                b'\\' => {
+                    let (escaped, next) = next_config_byte(rest)?;
+                    rest = next;
+                    if escaped == b'\n' {
+                        return None;
+                    }
+                    sub.push(escaped);
+                }
                 c => sub.push(c),
-            },
-            c => sub.push(c),
+            }
         }
-    }
-    (chars.next()? == ']').then_some((name, Some(sub)))
+        (Cow::Owned(sub), rest)
+    } else {
+        (Cow::Borrowed(raw), after.get(1..)?)
+    };
+    Some(Header { section: name, sub: Some(sub), rest: rest.strip_prefix(b"]")? })
 }
 
-/// A value after its `=`, through the end of its (possibly continued)
-/// line; `None` when malformed (an unknown escape, an open quote).
-fn config_value(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
-    let mut value = String::new();
+/// A `key[ = value]` at its first character: the entry, when it is well
+/// formed and `keep` asks for it (a skipped value allocates nothing), and
+/// the text after its (possibly continued) line.
+fn config_entry(s: &[u8], keep: bool) -> (Option<ConfigEntry<'_>>, &[u8]) {
+    let key_len = s.iter().take_while(|b| b.is_ascii_alphanumeric() || **b == b'-').count();
+    let Some((key, rest)) = s.split_at_checked(key_len) else { return (None, after_line(s)) };
+    let blanks = rest.iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
+    let rest = rest.get(blanks..).unwrap_or_default();
+    match next_config_byte(rest) {
+        None => (keep.then_some(ConfigEntry { key, value: None }), rest),
+        Some((b'\n', next)) => (keep.then_some(ConfigEntry { key, value: None }), next),
+        Some((b'=', next)) => {
+            let mut value = Vec::new();
+            let (ok, next) = config_value(next, keep.then_some(&mut value));
+            let entry = (ok && keep).then(|| ConfigEntry {
+                key,
+                value: Some(String::from_utf8_lossy(&value).into_owned()),
+            });
+            (entry, next)
+        }
+        Some((_, next)) => (None, after_line(next)),
+    }
+}
+
+/// A value after its `=`, read into `value` when there is one: whether it
+/// is well formed (no unknown escape, no open quote) and the text after
+/// its (possibly continued) line.
+fn config_value<'a>(s: &'a [u8], mut value: Option<&mut Vec<u8>>) -> (bool, &'a [u8]) {
+    let mut rest = s;
     let mut quoted = false;
     let mut comment = false;
     // The length before a run of unquoted blanks, dropped if the run ends
     // the value.
     let mut trim_to: Option<usize> = None;
     loop {
-        let c = match chars.next() {
-            None | Some('\n') => {
-                if quoted {
-                    return None;
-                }
-                if let Some(len) = trim_to {
-                    value.truncate(len);
-                }
-                return Some(value);
+        // The end of the text reads as a line break, as it does to git.
+        let (c, next) = next_config_byte(rest).unwrap_or((b'\n', rest));
+        rest = next;
+        if c == b'\n' {
+            if let (Some(v), Some(len)) = (value.as_deref_mut(), trim_to) {
+                v.truncate(len);
             }
-            Some(c) => c,
-        };
+            return (!quoted, rest);
+        }
         if comment {
             continue;
         }
-        if c.is_whitespace() && !quoted {
-            if trim_to.is_none() {
-                trim_to = Some(value.len());
-            }
-            if !value.is_empty() {
-                value.push(c);
+        if is_config_space(c) && !quoted {
+            if let Some(v) = value.as_deref_mut() {
+                trim_to = trim_to.or(Some(v.len()));
+                if !v.is_empty() {
+                    v.push(c);
+                }
             }
             continue;
         }
-        if !quoted && (c == ';' || c == '#') {
+        if !quoted && matches!(c, b';' | b'#') {
             comment = true;
             continue;
         }
         trim_to = None;
-        match c {
-            '\\' => match chars.next()? {
-                '\n' => {}
-                't' => value.push('\t'),
-                'b' => value.push('\u{8}'),
-                'n' => value.push('\n'),
-                e @ ('\\' | '"') => value.push(e),
-                _ => return None,
-            },
-            '"' => quoted = !quoted,
-            c => value.push(c),
+        let c = match c {
+            b'\\' => {
+                let (escaped, next) = next_config_byte(rest).unwrap_or((b'\n', rest));
+                rest = next;
+                match escaped {
+                    b'\n' => continue,
+                    b't' => b'\t',
+                    b'b' => 0x08,
+                    b'n' => b'\n',
+                    b'\\' | b'"' => escaped,
+                    _ => return (false, after_line(rest)),
+                }
+            }
+            b'"' => {
+                quoted = !quoted;
+                continue;
+            }
+            c => c,
+        };
+        if let Some(v) = value.as_deref_mut() {
+            v.push(c);
         }
     }
 }
@@ -658,12 +1031,24 @@ pub fn ref_exists(dirs: &Dirs, refname: &str, timeout: Duration) -> Result<bool,
 ///   which the user opts into (`fetch_interval`); [`fetch`] turns off the
 ///   maintenance and submodule recursion it would start, and PLAN's
 ///   backlog carries the decision on the rest;
-/// - lazy fetching in a partial clone is off through `GIT_NO_LAZY_FETCH`
-///   (git 2.44 and later; an older git ignores it).
+/// - lazy fetching in a partial clone, which runs the promisor remote's
+///   `uploadpack` from the same file, is off through `GIT_NO_LAZY_FETCH`
+///   (honoured since the May 2024 security releases, 2.39.4 onward on
+///   every maintained line, and by distribution gits that took the fix;
+///   an older git ignores it), and every call but [`fetch`] refuses every
+///   transport besides ([`NO_TRANSPORT`]), which any git honours.
 ///
 /// The user typing `git status` in that checkout would run all of these
 /// too; what is new is that garnish runs git on a *timer*, unasked.
 const NO_COMMAND_HOOKS: [&str; 2] = ["-c", "core.fsmonitor="];
+
+/// `GIT_ALLOW_PROTOCOL` empty: no transport at all, on every git call but
+/// [`fetch`] (review 2026-09-25). None of them needs one, and a lazy fetch
+/// in a hostile partial clone would otherwise start the repository's own
+/// `uploadpack` on a git too old for `GIT_NO_LAZY_FETCH`; the variable,
+/// unlike `protocol.<name>.allow`, is out of that repository's reach.
+/// `fetch` keeps whatever the user set.
+const NO_TRANSPORT: (&str, &str) = ("GIT_ALLOW_PROTOCOL", "");
 
 /// Variables that point git at a repository, index or object store other
 /// than the one it would find from its working directory. A worker started
@@ -887,9 +1272,23 @@ pub fn run_program(
     Ok(Finished { status, stdout, truncated, stderr })
 }
 
-/// `git <args>` through [`run_program`] with the command hooks cleared,
-/// its failures described in terms of the caller's own `args`.
+/// `git <args>` through [`run_program`] with the command hooks cleared and
+/// no transport ([`NO_TRANSPORT`]), its failures described in terms of the
+/// caller's own `args`.
 fn git_call(
+    program: &Path,
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+    want: Stdout,
+) -> Result<Finished, String> {
+    let (key, value) = NO_TRANSPORT;
+    git_with(program, cwd, args, &[(key, std::ffi::OsStr::new(value))], timeout, want)
+}
+
+/// [`git_call`] with `env` in place of [`NO_TRANSPORT`]: for [`fetch`],
+/// the one call that reaches another repository.
+fn git_with(
     program: &Path,
     cwd: &Path,
     args: &[&str],
@@ -919,7 +1318,7 @@ fn git_failed(args: &[&str], finished: Finished) -> String {
 /// git's stderr (or a message naming the command) when it cannot be run,
 /// times out, exits non-zero, or writes more than [`MAX_STDOUT`].
 pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
-    let finished = git_call(git_program()?, cwd, args, &[], timeout, Stdout::Read)?;
+    let finished = git_call(git_program()?, cwd, args, timeout, Stdout::Read)?;
     if !finished.status.success() {
         return Err(git_failed(args, finished));
     }
@@ -933,7 +1332,7 @@ pub fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, S
 /// plumbing: 0 = no difference, 1 = difference), with the message to
 /// record for any other exit.
 fn git_answer(cwd: &Path, args: &[&str], timeout: Duration) -> Result<Answer, String> {
-    let finished = git_call(git_program()?, cwd, args, &[], timeout, Stdout::Discard)?;
+    let finished = git_call(git_program()?, cwd, args, timeout, Stdout::Discard)?;
     Ok(match finished.status.code() {
         Some(0) => Answer::No,
         Some(1) => Answer::Yes,
@@ -991,11 +1390,12 @@ pub fn ahead_behind(
 ///   index is staged;
 /// - `diff-files --quiet` for unstaged ones, which compares stat data and
 ///   stops at the first difference without reading content, with
-///   `core.checkStat=default` pinned so a repository cannot relax the
-///   comparison (`minimal`) until an archive's files match their index by
-///   mtime and size and git hashes them as "racily clean", and with
-///   `--ignore-submodules=dirty`, since a submodule's own dirtiness is a
-///   `git status` run inside it.
+///   `core.checkStat=default` and `core.trustctime=true` pinned so a
+///   repository cannot relax the comparison (to mtime and size, or to all
+///   but the ctime, which extraction sets and a crafted index cannot
+///   match) until an archive's files match their index and git hashes
+///   them as "racily clean", and with `--ignore-submodules=dirty`, since a
+///   submodule's own dirtiness is a `git status` run inside it.
 ///
 /// The trade-off, accepted: a file whose stat data changed and content did
 /// not (touched, rewritten with the same bytes) reads as dirty until the
@@ -1013,8 +1413,7 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
                     // HEAD names no commit yet: everything in the index is staged.
                     Answer::Yes => {
                         let args = ["ls-files", "--cached", "-z"];
-                        let listed =
-                            git_call(git_program()?, cwd, &args, &[], timeout, Stdout::Read)?;
+                        let listed = git_call(git_program()?, cwd, &args, timeout, Stdout::Read)?;
                         if !listed.status.success() {
                             return Err(git_failed(&args, listed));
                         }
@@ -1027,8 +1426,15 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
     if staged {
         return Ok(true);
     }
-    let unstaged =
-        ["-c", "core.checkStat=default", "diff-files", "--quiet", "--ignore-submodules=dirty"];
+    let unstaged = [
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.trustctime=true",
+        "diff-files",
+        "--quiet",
+        "--ignore-submodules=dirty",
+    ];
     match git_answer(cwd, &unstaged, timeout)? {
         Answer::No => Ok(false),
         Answer::Yes => Ok(true),
@@ -1091,7 +1497,7 @@ pub fn fetch(cwd: &Path, remote: &str, timeout: Duration) -> Result<(), String> 
         ("SSH_ASKPASS_REQUIRE", std::ffi::OsStr::new("force")),
         ("SSH_ASKPASS", failing_program().as_os_str()),
     ];
-    let finished = git_call(git_program()?, cwd, &args, &env, timeout, Stdout::Discard)?;
+    let finished = git_with(git_program()?, cwd, &args, &env, timeout, Stdout::Discard)?;
     if finished.status.success() { Ok(()) } else { Err(git_failed(&args, finished)) }
 }
 
@@ -1344,22 +1750,31 @@ mod tests {
     /// A ref file is one short line, so a huge one is not a ref. The cap is
     /// what stops a hostile `.git/HEAD` becoming a branch name the size of
     /// the file, which every render that cuts it then walks cluster by
-    /// cluster on the tick path.
+    /// cluster on the tick path. A name past [`MAX_BRANCH_CHARS`], or one
+    /// holding a control character, is no head at all: git writes neither,
+    /// and the worker's entry cannot carry either (one is past the entry's
+    /// cap, the other loses its line break), so the tick never found the
+    /// entry it asked for and spawned a worker every time (review
+    /// 2026-09-25).
     #[test]
     fn a_ref_file_is_bounded_so_a_huge_head_cannot_become_a_branch_name() {
         let (_d, work) = repo();
         let dirs = discover(&work).unwrap();
+        let set_head = |text: &str| std::fs::write(work.join(".git/HEAD"), text).unwrap();
         let huge = "a".repeat(usize::try_from(MAX_REF_BYTES).unwrap_or(0) * 2);
-        std::fs::write(work.join(".git/HEAD"), format!("ref: refs/heads/{huge}\n")).unwrap();
-        let name = match head(&dirs) {
-            Some(Head::Branch(n)) => n,
-            other => panic!("expected a branch, got {other:?}"),
-        };
-        assert!(
-            u64::try_from(name.len()).is_ok_and(|n| n <= MAX_REF_BYTES),
-            "the name is {} bytes, past the cap",
-            name.len()
-        );
+        set_head(&format!("ref: refs/heads/{huge}\n"));
+        assert_eq!(head(&dirs), None);
+        let longest = "b".repeat(MAX_BRANCH_CHARS);
+        set_head(&format!("ref: refs/heads/{longest}\n"));
+        assert_eq!(head(&dirs), Some(Head::Branch(longest.clone())));
+        set_head(&format!("ref: refs/heads/{longest}b\n"));
+        assert_eq!(head(&dirs), None);
+        for bad in ["ref: refs/heads/ma\u{1}in\n", "ref: refs/heads/ma\rin\n", "abc\u{7f}def\n"] {
+            set_head(bad);
+            assert_eq!(head(&dirs), None, "{bad:?}");
+        }
+        set_head("ref: refs/heads/é\n");
+        assert_eq!(head(&dirs), Some(Head::Branch("é".into())), "only control characters go");
     }
 
     /// `f` on a thread, or `None` when it has not returned within five
@@ -1503,7 +1918,7 @@ mod tests {
     /// last `remote`.
     #[test]
     fn the_config_parser_follows_git() {
-        let up = |text: &str, branch: &str| upstream_in(text, branch);
+        let up = |text: &str, branch: &str| upstream_in(text.as_bytes(), branch);
         let origin = |r: &str| Some(("origin".to_owned(), format!("refs/remotes/origin/{r}")));
         assert_eq!(
             up("[branch \"a\"]\n\tremote = origin\n\tmerge = refs/heads/a ; why\n", "a"),
@@ -1541,6 +1956,259 @@ mod tests {
             up("[branch \"a\"]\nremote = .\nmerge = refs/heads/main\n", "a"),
             Some((".".to_owned(), "refs/heads/main".to_owned()))
         );
+    }
+
+    /// A value git cannot have written for a ref (a control character,
+    /// here through the `\n` and `\t` escapes, or a name past
+    /// [`MAX_BRANCH_CHARS`]) is no upstream: the worker's entry cannot
+    /// carry it as it is, so `sync` found no entry for it on any tick and
+    /// spawned a worker on every one (review 2026-09-25).
+    #[test]
+    fn an_upstream_git_cannot_have_written_is_no_upstream() {
+        let up = |remote: &str, merge: &str| {
+            let text = format!("[branch \"a\"]\nremote = {remote}\nmerge = {merge}\n");
+            upstream_in(text.as_bytes(), "a")
+        };
+        assert!(up("origin", "refs/heads/a").is_some());
+        assert_eq!(up("origin", "\"refs/heads/ma\\nin\""), None);
+        assert_eq!(up("origin", "refs/heads/ma\\tin"), None);
+        assert_eq!(up("ori\\bgin", "refs/heads/a"), None);
+        assert_eq!(up("origin", "refs/heads/a\u{7f}"), None);
+        let long = "c".repeat(MAX_BRANCH_CHARS);
+        assert!(up("origin", &long).is_some());
+        assert_eq!(up("origin", &format!("{long}c")), None);
+        assert_eq!(up(&format!("{long}c"), "refs/heads/a"), None);
+    }
+
+    /// A section nobody wants is jumped over, not parsed, so the jump must
+    /// land where git's parse would: a `\` at a line's end joins the next
+    /// line to a value (and a header there is part of it), except in a
+    /// comment, after an escaped backslash, or on a header's line; a `[`
+    /// inside a value or a comment opens nothing; a header may follow
+    /// another on its line; a CRLF is a line break; a byte-order mark
+    /// leads. An unknown escape costs its own line and nothing after it on
+    /// that line.
+    #[test]
+    fn a_skipped_section_ends_where_git_says() {
+        let up = |text: &str| upstream_in(text.as_bytes(), "a");
+        let origin = |r: &str| Some(("origin".to_owned(), format!("refs/remotes/origin/{r}")));
+        let real = "[branch \"a\"]\nremote = origin\nmerge = refs/heads/a\n";
+        let decoy = "[branch \"a\"]\nremote = decoy\nmerge = refs/heads/decoy\n";
+        let decoyed = Some(("decoy".to_owned(), "refs/remotes/decoy/decoy".to_owned()));
+        for (skipped, expected) in [
+            // The decoy's header continues `x`, so its entries are core's.
+            (format!("[core]\nx = y\\\n{decoy}{real}"), origin("a")),
+            (format!("[core]\nx = y\\\r\n{decoy}{real}"), origin("a")),
+            (
+                format!("[core]\nx = \"y\\\n[branch \"a\"]\\\n\"\nremote = decoy\n{real}"),
+                origin("a"),
+            ),
+            (format!("[core]\nx = y\\\n  z\\\n{decoy}{real}"), origin("a")),
+            (format!("[core] x = y\\\n{decoy}{real}"), origin("a")),
+            (format!("[branch \"b\"] x = y\\\n{decoy}{real}"), origin("a")),
+            // Each of these `\` ends something that does not continue.
+            (format!("[core]\n# c \\\n{decoy}"), decoyed.clone()),
+            (format!("[core]\nx = y ; c \\\n{decoy}"), decoyed.clone()),
+            (format!("[core]\nx = y\\\\\n{decoy}"), decoyed.clone()),
+            (format!("[branch \"b\"] # c \\\n{decoy}"), decoyed.clone()),
+            (format!("[core]\nx = y\\q\\\n{decoy}"), decoyed.clone()),
+            // A `[` that opens no header.
+            (format!("[core]\nurl = [::1]\n# {decoy}; {decoy}{real}"), origin("a")),
+            (
+                "[core] [branch \"a\"]\nremote = origin\nmerge = refs/heads/a\n".to_owned(),
+                origin("a"),
+            ),
+            (
+                "[branch \"b\"] [branch \"a\"] remote = origin\nmerge = refs/heads/a\n".to_owned(),
+                origin("a"),
+            ),
+            (format!("[branch \"b\"]\r\nx = y\r\n{}", real.replace('\n', "\r\n")), origin("a")),
+            (format!("\u{feff}{real}"), origin("a")),
+            (format!("[core]\n\t[\n{real}"), origin("a")),
+            (
+                format!(
+                    "[branch \"a\"]\nremote = origin\nmerge = refs/heads/a\\q remote = evil\n{real}"
+                ),
+                origin("a"),
+            ),
+            (format!("[branch \"b\n{real}"), origin("a")),
+            (format!("[branch \"b\\\n{real}"), origin("a")),
+            (format!("[branch\r\n\"b\"]\n{real}"), origin("a")),
+            (format!("[branch \"a\\\"]\n{decoy}"), decoyed),
+        ] {
+            assert_eq!(up(&skipped), expected, "{skipped:?}");
+        }
+    }
+
+    /// Adversarial shapes stay linear: the search for a header resumes past
+    /// every line and value it has looked at.
+    #[test]
+    fn a_hostile_config_is_skipped_in_linear_time() {
+        let started = std::time::Instant::now();
+        let real = "[branch \"a\"]\nremote = origin\nmerge = refs/heads/a\n";
+        for body in [
+            format!("[core]\nx = {}\n", "[".repeat(400_000)),
+            format!("[core]\nx = y\\\n{}\n", "[\\\n".repeat(100_000)),
+            "# \\\n[x] \\\n".repeat(40_000),
+            format!("[branch \"b\"]{}\n", " [".repeat(200_000)),
+        ] {
+            let text = format!("{body}{real}");
+            assert_eq!(upstream_in(text.as_bytes(), "a").map(|u| u.0), Some("origin".to_owned()));
+        }
+        assert!(started.elapsed() < Duration::from_secs(20), "took {:?}", started.elapsed());
+    }
+
+    /// [`upstream`] over a config's whole text.
+    fn upstream_in(text: &[u8], branch: &str) -> Option<(String, String)> {
+        upstream_read(text, branch, CONFIG_CHUNK)
+    }
+
+    /// An entry with its section: name, subsection, key, value.
+    type Placed = (Vec<u8>, Option<Vec<u8>>, Vec<u8>, Option<String>);
+
+    /// Every entry of `text` with its section, by the parser's pieces and
+    /// no skipping at all: the reference the skipping must agree with.
+    fn every_entry(text: &[u8]) -> Vec<Placed> {
+        let mut out = Vec::new();
+        let mut rest = text.strip_prefix(b"\xef\xbb\xbf").unwrap_or(text);
+        let mut section: Option<(Vec<u8>, Option<Vec<u8>>)> = None;
+        loop {
+            rest = skip_blanks(rest);
+            let Some(&first) = rest.first() else { break };
+            if let Some(after) = rest.strip_prefix(b"[") {
+                if let Some(header) = config_header(after) {
+                    section = Some((header.section.to_vec(), header.sub.map(Cow::into_owned)));
+                    rest = header.rest;
+                } else {
+                    section = None;
+                    rest = after_line(after);
+                }
+            } else if first.is_ascii_alphabetic() {
+                let (entry, next) = config_entry(rest, true);
+                if let (Some(entry), Some((name, sub))) = (entry, &section) {
+                    out.push((name.clone(), sub.clone(), entry.key.to_vec(), entry.value));
+                }
+                rest = next;
+            } else {
+                rest = after_line(rest);
+            }
+        }
+        out
+    }
+
+    /// The skipping (a quick look at each header, a byte search for the
+    /// next one, a parse only where a `\` may join lines) agrees with a
+    /// parse of every token, over random configs spelt from the pieces
+    /// that matter to it.
+    #[test]
+    fn skipping_agrees_with_parsing_everything() {
+        const PIECES: [&str; 30] = [
+            "[branch \"a\"]",
+            "[branch \"ab\"]",
+            "[BRANCH \"a\"]",
+            "[branch.a]",
+            "[branch \"a",
+            "[branch \"\\a\"]",
+            "[branch]",
+            "[core]",
+            "[branch  \"a\"]",
+            "[",
+            "]",
+            "\"",
+            "\\",
+            "\n",
+            "\n",
+            "\n",
+            "\r\n",
+            "\r",
+            " ",
+            "\t",
+            "#",
+            ";",
+            "k = v",
+            "remote = r",
+            "merge = m",
+            "=",
+            "b",
+            "\\\n",
+            "\\\\",
+            "[x] ",
+        ];
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..20_000 {
+            let len = next() % 40;
+            let text: String =
+                (0..len).map(|_| PIECES[usize::try_from(next() % 30).unwrap()]).collect();
+            let chunk = usize::try_from(next() % 24 + 1).unwrap();
+            let every = every_entry(text.as_bytes());
+            for (section, sub) in [("branch", "a"), ("branch", "ab"), ("core", "x"), ("x", "a")] {
+                let expected: Vec<(Vec<u8>, Option<String>)> = every
+                    .iter()
+                    .filter(|(s, u, _, _)| {
+                        s.eq_ignore_ascii_case(section.as_bytes())
+                            && u.as_deref() == Some(sub.as_bytes())
+                    })
+                    .map(|(_, _, k, v)| (k.clone(), v.clone()))
+                    .collect();
+                for chunk in [CONFIG_CHUNK, chunk] {
+                    let mut got: Vec<(Vec<u8>, Option<String>)> = Vec::new();
+                    let (section, sub) = (section.as_bytes(), sub.as_bytes());
+                    read_section(text.as_bytes(), section, sub, chunk, |key, value| {
+                        got.push((key.to_vec(), value));
+                    })
+                    .unwrap();
+                    assert_eq!(got, expected, "{section:?} {sub:?} by {chunk} in {text:?}");
+                }
+            }
+        }
+    }
+
+    /// A config read a few bytes at a time gives what it gives read whole:
+    /// a piece ends only where no `\` joins its last line to the next, and
+    /// the byte-order mark is skipped once, at the start.
+    #[test]
+    fn a_config_read_in_pieces_reads_as_a_whole() {
+        let text = "\u{feff}[core]\nx = y\\\n[branch \"a\"]\nremote = decoy\n[branch \"a\"]\r\n\tremote = origin\n\tmerge = \"refs/heads/\\\na\" ; c\n";
+        let whole = upstream_read(text.as_bytes(), "a", CONFIG_CHUNK);
+        assert_eq!(whole, Some(("origin".to_owned(), "refs/remotes/origin/a".to_owned())));
+        for chunk in 0..=text.len() {
+            assert_eq!(upstream_read(text.as_bytes(), "a", chunk), whole, "by {chunk}");
+        }
+        assert_eq!(safe_cut(b"a\nb\\\nc", 0), 2);
+        assert_eq!(safe_cut(b"a\nb\\\r\nc", 0), 2);
+        assert_eq!(safe_cut(b"a\nb\\\r\nc\n", 0), 8);
+        assert_eq!(safe_cut(b"a\\\nb\\\n", 0), 0);
+        assert_eq!(safe_cut(b"a\nb\n", 3), 4);
+    }
+
+    /// The word-at-a-time search finds what a byte loop finds, at every
+    /// offset and length around a word, whatever the neighbouring bytes
+    /// (a zero byte next to a match is where the trick could misfire).
+    #[test]
+    fn find_byte_finds_what_a_byte_loop_finds() {
+        for len in 0..70 {
+            for at in 0..=len {
+                for (byte, filler) in
+                    [(b'[', b'a'), (0, 1), (1, 0), (0x80, 0x7f), (0xff, 0), (b'\n', 0xfe)]
+                {
+                    let mut hay = vec![filler; len];
+                    if let Some(slot) = hay.get_mut(at) {
+                        *slot = byte;
+                    }
+                    if let Some(slot) = hay.get_mut(at + 3) {
+                        *slot = byte;
+                    }
+                    let expected = hay.iter().position(|b| *b == byte);
+                    assert_eq!(find_byte(&hay, byte), expected, "{hay:?} {byte}");
+                }
+            }
+        }
     }
 
     /// The remote comes from the repository's own `.git/config`, so a name
@@ -1617,7 +2285,7 @@ mod tests {
         timeout: Duration,
         want: Stdout,
     ) -> Result<String, String> {
-        let finished = git_call(program, cwd, args, &[], timeout, want)?;
+        let finished = git_call(program, cwd, args, timeout, want)?;
         if finished.status.success() {
             Ok(String::from_utf8_lossy(&finished.stdout).into_owned())
         } else {
@@ -1842,6 +2510,66 @@ mod tests {
             .output()
             .unwrap();
         assert!(marker.exists(), "the relaxed rule hashes the file");
+    }
+
+    /// With the stat rule pinned, a repository can still say
+    /// `core.trustctime = false`, after which an entry whose stat data
+    /// differs from the file's in its ctime alone reads as unchanged and,
+    /// when racily clean, is hashed through the filter driver. Extraction
+    /// sets every file's ctime, so trusting it keeps an archive's crafted
+    /// index from matching (review 2026-09-25).
+    #[test]
+    fn the_dirty_check_trusts_ctime_whatever_the_repository_says() {
+        let (d, work) = repo();
+        let t = Duration::from_secs(5);
+        let a = work.join("a.txt");
+        let old = std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        std::fs::File::options().write(true).open(&a).unwrap().set_modified(old).unwrap();
+        git(&work, &["update-index", "--refresh"]);
+        let marker = d.path().join("marker");
+        let config = work.join(".git/config");
+        let text = std::fs::read_to_string(&config).unwrap();
+        let m = marker.display();
+        let driver = format!("[filter \"c\"]\n\tclean = \"sh -c 'touch {m}; cat'\"\n");
+        std::fs::write(&config, format!("{text}{driver}")).unwrap();
+        std::fs::write(work.join(".gitattributes"), "a.txt filter=c\n").unwrap();
+        git(&work, &["config", "core.trustctime", "false"]);
+        // A new ctime and nothing else: a second link made and removed,
+        // past the second the index recorded.
+        std::thread::sleep(Duration::from_millis(1100));
+        std::fs::hard_link(&a, work.join("a.link")).unwrap();
+        std::fs::remove_file(work.join("a.link")).unwrap();
+        // The index older than the entry: racily clean.
+        let index = work.join(".git/index");
+        let older = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        std::fs::File::options().write(true).open(&index).unwrap().set_modified(older).unwrap();
+        assert_eq!(is_dirty(&work, t), Ok(true));
+        assert!(!marker.exists(), "an entry differing in ctime alone ran the filter");
+        // The repository's own rule does hash it: the case is not vacuous.
+        let _ = Command::new("git")
+            .args(["-c", "core.checkStat=default", "diff-files", "--quiet"])
+            .current_dir(&work)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(marker.exists(), "trustctime = false hashes the file");
+    }
+
+    /// The reftable fallback names the branch as [`head`] does: the full
+    /// ref less `refs/heads/`, never `--short`'s `heads/main` for a branch
+    /// that shares its name with a tag.
+    #[test]
+    fn head_from_git_names_a_branch_as_head_does() {
+        let (_d, work) = repo();
+        let t = Duration::from_secs(5);
+        git(&work, &["tag", "main"]);
+        assert_eq!(head_from_git(&work, t), Ok(Head::Branch("main".into())));
+        git(&work, &["checkout", "-q", "-b", "feature/x"]);
+        git(&work, &["tag", "feature/x"]);
+        assert_eq!(head_from_git(&work, t), Ok(Head::Branch("feature/x".into())));
+        git(&work, &["checkout", "-q", "--detach"]);
+        assert!(matches!(head_from_git(&work, t), Ok(Head::Detached(s)) if s.len() == 40));
     }
 
     /// Since git 2.35, porcelain `status` prints `# stash <n>` when

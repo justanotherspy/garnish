@@ -1608,7 +1608,13 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   regular file of at most 64 KiB (a FIFO would block the tick in `open`;
   locks are read the same way). The error text, and `fetch_error`, are
   plain text of at most 500 characters: control characters and escape
-  sequences are dropped, since `doctor` prints them to a terminal. Written
+  sequences are dropped, since `doctor` prints them to a terminal. A
+  refresh whose entry would not read back as itself (a value holding a line
+  break, a file past 64 KiB) is stored as a failed entry naming the value
+  (review 2026-09-25: such an entry never matched what the tick asked for,
+  and every tick spawned a worker); the repository readers already refuse
+  a branch name, `remote` or `merge` value holding a control character or
+  longer than 4096 characters, which git cannot have written. Written
   as `.<module>.tmp.<pid>` in the entry's directory + rename; every
   temporary name is unlinked first and created exclusively, so a link
   planted at one is never followed. `ttl_ms` is informational: freshness is
@@ -1641,7 +1647,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   whatever its pid, so nothing was added.)
 - Worker: `garnish [--config C] refresh --module M --session S --cwd D`,
   null stdio, `process_group(0)`, spawned without wait. `--config` names the
-  file the tick loaded (absolute), when it loaded one, so the worker reads
+  file the tick loaded (absolute, and as bytes: a path that is not UTF-8
+  reaches the worker intact, where a lossy one named no file and the
+  worker read the defaults), when it loaded one, so the worker reads
   the same options: a `--config` on the status line command is not in the
   environment the worker inherits, and it used to re-resolve the config
   and take `sync.fetch_interval` from another file (review 2026-09-25).
@@ -1669,7 +1677,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   worktree `gitdir`, symref chains capped at 5). Every such read is a
   bounded read of a regular file (a FIFO or a link to `/dev/zero` is
   refused, not opened: an archive can carry either and the tick repeats
-  the read every second), contained in the git directory, and a symbolic
+  the read every second; the open is `O_NONBLOCK` and the handle is
+  checked again, since whoever can write the directory can swap a FIFO in
+  after the check, review 2026-09-25), contained in the git directory, and a symbolic
   ref may only point under `refs/` or at a capitalised pseudo-ref, as git's
   own `refname_is_safe` has it; a `.git` file's `gitdir:` and a `commondir`
   count only when they name a git directory by git's test (a `HEAD`, an
@@ -1677,14 +1687,23 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   (review 2026-09-25: `commondir: ~/.ssh` rendered a key's first line as
   the SHA). The upstream comes from `.git/config`, read up to 1 MiB (a
   byte that is not UTF-8 costs only what it touches) and parsed as git
-  parses it: quoted values, the escapes, `;`/`#` comments, section and key
-  names in any case, the first `merge` and the last `remote` (git quotes a
-  value holding `#`, so `fix/#12` used to read as a tracking ref with
-  quotes in it and `sync` showed `✗`). Reftable repos (whose refs are not
+  parses it: quoted values, the escapes, `;`/`#` comments, a `\` that
+  joins a line to the next, section and key names in any case, git's four
+  blanks, CRLF line breaks, a leading byte-order mark, the first `merge`
+  and the last `remote` (git quotes a value holding `#`, so `fix/#12` used
+  to read as a tracking ref with quotes in it and `sync` showed `✗`); a
+  malformed line (which makes git refuse the file) costs only itself. The
+  tick reads it on every render, so it is read 64 KiB at a time, and a
+  section other than the branch's is jumped over by a byte search for the
+  next header, parsed only where a `\` may join lines (review 2026-09-25:
+  parsing every entry of a 500 KB config added 3 ms to the tick; now
+  about 0.2 ms). Reftable repos (whose refs are not
   files) report no head to the tick and fall back to the workers (review
   2026-09-25, decided with Daniel: this sentence used to be all there was,
   and both modules rendered nothing): `branch`'s worker asks git
-  (`symbolic-ref -q --short HEAD`, else `rev-parse --verify HEAD` for a
+  (`symbolic-ref -q HEAD` less `refs/heads/`, not `--short`, which spells
+  a branch sharing its name with a tag `heads/<name>`; else `rev-parse
+  --verify HEAD` for a
   detached one, plus the commit for `show_sha`) and records `branch` and
   `detached`; `sync`'s resolves the branch the same way, reads the upstream
   from the config and checks its ref with `show-ref --verify`, recording
@@ -1692,7 +1711,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   failures. Both entries carry `tables`, the mtimes of the worktree's and
   the common `reftable/tables.list` (taken before git is asked), and the
   tick treats an entry whose `tables` differs from what it stats as for
-  another state of the refs. A `HEAD` the tick refuses in a files
+  another state of the refs; a failed entry, which keeps no values, is
+  fresh for its TTL whatever the stamp (a failing git used to get a worker
+  spawned on every tick). A `HEAD` the tick refuses in a files
   repository (a link out of the git directory) leaves `branch`'s entry
   without a `head` key, which any render accepts (an empty one matched
   nothing, so every tick spawned a worker). Ahead/behind, dirty, and fetch run in the
@@ -1703,21 +1724,27 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   relative entry would find a `git` the checkout ships, since the child
   resolves the name after its `chdir`); every call clears `core.fsmonitor`,
   sets `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0` and
-  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone), and removes
-  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the other variables that
-  point git elsewhere, so git finds the repository from the directory as the
-  tick did.
+  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone, which would run
+  the repository's own `uploadpack`; honoured since the May 2024 security
+  releases), and removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
+  the other variables that point git elsewhere, so git finds the
+  repository from the directory as the tick did. Every call but `fetch`
+  also sets `GIT_ALLOW_PROTOCOL` empty, refusing every transport on any
+  git, since none of them needs one and an older git ignores
+  `GIT_NO_LAZY_FETCH` (review 2026-09-25); `fetch` keeps the user's.
 - **The dirty check never reads a worktree file** (decided 2026-09-25 with
   Daniel): `git status` hashes every file whose stat data no longer
   matches the index, through the `clean`/`process` filter driver the
   repository's own `.git/config` defines, so in an unpacked archive it ran
   that command on every refresh. `dirty` is `git diff-index --cached --quiet
   HEAD` (anything in the index before the first commit) plus `git -c
-  core.checkStat=default diff-files --quiet --ignore-submodules=dirty`,
-  which compare stat data and stop at the first difference; the stat rule
-  is pinned so a repository cannot relax it until its files look "racily
-  clean" and get hashed, and a submodule's own dirtiness (a `git status`
-  inside it) is not asked. The accepted cost: a file touched without
+  core.checkStat=default -c core.trustctime=true diff-files --quiet
+  --ignore-submodules=dirty`, which compare stat data and stop at the
+  first difference; the stat rule is pinned, ctime included (which
+  extraction sets, so a crafted index cannot match it; review
+  2026-09-25), so a repository cannot relax it until its files look
+  "racily clean" and get hashed, and a submodule's own dirtiness (a `git
+  status` inside it) is not asked. The accepted cost: a file touched without
   changing reads as dirty until the user's own git refreshes the index.
   `status.showStash` no longer matters (porcelain printed `# stash N`).
 - **Fetch** (opt-in, `fetch_interval`) passes `--no-auto-maintenance`,

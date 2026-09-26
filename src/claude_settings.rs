@@ -334,27 +334,89 @@ pub enum FileState {
     Keys(FileKeys),
 }
 
+/// `O_NONBLOCK`, with which [`open_regular`] opens: an open that would wait
+/// (a FIFO with no writer) returns at once instead, and a regular file
+/// reads as it always does. Spelt per platform, there being no `libc`
+/// here; on a Unix not listed it is 0, and the check before the open is
+/// the only guard.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const O_NONBLOCK: i32 = if cfg!(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6"
+)) {
+    0o200
+} else if cfg!(any(target_arch = "sparc", target_arch = "sparc64")) {
+    0x4000
+} else {
+    0o4000
+};
+#[cfg(any(
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const O_NONBLOCK: i32 = 0x0004;
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NONBLOCK: i32 = 0;
+
+/// The error for a path that is not a regular file.
+fn not_regular() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file")
+}
+
 /// Open a file garnish reads on a timer, refusing anything that is not a
 /// regular file.
 ///
 /// `open` on a FIFO waits for a writer for ever, and a repository nobody
 /// here built can put one at `.claude/settings.json` (CLAUDE.md, "The
-/// repository is not the user's file"). `Ok(None)` when there is nothing
-/// at `path`; a symlink is followed.
+/// repository is not the user's file"). The path is checked first, so a
+/// device is never opened, and then the handle: whoever can write the
+/// directory can swap a FIFO in between the two, so the open does not
+/// wait ([`O_NONBLOCK`]) and what it opened is checked again (review
+/// 2026-09-25). The file comes with the length its handle gives;
+/// `Ok(None)` when there is nothing at `path`; a symlink is followed.
 ///
 /// # Errors
 /// The metadata or open error, or one saying the path is not a regular
 /// file.
-pub fn open_regular(path: &Path) -> std::io::Result<Option<std::fs::File>> {
-    let meta = match std::fs::metadata(path) {
-        Ok(meta) => meta,
+pub fn open_regular(path: &Path) -> std::io::Result<Option<(std::fs::File, u64)>> {
+    let found = |r: std::io::Result<std::fs::Metadata>| match r {
+        Ok(meta) if meta.is_file() => Ok(Some(meta.len())),
+        Ok(_) => Err(not_regular()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    };
+    if found(std::fs::metadata(path))?.is_none() {
+        return Ok(None);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(O_NONBLOCK);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    if !meta.is_file() {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file"));
-    }
-    std::fs::File::open(path).map(Some)
+    Ok(found(file.metadata())?.map(|len| (file, len)))
 }
 
 /// At most `limit` bytes of the regular file at `path`.
@@ -363,15 +425,17 @@ pub fn open_regular(path: &Path) -> std::io::Result<Option<std::fs::File>> {
 /// a file it does not own on a timer (settings files, `.claude.json`, every
 /// file under `.git`, cache entries). `Ok(None)` when there is nothing at
 /// `path`. A caller that must tell an over-long file from one at its cap
-/// asks for one byte more and compares.
+/// asks for one byte more and compares. The buffer is sized from the
+/// handle, so a large file (a `.git/config` of 500 KB) is one read, not
+/// sixteen growing ones.
 ///
 /// # Errors
 /// The metadata, open or read error, or one saying the path is not a
 /// regular file.
 pub fn read_regular(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
     use std::io::Read as _;
-    let Some(file) = open_regular(path)? else { return Ok(None) };
-    let mut bytes = Vec::new();
+    let Some((file, len)) = open_regular(path)? else { return Ok(None) };
+    let mut bytes = Vec::with_capacity(usize::try_from(len.min(limit)).unwrap_or(0));
     file.take(limit).read_to_end(&mut bytes)?;
     Ok(Some(bytes))
 }
@@ -484,6 +548,48 @@ pub mod tests {
     pub fn fifo(path: &Path) -> Option<PathBuf> {
         let made = std::process::Command::new("mkfifo").arg(path).status().ok()?.success();
         made.then(|| path.to_path_buf())
+    }
+
+    /// The check that a path is a regular file and the open that follows
+    /// are two steps, and whoever can write the directory (a shared
+    /// checkout) can swap a FIFO in between: `open` then waited for a
+    /// writer for ever, in the tick or in a worker holding its lock
+    /// (review 2026-09-25). The open itself must not block, and the handle
+    /// it gives must be the one checked. A thread swaps a file and a FIFO
+    /// at one name as fast as it can while reads go on.
+    #[test]
+    fn a_file_swapped_for_a_fifo_after_the_check_never_blocks_a_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pipe) = fifo(&dir.path().join("pipe")) else { return };
+        let plain = dir.path().join("plain");
+        std::fs::write(&plain, "{}").unwrap();
+        let path = dir.path().join("settings.json");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let swapper = {
+            let (stop, path) = (stop.clone(), path.clone());
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    for target in [&plain, &pipe] {
+                        let _ = std::fs::remove_file(&path);
+                        let _ = std::fs::hard_link(target, &path);
+                    }
+                }
+            })
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut read = 0;
+            for _ in 0..200_000 {
+                if matches!(read_regular(&path, 16), Ok(Some(_))) {
+                    read += 1;
+                }
+            }
+            let _ = tx.send(read);
+        });
+        let read = rx.recv_timeout(std::time::Duration::from_secs(15));
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(read.is_ok(), "a read blocked on a FIFO swapped in after the check");
+        swapper.join().unwrap();
     }
 
     #[test]
