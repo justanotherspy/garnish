@@ -1887,8 +1887,14 @@ fn install_follows_the_managed_env_and_never_a_checkouts_managed_file() {
     let org = dir.path().join("org.json");
     let org_config = dir.path().join("org.toml");
     managed_env(&org, &org_config);
+    // Drop-ins count from a directory nobody else can write to.
+    let private = |dir: &Path| {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::create_dir(dir).unwrap();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
     let drop_dir = dir.path().join("managed-settings.d");
-    std::fs::create_dir(&drop_dir).unwrap();
+    private(&drop_dir);
     let drop_in = drop_dir.join("50-garnish.json");
     let drop_config = dir.path().join("drop.toml");
     managed_env(&drop_in, &drop_config);
@@ -1931,8 +1937,12 @@ fn install_follows_the_managed_env_and_never_a_checkouts_managed_file() {
     let args = [&install[..], &["--settings", checkout_settings.to_str().unwrap()]].concat();
     let (out, err, ok) = run_in(&elsewhere, &args, &home, &hook);
     assert!(ok && !victim.exists(), "{out}{err}");
+    // The other file of that pair naming the hook counts the same.
+    std::fs::rename(&checkout_settings, proj.join(".claude/settings.local.json")).unwrap();
+    let (out, err, ok) = run_in(&elsewhere, &args, &home, &hook);
+    assert!(ok && !victim.exists(), "{out}{err}");
     let planted_drop = proj.join(".claude/managed-settings.d/50.json");
-    std::fs::create_dir(planted_drop.parent().unwrap()).unwrap();
+    private(planted_drop.parent().unwrap());
     let victim_drop = home.join("victim-drop.toml");
     managed_env(&planted_drop, &victim_drop);
     let (out, err, ok) = run_in(&proj, &install, &home, &hook);

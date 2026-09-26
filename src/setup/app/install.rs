@@ -229,6 +229,9 @@ mod tests {
             let shown = format!("garnish --config {quoted} ~/x");
             assert_eq!(tilde_paths(&command, home), shown);
         }
+        // Inside single quotes a backslash is a plain character, so the
+        // quote after it closes them.
+        assert_eq!(tilde_paths("'/home/u/a\\' /home/u/x", home), "'/home/u/a\\' ~/x");
         // An escaped blank keeps its word whole.
         assert_eq!(tilde_paths("/home/u/My\\ /home/u/g.toml", home), "~/My\\ /home/u/g.toml");
         assert_eq!(

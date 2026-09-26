@@ -756,7 +756,10 @@ read. The chain's managed layer is the managed file and the
 `managed-settings.d/*.json` drop-ins beside it, which Claude Code
 applies above it (the last by name first; only a file or a link, and a
 hidden `.name.json` is switched off, as Claude Code skips it; the
-hook's file of § 9 stands in for the platform's, drop-ins and all);
+hook's file of § 9 stands in for the platform's, drop-ins and all, and
+the drop-in directory counts only when it belongs to root or to the
+managed file's owner and nobody else can write to it, so a hook file in
+a shared directory takes no drop-ins another user put beside it);
 `doctor` lists them as `drop-in`, and says that the keys a tick reads
 (§ 2.3) come from none of them (PLAN backlog). An `env` value of any
 JSON type counts, as the string JavaScript's `String()` makes of it and
@@ -797,7 +800,8 @@ current directory's checkout files set is refused too. For `install` the command
 rewrites (`--settings`, else the user file), and its `env` value the
 managed layer's, read as the chain reads it (so a managed layer a
 checkout pointed the hook at names nothing, whether the checkout is the
-current directory or the file `install` rewrites), else that file's own;
+current directory or the file `install` rewrites, with the other file
+of its `.claude` pair), else that file's own;
 `install` keeps it, writing
 the default config there when it is missing and checking its `padding`
 against that file, but writes no config a `--settings` file that is not

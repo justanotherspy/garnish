@@ -119,13 +119,16 @@ const MAX_DROP_IN_ENTRIES: usize = 4096;
 /// `managed`, which Claude Code applies on top of it, in name order (the
 /// last one wins a key it shares with another); a hidden one (`.x.json`)
 /// is switched off and only a file or a link counts, as Claude Code has it
-/// (verification of 2026-09-26, 2.1.283).
+/// (verification of 2026-09-26, 2.1.283). The directory counts only when
+/// it is the organisation's ([`guarded_dir`]).
 fn drop_ins(managed: &Path) -> Vec<PathBuf> {
     let shown =
         |path: &Path| path.file_name().is_some_and(|name| !name.to_string_lossy().starts_with('.'));
     let mut files: Vec<PathBuf> = managed
         .parent()
-        .and_then(|dir| std::fs::read_dir(dir.join("managed-settings.d")).ok())
+        .map(|dir| dir.join("managed-settings.d"))
+        .filter(|dir| guarded_dir(dir, managed))
+        .and_then(|dir| std::fs::read_dir(dir).ok())
         .map_or_else(Vec::new, |entries| {
             entries
                 .take(MAX_DROP_IN_ENTRIES)
@@ -137,6 +140,22 @@ fn drop_ins(managed: &Path) -> Vec<PathBuf> {
         });
     files.sort();
     files
+}
+
+/// Whether the drop-in directory `dir` beside the managed file `managed`
+/// is the organisation's: a directory that belongs to root or to the
+/// managed file's owner, and that nobody else can write to, both the
+/// entry (a link) and what it names. A managed file the hook names in a
+/// shared directory (`/tmp`) would otherwise take drop-ins anyone there
+/// can create (a second verification of 2026-09-26).
+fn guarded_dir(dir: &Path, managed: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    let owner = std::fs::metadata(managed).ok().map(|m| m.uid());
+    let trusted = |uid: u32| uid == 0 || Some(uid) == owner;
+    let entry = std::fs::symlink_metadata(dir).is_ok_and(|m| trusted(m.uid()));
+    let target = std::fs::metadata(dir)
+        .is_ok_and(|m| m.is_dir() && trusted(m.uid()) && m.mode() & 0o022 == 0);
+    entry && target
 }
 
 /// The settings files that are the person's (or their organisation's) own
@@ -388,7 +407,9 @@ fn chain_files() -> Vec<ChainFile> {
 /// may lie outside the current directory's chain, and whose `env` block
 /// counts for [`demote_hooked`] as the chain's do (a second verification of
 /// 2026-09-26: `install --settings` a checkout's file, run from elsewhere,
-/// wrote where the managed file it pointed the hook at said).
+/// wrote where the managed file it pointed the hook at said). The files
+/// read for that follow the chain's; `install` reads only the managed
+/// layer of what comes back.
 fn chain_files_rewriting(rewritten: Option<&Path>) -> Vec<ChainFile> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
@@ -410,15 +431,26 @@ fn chain_files_rewriting(rewritten: Option<&Path>) -> Vec<ChainFile> {
         _ => None,
     };
     let mut files: Vec<ChainFile> = chain.filter_map(read).collect();
-    let extra = rewritten
-        .filter(|path| !files.iter().any(|file| file.path == *path))
-        .and_then(|path| read(("project", path.to_path_buf())));
-    let counted = files.len();
+    // The rewritten file and, in a `.claude` directory, the other of its
+    // project's pair, either of which can name the hook (a third
+    // verification: the local file named it, `install` rewrote the other).
+    let pair = rewritten
+        .and_then(Path::parent)
+        .filter(|dir| dir.file_name().is_some_and(|name| name == ".claude"))
+        .map_or_else(Vec::new, |dir| {
+            vec![("local", dir.join("settings.local.json")), ("project", dir.join("settings.json"))]
+        });
+    let extra: Vec<ChainFile> = rewritten
+        .map(|path| ("project", path.to_path_buf()))
+        .into_iter()
+        .chain(pair)
+        .filter(|(_, path)| !files.iter().any(|file| file.path == *path))
+        .filter_map(read)
+        .collect();
     files.extend(extra);
     let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
     let platform = cs::platform_managed_settings();
     demote_hooked(&mut files, hook.as_deref(), base.as_deref(), &platform);
-    files.truncate(counted);
     files
 }
 
@@ -828,10 +860,14 @@ mod tests {
     /// however many and in whatever order the directory lists them.
     #[test]
     fn the_own_settings_files_are_the_managed_file_its_drop_ins_and_the_user_file() {
+        use std::os::unix::fs::PermissionsExt as _;
         let dir = tempfile::tempdir().unwrap();
         let managed = dir.path().join("managed-settings.json");
+        std::fs::write(&managed, "{}").unwrap();
         let drop_dir = dir.path().join("managed-settings.d");
         std::fs::create_dir(&drop_dir).unwrap();
+        let mode = |bits: u32| std::fs::Permissions::from_mode(bits);
+        std::fs::set_permissions(&drop_dir, mode(0o755)).unwrap();
         for i in 0..400 {
             std::fs::write(drop_dir.join(format!("x{i:03}.json")), "{}").unwrap();
         }
@@ -860,8 +896,15 @@ mod tests {
         assert_eq!(layer.len(), 402 + links);
         assert_eq!(layer.first(), Some(&("drop-in", drop_dir.join("x399.json"))));
         assert_eq!(layer.get(400 + links), Some(&("drop-in", drop_dir.join("10-garnish.json"))));
-        assert_eq!(layer.last(), Some(&("managed", managed)));
+        assert_eq!(layer.last(), Some(&("managed", managed.clone())));
         assert_eq!(layer_of(alone.clone()), [("managed", alone)]);
+        // A directory others can write to is nobody's in particular (a
+        // managed file the hook names in `/tmp`, say): its drop-ins are
+        // not the organisation's.
+        std::fs::set_permissions(&drop_dir, mode(0o777)).unwrap();
+        assert_eq!(layer_of(managed.clone()), [("managed", managed.clone())]);
+        std::fs::set_permissions(&drop_dir, mode(0o775)).unwrap();
+        assert_eq!(layer_of(managed.clone()), [("managed", managed)]);
     }
 
     /// Verification of 2026-09-26: an empty `GARNISH_CONFIG` names nothing,

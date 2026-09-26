@@ -1172,7 +1172,17 @@ was built, what the reviews found and what was decided, not how.
     its drop-ins too and a CLI test reaches them. Accepted as nits (PLAN):
     a halfway number, serde_json's inexact floats and `1e999`, a config
     key named `--config`, and `install` refusing where `config path`
-    passes over a demoted file.
+    passes over a demoted file. A tenth verifier found every round-9 fix
+    holding and no way in from a session; from a terminal with the hook
+    exported, the other file of the rewritten file's `.claude` pair
+    naming the hook still let `install --settings` write (both now
+    count), and the hook bringing drop-ins opened a new door: a hook file
+    in a shared directory took drop-ins anyone could create there, so a
+    drop-in directory now counts only when root or the managed file's
+    owner owns it and nobody else can write to it (`guarded_dir`). An
+    unobservable `truncate` is gone, a single-quote case pins the
+    backslash rule, and bash's `$'…'` (only what the install screen
+    shows) is left as a nit.
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was
