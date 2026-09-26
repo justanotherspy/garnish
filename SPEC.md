@@ -1685,11 +1685,13 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   repository's own `.git/config` defines, so in an unpacked archive it ran
   that command on every refresh. `dirty` is `git diff-index --cached --quiet
   HEAD` (anything in the index before the first commit) plus `git -c
-  core.checkStat=default diff-files --quiet --ignore-submodules=dirty`,
-  which compare stat data and stop at the first difference; the stat rule
-  is pinned so a repository cannot relax it until its files look "racily
-  clean" and get hashed, and a submodule's own dirtiness (a `git status`
-  inside it) is not asked. The accepted cost: a file touched without
+  core.checkStat=default -c core.trustctime=true diff-files --quiet
+  --ignore-submodules=dirty`, which compare stat data and stop at the
+  first difference; the stat rule is pinned, ctime included (which
+  extraction sets, so a crafted index cannot match it; review
+  2026-09-25), so a repository cannot relax it until its files look
+  "racily clean" and get hashed, and a submodule's own dirtiness (a `git
+  status` inside it) is not asked. The accepted cost: a file touched without
   changing reads as dirty until the user's own git refreshes the index.
   `status.showStash` no longer matters (porcelain printed `# stash N`).
 - **Fetch** (opt-in, `fetch_interval`) passes `--no-auto-maintenance`,

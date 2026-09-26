@@ -1382,11 +1382,12 @@ pub fn ahead_behind(
 ///   index is staged;
 /// - `diff-files --quiet` for unstaged ones, which compares stat data and
 ///   stops at the first difference without reading content, with
-///   `core.checkStat=default` pinned so a repository cannot relax the
-///   comparison (`minimal`) until an archive's files match their index by
-///   mtime and size and git hashes them as "racily clean", and with
-///   `--ignore-submodules=dirty`, since a submodule's own dirtiness is a
-///   `git status` run inside it.
+///   `core.checkStat=default` and `core.trustctime=true` pinned so a
+///   repository cannot relax the comparison (to mtime and size, or to all
+///   but the ctime, which extraction sets and a crafted index cannot
+///   match) until an archive's files match their index and git hashes
+///   them as "racily clean", and with `--ignore-submodules=dirty`, since a
+///   submodule's own dirtiness is a `git status` run inside it.
 ///
 /// The trade-off, accepted: a file whose stat data changed and content did
 /// not (touched, rewritten with the same bytes) reads as dirty until the
@@ -1417,8 +1418,15 @@ pub fn is_dirty(cwd: &Path, timeout: Duration) -> Result<bool, String> {
     if staged {
         return Ok(true);
     }
-    let unstaged =
-        ["-c", "core.checkStat=default", "diff-files", "--quiet", "--ignore-submodules=dirty"];
+    let unstaged = [
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.trustctime=true",
+        "diff-files",
+        "--quiet",
+        "--ignore-submodules=dirty",
+    ];
     match git_answer(cwd, &unstaged, timeout)? {
         Answer::No => Ok(false),
         Answer::Yes => Ok(true),
@@ -2494,6 +2502,50 @@ mod tests {
             .output()
             .unwrap();
         assert!(marker.exists(), "the relaxed rule hashes the file");
+    }
+
+    /// With the stat rule pinned, a repository can still say
+    /// `core.trustctime = false`, after which an entry whose stat data
+    /// differs from the file's in its ctime alone reads as unchanged and,
+    /// when racily clean, is hashed through the filter driver. Extraction
+    /// sets every file's ctime, so trusting it keeps an archive's crafted
+    /// index from matching (review 2026-09-25).
+    #[test]
+    fn the_dirty_check_trusts_ctime_whatever_the_repository_says() {
+        let (d, work) = repo();
+        let t = Duration::from_secs(5);
+        let a = work.join("a.txt");
+        let old = std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        std::fs::File::options().write(true).open(&a).unwrap().set_modified(old).unwrap();
+        git(&work, &["update-index", "--refresh"]);
+        let marker = d.path().join("marker");
+        let config = work.join(".git/config");
+        let text = std::fs::read_to_string(&config).unwrap();
+        let m = marker.display();
+        let driver = format!("[filter \"c\"]\n\tclean = \"sh -c 'touch {m}; cat'\"\n");
+        std::fs::write(&config, format!("{text}{driver}")).unwrap();
+        std::fs::write(work.join(".gitattributes"), "a.txt filter=c\n").unwrap();
+        git(&work, &["config", "core.trustctime", "false"]);
+        // A new ctime and nothing else: a second link made and removed,
+        // past the second the index recorded.
+        std::thread::sleep(Duration::from_millis(1100));
+        std::fs::hard_link(&a, work.join("a.link")).unwrap();
+        std::fs::remove_file(work.join("a.link")).unwrap();
+        // The index older than the entry: racily clean.
+        let index = work.join(".git/index");
+        let older = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        std::fs::File::options().write(true).open(&index).unwrap().set_modified(older).unwrap();
+        assert_eq!(is_dirty(&work, t), Ok(true));
+        assert!(!marker.exists(), "an entry differing in ctime alone ran the filter");
+        // The repository's own rule does hash it: the case is not vacuous.
+        let _ = Command::new("git")
+            .args(["-c", "core.checkStat=default", "diff-files", "--quiet"])
+            .current_dir(&work)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(marker.exists(), "trustctime = false hashes the file");
     }
 
     /// Since git 2.35, porcelain `status` prints `# stash <n>` when
