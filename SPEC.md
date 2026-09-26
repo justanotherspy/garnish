@@ -753,16 +753,21 @@ or sits in their settings directory (`CLAUDE_CONFIG_DIR`, else
 `~/.claude`, also `~/.claude` itself, by its path or the one it links
 to); any other local or project file is a checkout's, a repository
 nobody here may have built. When a checkout's file names the config,
-by the command's `--config` or `GARNISH_CONFIG=` prefix, by a
-`GARNISH_CONFIG` its `env` block sets (Claude Code copies that block
-into the session, so the variable garnish sees came from the checkout),
-or by pointing `GARNISH_MANAGED_SETTINGS` at a file through the same
-block, garnish follows it for none of them, reading or writing: they
-refuse as for a value that names no one file (below), and `doctor` says
-so (verification of 2026-09-26: `config init`, `setup` and the
-`garnish-statusline` skill wrote wherever a cloned repository named,
-`~/.profile` included); a command there that passes no config leaves the
-file to the lookup. For `install` the command is the one in the file it
+by the command's `--config` or `GARNISH_CONFIG=` prefix, garnish follows
+it for none of them, reading or writing: they refuse as for a value that
+names no one file (below), and `doctor` says so and shows what the
+lookup finds, never the refused file (verification of 2026-09-26:
+`config init`, `setup` and the `garnish-statusline` skill wrote wherever
+a cloned repository named, `~/.profile` included); a command there that
+passes no config leaves the file to the lookup. Inside a Claude Code
+session (`CLAUDECODE` is set, even to nothing) the environment carries
+the `env` blocks of every settings file Claude Code read, a checkout's
+included, in whatever directory the command runs and whatever JSON the
+value was: so there a `GARNISH_CONFIG` counts only when the person's own
+settings (the user file, or the platform's managed file) set that value,
+and a `GARNISH_MANAGED_SETTINGS` likewise, else the platform's managed
+file stands; outside one, a `GARNISH_CONFIG` the current directory's
+checkout files set is refused too. For `install` the command is the one in the file it
 rewrites (`--settings`, else the user file); `install` keeps it, writing
 the default config there when it is missing and checking its `padding`
 against that file, but writes no config a `--settings` file that is not

@@ -127,7 +127,12 @@ impl App {
                         self.shown(dir)
                     )));
                 }
+                // Paths under the home read as `~/…`, as the rest of the
+                // screen shows them.
+                let home = self.home.as_deref().map(|h| format!("{}/", h.display()));
                 for note in steps.notes() {
+                    let note =
+                        home.as_deref().map_or_else(|| note.clone(), |h| note.replace(h, "~/"));
                     lines.push(Line::from(Span::styled(note, Chrome::warn())));
                 }
                 lines.push(Line::from(""));

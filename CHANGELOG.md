@@ -66,8 +66,9 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   Code copies into the session) is followed by none of them: a cloned
   repository never chooses a file garnish reads or writes, and each
   command says so on one line (`garnish --config FILE …` names the file
-  yourself); `install --settings` on such a file writes no config it
-  names. When the project runs another status line, your own garnish
+  yourself); inside a Claude Code session a `GARNISH_CONFIG` counts only
+  when your own settings set it; `install --settings` on such a file
+  writes no config it names. When the project runs another status line, your own garnish
   command still names your config, and `setup --install` says so when
   the command it keeps reads another file than the one it wrote. `$HOME`
   and a `GARNISH_CONFIG=` prefix in the command are read as `sh` reads

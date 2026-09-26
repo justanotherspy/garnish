@@ -55,9 +55,13 @@ pub fn explicit(flag: Option<&Path>) -> Option<PathBuf> {
 
 /// [`explicit`] for a command run by hand (SPEC § 4).
 ///
-/// A `GARNISH_CONFIG` that a checkout's own settings set in their `env`
-/// block, which Claude Code copies into the session, is a [`Checkout`]
-/// instead, since the person never named it (verification of 2026-09-26).
+/// Inside a Claude Code session the environment carries the `env` blocks of
+/// every settings file Claude Code read, a checkout's included, so a
+/// `GARNISH_CONFIG` there counts only when the person's own settings set
+/// that very value (`own_env_sets`); anywhere, one that the current
+/// directory's checkout files set is a [`Checkout`] (verification of
+/// 2026-09-26: matching the checkout's files alone missed a session in a
+/// subdirectory, a non-string value and a file serde refuses).
 ///
 /// # Errors
 /// That [`Checkout`].
@@ -66,26 +70,78 @@ pub fn hand_explicit(flag: Option<&Path>) -> Result<Option<PathBuf>, Checkout> {
         return Ok(explicit(flag));
     }
     let Some(value) = env_path(CONFIG_ENV) else { return Ok(None) };
+    let refused = |settings| Err(Checkout { settings, key: "GARNISH_CONFIG", path: value.clone() });
+    if in_claude_code() && !own_env_sets(CONFIG_ENV, value.as_os_str()) {
+        return refused(None);
+    }
     let named = |keys: &crate::claude_settings::FileKeys| {
         keys.env(CONFIG_ENV).is_some_and(|set| Path::new(set) == value)
     };
     match chain_files().into_iter().find(|file| !file.own && named(&file.keys)) {
-        Some(file) => Err(Checkout { settings: file.path, key: "env.GARNISH_CONFIG", path: value }),
+        Some(file) => refused(Some(file.path)),
         None => Ok(Some(value)),
+    }
+}
+
+/// Whether garnish runs inside a Claude Code session, which marks every
+/// process it starts with `CLAUDECODE` (a settings `env` block can blank a
+/// variable but not remove it, so presence is the test).
+fn in_claude_code() -> bool {
+    std::env::var_os("CLAUDECODE").is_some()
+}
+
+/// Whether the person's own settings set the variable `name` to `value` in
+/// their `env` block: the user file, or the managed file the platform
+/// names (never one a variable names, which the session may have from a
+/// checkout).
+fn own_env_sets(name: &str, value: &std::ffi::OsStr) -> bool {
+    use crate::claude_settings as cs;
+    let user = cs::user_dir(cs::home_dir().as_deref()).map(|dir| dir.join("settings.json"));
+    [Some(cs::platform_managed_settings()), user].into_iter().flatten().any(|file| {
+        match cs::read_file_up_to(&file, cs::MAX_COMMAND_SETTINGS_BYTES) {
+            cs::FileState::Keys(keys) => {
+                keys.env(name).is_some_and(|set| std::ffi::OsStr::new(set) == value)
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The managed settings file for a command run by hand: the hook's
+/// ([`crate::claude_settings::managed_settings_path`]), unless inside a
+/// Claude Code session the person's own settings do not set it, in which
+/// case the platform's; a checkout's `env` block could have pointed it at
+/// the checkout's own file.
+fn hand_managed() -> Option<PathBuf> {
+    use crate::claude_settings as cs;
+    let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
+    // An empty hook (no managed file) is left alone: it can only drop a
+    // file from the chain, never add one.
+    match hook.as_deref() {
+        Some(value)
+            if !value.is_empty()
+                && in_claude_code()
+                && !own_env_sets(cs::MANAGED_SETTINGS_ENV, value) =>
+        {
+            Some(cs::platform_managed_settings())
+        }
+        _ => cs::managed_settings_path(),
     }
 }
 
 /// A config that a settings file which is not the person's own names.
 ///
-/// A checkout's `statusLine.command` or `env` block, or a `--settings` file
-/// elsewhere. garnish never reads or writes a file a repository nobody here
-/// may have built chooses (CLAUDE.md, "The repository is not the user's
-/// file"), so it is refused like [`WriteTarget::Unresolved`].
+/// A checkout's `statusLine.command` or `env` block, a `--settings` file
+/// elsewhere, or a `GARNISH_CONFIG` none of the person's own settings set
+/// inside a Claude Code session. garnish never reads or writes a file a
+/// repository nobody here may have built chooses (CLAUDE.md, "The
+/// repository is not the user's file"), so it is refused like
+/// [`WriteTarget::Unresolved`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkout {
-    /// The settings file.
-    pub settings: PathBuf,
-    /// The key naming it: `statusLine.command` or `env.GARNISH_CONFIG`.
+    /// The settings file, when one is known to name it.
+    pub settings: Option<PathBuf>,
+    /// The key naming it: `statusLine.command` or `GARNISH_CONFIG`.
     pub key: &'static str,
     /// The file it names.
     pub path: PathBuf,
@@ -94,9 +150,13 @@ pub struct Checkout {
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
 #[must_use]
 pub fn locate(flag: Option<&Path>) -> Option<PathBuf> {
-    if let Some(p) = explicit(flag) {
-        return Some(p);
-    }
+    explicit(flag).or_else(lookup)
+}
+
+/// [`locate`] without the explicit ones: the XDG file, else
+/// `~/.garnish.toml`, whichever exists.
+#[must_use]
+pub fn lookup() -> Option<PathBuf> {
     let xdg = config_home().map(|d| d.join("garnish").join("garnish.toml"));
     if let Some(p) = xdg.filter(|p| p.is_file()) {
         return Some(p);
@@ -174,7 +234,7 @@ pub fn write_target(flag: Option<&Path>, from: CommandFrom<'_>) -> WriteTarget {
         Ok(None) => {}
     }
     command_target(from).unwrap_or_else(|| {
-        locate(None).or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
+        lookup().or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
     })
 }
 
@@ -218,9 +278,7 @@ pub fn read_target(flag: Option<&Path>) -> ReadTarget {
             ReadTarget::Unresolved { settings, word }
         }
         Some(WriteTarget::Checkout(checkout)) => ReadTarget::Checkout(checkout),
-        Some(WriteTarget::NoHome) | None => {
-            locate(None).map_or(ReadTarget::Defaults, ReadTarget::File)
-        }
+        Some(WriteTarget::NoHome) | None => lookup().map_or(ReadTarget::Defaults, ReadTarget::File),
     }
 }
 
@@ -233,9 +291,10 @@ struct ChainFile {
     path: PathBuf,
     /// What it sets.
     keys: crate::claude_settings::FileKeys,
-    /// The person's own: the managed file (unless a checkout's `env` block
-    /// named it) or one in their settings directory ([`users`]); any other
-    /// local or project file is a checkout's.
+    /// The person's own: the managed file ([`hand_managed`], unless a
+    /// checkout's `env` block here named it) or one in their settings
+    /// directory ([`users`]); any other local or project file is a
+    /// checkout's.
     own: bool,
 }
 
@@ -248,7 +307,7 @@ fn chain_files() -> Vec<ChainFile> {
     let home = cs::home_dir();
     let project = std::env::current_dir().ok();
     let user = cs::user_dir(home.as_deref());
-    let managed = cs::managed_settings_path();
+    let managed = hand_managed();
     let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
     let mut files: Vec<ChainFile> = chain
         .into_iter()
@@ -314,6 +373,7 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     };
     match crate::install::command_config(&command, home.as_deref())? {
         crate::install::CommandConfig::File(path) if !own => {
+            let settings = Some(settings);
             Some(WriteTarget::Checkout(Checkout { settings, key: "statusLine.command", path }))
         }
         crate::install::CommandConfig::File(p) => Some(WriteTarget::File(p)),
@@ -354,7 +414,19 @@ pub fn load(explicit: Option<&Path>, schemas: &[ModuleSchema]) -> Loaded {
 /// [`load`] with command-line overrides.
 #[must_use]
 pub fn load_with(explicit: Option<&Path>, schemas: &[ModuleSchema], overlay: &Overlay) -> Loaded {
-    let path = locate(explicit);
+    load_path(locate(explicit), schemas, overlay)
+}
+
+/// [`load`] of exactly `path`, never locating one (so never reading
+/// `GARNISH_CONFIG`): the built-in defaults when it is `None`. `doctor`
+/// loads a refused config's stand-in this way.
+#[must_use]
+pub fn load_exactly(path: Option<&Path>, schemas: &[ModuleSchema]) -> Loaded {
+    load_path(path.map(Path::to_path_buf), schemas, &Overlay::default())
+}
+
+/// [`load_with`] once the file is known.
+fn load_path(path: Option<PathBuf>, schemas: &[ModuleSchema], overlay: &Overlay) -> Loaded {
     let Some(p) = path.clone() else {
         let (config, errors) = parse_with("", schemas, overlay);
         return Loaded { config, path: None, errors };

@@ -206,12 +206,20 @@ Open items only; closed ones are in `WORKLOG.md`.
     path` then answered for one side, and the `garnish-statusline` skill
     writes through it), or trust a project Claude Code itself trusts
     (`hasTrustDialogAccepted` in `~/.claude.json`, an undocumented key).
-    Not guarded: a checkout's `env` block can also set `GARNISH_CACHE_DIR`,
-    `GARNISH_DEBUG` and the other hooks for the tick, whose files are
-    garnish-named (the tick reading a checkout's config is Claude Code's
-    workspace-trust matter). Also open: `$HOME$HOME`, `~/$HOME`,
-    `${HOME-x}` and a `~` after `GARNISH_CONFIG=` name one file to `sh`
-    and are refused as naming none
+    Inside a Claude Code session a `GARNISH_CONFIG` or managed-settings
+    hook counts only when the person's own settings set it, so one they
+    export in their shell before starting Claude Code is refused there
+    (`--config` works). Not guarded: a checkout's `env` block can also set
+    `GARNISH_CACHE_DIR`, `GARNISH_DEBUG` and the other hooks for the tick,
+    whose files are garnish-named (the tick reading a checkout's config is
+    Claude Code's workspace-trust matter). The project directory is the
+    current one, where Claude Code 2.1.283 reads a session's local file
+    from the git root, so a hand command in a subdirectory skips the
+    checkout's files (the safe direction: the person's own then decide,
+    but `doctor` lists the wrong project files). Also open: `$HOME$HOME`,
+    `~/$HOME` and `${HOME-x}` name one file to `sh` and are refused as
+    naming none; `install --settings <link>` replaces the link, not its
+    target
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)

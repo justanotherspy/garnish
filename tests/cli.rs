@@ -50,7 +50,11 @@ fn run_in(
         .env("GARNISH_MANAGED_SETTINGS", "")
         // It moves the user settings file and the skills (SPEC § 7); a
         // test that wants it sets it through `extra`.
-        .env_remove("CLAUDE_CONFIG_DIR");
+        .env_remove("CLAUDE_CONFIG_DIR")
+        // A suite run inside a Claude Code session inherits it, and then a
+        // `GARNISH_CONFIG` no settings file sets is refused (SPEC § 4); a
+        // test that wants the session sets it through `extra`.
+        .env_remove("CLAUDECODE");
     for (k, v) in extra {
         cmd.env(k, v);
     }
@@ -784,6 +788,7 @@ fn writing_commands_refuse_to_guess_a_home_directory() {
         .current_dir(dir.path())
         .env_remove("HOME")
         .env_remove("XDG_CONFIG_HOME")
+        .env_remove("CLAUDECODE")
         .env("GARNISH_MANAGED_SETTINGS", "")
         .env("GARNISH_CONFIG", &via_env);
     assert!(cmd.output().unwrap().status.success());
@@ -1570,10 +1575,10 @@ fn a_checkout_never_chooses_the_config() {
     let mut project = command(&format!("garnish --config {}", victim.display()));
     project["env"] = serde_json::json!({"GARNISH_CONFIG": victim});
     write(&proj, "settings.json", project.clone());
-    refused(&named, "env.GARNISH_CONFIG");
-    for args in [&["config", "init"][..], &["install", "--no-skills"]] {
+    refused(&named, "settings.json: GARNISH_CONFIG names");
+    for args in [&["config", "init"][..], &["config", "check"], &["install", "--no-skills"]] {
         let (out, err, ok) = run_in(&proj, args, &home, &named);
-        assert!(!ok && err.contains("env.GARNISH_CONFIG"), "{args:?}: {out}{err}");
+        assert!(!ok && err.contains("GARNISH_CONFIG names"), "{args:?}: {out}{err}");
     }
     let own = proj.join(".claude/settings.json");
     project["env"] = serde_json::json!({"GARNISH_MANAGED_SETTINGS": own});
@@ -1620,6 +1625,56 @@ fn a_checkout_never_chooses_the_config() {
     assert_eq!(std::fs::read_to_string(&victim).unwrap(), "export PATH\n");
 }
 
+/// Inside a Claude Code session a checkout's `env` block reaches every
+/// directory, in any JSON shape: a `GARNISH_CONFIG` counts only when the
+/// person's own settings set that value, and so does a managed-settings
+/// hook (verification of 2026-09-26: from a subdirectory, with an array
+/// value or a file serde refuses, the checkout's value was followed, and
+/// `doctor` loaded the refused file).
+#[test]
+fn a_claude_code_session_trusts_only_the_persons_own_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let proj = dir.path().join("proj");
+    let sub = proj.join("sub");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(proj.join(".claude")).unwrap();
+    std::fs::create_dir_all(&sub).unwrap();
+    let victim = home.join(".profile");
+    std::fs::write(&victim, "export PATH\n").unwrap();
+    let own = proj.join(".claude/settings.json");
+    let project = serde_json::json!({"env": {"GARNISH_CONFIG": [victim]},
+        "statusLine": {"type": "command", "command": format!("garnish --config {}", victim.display())}});
+    std::fs::write(&own, project.to_string()).unwrap();
+    let payload = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/payloads/subscription-full.json");
+    let preview = ["preview", payload.to_str().unwrap(), "--width", "100"];
+
+    let session = [("CLAUDECODE", "1"), ("GARNISH_CONFIG", victim.to_str().unwrap())];
+    for args in [&["config", "path"][..], &["config", "check"], &["config", "init"], &preview] {
+        let (out, err, ok) = run_in(&sub, args, &home, &session);
+        assert!(
+            !ok && out.is_empty() && err.contains("inside Claude Code"),
+            "{args:?}: {out}{err}"
+        );
+    }
+    let (out, err, ok) = run_in(&sub, &["doctor"], &home, &session);
+    assert!(ok && out.contains("inside Claude Code"), "{out}{err}");
+    assert!(!out.contains("does not parse"), "doctor read the refused file:\n{out}");
+    // A hook the session has from the checkout names no managed file.
+    let hook = [("CLAUDECODE", "1"), ("GARNISH_MANAGED_SETTINGS", own.to_str().unwrap())];
+    let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &hook);
+    assert!(ok && !out.contains(".profile"), "{out}{err}");
+    // The person's own settings set it: it counts.
+    let mine = home.join("mine.toml");
+    let user = serde_json::json!({"env": {"GARNISH_CONFIG": mine}});
+    std::fs::write(home.join(".claude/settings.json"), user.to_string()).unwrap();
+    let vouched = [("CLAUDECODE", "1"), ("GARNISH_CONFIG", mine.to_str().unwrap())];
+    let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &vouched);
+    assert!(ok && out.trim_end() == mine.to_str().unwrap(), "{out}{err}");
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "export PATH\n");
+}
+
 /// A home reached through a link is still the person's: a session started
 /// in it reads their own settings as the project's, and a checkout's file
 /// that links to one of theirs is theirs too (as `/var` is `/private/var`
@@ -1647,6 +1702,26 @@ fn a_linked_home_is_still_the_persons_own() {
     .unwrap();
     let (out, err, ok) = run_in(&proj, &["config", "path"], &link, &[]);
     assert!(ok && out.trim_end() == work.to_str().unwrap(), "{out}{err}");
+    // `~/.claude` is the person's own even when `CLAUDE_CONFIG_DIR` moves
+    // their settings elsewhere.
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let moved = [("CLAUDE_CONFIG_DIR", elsewhere.to_str().unwrap())];
+    let (out, err, ok) = run_in(&home, &["config", "path"], &home, &moved);
+    assert!(ok && out.trim_end() == work.to_str().unwrap(), "{out}{err}");
+    // A session in the home directory whose local file passes a config the
+    // user file's command does not: `setup --install` writes that one and
+    // says the command it keeps reads the lookup's file.
+    let status = serde_json::json!({"statusLine": {"type": "command", "command": "garnish"}});
+    std::fs::write(home.join(".claude/settings.json"), status.to_string()).unwrap();
+    let local = serde_json::json!({"statusLine": {"type": "command",
+        "command": format!("garnish --config {}", work.display())}});
+    std::fs::write(home.join(".claude/settings.local.json"), local.to_string()).unwrap();
+    let args = ["setup", "--preset", "minimal", "--install"];
+    let (out, err, ok) = run_in(&home, &args, &home, &[]);
+    let xdg = home.join(".config/garnish/garnish.toml");
+    let note = format!("reads {}, not {}", xdg.display(), work.display());
+    assert!(ok && work.exists() && err.contains(&note), "{out}{err}");
 }
 
 /// Final review: `install` reads the whole settings file it rewrites, so

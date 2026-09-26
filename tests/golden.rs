@@ -31,6 +31,9 @@ fn render(fixture: &Path, preset: &str, icons: &str) -> String {
         ])
         .env("GARNISH_NOW", "1738425600")
         .env("GARNISH_CONFIG", root().join("tests/fixtures/configs/empty.toml"))
+        // Inside a Claude Code session `preview` would refuse a
+        // GARNISH_CONFIG no settings file sets (SPEC § 4).
+        .env_remove("CLAUDECODE")
         .env("GARNISH_CACHE_DIR", std::env::temp_dir().join("garnish-golden-cache"))
         .env("GARNISH_NO_SPAWN", "1")
         .env("HOME", "/home/dev")

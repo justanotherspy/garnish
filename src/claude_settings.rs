@@ -124,7 +124,8 @@ pub fn managed_settings_from(hook: Option<&std::ffi::OsStr>) -> Option<PathBuf> 
 }
 
 /// Where Claude Code reads the managed settings file on this platform.
-fn platform_managed_settings() -> PathBuf {
+#[must_use]
+pub fn platform_managed_settings() -> PathBuf {
     if cfg!(target_os = "macos") {
         PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json")
     } else {

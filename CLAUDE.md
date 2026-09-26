@@ -533,9 +533,15 @@ for the contract and `docs/` for user docs.
   managed file or one in their settings directory, by path or link) is a
   `config::Checkout`, refused like `Unresolved`, never followed; callers
   resolve `GARNISH_CONFIG` through `config::hand_explicit`
-  (`cli::explicit_or_quiet`), which refuses one a checkout's `env` block
-  set, since Claude Code copies that block into the session; the tick's
-  `explicit` takes the variable as it comes) and its twin
+  (`cli::explicit_or_quiet`): inside a Claude Code session (`CLAUDECODE`
+  present) the environment carries every settings file's `env` block, a
+  checkout's included, so the variable counts only when the person's own
+  settings set that value, and the managed-settings hook likewise
+  (`hand_managed`); guessing which checkout file set it failed three ways
+  (a subdirectory, a non-string value, a file serde refuses); the tick's
+  `explicit` takes the variable as it comes; `doctor` loads a refused
+  config's stand-in through `config::load_exactly`, never `load`, which
+  would locate the refused file again) and its twin
   `config::read_target` (the same order without
   the default, for the commands a person runs to look at their config:
   `config check`, `config show`, `preview`, `doctor`, so they read the
@@ -931,7 +937,10 @@ is that garnish does it on a *timer*, so the rules are:
   current directory on their own. Tests that run the binary must set
   `GARNISH_CACHE_DIR`, `GARNISH_NO_SPAWN` and `GARNISH_MANAGED_SETTINGS=`
   (empty: no managed settings file) and clear
-  `CLAUDE_*` (`CLAUDE_CONFIG_DIR` included)/`DISABLE_*`/`GARNISH_ANIMATE`;
+  `CLAUDE_*` (`CLAUDE_CONFIG_DIR` included)/`DISABLE_*`/`GARNISH_ANIMATE`
+  and `CLAUDECODE` (a suite run inside a Claude Code session inherits it,
+  and a hand command then refuses a `GARNISH_CONFIG` no settings file
+  sets);
   one that writes a payload to the child's stdin ignores `EPIPE`, since
   the child may exit before reading; and `tests/cli.rs` runs the
   binary in the test's own directory so the checkout's `.claude/` never

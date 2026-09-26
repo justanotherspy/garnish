@@ -1102,4 +1102,14 @@ was built, what the reviews found and what was decided, not how.
     names it. `setup --install` notes a command that reads another file
     than the one it wrote; a `~` in a `GARNISH_CONFIG=` value and
     arguments clap refuses name no file; a linked home or a checkout
-    file linked to the person's own counts as theirs.
+    file linked to the person's own counts as theirs. A fifth verifier,
+    running Claude Code 2.1.283 end to end, confirmed a project's `env`
+    block reaches the Bash tool, and got past the env check three ways
+    (a session in a subdirectory, an array value, a file serde refuses but
+    `JSON.parse` reads): guessing which checkout file set the variable was
+    the wrong shape. Now inside a session (`CLAUDECODE` present) a
+    `GARNISH_CONFIG` or managed-settings hook counts only when the
+    person's own settings set it. `doctor` no longer loads the refused
+    file (`config::load_exactly`); the setup notes compare a relative
+    path absolutely, cover a command that passes no config, and show
+    `~/…` on the screen.

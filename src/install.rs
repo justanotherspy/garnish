@@ -377,14 +377,16 @@ fn env_config(prefix: &[Word], command: &str) -> Option<(Word, String)> {
         word.text.strip_prefix(VAR).filter(|rest| !rest.is_empty() || word.home.is_some())?;
     let written = command.get(word.start..word.end)?.strip_prefix(VAR)?.to_owned();
     let home = word.home.map(|h| h.saturating_sub(VAR.len()));
-    let literal = word.literal && !written.contains('~');
+    let literal = word.literal && !(written.starts_with('~') || written.contains(":~"));
     Some((Word { text: rest.to_owned(), home, literal, ..word.clone() }, written))
 }
 
 /// Whether two paths name one file: the same path or, when both exist, the
 /// same file once links are followed.
 fn same_file(a: &Path, b: &Path) -> bool {
-    a == b || std::fs::canonicalize(a).is_ok_and(|a| std::fs::canonicalize(b).is_ok_and(|b| a == b))
+    let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    absolute(a) == absolute(b)
+        || std::fs::canonicalize(a).is_ok_and(|a| std::fs::canonicalize(b).is_ok_and(|b| a == b))
 }
 
 /// The path this binary is known by, for `install --absolute`: the first
@@ -808,13 +810,22 @@ impl std::fmt::Display for Refusal {
                 settings.display(),
                 shown_word(word)
             ),
-            Self::CheckoutConfig(c) => write!(
-                f,
-                "{}: {} names the config {:?}, but this settings file is a checkout's, not yours, and garnish never follows a file one chooses; pass --config <FILE> to say which",
-                c.settings.display(),
-                c.key,
-                shown_word(&c.path.to_string_lossy())
-            ),
+            Self::CheckoutConfig(c) => {
+                let shown = shown_word(&c.path.to_string_lossy());
+                match &c.settings {
+                    Some(settings) => write!(
+                        f,
+                        "{}: {} names the config {shown:?}, but this settings file is a checkout's, not yours, and garnish never follows a file one chooses; pass --config <FILE> to say which",
+                        settings.display(),
+                        c.key
+                    ),
+                    None => write!(
+                        f,
+                        "{} names the config {shown:?}, but inside Claude Code a project's settings can set it and none of your own does, so garnish does not follow it; pass --config <FILE> to say which",
+                        c.key
+                    ),
+                }
+            }
             Self::Unparsable { path, problem } => write!(
                 f,
                 "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
@@ -987,11 +998,15 @@ impl Steps {
             // What `setup` writes against what the command written reads
             // (verification of 2026-09-26: a preset went where nothing read
             // it, without a word).
+            // A command that passes no config reads the lookup's file.
             let home = crate::claude_settings::home_dir();
-            match (&options.config_written, command_config(&command, home.as_deref())) {
-                (Some(written), Some(CommandConfig::File(reads)))
-                    if !same_file(written, &reads) =>
-                {
+            let reads = match command_config(&command, home.as_deref()) {
+                Some(CommandConfig::File(reads)) => Some(reads),
+                Some(CommandConfig::Unresolved(_)) => None,
+                None => crate::config::lookup().or_else(crate::config::default_path),
+            };
+            match (&options.config_written, reads) {
+                (Some(written), Some(reads)) if !same_file(written, &reads) => {
                     ConfigStep::Elsewhere { written: written.clone(), reads }
                 }
                 _ => ConfigStep::Skipped,
@@ -1305,6 +1320,33 @@ mod tests {
         assert_eq!(command_config("garnish --config \"$HOME/w\"", glob), file("/h*/w"));
     }
 
+    /// Verification of 2026-09-26: the file `setup` writes and the one the
+    /// installed command reads are one file through a link or a relative
+    /// spelling, so no note says otherwise.
+    #[cfg(unix)]
+    #[test]
+    fn one_file_by_a_link_or_a_relative_path_is_the_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        std::fs::write(&real, "").unwrap();
+        let link = dir.path().join("link.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(same_file(&link, &real));
+        let cwd = std::env::current_dir().unwrap();
+        assert!(same_file(Path::new("rel.toml"), &cwd.join("rel.toml")));
+        assert!(!same_file(&real, &dir.path().join("other.toml")));
+        let settings = dir.path().join("settings.json");
+        let options = Options {
+            settings: Some(settings),
+            config_path: Some(PathBuf::from("rel.toml")),
+            config_written: Some(PathBuf::from("rel.toml")),
+            write_config: false,
+            write_skills: false,
+            ..Options::default()
+        };
+        assert_eq!(Steps::plan(&options).unwrap().config, ConfigStep::Skipped);
+    }
+
     /// A quoted `--config` word is cut to a line's worth: it comes from a
     /// settings file a project may carry.
     #[test]
@@ -1392,6 +1434,7 @@ mod tests {
             // A `~` after the `=` or a `:` of an assignment is the shell's.
             ("GARNISH_CONFIG=/a:~/b garnish", unresolved("/a:~/b")),
             ("GARNISH_CONFIG=~/b garnish", unresolved("~/b")),
+            ("GARNISH_CONFIG=/a/b~c garnish", file("/a/b~c")),
         ] {
             assert_eq!(command_config(command, home), want, "{command}");
         }

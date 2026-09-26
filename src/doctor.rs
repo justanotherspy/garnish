@@ -65,23 +65,23 @@ pub fn report_with(
     let _ = writeln!(o);
     // A `--config` the status line command passes that names no one file,
     // or that a checkout chooses, is said once; the report then shows what
-    // a bare lookup finds.
+    // the lookup finds, never the refused file (`GARNISH_CONFIG` may be it).
     let (config_path, unresolved) = match config_file {
-        config::ReadTarget::File(p) => (Some(p.as_path()), None),
-        config::ReadTarget::Defaults => (None, None),
+        config::ReadTarget::File(p) => (Some(p.clone()), None),
+        config::ReadTarget::Defaults => (config::lookup(), None),
         config::ReadTarget::Unresolved { settings, word } => {
             let refusal = crate::install::Refusal::UnresolvedConfig {
                 settings: settings.clone(),
                 word: word.clone(),
             };
-            (None, Some(refusal.to_string()))
+            (config::lookup(), Some(refusal.to_string()))
         }
         config::ReadTarget::Checkout(checkout) => {
             let refusal = crate::install::Refusal::CheckoutConfig(checkout.clone());
-            (None, Some(refusal.to_string()))
+            (config::lookup(), Some(refusal.to_string()))
         }
     };
-    let loaded = config::load(config_path, &SCHEMAS);
+    let loaded = config::load_exactly(config_path.as_deref(), &SCHEMAS);
     let chain = read_chain(&claude_settings::settings_chain(managed, project, user));
     for row in settings_rows(&chain, project, &loaded.config, crate::time::animate_from_env()) {
         let _ = writeln!(o, "{row}");
