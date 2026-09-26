@@ -1,0 +1,50 @@
+# fixture: subscription-full
+# columns: 40
+# icons: unicode
+# An `fr` column whose share floors to nothing draws nothing, so it takes no
+# gap either (SPEC § 4.3), and the row is shared again without it. Its gap
+# used to be reserved and never drawn: the cells turned up as a stray rule
+# between the session timer and the cap's pad, `⏱ 1h12m─ ──`.
+#
+# Row 1: a fixed column and an `auto` one leave the two bare columns
+# nothing. No `fr` column is left to take the freed cells, so they are the
+# rule after the timer, behind its pad, as in a row with no `fr` column.
+# Row 2: a weight so large the other `fr` column's share floors to nothing;
+# the first one takes the freed gap.
+# Row 3: the squeezed column is the last one. It draws nothing, so the row
+# does not end in content and the rule runs into the cap with no pad: the
+# cap used to keep one, a hole in the rule.
+
+[[row]]
+gap = 1
+[[row.col]]
+width = 20
+modules = ["model"]
+[[row.col]]
+modules = ["clock"]
+[[row.col]]
+modules = ["path"]
+[[row.col]]
+width = "auto"
+modules = ["session"]
+
+[[row]]
+gap = 3
+[[row.col]]
+width = "64fr"
+modules = ["model"]
+[[row.col]]
+width = "1fr"
+modules = ["clock"]
+[[row.col]]
+width = "auto"
+modules = ["session"]
+
+[[row]]
+gap = 3
+[[row.col]]
+width = "64fr"
+modules = ["model"]
+[[row.col]]
+width = "1fr"
+modules = ["session"]

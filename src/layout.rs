@@ -324,8 +324,10 @@ impl Layout<'_> {
                             .map(|i| self.inner_width(row, index.saturating_add(i), framed))
                             .min()
                             .unwrap_or_else(|| self.inner_width(row, *index, framed));
+                        let widths = self.share(row, inner, fill);
+                        let ends = ends_in_content(row, &widths);
                         let lines = self
-                            .row_body(row, inner, height, fill, Fit::default())
+                            .row_columns(row, &widths, height, fill, Fit::default())
                             .into_iter()
                             .enumerate()
                             .map(|(i, drafts)| {
@@ -334,8 +336,14 @@ impl Layout<'_> {
                                 // row's belongs to its box, which draws it
                                 // on its top edge; none reaches this arm.
                                 let title = row.title.filter(|_| i == 0);
-                                let line =
-                                    self.wrap_frame(drafts, *index, framed, row, fill, title);
+                                let line = self.wrap_frame(
+                                    drafts,
+                                    (*index, framed),
+                                    row,
+                                    fill,
+                                    title,
+                                    ends,
+                                );
                                 *index = index.saturating_add(1);
                                 line
                             })
@@ -432,9 +440,24 @@ fn row_ends_in_content(row: &Row<'_>) -> bool {
     has_fr(row) && row.cols.last().is_some_and(col_ends_in_content)
 }
 
+/// [`row_ends_in_content`] for a row laid out to `widths`: a last column
+/// that took no cells (an `fr` one whose share floored to nothing, or one
+/// dropped from a row too narrow for it) draws nothing, and the column
+/// before it keeps a pad of its own (SPEC § 4.3).
+fn ends_in_content(row: &Row<'_>, widths: &[usize]) -> bool {
+    widths.last().is_some_and(|w| *w > 0) && row_ends_in_content(row)
+}
+
 /// Whether any column of the row shares the free width.
 fn has_fr(row: &Row<'_>) -> bool {
     row.cols.iter().any(|c| matches!(c.width, Width::Fr(_)))
+}
+
+/// The cells the drawn columns of `widths` take, with a gap between each
+/// two of them.
+fn drawn_cells(widths: &[usize], gap: usize) -> usize {
+    let drawn = widths.iter().filter(|w| **w > 0).count();
+    widths.iter().sum::<usize>().saturating_add(gap.saturating_mul(drawn.saturating_sub(1)))
 }
 
 /// Whether a column's text can meet a rule beside it: not when a box's side
@@ -448,13 +471,16 @@ fn meets_rule(col: &Col<'_>) -> bool {
         }
 }
 
+/// Whether a column's content reaches its right edge. A `width = 0` column
+/// takes no cells and draws nothing, so it never does.
 fn col_ends_in_content(col: &Col<'_>) -> bool {
-    match &col.content {
-        Content::Groups { left, right, .. } => {
-            !right.is_empty() || (col.justify == Justify::Right && !left.is_empty())
+    col.width != Width::Cells(0)
+        && match &col.content {
+            Content::Groups { left, right, .. } => {
+                !right.is_empty() || (col.justify == Justify::Right && !left.is_empty())
+            }
+            Content::Stack(rows) => rows.iter().any(row_ends_in_content),
         }
-        Content::Stack(rows) => rows.iter().any(row_ends_in_content),
-    }
 }
 
 impl Fill {
@@ -522,6 +548,31 @@ impl Layout<'_> {
         inherit: Fit,
     ) -> Vec<Vec<Draft>> {
         let widths = self.share(row, width, fill);
+        let mut lines = self.row_columns(row, &widths, height, fill, inherit);
+        // The cells no column took: with no `fr` column to share them, the
+        // free width is filler after the last column.
+        let left = width.saturating_sub(drawn_cells(&widths, row.gap));
+        if left > 0 && fill.draws() {
+            for line in &mut lines {
+                line.push(Self::filler(left, fill));
+            }
+        }
+        lines
+    }
+
+    /// One row's columns laid out to `widths` and joined by their gaps, a
+    /// list of drafts per line, without the cells no column took: a row in
+    /// a column or a box has them filled by [`Self::row_body`], and a row of
+    /// the frame by [`Self::wrap_frame`], which puts them behind the pad
+    /// before its cap.
+    fn row_columns(
+        &self,
+        row: &Row<'_>,
+        widths: &[usize],
+        height: usize,
+        fill: Fill,
+        inherit: Fit,
+    ) -> Vec<Vec<Draft>> {
         let gap = row.gap;
         // Inside a box the gap is spaces, and they alone keep two columns
         // apart; only at `gap = 0` does a side facing a neighbour need a
@@ -531,7 +582,7 @@ impl Layout<'_> {
         let cols: Vec<Vec<Vec<Draft>>> = row
             .cols
             .iter()
-            .zip(&widths)
+            .zip(widths)
             .enumerate()
             .map(|(j, (col, w))| {
                 let (l, r) = self.edge_pads(row, j, fill);
@@ -554,14 +605,14 @@ impl Layout<'_> {
         (0..height)
             .map(|i| {
                 let mut line: Vec<Draft> = Vec::new();
-                let mut used = 0_usize;
-                for (j, (col, w)) in cols.iter().zip(&widths).enumerate() {
+                let mut drawn = false;
+                for (col, w) in cols.iter().zip(widths) {
                     // A column clamped to nothing renders nothing, and so
                     // does its gap (SPEC § 4.3).
                     if *w == 0 {
                         continue;
                     }
-                    if j > 0 && used > 0 {
+                    if drawn {
                         // On a one-line row the rule runs through the gaps
                         // too, so a centred module floats on one rule; on a
                         // taller row a gap beside a box's side is spaces.
@@ -570,14 +621,9 @@ impl Layout<'_> {
                         } else {
                             Draft::Space(gap, Elem::Gap)
                         });
-                        used = used.saturating_add(gap);
                     }
                     line.extend(col.get(i).cloned().unwrap_or_default());
-                    used = used.saturating_add(*w);
-                }
-                let left = width.saturating_sub(used);
-                if left > 0 && fill.draws() {
-                    line.push(Self::filler(left, fill));
+                    drawn = true;
                 }
                 line
             })
@@ -589,7 +635,21 @@ impl Layout<'_> {
     /// right so a narrow terminal drops whole columns rather than spilling
     /// (SPEC § 4.3).
     fn share(&self, row: &Row<'_>, width: usize, fill: Fill) -> Vec<usize> {
-        let n = row.cols.len();
+        let (widths, dropped) = self.shares(row, width, fill);
+        // A dropped column is invisible on screen, so the one place it can
+        // be explained is the debug log (SPEC § 4.3).
+        if dropped > 0 {
+            crate::debug::log(&format!(
+                "layout: {dropped} of {} columns dropped, {width} cells is too narrow for them",
+                row.cols.len()
+            ));
+        }
+        widths
+    }
+
+    /// [`Self::share`] without the log, with the number of columns that
+    /// wanted cells and got none, which the log reports.
+    fn shares(&self, row: &Row<'_>, width: usize, fill: Fill) -> (Vec<usize>, usize) {
         let want: Vec<usize> = row
             .cols
             .iter()
@@ -611,71 +671,43 @@ impl Layout<'_> {
             })
             .collect();
         // A gap sits between two columns that are drawn, and a column that
-        // takes no cells (`width = 0`, an `auto` one with nothing to show)
-        // draws nothing: `row_body` skips it and its gap, so reserving that
-        // gap would leave its cells over. An `fr` share is not known yet.
-        let drawn = row
+        // takes no cells (`width = 0`, an `auto` one with nothing to show,
+        // an `fr` one whose share floors to nothing) draws nothing:
+        // `row_columns` skips it and its gap, so reserving that gap would leave
+        // its cells over. An `fr` column counts until its share is known;
+        // the last one that comes to nothing is dropped and the row shared
+        // again, so the gap cells it freed go to the `fr` columns that
+        // remain. Each round drops one, so this ends within the row's
+        // columns.
+        let mut live: Vec<bool> = row
             .cols
             .iter()
             .zip(&want)
-            .filter(|(col, w)| matches!(col.width, Width::Fr(_)) || **w > 0)
-            .count();
-        let gaps = row.gap.saturating_mul(drawn.saturating_sub(1));
-        let available = width.saturating_sub(gaps);
-        let fixed: usize = want.iter().sum();
-        let free = available.saturating_sub(fixed);
-        let total_fr: u32 = row
-            .cols
-            .iter()
-            .filter_map(|c| match c.width {
-                Width::Fr(n) => Some(n),
-                _ => None,
-            })
-            .sum();
-        // floor(free × n ÷ Σfr) each, and the cells that floor left over go
-        // one each to the first of them, so the shares differ by at most one
-        // and always add up. The leftover is what the shares did not take,
-        // never `free % Σfr`: with a weight above 1 the two differ, and
-        // handing out the larger one overshoots the row.
-        let fr = usize::try_from(total_fr).unwrap_or(1).max(1);
-        let mut desired: Vec<usize> = row
-            .cols
-            .iter()
-            .zip(&want)
-            .map(|(col, w)| match col.width {
-                Width::Fr(n) => {
-                    let n = usize::try_from(n).unwrap_or(1);
-                    free.saturating_mul(n).checked_div(fr).unwrap_or(0)
-                }
-                _ => *w,
-            })
+            .map(|(col, w)| matches!(col.width, Width::Fr(_)) || *w > 0)
             .collect();
-        let shared: usize = row
-            .cols
-            .iter()
-            .zip(&desired)
-            .filter(|(col, _)| matches!(col.width, Width::Fr(_)))
-            .map(|(_, w)| *w)
-            .sum();
-        let mut leftover = free.saturating_sub(shared);
-        for (col, take) in row.cols.iter().zip(desired.iter_mut()) {
-            if leftover == 0 {
-                break;
+        let mut desired = loop {
+            let desired = Self::fr_shares(row, &want, &live, width);
+            let emptied = row.cols.iter().zip(&desired).zip(live.iter_mut()).rev().find(
+                |((col, take), drawn)| **drawn && **take == 0 && matches!(col.width, Width::Fr(_)),
+            );
+            match emptied {
+                Some((_, drawn)) => *drawn = false,
+                None => break desired,
             }
-            if matches!(col.width, Width::Fr(_)) {
-                *take = take.saturating_add(1);
-                leftover = leftover.saturating_sub(1);
-            }
-        }
+        };
         // Left to right, gap then column: a column whose gap plus one cell
         // does not fit renders nothing, and so does everything to its right.
-        // A column that takes no cells takes no gap either, as `row_body`
-        // draws a gap only between two columns it draws.
+        // A column that takes no cells takes no gap either, as `row_columns`
+        // draws a gap only between two columns it draws; an `fr` one that
+        // came to nothing was dropped for want of room.
         let mut left = width;
         let mut dropped = 0_usize;
         let mut after_one = false;
         for (col, take) in row.cols.iter().zip(desired.iter_mut()) {
-            if *take == 0 && !matches!(col.width, Width::Fr(_)) {
+            if *take == 0 {
+                if matches!(col.width, Width::Fr(_)) {
+                    dropped = dropped.saturating_add(1);
+                }
                 continue;
             }
             let cost = if after_one { row.gap } else { 0 };
@@ -685,17 +717,60 @@ impl Layout<'_> {
                 continue;
             }
             *take = (*take).min(left.saturating_sub(cost));
-            if *take > 0 {
-                left = left.saturating_sub(cost).saturating_sub(*take);
-                after_one = true;
-            }
+            left = left.saturating_sub(cost).saturating_sub(*take);
+            after_one = true;
         }
-        // A dropped column is invisible on screen, so the one place it can
-        // be explained is the debug log (SPEC § 4.3).
-        if dropped > 0 {
-            crate::debug::log(&format!(
-                "layout: {dropped} of {n} columns dropped, {width} cells is too narrow for them"
-            ));
+        (desired, dropped)
+    }
+
+    /// Every column's cells before the clamp: its `want`, or for a `live`
+    /// `fr` column its part of what the fixed columns and the gaps between
+    /// the live columns leave (a dropped `fr` column takes nothing).
+    fn fr_shares(row: &Row<'_>, want: &[usize], live: &[bool], width: usize) -> Vec<usize> {
+        let drawn = live.iter().filter(|l| **l).count();
+        let gaps = row.gap.saturating_mul(drawn.saturating_sub(1));
+        let available = width.saturating_sub(gaps);
+        let fixed: usize = want.iter().sum();
+        let free = available.saturating_sub(fixed);
+        let weight = |col: &Col<'_>, drawn: bool| match col.width {
+            Width::Fr(n) if drawn => usize::try_from(n).ok(),
+            _ => None,
+        };
+        let total_fr: usize = row.cols.iter().zip(live).filter_map(|(c, l)| weight(c, *l)).sum();
+        // floor(free × n ÷ Σfr) each, and the cells that floor left over go
+        // one each to the first of them, so the shares differ by at most one
+        // and always add up. The leftover is what the shares did not take,
+        // never `free % Σfr`: with a weight above 1 the two differ, and
+        // handing out the larger one overshoots the row.
+        let fr = total_fr.max(1);
+        let mut desired: Vec<usize> = row
+            .cols
+            .iter()
+            .zip(want)
+            .zip(live)
+            .map(|((col, w), l)| match (col.width, weight(col, *l)) {
+                (_, Some(n)) => free.saturating_mul(n).checked_div(fr).unwrap_or(0),
+                (Width::Fr(_), None) => 0,
+                _ => *w,
+            })
+            .collect();
+        let shared: usize = row
+            .cols
+            .iter()
+            .zip(live)
+            .zip(&desired)
+            .filter(|((col, l), _)| weight(col, **l).is_some())
+            .map(|(_, w)| *w)
+            .sum();
+        let mut leftover = free.saturating_sub(shared);
+        for ((col, l), take) in row.cols.iter().zip(live).zip(desired.iter_mut()) {
+            if leftover == 0 {
+                break;
+            }
+            if weight(col, *l).is_some() {
+                *take = take.saturating_add(1);
+                leftover = leftover.saturating_sub(1);
+            }
         }
         desired
     }
@@ -1657,15 +1732,17 @@ impl Layout<'_> {
         if blank { blank_line(line) } else { line }
     }
 
-    /// One row line between the frame's caps.
+    /// One row line between the frame's caps: line `index` of the `count`
+    /// that carry them. `ends` is whether the row's content reaches the cap
+    /// ([`ends_in_content`]).
     fn wrap_frame(
         &self,
         drafts: Vec<Draft>,
-        index: usize,
-        count: usize,
+        (index, count): (usize, usize),
         row: &Row<'_>,
         fill: Fill,
         title: Option<&crate::config::TitleCfg>,
+        ends: bool,
     ) -> Line {
         let (prefix, cap) = self.chars.ends(index, count);
         let style = Style::fg(self.theme.role(Role::Frame));
@@ -1681,24 +1758,25 @@ impl Layout<'_> {
             }
         }
         line.extend(drafts);
-        if let Some(title) = title {
-            self.place_title(&mut line, title, fill);
-        }
         if fill.draws() {
             // The cap is padded from the content only: with no right group
-            // the rule runs into it, as it always has. Any cell left over
-            // (a later line of a tall row whose cap is narrower than the
-            // first's, or empty) goes to the rule, so every line is the
-            // same width.
+            // the rule runs into it, as it always has. The pad stands
+            // against the content, and every cell left over goes to the rule
+            // after it: the free width no `fr` column took, and on a later
+            // line of a tall row what a cap narrower than the first's (or
+            // none) leaves. So the rule never touches text, and every line
+            // is the same width. A line with no cap takes the pad only when
+            // it has the cells for it: nothing reserved them.
             let used: usize = line.iter().map(Draft::cells).sum();
-            let padded = !cap.is_empty() && row_ends_in_content(row) && pad > 0;
-            let cap_total = display_width(cap).saturating_add(if padded { pad } else { 0 });
-            let spare = self.width.saturating_sub(used).saturating_sub(cap_total);
-            if spare > 0 {
-                line.push(Self::filler(spare, fill));
-            }
+            let room = self.width.saturating_sub(used);
+            let padded = ends && pad > 0 && (!cap.is_empty() || room >= pad);
             if padded {
                 line.push(self.pad(pad));
+            }
+            let taken = display_width(cap).saturating_add(if padded { pad } else { 0 });
+            let spare = room.saturating_sub(taken);
+            if spare > 0 {
+                line.push(Self::filler(spare, fill));
             }
             if !cap.is_empty() {
                 line.push(Draft::Done(Piece {
@@ -1706,6 +1784,11 @@ impl Layout<'_> {
                     segs: vec![Segment::styled(cap, style)],
                 }));
             }
+        }
+        // The title goes in last, so the rule after the columns is a run it
+        // can take; a run is only ever rule or space cells, never a cap.
+        if let Some(title) = title {
+            self.place_title(&mut line, title, fill);
         }
         if !fill.draws() {
             // A packed row draws no filler at all, so the cells that only
@@ -1871,9 +1954,11 @@ mod tests {
             let l = self.layout();
             let fill = if self.fill { Fill::Rule } else { Fill::Packed };
             let inner = l.inner_width(&row, index, count);
-            let mut body = l.row_body(&row, inner, 1, fill, Fit::default());
+            let widths = l.share(&row, inner, fill);
+            let mut body = l.row_columns(&row, &widths, 1, fill, Fit::default());
             let drafts = body.pop().unwrap_or_default();
-            let line = l.wrap_frame(drafts, index, count, &row, fill, None);
+            let ends = ends_in_content(&row, &widths);
+            let line = l.wrap_frame(drafts, (index, count), &row, fill, None, ends);
             Painter::PLAIN.paint(&line.segments())
         }
     }
@@ -1948,7 +2033,7 @@ mod tests {
             let inner = l.inner_width(&row, 0, 1);
             let mut body = l.row_body(&row, inner, 1, Fill::Packed, Fit::default());
             let drafts = body.pop().unwrap_or_default();
-            let line = l.wrap_frame(drafts, 0, 1, &row, Fill::Packed, None);
+            let line = l.wrap_frame(drafts, (0, 1), &row, Fill::Packed, None, false);
             line.pieces
                 .iter()
                 .filter(|p| matches!(p.elem, Elem::Separator))
@@ -2371,12 +2456,16 @@ mod tests {
     }
 
     /// SPEC § 4.3: a column that draws nothing (an `auto` column with
-    /// nothing to show, a `width = 0` one) takes no cells and no gap.
-    /// `share` used to reserve its gap, which `row_body` never drew, so the
-    /// cells turned up as a stray rule after the last column and a
-    /// right-justified module ended against it: `⠋ 16:00:00─ ─╮`.
+    /// nothing to show, a `width = 0` one, an `fr` one whose share floors
+    /// to nothing) takes no cells and no gap, and a last one leaves the
+    /// column before it last. `share` used to reserve the gap, which
+    /// `row_body` never drew, so the cells turned up as a stray rule after
+    /// the last column and a right-justified module ended against it:
+    /// `⠋ 16:00:00─ ─╮`. A last column that drew nothing still counted as
+    /// ending in content, so the cap kept a pad beside the rule: `end ─── ──`.
     #[test]
     fn a_column_that_draws_nothing_takes_no_gap() {
+        let right = |c: Col<'static>| Col { justify: Justify::Right, ..c };
         let nothing = [|| col(Width::Auto, ""), || col(Width::Cells(0), "⠋ 16:00:00")];
         for (width, gap, empty) in [30_usize, 60, 101]
             .into_iter()
@@ -2385,10 +2474,13 @@ mod tests {
         {
             let f = Fixture::new(FrameStyle::Rounded, true, width);
             let l = f.layout();
-            let last = || Col { justify: Justify::Right, ..col(Width::Fr(1), "end") };
+            let last = || right(col(Width::Fr(1), "end"));
             for cols in [
                 vec![empty(), col(Width::Fr(1), "a"), last()],
                 vec![col(Width::Fr(1), "a"), empty(), last()],
+                // Last, right-justified as a last column is by default: the
+                // column before it keeps its own pad, so the cap takes none.
+                vec![col(Width::Fr(1), "a"), last(), right(empty())],
             ] {
                 let r = row(cols, gap);
                 let widths = l.share(&r, l.inner_width(&r, 0, 1), Fill::Rule);
@@ -2404,26 +2496,84 @@ mod tests {
                 assert!(show(line).ends_with(" end ──"), "{}", show(line));
             }
         }
+        // `fr` columns squeezed to nothing: by fixed columns (the review's
+        // `width = 20` beside two bare columns and an `auto` one), and by a
+        // weight so large the other's share floors to nothing. The gap cells
+        // no `fr` column is left to take are the rule after the last column,
+        // behind its pad, as in a row with no `fr` column at all.
+        let squeezed = |gap: usize| {
+            [
+                row(
+                    vec![
+                        col(Width::Cells(20), "a"),
+                        col(Width::Fr(1), "b"),
+                        col(Width::Fr(1), "c"),
+                        right(col(Width::Auto, "end")),
+                    ],
+                    gap,
+                ),
+                row(
+                    vec![
+                        col(Width::Fr(64), "a"),
+                        col(Width::Fr(1), "b"),
+                        right(col(Width::Auto, "end")),
+                    ],
+                    gap,
+                ),
+            ]
+        };
+        let rules_into_cap = |text: &str| {
+            text.rsplit_once(" end ").is_some_and(|(_, tail)| {
+                tail.chars().count() >= 2 && tail.chars().all(|c| c == '─')
+            })
+        };
+        for (width, gap) in (33_usize..=48).flat_map(|w| [1, 3].map(|g| (w, g))) {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            for r in squeezed(gap) {
+                let lines = l.lines(std::slice::from_ref(&r));
+                let line = lines.first().and_then(|r| r.first()).unwrap();
+                assert_eq!(line.width(), width, "{}", show(line));
+                assert!(rules_into_cap(&show(line)), "{width}, gap {gap}: {}", show(line));
+            }
+        }
+        // A last `fr` column squeezed to nothing: the row ends in the rule,
+        // which runs into the cap with no pad before it.
+        for width in [30_usize, 40, 60] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let r = row(vec![col(Width::Fr(64), "a"), right(col(Width::Fr(1), "end"))], 3);
+            let lines = l.lines(std::slice::from_ref(&r));
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            let text = show(line);
+            assert_eq!(line.width(), width, "{text}");
+            assert!(!text.contains("end"), "the column is squeezed out: {text}");
+            assert!(text.ends_with(&"─".repeat(6)), "a hole before the cap: {text}");
+        }
     }
 
     /// SPEC § 4.3: the `fr` columns share the free width as
     /// `floor(free × n ÷ Σfr)` each, the leftover one cell each to the first
     /// of them, so the shares differ by at most one cell and always add up.
+    /// A share that floors to nothing drops its column, gap and all, and the
+    /// columns that remain share again: the gaps are counted between the
+    /// columns that are drawn, never `n − 1` of them.
     #[test]
     fn column_shares_add_up_and_differ_by_at_most_one_cell() {
         let f = Fixture::new(FrameStyle::Rounded, true, 80);
         let l = f.layout();
         for n in 1..=6_usize {
             let r = row((0..n).map(|_| col(Width::Fr(1), "x")).collect(), 1);
-            for width in 10..=400_usize {
+            for width in 1..=400_usize {
                 let widths = l.share(&r, width, Fill::Rule);
-                let gaps = n.saturating_sub(1);
+                let drawn: Vec<usize> = widths.iter().copied().filter(|w| *w > 0).collect();
+                let gaps = drawn.len().saturating_sub(1);
                 let total: usize = widths.iter().sum::<usize>() + gaps;
                 assert!(total <= width, "{n} columns at {width}: {widths:?}");
                 assert_eq!(total, width, "the shares fill the width: {widths:?}");
                 let (min, max) = (
-                    widths.iter().min().copied().unwrap_or(0),
-                    widths.iter().max().copied().unwrap_or(0),
+                    drawn.iter().min().copied().unwrap_or(0),
+                    drawn.iter().max().copied().unwrap_or(0),
                 );
                 assert!(max - min <= 1, "{n} columns at {width}: {widths:?}");
                 // The leftover goes to the *first* columns, so the shares
@@ -2948,6 +3098,28 @@ mod tests {
                 let text = Painter::PLAIN.paint(&line.segments());
                 assert_eq!(line.width(), width, "{text:?}");
                 assert!(text.starts_with(prefix) && text.ends_with(cap), "{text:?}");
+            }
+            // With a right group on every line the pad stands against it and
+            // the spare cells go to the rule behind it (content, pad, rule,
+            // cap). They went between the text and the pad, so a later line
+            // under a narrower or empty cap read `⏱ 1h12m──`; a line with no
+            // cap and no cells to spare ends in its text.
+            let flexed = |right: &'static str| row(vec![flex(Width::Fr(1), "l", right)], 1);
+            let stack = Col {
+                content: Content::Stack(vec![flexed("r0"), flexed("r1"), flexed("r2")]),
+                ..col(Width::Fr(1), "")
+            };
+            let rows = vec![Row { cols: vec![stack], ..row(Vec::new(), 1) }];
+            let lines = l.lines(&rows).into_iter().flatten().zip(ends).enumerate();
+            for (i, (line, (_, cap))) in lines {
+                let text = Painter::PLAIN.paint(&line.segments());
+                assert_eq!(line.width(), width, "{text:?}");
+                let after = text.strip_suffix(cap).and_then(|t| t.rsplit_once(&format!("r{i}")));
+                assert!(
+                    after.is_some_and(|(_, t)| t.is_empty()
+                        || (t.starts_with(' ') && t.chars().skip(1).all(|c| c == '─'))),
+                    "the rule touches the text: {text:?}"
+                );
             }
         }
     }
