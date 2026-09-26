@@ -1,0 +1,60 @@
+# fixture: subscription-full
+# columns: 51
+# icons: unicode
+# A `custom` frame whose last right cap is twelve cells, the others one.
+# A row of the frame is measured on the caps of the lines it lands on
+# (SPEC § 4.3): the first two rows never carry the last line's cap, so each
+# has the room for its box, three lines of content and two edges. They were
+# measured on the narrowest pair, where neither box fits, and laid out on
+# their own caps, where both do: each was drawn at full height and cut to
+# the smaller measure, so the first lost its bottom edge and its `effort`
+# row, and the second two of its three rows and its bottom edge.
+#
+# Row 1: a stack whose middle row is boxed. Row 2: a boxed column holding a
+# three-row stack. Row 3: the last line, under the wide cap.
+[frame]
+style = "custom"
+fill_char = "-"
+pad = " "
+single = "["
+right_single = "]"
+first = "["
+right_first = "]"
+middle = "|"
+right_middle = "]"
+last = "["
+right_last = "]]]]]]]]]]]]"
+top_left = "+"
+top_right = "+"
+bottom_left = "+"
+bottom_right = "+"
+side = "|"
+
+[[row]]
+[[row.col]]
+width = 30
+modules = ["model"]
+[[row.col]]
+[[row.col.row]]
+modules = ["session"]
+[[row.col.row]]
+box = true
+modules = ["clock"]
+[[row.col.row]]
+modules = ["effort"]
+
+[[row]]
+[[row.col]]
+width = 30
+modules = ["path"]
+[[row.col]]
+box = true
+[[row.col.row]]
+modules = ["session"]
+[[row.col.row]]
+modules = ["clock"]
+[[row.col.row]]
+modules = ["effort"]
+
+[[row]]
+modules = ["context"]

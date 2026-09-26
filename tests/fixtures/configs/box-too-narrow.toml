@@ -11,7 +11,12 @@
 #
 # Row 1: a one-cell boxed column. Row 2: a zero-width one between two
 # columns, which takes no gap either: the row is the row without it. Row 3:
-# a one-cell column holding a stack with a boxed row.
+# a one-cell column holding a stack with a boxed row. Row 4: row 2 with a
+# `style = "none"` box, which has no glyphs and so fits in one cell, but a
+# zero-width column has none: it made its row three lines tall.
+
+[box.x]
+style = "none"
 
 [[row]]
 [[row.col]]
@@ -40,3 +45,14 @@ width = 1
 [[row.col.row]]
 box = true
 modules = ["clock"]
+
+[[row]]
+gap = 3
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+width = 0
+box = "x"
+modules = ["clock"]
+[[row.col]]
+modules = ["session"]

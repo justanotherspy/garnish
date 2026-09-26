@@ -1240,8 +1240,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   2026-09-25: it did, and left a hole in the rule). A row whose content
   does reach the cap keeps the cap's pad against that content, and any
   cells left over go to the rule behind it: content, pad, rule, cap, so
-  the rule never touches text (2026-09-26: the cells went between the
-  text and the pad). When the width runs out, the
+  the rule never touches that text (2026-09-26: the cells went between
+  the text and the pad; a column too narrow for its own pads is the one
+  exception, under Pads). When the width runs out, the
   row is laid out left to right, gap then column: a fixed or `auto`
   column takes at most what remains, and a column whose gap plus one
   cell does not fit renders nothing, as does everything to its right
@@ -1301,7 +1302,16 @@ color = "accent"               # role or literal for the box's glyphs; default t
   cap's pad, as the free width does (above); a line with an empty cap
   keeps the pad when it has the cells for it (2026-09-26: they went
   between the text and the pad, and a line with no cap had no pad, so
-  the rule touched the text: `⏱ 1h12m--`). On a one-line row, `fill` draws the rule glyph (or the
+  the rule touched the text: `⏱ 1h12m--`). A row's height is measured
+  on the room it is laid out to, the caps of the lines it lands on,
+  which depend on the heights before it, so the rows are measured again
+  until none moves (2026-09-26: a row was measured on the narrowest pair
+  of the whole frame and laid out on its own, so a box that fitted only
+  on its own lines was drawn at full height and cut, losing its bottom
+  edge and the rows after it). A frame whose heights never settle (a
+  row whose box fits under the narrow `single` caps, but not under the
+  `first` and `last` its three lines would take) is measured and laid
+  out on the narrowest pair. On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is
@@ -1389,7 +1399,10 @@ color = "accent"               # role or literal for the box's glyphs; default t
   and a last column whose box does not fit does not end the row in
   content, so the cap takes no pad (2026-09-26: it kept its two edge
   lines, so its row came out two lines taller, empty framed lines under a
-  frame with caps, and a one-line row's gaps turned to spaces).
+  frame with caps, and a one-line row's gaps turned to spaces). A box
+  with no glyphs (`style = "none"`) fits any one cell, and a `width = 0`
+  column has none to give it, so it too adds no lines (2026-09-26: it
+  fitted the column's no cells and made its row three lines tall).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under
@@ -1424,7 +1437,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
   reaches (a flex column's two groups, a left- or right-justified lone
   group, and both ends of an `auto` column, whose declared width is its
   content plus those cells), and none where the rule already surrounds the
-  group or where the frame's cap or the box's side has padded it. A
+  group or where the frame's cap or the box's side has padded it. The one
+  exception is a column narrower than its text and its pads together: it
+  keeps what fits of the text, a one-cell column its `…`, and none of the
+  pads, so there alone the text can meet the rule beside it (found
+  2026-09-26 in a one-cell column before the free width, `├─ … …──┤`;
+  the rule is everywhere else kept off the text). A
   stack's column pads belong to the inner rows that reach its edges, as
   they would to the same modules unstacked. A box's
   interior pad is the frame's `pad`, or one cell when the frame has none,
