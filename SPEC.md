@@ -1636,10 +1636,17 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   (review 2026-09-25: `commondir: ~/.ssh` rendered a key's first line as
   the SHA). The upstream comes from `.git/config`, read up to 1 MiB (a
   byte that is not UTF-8 costs only what it touches) and parsed as git
-  parses it: quoted values, the escapes, `;`/`#` comments, section and key
-  names in any case, the first `merge` and the last `remote` (git quotes a
-  value holding `#`, so `fix/#12` used to read as a tracking ref with
-  quotes in it and `sync` showed `✗`). Reftable repos (whose refs are not
+  parses it: quoted values, the escapes, `;`/`#` comments, a `\` that
+  joins a line to the next, section and key names in any case, git's four
+  blanks, CRLF line breaks, a leading byte-order mark, the first `merge`
+  and the last `remote` (git quotes a value holding `#`, so `fix/#12` used
+  to read as a tracking ref with quotes in it and `sync` showed `✗`); a
+  malformed line (which makes git refuse the file) costs only itself. The
+  tick reads it on every render, so it is read 64 KiB at a time, and a
+  section other than the branch's is jumped over by a byte search for the
+  next header, parsed only where a `\` may join lines (review 2026-09-25:
+  parsing every entry of a 500 KB config added 3 ms to the tick; now
+  about 0.2 ms). Reftable repos (whose refs are not
   files) report no head to the tick and fall back to the workers (review
   2026-09-25, decided with Daniel: this sentence used to be all there was,
   and both modules rendered nothing): `branch`'s worker asks git

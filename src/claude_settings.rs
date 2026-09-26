@@ -394,7 +394,7 @@ fn not_regular() -> std::io::Error {
 /// # Errors
 /// The metadata or open error, or one saying the path is not a regular
 /// file.
-fn open_regular(path: &Path) -> std::io::Result<Option<(std::fs::File, u64)>> {
+pub fn open_regular(path: &Path) -> std::io::Result<Option<(std::fs::File, u64)>> {
     let found = |r: std::io::Result<std::fs::Metadata>| match r {
         Ok(meta) if meta.is_file() => Ok(Some(meta.len())),
         Ok(_) => Err(not_regular()),
