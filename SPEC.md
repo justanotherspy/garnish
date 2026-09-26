@@ -600,10 +600,11 @@ its `✗`, `context` before the first response, `cache` without a ratio), is
 ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
 2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
 on the first tick of every session. One character in an ascii row is not
-7-bit, and it is not a mark: with colour off, the braille blank U+2800
-that holds a row's leading cells through the harness's trim (§ 2.1: a
+7-bit, and it is not a mark: the braille blank U+2800, which with colour
+off holds a row's leading cells through the harness's trim (§ 2.1: a
 row that would start with whitespace, such as a right group alone under
-`style = "none"`) and that `blank = true` puts in a spacer (§ 4.1). The
+`style = "none"`), and which `blank = true` puts in a spacer in either
+colour mode (§ 4.1). The
 only 7-bit character that takes a cell and shows nothing is the space,
 which the trim removes, so the alternative is a row drawn shifted left or
 dropped.
@@ -1172,7 +1173,18 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the free width, shared
   by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
   cells going one each to the first of them, so shares differ by at most
-  one cell and always add up. Defaults: `"1fr"`, so three bare columns
+  one cell and always add up. An `fr` column whose share comes to nothing
+  (a weight far below its neighbours', or fixed columns that leave no
+  free width) takes no cells either: the last such column is dropped with
+  its gap and the row shared again, until every `fr` column left has
+  cells, so the gap cells it freed go to the `fr` columns that remain,
+  and with none left they are free width after the last column
+  (2026-09-26: its gap was still reserved, the same stray rule cell). A last column that takes no cells
+  draws nothing, so the column before it ends the row and keeps its own
+  pad: the row does not end in content, and the cap takes no pad of its
+  own (2026-09-26: a `width = 0` last column's modules counted as its
+  content, and the cap kept a pad beside the rule, a hole before it).
+  Defaults: `"1fr"`, so three bare columns
   are thirds and six are sixths. Content wider than its column is cut
   with `…` (`overflow = "truncate"`) or scrolled inside the column
   (`overflow = "ticker"`) and never spills into a neighbour, which is
@@ -1191,7 +1203,11 @@ color = "accent"               # role or literal for the box's glyphs; default t
   wide as its widest inner row. With no `fr` column at all, the free
   width is a rule after the last column, running into the right cap (the
   last column keeps a pad of its own before it, so the cap takes none;
-  2026-09-25: it did, and left a hole in the rule). When the width runs out, the
+  2026-09-25: it did, and left a hole in the rule). A row whose content
+  does reach the cap keeps the cap's pad against that content, and any
+  cells left over go to the rule behind it: content, pad, rule, cap, so
+  the rule never touches text (2026-09-26: the cells went between the
+  text and the pad). When the width runs out, the
   row is laid out left to right, gap then column: a fixed or `auto`
   column takes at most what remains, and a column whose gap plus one
   cell does not fit renders nothing, as does everything to its right
@@ -1224,9 +1240,13 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the right, so its bars did not stack.)
 - **Stacks and height.** `[[row.col.row]]` entries make the column a
   stack of rows, each laid out to the column's width with the rules above
-  (an inner row's `justify` overrides the column's). A row's height in
+  (an inner row takes no `justify` of its own, and the parser reports one
+  as an unknown key: its modules sit where the column's `justify` says;
+  2026-09-26: this said an inner row's `justify` overrode the column's,
+  which no config could write). A row's height in
   lines is its content's: a bare row is one line, a boxed row its lines
-  plus two; a column's height is the sum of its rows'; the outer row is
+  plus two (a box too narrow to draw at its width adds none; see Boxes);
+  a column's height is the sum of its rows'; the outer row is
   as tall as its tallest column. A shorter stack is padded with empty
   lines placed by `valign` (which has no effect when every column is one
   line tall). Inner rows take no `[[row.col]]` and no `gap`; a column
@@ -1243,7 +1263,11 @@ color = "accent"               # role or literal for the box's glyphs; default t
   width: a tall row is laid out to the room its widest pair leaves, and
   a narrower or empty cap's spare cells go to the rule, so every line
   fills the box (2026-09-25: an empty cap's went nowhere, and its line
-  came out short). On a one-line row, `fill` draws the rule glyph (or the
+  came out short). On a row that ends in content they go behind the
+  cap's pad, as the free width does (above); a line with an empty cap
+  keeps the pad when it has the cells for it (2026-09-26: they went
+  between the text and the pad, and a line with no cap had no pad, so
+  the rule touched the text: `⏱ 1h12m--`). On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is
@@ -1321,11 +1345,17 @@ color = "accent"               # role or literal for the box's glyphs; default t
   drawn rounded. A `custom` frame adds `top_left`, `top_right`,
   `bottom_left`, `bottom_right` and `side`, one cell each (reported
   otherwise, the style's glyph stays); every glyph passes the § 4.1
-  width guard. Any of the five may be left empty; the corners are drawn
+  width guard. Any of the five may be left unset, and is then empty (an
+  explicit empty string is refused as not one cell wide); the corners are drawn
   whatever the side is, so a box too narrow for its corners renders
   nothing, as one too narrow for its sides does (2026-09-25: with corners
   and no side, a one-cell box drew `++`, overflowed the line and had it
-  recut to `…`).
+  recut to `…`). Nothing means nothing: its cells are empty cells (rule on
+  a one-line row, spaces on a taller one), it adds no lines to its row,
+  and a last column whose box does not fit does not end the row in
+  content, so the cap takes no pad (2026-09-26: it kept its two edge
+  lines, so its row came out two lines taller, empty framed lines under a
+  frame with caps, and a one-line row's gaps turned to spaces).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under

@@ -1,0 +1,28 @@
+# fixture: subscription-full
+# columns: 54
+# icons: unicode
+# A tall row under a `custom` frame whose right caps differ (the first is
+# one cell, the others are empty), with a right group on every line. The
+# pad stands against the right group and the spare cells of a narrower cap
+# go to the rule behind it (SPEC § 4.3: content, pad, rule, cap), so the
+# rule never touches text. They used to go between the text and the pad,
+# and on the lines with no cap there was no pad: `⏱ 1h12m--`.
+[frame]
+style = "custom"
+fill_char = "-"
+pad = " "
+first = "["
+middle = "|"
+last = "["
+right_first = "]"
+
+[[row]]
+[[row.col]]
+[[row.col.row]]
+modules = ["model"]
+right = ["clock"]
+[[row.col.row]]
+modules = ["path"]
+right = ["session"]
+[[row.col.row]]
+right = ["effort"]

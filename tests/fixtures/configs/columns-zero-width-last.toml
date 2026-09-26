@@ -1,0 +1,30 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# A `width = 0` column takes no cells, and as the last column it draws
+# nothing (SPEC § 4.3): the row does not end in content, so the cap keeps
+# no pad and the rule runs into it. The column's modules used to count as
+# its content, so the cap kept a pad beside the rule, a hole before it:
+# `⏱ 1h12m ─────── ──`. The second row is the same with the session timer
+# right-justified: it keeps a pad of its own, and the cap takes none.
+
+[[row]]
+gap = 3
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+modules = ["session"]
+[[row.col]]
+width = 0
+modules = ["clock"]
+
+[[row]]
+gap = 3
+[[row.col]]
+modules = ["model"]
+[[row.col]]
+justify = "right"
+modules = ["session"]
+[[row.col]]
+width = 0
+modules = ["clock"]
