@@ -1192,7 +1192,10 @@ was built, what the reviews found and what was decided, not how.
     them), the chain's decisions became pure functions a unit test gives
     a drop-in (`chain_target`, `managed_env`), and the rewritten file's
     `.claude` pair is found once resolved as well (a link, `x/..`, a bare
-    `settings.json`).
+    `settings.json`). Rounds 9 to 11 found nothing reachable from a
+    session, and the last fix removes code, so the rounds stop there.
+    `make bench` at 9417c5d: every scenario within budget (warm 2.13 to
+    2.37 ms mean, p99 at most 3.65 ms; cold 3.53 ms).
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was
