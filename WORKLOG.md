@@ -1,1217 +1,360 @@
 # WORKLOG.md — what was built, found and decided, by date
 
-The dated log of the codebase, moved out of `PLAN.md` on 2026-09-19 so the
-plan stays a short statement of drift and backlog. One compact entry per
-date: what was built, what the reviews found, what was decided, never how
-the session went. Host trouble does not belong here (`CLAUDE.md` § Hosts).
-Newest entries at the end.
-
-Compacted on 2026-09-12 from the full session log; each entry keeps what
-was built, what the reviews found and what was decided, not how.
+The dated log of the codebase, moved out of `PLAN.md` on 2026-09-19. One
+entry per date: what landed, what the reviews found (by class), what was
+decided and why, and the lessons behind the rules in `CLAUDE.md`. Not how
+a session went; host trouble belongs in the host's notes. Oldest first.
+Compacted on 2026-09-12 and again on 2026-09-26.
 
 - **2026-09-04** — Research (statusline contract, autocompact internals,
-  the namtao toolkit), spec and plan approved. Phases 0–9 in one day:
+  the namtao toolkit); spec and plan approved. Phases 0–9 in one day:
   scaffold, payload/time/ansi/num, schema-driven config, all 21 modules,
   cache and workers, git reader, docs generator, install/doctor, benches,
-  hardening. Three adversarial reviews fixed a symref-cycle stack overflow,
-  a pipe-buffer deadlock in the worker, an untimed fetch, fetch failures
-  poisoning `sync`, failed entries respawning every tick, a lock handed to
-  a worker that looked dead the moment the tick exited (grace window plus
-  re-stamping), and `install` widening permissions, colliding backups and
-  replacing symlinks; `command-run` was dropped for want of a timeout.
-  Deviation: role overrides live under `[colors]`, not `[theme.colors]`.
-  `v0.1.0` tagged, pushed, CI added on Linux and macOS (the macOS run found
-  the Linux-only lock hand-over asserted in tests and `/var` vs
-  `/private/var`). Daniel's first feedback: a Nerd Fonts v3 glyph drew as
-  a box (replaced), the fetch age dimmed every fifth tick (new
-  `stale_after`), the right edge was cut (root cause found the next day).
+  hardening. Three adversarial reviews found hangs and loops (a
+  symref-cycle stack overflow, a pipe-buffer deadlock in the worker, an
+  untimed fetch), cache churn (fetch failures poisoning `sync`, failed
+  entries respawning every tick, a handed-over lock that looked dead the
+  moment the tick exited: fixed with a grace window and re-stamping) and
+  `install` damage (widened permissions, colliding backups, replaced
+  symlinks). Decided: `command-run` dropped, it has no kill-on-timeout;
+  role overrides live under `[colors]`, not `[theme.colors]`. `v0.1.0`
+  tagged; CI on Linux and macOS (macOS found the Linux-only lock hand-over
+  asserted in tests and `/var` vs `/private/var`). Daniel's first
+  feedback: a Nerd Fonts v3 glyph drew as a box (BMP private use only
+  since), the fetch age dimmed every fifth tick (new `stale_after`), the
+  right edge was cut.
 - **2026-09-05** — CI green on both platforms; documents split by role
   (`CLAUDE.md` host-neutral, `SPRITE.md`, `PLAN.md` codebase-only); Phase
   10 host setup and the SessionStart hook. Right-edge root cause read from
   the 2.1.261 binary: the box is `COLUMNS − 4 − 2 × statusLine.padding`,
-  so `Config::width` subtracts 4 (goldens regenerated, `install --padding`
-  seeds `padding = 2N`). Phase 11 (`align`, `durations = fixed`) for
-  Daniel, byte-identical by default; its review dropped empty renders from
-  the column count. A live walkthrough of every preset, theme, frame, icon
-  set and option with Daniel found eleven bugs (COSMIC's wide glyphs, a
-  bad colour discarding the whole config, an error report from
-  `config check`, unpadded powerline caps, the wrong separator at the
-  unfilled join, coloured zero counts, empty rows) and produced SPEC § 4.1,
-  § 3.7, § 4.2, § 12 and § 13, planned as Phases 12–18 in the order
-  12 → 14 → 13 → 15 → 16 → 17 → 18 as one `gh stack`. Phases 12, 14, 13 and
-  15 landed that day (glyph guard and replacement sets, per-key fallback,
-  the line keys, `time::frame`, `ansi::scroll`, the ticker, text modules);
-  the Phase 15 review found unsanitised `gap`/`ticker_gap` and text-module
-  names that broke the `config show` round trip.
-- **2026-09-06** — Phases 16, 17 and 18 (animation framework; presets
-  gallery with `include_str!` embedding and a generated page; the three
-  skills, `skills install`, issue templates). Reviews: a multi-character
-  spinner frame split into characters, a rule shorter than one period
-  blinked, the submit-preset skill's frontmatter was not YAML, the
-  statusline skill wrote before previewing, `skills::install` followed
-  symlinks. A whole-stack review by three reviewers then hardened every
-  row (`Segment::plain`/`styled` reduce everything to plain text, bounded
-  sizes after `width = i64::MAX` aborted a tick, OSC 8 only for
-  `http(s)://`, a `HOME` guard) and polished config/CLI (`config show`
-  round-trips, a mistyped `modules` is not a spacer, doctor collapses
-  `$HOME`). Daniel's three answers: ticker durations default to `fixed`
-  (module-level `durations` override), a frozen ticker is cut with `…`,
-  `blank = true` keeps an unframed spacer (premise narrowed on review: the
-  harness trims raw bytes, so only colour off loses the row). Stack #13–#42
-  merged bottom-up, `v0.2.0` tagged. Bench: warm default 0.87 ms.
-- **2026-09-11** — Release pipeline with the Homebrew tap, modelled on
-  garlic's workflow and the tap's octo-sts policies: tag → verify →
-  pre-release → four archives (Linux arm64 native) → cask rendered and
-  `brew fetch`-checked → Daniel's approval in the `release` environment →
-  push to the tap → promote. Its review fixed a `sha256 ""` from a failed
-  sed substitution under `set -e`, a per-tag concurrency group, an
-  auto-created unprotected environment, and moved the approval after the
-  cask exists; `CLAUDE.md` § Release process records the repository state
-  the workflow relies on.
-- **2026-09-12 (code)** — Every open plan item closed: the killed-tick test
-  (the tick as a process-group leader; dash's builtin `kill` takes neither
-  `--` nor a negative pid, which the first cut hid), behind/diverged/
-  no-upstream and `fetch_interval` tests against a second clone,
-  `Segment.text` private behind sanitising setters, `OptSpec::max`
-  replacing the key-name match (catching `cost.decimals`, a 4 GB
-  allocation per tick), the docs index wording. SPEC audited against the
-  code and its drift fixed (visible `render`, `--width` on `preview`,
-  `band_colors`, `exceeds_200k` as a flag, the `sync` glyphs,
-  `DISABLE_COMPACT`, temp entry names, no settings cache); three § 9
-  promises got tests (schema completeness by source scan, the frame-style
-  matrix, `preview <dir>`). Review: the scan checked one literal per call,
-  `push_str` allocated per bar cell, `label`/`prefix`/`suffix` had no cap;
-  macOS counted `branch` spawns without the lock hand-over.
-- **2026-09-12 (documents, PR #48)** — Daniel asked for FUTURE-SPEC's
-  low-impact ideas in the spec and plan, the website dropped, and an
-  interactive setup in its place. SPEC § 14 became `garnish setup`:
-  FUTURE-SPEC § 13's `ratatui` option made a decision, with the exact
-  preview through `render_lines_at`, editors generated from `ModuleSchema`,
-  the gallery first, live save, install through `install`,
-  `setup --preset` as the scriptable twin, and selection in the preview
-  over a placement map. Chosen from the rest by "Tier A, no crate, no
-  non-goal, no tick-side write, module set unchanged": the dim reset,
-  reduced motion, the doctor's settings report, never rewriting an
-  unparsable file, `max_width`, fish paths, branch and text links, the
-  usable context scale, absolute reset times, the schema-generated matrix
-  test: Phases 19 and 20.
-
-  Daniel's layout ideas (grid columns, titled rules and boxes, panels of
-  stacked boxes) became one model in SPEC § 4.3: a row is columns, a column
-  is modules or a stack of rows, `width = "1fr" | "auto" | cells`,
-  `justify`, titles and boxes as decorations, two levels deep, with a plain
-  row as one `1fr` column so the default render is byte-identical. The name
-  came from his distinction: a *line* is one terminal line, a *row* is the
-  addressable unit, one or more lines tall, so the unit is `[[row]]` with
-  `[[row.col]]` and `[[row.col.row]]` beneath, and `[[line]]` and
-  `hide_empty_lines` stay as permanent aliases. Two adversarial reviews of
-  the spec text returned 25 findings each, all taken (`51d4b66`, `cada6ef`):
-  the samples contradicted the box rules, the lock horizon could never
-  fire, `path.depth` already existed, and about two dozen corners were
-  defined: the `truncate = false` rule, gap-then-column clamping, the fill
-  pattern phased over the row, `config show` as a fixed point,
-  both-direction nesting. A read-only code map at the top of each open
-  phase re-cut its layers where the code's shape demanded. Open drafts #27
-  and #40 stay parked.
-- **2026-09-12 (Phase 19)** — Harness fidelity, on a branch as five
-  commits. The verify items came first, read from the 2.1.270 binary and
-  the 2.1.261 npm package: the 13 000 buffer is unchanged in both,
-  `COLUMNS`/`LINES` are the full terminal size, and the status line
-  component wraps each row in `<Text dimColor wrap="truncate">` around a
-  child whose Ink fork merges the parent's `dim` into every piece, so a
-  leading `ESC[0m` is parsed away and FUTURE-SPEC A1's premise never held.
-  The dim-reset layer was therefore not built; SPEC § 2.1 records the
-  mechanism and how to re-verify it.
-
-  The layers that did land: `animate` as `Option<bool>` following
-  `prefersReducedMotion` over the settings chain (with `Clock.settings`
-  gating the read so a pinned clock never touches a settings file);
-  never-rewrite through one `install::replace_file`; the doctor's settings
-  rows as a pure function over a labelled chain; and the `# color:` golden
-  mode. A five-lens adversarial review with three refuters per finding
-  found all of these, all fixed: `replace_file` turned a dangling symlink
-  into a regular file; the doctor suggested `refreshInterval = 1` where
-  nothing was animated and printed a settings `command` raw; an empty
-  `settings.json` was "invalid" to the doctor and `{}` to `install`; a
-  settings file was read without a size bound; the settings chain was
-  parsed twice per tick; the CLI tests could see the checkout's `.claude/`
-  and the developer's `GARNISH_ANIMATE`; `config show` folded the session
-  switch into a printed config; the unit tests could see the machine's
-  managed settings file. Declined: a `GARNISH_MANAGED_SETTINGS` hook for
-  the goldens (a spec decision, taken the next day).
-- **2026-09-13 (backlog decisions)** — Daniel took the three Phase 19
-  questions as suggested and PR #49 merged mid-way; the rest went on the
-  same branch restarted from `main` (PR #50, merged 2026-09-14). `preview`
-  draws every row faint (`Painter.dim` through
-  `Request.dim`; only `preview` sets it, the tick's bytes and goldens are
-  unchanged, the colour-on golden re-pinned) and SPEC § 14 has the pane
-  do the same. `GARNISH_MANAGED_SETTINGS` (SPEC § 9) names the managed
-  settings file or, empty, none: `managed_settings_path` returns an
-  `Option`, every binary-run test and the bench set it empty, `doctor`
-  lists it, one CLI test points it at a fixture (CI's one red was that
-  test comparing a `/var` path with `doctor`'s `/private/var` cwd on
-  macOS; canonicalised). The height rule came from the 2.1.270 binary in
-  the session's container (a five-lens read with refuters, the renderer
-  and component-tree lenses decisive): three renderers, nothing cut by
-  the classic one (the frame scrolls, the bottom `LINES − 1` rows stay),
-  `⌊LINES / 2⌋` for the whole bottom block in fullscreen (the status
-  line's last rows go first; 7 rows whole at 24 lines, 20 at 50), and
-  `LINES − 2` in the off-by-default DECSTBM split renderer. Decided:
-  garnish caps nothing on the tick, the § 14 picker warns against the
-  fullscreen budget, § 4.3 rows need no cap of their own, `doctor` prints
-  the `tui` setting with what it means; SPEC § 2.1, § 7, § 11, § 14,
-  `CLAUDE.md` (with the literals to grep after an upgrade), the guide and
-  README carry it. Read, not watched: a nine-line status line at 24 rows
-  on a real screen would confirm the arithmetic (backlog).
-- **2026-09-13 (Phase 20)** — Per-module presentation, on a branch as one
-  commit per layer (no `gh stack` in the session). A four-lens
-  trap-finding workflow read the plan against the code before the layers
-  and its findings were taken as they came: the `branch-link` golden went
-  on `worktree-session` (the only fixture with both `workspace.repo` and
-  a branch the module can read without a repository on disk;
-  `git-worktree` renders no branch there), the config-golden harness takes
-  one `# fixture:` per file so `context-usable` became two files, the
-  SPEC's fish example `g/src` contradicted `shorten` (which keeps the `~`
-  at every depth) and was corrected to `~/g/src`, the marker's `⤓`
-  percentage under `usable` was decided (hidden with the marker, since it
-  would read a constant 100 %), the fallback keys on § 2.3's enabled state
-  while `compaction_marker` governs drawing alone, GitLab is the host's
-  name or `pr.kind = "mr"`, the URL is built from the untruncated name,
-  a text `url` is checked by the config against the painter's rule, the
-  ASCII `pr` pending glyph is `..` so the matrix asserts an implication
-  (cut ⇒ ellipsis; uncut ⇒ byte-identical) rather than an equivalence,
-  the unknown-option message for a text module no longer recommends the
-  keys it rejects, and a fish initial is a terminal cluster. The layers:
-  `COMMON_OPTS` (the common keys as bounded specs, `COMMON_KEYS` nine
-  wide, `config show` and the reference printing them from the table);
-  `max_width` in `render_group` after `decorate` and before
-  `align_columns`, skipped at 0 so the default tick pays nothing; the
-  schema matrix (about 100 000 single-module renders, 0.6 s under rayon,
-  registered for nextest's longer budget); `path.style = "fish"`;
-  `branch.link` and `text.url`; `context.scale = "usable"` with the
-  threshold factored out of the marker; `reset` on the limit modules with
-  `time::wall_clock` and `Ctx::wall_clock`. The pre-Phase-19 code map's
-  line pointers had drifted, so the layers navigated by symbol. One
-  incident: a finder agent ran `git stash` in the checkout while the
-  reset layer was half-written, so three files silently reverted; the
-  stash was found, the edits re-applied and the lesson written into
-  `CLAUDE.md` § Phase protocol (worktree isolation, no git commands that
-  touch the tree).
-- **2026-09-14 (first macOS host)** — `make setup` on Daniel's Mac died
-  with `rustc: command not found` after a clean toolchain install: the
-  rustup there is Homebrew's keg-only formula, whose `cargo`/`rustc`
-  proxies sit in `$(brew --prefix rustup)/bin`, off PATH, while
-  `~/.cargo/bin` held dead 2022 symlinks to a `rustup-init` the formula
-  no longer ships. Fixed on the host (PATH); `scripts/setup.sh` now looks
-  for the proxies in `$CARGO_HOME/bin` and rustup's own bin, uses them
-  for its run and stops with a PATH note instead of a bare `command not
-  found`. `make install` then built and installed `garnish` 0.2.0 with no
-  change needed.
-- **2026-09-16 (Phase 20 rebase and review)** — PR #51 had gone stale:
-  cut from `85fe8b4`, twelve commits behind `main` and conflicting in this
-  file. Its nine commits were replayed on `c62c03b` (one conflict, both
-  sides kept, Phase 20's entries slotted in by date) and the phase
-  protocol's step 4, which #51 never ran, was done here: three adversarial
-  lenses (correctness and the lint policy, SPEC conformance, tests and
-  performance), each in its own worktree with a no-git brief. The lint
-  policy came out clean — no `unwrap`, indexing, `as` or unchecked
-  arithmetic outside tests, and no `#[allow]` in the whole change set —
-  and a mutation pass proved all eight new goldens real (revert a feature,
-  exactly its golden fails). What they found, all fixed: the settings
-  chain was read on every `context` render where the marker used to skip
-  it; `branch.link` built a link to the repository root for an empty
-  branch name, encoded the host so a self-hosted forge on a port became
-  `…com%3A8443`, and let `pr.kind = "mr"` point github.com at a 404
-  `/-/tree/`; `percent_encode` passed `.`/`..` segments through, so a
-  payload-supplied owner could walk the URL up a level; `ansi::clusters`
-  split flags and skin tones, so a cap cut half a flag off (and `fish`
-  abbreviated `...` to `..`, showing a path as its own parent). The
-  schema matrix covered a new module but not a new option — every
-  module-specific key sat at its default, Phase 20's own five included —
-  so it now sweeps every `Bool` and `Enum` a schema declares (still
-  0.40 s) and asserts no segment carries a link the painter would refuse.
-  Two invariants that were comments became tests (no schema redeclares a
-  common key; every rejected text key is refused with its own message,
-  from one table rather than two copies). The `spend` window took the date
-  form (`⏱Mar 1`) rather than a bare clock time, since a reset weeks out
-  read as tonight; a self-hosted GitLab with no open merge request was
-  documented as a known limitation instead of given a `branch.forge` key
-  (SPEC § 3.1).
-- **2026-09-16 (height-rule review)** — The adversarial review of PR #50
-  (four lenses; most of its refuters and the height read's own died when
-  the account ran out of usage credits, so the findings were judged by
-  hand) landed after the merge, as a follow-up PR. Behaviour: the `tui`
-  row printed any other value as if Claude Code used it, while Claude
-  Code's schema takes only the two names and, outside the managed file,
-  rejects the whole file for one (now `Tui::Other` keeps the value as
-  written, a non-string too; the row shows the next file that sets the
-  key and names what was skipped, quoted and cut with `…` through one
-  `line_of` helper shared with the command row); the rows asserted the
-  renderer from the setting alone (now "asks for", with the environment
-  override named, and `CLAUDE_CODE_NO_FLICKER`/`CLAUDE_CODE_DECSTBM` in
-  the environment section); "fresh installs get fullscreen" was more
-  than the binary says (a new install's first sessions, then gates that
-  default to off). Spec: the `⌊LINES / 2⌋ − 5` budget was stated as the
-  rule when it is the ceiling for an empty prompt (the prompt input's
-  fullscreen viewport is `max(3, ⌊LINES / 2⌋ − 5)` draft lines, so a long
-  draft or a notice takes the status line's last rows first); the
-  renderer choice is made before the `tui` key (`CLAUDE_CODE_NO_FLICKER`,
-  a background session, screen-reader mode, tmux `-CC`, Windows over SSH,
-  a crash auto-off); the classic bullet's "only" hid two more full-reset
-  triggers and its "the prompt box among them" holds only while the
-  block fits; the suggestions float above the fullscreen block; the hint
-  line sat in two parents; "top-aligned" now says why (Yoga's default
-  `justifyContent`). Documents: the guide and README said "under" the
-  count that fits (now "at most", rounding down); the plan's Phase 19
-  note still sent both questions to the backlog, the done row lacked the
-  09-13 items, the `setup-gallery` layer lacked the height warning, the
-  on-screen check left the backlog with the rule still "read, not
-  watched" (restored, narrowed); `CLAUDE.md`'s re-verify anchors were
-  minified names (now quoted strings and shapes, and the 2.1.270 anchor
-  for the stdout trim); the CHANGELOG led with the finding rather than
-  the change. Recorded from the runner lens: a failed, timed-out (600 s)
-  or empty run clears the status line, and an aborted run keeps the
-  previous text. Merged with Phase 20 (#51) the same day; the only
-  conflict was this file.
-- **2026-09-16 (audit through Phase 20)** — Daniel asked for the whole
-  project up to Phase 20 to be checked against its documents, its defects
-  fixed, and its duplication consolidated, so `main` is ready for Phase 21.
-  A seven-lens read-only audit (config, render, modules, systems,
-  documents, tests, simplification), each lens in its own worktree, found
-  the work below; every defect got a test, and the suite went 194 → 227.
-
-  **Two ways out of the repository**, both reachable from a checkout the
-  user did not create (an unpacked archive, a shared directory): a
-  `.git/HEAD` saying `ref: ../../../secret` made `branch` render the first
-  seven characters of that file as the short SHA, because a ref name was
-  joined onto the git directory unchecked (`git::joinable_ref` is git's own
-  `check-ref-format` rule now, applied to every `ref:` hop); and `git
-  fetch` took the remote name from `.git/config` as a positional argument,
-  where `--upload-pack=<cmd>` runs `<cmd>`.
-
-  **Four things nothing bounded.** `run_program`'s timeout covered only the
-  wait: joining the pipe readers blocked until every descendant closed the
-  write end, so an ssh `ControlPersist` master outliving `git fetch` left
-  the worker in `read_to_end` for ever with its lock held. A stamp in the
-  future (a resumed VM, NTP correcting a bad RTC) made a lock live for ever
-  and an entry fresh for ever, because the negative age passed the
-  staleness check and then satisfied the grace window. The existing
-  live-lock test only passed *because* of that, stamping from the wall
-  clock while the tick ran on `GARNISH_NOW`. A failed entry stored a
-  command's whole stderr, which every warm tick then read and parsed.
-  `Cache::write` left its temp file behind on any failure.
-
-  **Empty is unset.** `config::locate` read `GARNISH_CONFIG` and
-  `XDG_CONFIG_HOME` without the empty guard its siblings have, so
-  `GARNISH_CONFIG=` put `⚠ config: cannot read` on every tick and
-  `XDG_CONFIG_HOME=` made the lookup relative to the current directory, so a
-  checkout holding `garnish/garnish.toml` became the user's config.
-
-  **Nine silent or wrong renders.** A *failed* module built wholly from its
-  cache entry lost its `✗` mark, so a broken git read as an empty row (the
-  first fix took the overdue case with it, which the review caught: an
-  overdue module with no value still hides, or `sync` would flash `– ⟳`
-  after every idle pause); `pr` underlined its number whenever `link = true`, even with
-  no URL to link to; `sync` printed `refs/heads/main` where every other
-  case reads `origin/main`; `spend` picked its band from a percentage
-  clamped to 100 while printing the unclamped one; `context`'s
-  `show_compaction_percent` did nothing unless the marker was also on;
-  `branch.max_length` and `session_name.max_length` cut with `…` even in
-  the ascii set, and by `char` rather than by cluster; a bar glyph override
-  that was not one cell was swapped out in silence while `config check`
-  said `ok`; `[frame] separator_frames = []` was accepted where an icon's
-  was reported; a non-table item in an inline `line` array renumbered every
-  later line, so an error named a `line[n]` that was not the user's; and
-  `rgb_to_256` split the range evenly although xterm's cube levels are
-  `0, 95, 135, 175, 215, 255`, which moved whole themes under
-  `color = "256"` (`#6c7086` came out a light blue-grey). A clipped text
-  box of wide glyphs could also come out narrower than its `width`, which
-  the new sweep over that family found.
-
-  **One home per rule.** `IconSet::ellipsis` and `IconSet::stale_glyphs`,
-  `util::cut_name` and `util::short_sha`, `modules::lead` (the `show_icon`
-  preamble seventeen renders opened with), `modules::badge` (a trailing
-  glyph, four of whose nine sites had dropped the empty-glyph guard and
-  left a stray cell) and `modules::glyph_prefix` (the same glyph built
-  into a longer string, where the leftover was a double space),
-  `config::env_path`, `equal_width_frames`,
-  `refuse_unparsable`, one `comment()` in place of three identical closures,
-  `common_keys()` derived from `COMMON_OPTS`, `name()` on `ColorChoice` and
-  `StaleStyle` where `docs.rs` had carried stand-ins. `Freshness::Failed`
-  held a message its own doc said `doctor` read (it does not, it re-reads
-  the entries), so it was a `String` cloned per tick and dropped; five more
-  public items had no caller at all.
-
-  **The tests had five blind spots.** Every pinned render runs under
-  `Clock::fixed()`, whose `git: false` makes the repo group render nothing,
-  and every fixture's `cwd` does not exist either, so `sync` and half of
-  `branch` appeared in no golden at all, in no matrix case and in no
-  benchmark (`render_module/sync` was timing an early return). The git
-  helpers ran under the developer's `~/.gitconfig`, which on this project
-  means `commit.gpgsign`. The payload goldens and the generated docs had no
-  orphan check. The "unwritable cache" case was a no-op as root. And
-  `Cache::from_env`'s precedence chain had no test: the one named for it
-  asserted `key_hash` and `sanitize`.
-
-  **CI** gained the shellcheck gate `CLAUDE.md` has always required (about
-  600 lines of shell, none of it checked) and `permissions: contents: read`
-  on `ci.yml`. An explicit `ref:` on the review workflow's checkout, whose
-  three comment triggers read `main`'s tree, was written and then taken back
-  out: the action refuses to run on any branch whose copy of its workflow
-  differs from `main`'s, so carrying the fix here cost this very branch its
-  Claude review (a green twelve-second job saying `Workflow validation
-  failed`). It goes in alone, first, and is in the backlog.
-
-  **Documents.** SPEC said the settings chain is read every tick (it is
-  read once, on demand), put `sync`'s fetch-age hint in the wrong preset
-  column, still named `●`/`○` glyphs its own width rule bans, credited the
-  statusline skill with `config init --force` semantics it did not have
-  (the skill now takes the backup), and justified the feedback skill's
-  redaction with a claim `doctor` stopped making in v0.2.0. The generated
-  environment table left out `GARNISH_DEBUG` and `DISABLE_COMPACT`; the
-  reference documented `ticker_step` as "> 0" while the parser takes
-  0.001–1000. `GARNISH_DEBUG` itself wrote only on a failed spawn although
-  SPEC promised per-tick diagnostics, so the tick writes one line and
-  `debug.rs` has tests (it had none). `CLAUDE.md` restated SPEC § 2.1
-  paragraph for paragraph and carried run IDs, dollar figures and
-  Homebrew line numbers that cannot stay true; it keeps the conclusions and
-  the grep anchors. This backlog lost two items that were already answered
-  and gained the shape it has now: what waits on Daniel, and what is parked.
-
-  **The review of the audit** (two adversarial agents over the branch's own
-  diff, each in its own worktree) found nineteen things, and the useful half
-  of that was what the audit had got *wrong*. Four were regressions it had
-  introduced. Consolidating the frame-list rule made `separator_frames = []`
-  a hard error, which is the line every `garnish config init` has ever
-  written, so every config in the wild would have printed `⚠ config:` on
-  every tick; worse, the docs-sync test had been satisfied by changing the
-  generator to comment the key out, which hid the breakage instead of
-  showing it. Bounding `run_program`'s pipe read returned `Ok("")` on
-  giving up, and `is_dirty` reads no output as a clean tree, so the fix for
-  a hang introduced a silent lie. Fixing `decorate` for a *failed* module
-  also stopped `hide_when_empty` applying to an *overdue* one, which would
-  have flashed `– ⟳` on `sync` after every idle pause. The one-cell bar rule
-  refused `marker = ""`, the documented way to turn the marker off.
-
-  Five more were fixes that had stopped at the example: `joinable_ref` is a
-  rule about a name where the threat is a path, so a symlinked `HEAD`, ref
-  or `refs/heads` still read any file on disk; refusing a `-` remote left
-  `core.fsmonitor` and `remote.<name>.uploadpack`, which the same untrusted
-  file sets and git runs; the one-cell rule was bypassed by `<key>_frames`;
-  `MAX_ERROR_CHARS` missed `fetch_error`, the same stderr in a *successful*
-  entry; and the future-stamp rule missed `fetch_attempt`, so a backwards
-  clock froze auto-fetch. Two tests were weaker than their own doc comments
-  claimed: the drain test ran a fake git that printed nothing, so it passed
-  whether output was delivered or dropped, and the palette test sampled four
-  roles of which two are the same colour in every palette.
-
-  The lesson worth keeping is in `CLAUDE.md` now: fix the shape rather than
-  the example, and check what is already on disk before making a config rule
-  stricter. Both reproductions were run before and after the fix (a
-  symlinked HEAD rendering `SECRETVALUE`, a future stamp leaving the fetch
-  frozen).
-
-  A fourth pass, over the claims the branch makes rather than its code,
-  found two more of the same kind and a regression from the round above.
-  `run_program`'s new "a read that gave up is an error" reached `fetch`,
-  which runs `--quiet` and throws its stdout away and is the one caller
-  whose pipes an ssh master holds open, so a fetch that worked was recorded
-  as failed: the callers that read stdout are the ones that treat losing it
-  as a failure now. The symlink rule had stopped at the three shapes it had
-  tests for and left `packed-refs`, the fallback every absent loose ref
-  takes; every ref read goes through one bounded, contained reader, and the
-  bound is also why a hostile `.git/HEAD` can no longer make a branch name
-  the size of the file. And the blank-`marker` exemption was in the static
-  arm but not the frames arm of the same rule.
-
-  It also caught four documents saying things that were no longer true: the
-  `⟳` mark in three places after the overdue case was put back, a 256-colour
-  error bound wrong by 28 (69, not 41, brute-forced to check), a shellcheck
-  gate credited with 1,100 lines of shell where there are 600, and a
-  `CLAUDE.md` tripwire that covered one of the four edits it claimed. The
-  tripwire now writes every common option into a config and requires it
-  back out, which fails if any of the four is missed. 194 → 227 tests.
-
-- **2026-09-17 (the review workflow itself)** — PR #66 merged, and the two
-  things that stopped its own Claude review working went in after it, alone,
-  because the action refuses to run on a branch whose copy of the workflow
-  differs from `main`'s. Asked for the label, the review fanned out to four
-  subagents, had all four refused (`Task` was not in the allowlist), and
-  finished reporting success after 44 of its 50 turns and $2.43 having
-  posted nothing at all. Daniel chose to allow the fanout rather than forbid
-  it, so `Task` is allowed and the cap is 100, since a subagent spends from
-  the same budget; the prompt now tells the review to use one subagent per
-  dimension on a large diff and never to end without its summary. The
-  checkout also names the pull request's head, which it had to stop doing
-  when the fix was pulled out of #66 to let that branch be reviewed at all.
-- **2026-09-17 (Phase 21)** — The layout model, on one branch as a commit
-  per layer. `[[row]]` first, with `[[line]]` and `hide_empty_lines` kept
-  for ever: the existing config fixtures stayed on the old names, so every
-  golden they pin covers the alias, and a unit test parses the same file
-  under both names and compares the resolved configs. Then the config model
-  (`ColCfg`, `Width`, `Justify`, `VAlign`, `TitleCfg`, `BoxRef`, `BoxCfg`)
-  with hand-written per-key fallback three levels deep and each of SPEC
-  § 4.3's validation rules under its own path, then `src/layout.rs`.
-
-  The engine replaces `frame::compose_line` outright rather than growing a
-  second composer beside it, and the proof is that all 227 goldens came out
-  byte-identical on the first green run: a row of one `1fr` column *is* the
-  flex line, and the composition tests that pinned `compose_line` moved over
-  unchanged. `render_rows_at` returns each configured row's lines as typed
-  pieces (cap, box edge, rule, gap, pad, module, separator, title), which is
-  what Phase 22's placement map reads; `render_lines_at` kept its signature.
-
-  Six bugs, each found by writing the thing that would show it. A golden
-  for mixed widths showed a rule running into a module's text, because only
-  a column's *interior* was padded: a column now keeps a pad on the ends its
-  content reaches and nowhere else. A `hide_empty_rows` fixture showed an
-  emptied stack drawing a rule on its first line and spaces below, because
-  the column had become a flex column when its rows went. `truncate = false`
-  let *every* column run past the box, where SPEC gives that to the last
-  one alone. A text module one cell wide lost its link, twice: `paint` threw
-  away a piece whose text was empty, and the packed-row trim then threw away
-  a piece that was only pad. And the benches found two copies worth
-  removing (a group flattened only to be measured, every line copied again
-  on its way to the painter), which took the in-process default tick from
-  85 µs to 71 µs against 49 µs before the phase — 0.08 ms end to end, inside
-  the 0.2 ms a change has to justify.
-
-  Decided while building, and written into SPEC § 4.3: the frame's caps are
-  chosen over the lines that carry them (an earlier wording would have put
-  `╭─` on every line of a tall row); the pad rule above; a box's interior
-  pad is the frame's or one cell, so a box drawn inside a `style = "none"`
-  frame still has room; a box's own edges do not animate.
-
-  Two adversarial reviews then ran, one for correctness and one a mutation
-  pass over the new tests. The correctness one found a `debug_assert!` in
-  `place_title` — a panic path on the render path, so a title wider than
-  its box exited 101 and cleared the status line — and six renders that
-  went wrong rather than badly: a column's `right` group never cut to its
-  column, a boxed column narrower than its own frame drawing past itself,
-  `fill = false` padding lines emitting nothing so every later column
-  shifted, a box joined only by inner rows reported as unused, a boxed
-  column inside a boxed row nesting, and a left title taken literally into
-  the one-cell gap between two columns and cut to its ellipsis. It also
-  caught the `fr` remainder: `free % Σfr` hands out a cell per *weight*,
-  not per column, so two `2fr` columns at 103 cells differed by two.
-
-  The mutation pass broke one rule at a time and reported which test went
-  red. Ten rules had none: the rule pattern's phase across a line, `align`
-  with columns, the choice of run for a title, an over-wide title, an inner
-  row's own `title` and `separator`, a box under a shapeless frame, a row
-  with no `fr` column, packed columns, a box title against the right
-  corner, and a `custom` frame's box glyphs. Six are now unit tests and six
-  config goldens (`columns-pattern`, `columns-aligned`, `columns-packed`,
-  `box-custom`, `stack-boxes`, plus rows added to `boxes-two`,
-  `columns-widths` and `stack-valign`), each checked by re-applying the
-  mutation and watching that fixture alone go red. It also found two of the
-  phase's own tests too weak to see their rule: the share test did not pin
-  *which* columns take the leftover, and `every_line_of_a_row_is_exactly_
-  the_box_width` cannot see a boxed column one cell short, because the
-  row's fill absorbs it — that one is pinned by the placement map instead,
-  the `BoxEdge` spans having to stand in the same cells on every line.
-
-  Two rules were only half implemented and are finished here. A box is one
-  run of adjacent rows *wherever* they are: a stack's rows now join by name
-  exactly as top-level rows do, and `check_box_runs` walks the whole tree,
-  a stack being a run of its own and a column's own `box` taking the name.
-  And a row's columns were sized from the caps of its first line, so a tall
-  row under a `custom` frame whose `last` cap is wider lost that cap to the
-  recut; the row now takes the room the widest pair leaves. Three SPEC
-  wordings the build proved wrong were corrected with them: the pattern's
-  phase is a rule-cell index, a title takes the first (or last) run that
-  can *hold* it and otherwise the widest, and a row-level `right` is
-  reported only beside `[[row.col]]`. 227 → 248 tests.
-- **2026-09-18 (a nightly roll turned every branch red)** — clippy's
-  `map_unwrap_or` widened to catch `map(_).unwrap_or_default()`, and with
-  `-D warnings` that is an error: two of them in `tests/worker.rs`, one on a
-  `Result` and one on an `Option`, on `main` and therefore on every branch
-  off it. Fixed rather than pinned (§ Toolchain offers both): two mechanical
-  lines that clippy itself wrote, against a pin that would need lifting
-  again. The tell that it is a roll and not a branch's own fault is that the
-  failing lines are byte-identical on `main`.
-
-  The session cost more than the fix did, because it was diagnosed from CI
-  one error at a time: a container's toolchain is whatever the image was
-  built with (here 09-13, four days behind CI), so `make check` came back
-  green on code CI rejected, and a grep for the single-line form missed a
-  third site inside `#[cfg(test)]` in `src/layout.rs` that only the lib-test
-  target compiles. `rustup update nightly` first, then reproduce: the whole
-  thing is one `cargo clippy` once the toolchains match. `clippy.toml`
-  relaxes unwrap and indexing in tests, not `map_unwrap_or`, so a test is
-  just as red as `src/`.
-- **2026-09-19 (the review failed a third time; stopped guessing)** — the
-  first review to run against the widened allowlist died the same way as
-  the two before it: `"subtype": "success"`, 10 turns, $0.95,
-  `permission_denials_count: 10`, no summary, no inline comments. The
-  difference was the diagnosis: the job log's `SDK options:` block showed
-  the whole allowlist had applied, `Task` and read-only `Bash` included, so
-  the previous fix was not the thing at fault and a fourth guess at the
-  allowlist would have been a guess about nothing. The action prints only
-  the denial *count*; it writes the full transcript to
-  `$RUNNER_TEMP/claude-execution-output.json` and exposes it as the
-  `execution_file` output, and the SDK's result message carries
-  `permission_denials` as `{tool_name, tool_use_id, tool_input}`. So:
-  `scripts/review-denials.sh` reads that file, prints each refused call as
-  the `--allowedTools` entry that would have allowed it (the verb only,
-  never arguments, so a public log cannot pick up a path or a token), and
-  exits non-zero on a refusal *or* on a run that posted no summary — the
-  first time either silent failure is a red check rather than a green one.
-  Two real defects fell out of reading the action's source: the checkout
-  was `fetch-depth: 1`, so the `git diff main...HEAD` the prompt points the
-  review at had no merge base and could never have worked, and the new step
-  had to run the base branch's copy of the script, since the checkout is
-  the untrusted pull-request head and that step holds the job's token. The
-  allowlist did grow again (`TodoWrite`, the read-only git verbs, the usual
-  text tools), but that part is still inference and is labelled as such in
-  the workflow; the script is what replaces inference next time.
-
-  Next time was the same afternoon, and the inference was wrong. Run
-  35452476655 failed the new step — a red check, which is the point — and
-  named all twelve denials: every one a `git` call, five `Bash(git:*)`,
-  four `Bash(git diff:*)`, three `Bash(git fetch origin:*)`. None of the
-  guessed entries were ever reached. The four refused `git diff` calls with
-  `Bash(git diff:*)` already allowed are the finding: **an allowlist of git
-  subcommands cannot work**, because the list matches on a prefix and git's
-  flags precede the verb, so `git --no-pager diff` is not `git diff`. `git`
-  is allowed whole now (the job is `contents: read`, the checkout is
-  disposable, and the action already allowed `git add|commit|rm`), and the
-  script additionally prints each denied command's verbs, since a line
-  refused for its shape — `git diff | less` dies on `less` — is invisible
-  when the denials are grouped by verb.
-
-  That verb printing paid off on the next run (35453133607), and corrected
-  the guess inside the fix it had just shipped: five denials, all
-  `git diff`, and the shape line read `git → wc`. **A compound command is
-  refused even when every part of it is allowed** — `Bash(git:*)` and
-  `Bash(wc:*)` were both on the list. So no allowlist can buy the review a
-  pipeline, and widening one further was never going to work. The review's
-  whole job is to read a diff, and five runs had now died obtaining or
-  slicing one through `Bash`, so the diff is collected for it: a step
-  before the review writes `$RUNNER_TEMP/pr.diff` and `pr.diffstat` in
-  plain job shell, with no permission system in front of it, and the prompt
-  sends `Read` and `Grep` there. Neither can be refused. The fan-out went
-  from encouraged to discouraged in the same pass, because the parent
-  stopping while subagents were still running is how every one of the five
-  ended. The script also reports `$(…)`, backticks and redirects now, since
-  those hide inside a command that looks single.
-
-  The sixth run (35458733807) is the one that separated the two problems.
-  Handing the review its diff worked: it read the diffstat from the file,
-  reviewed `src/layout.rs` and the `frame.rs`/`render.rs` integration, and
-  the denials fell from twelve to **three** — two `ls`, one `wc`, all of
-  them incidental compound lines. And it still posted nothing, stopping at
-  47 turns of its 100 and $2.77 with a subagent mid-flight. So the tool
-  surface was never the whole story; the parent abandoning its delegates
-  is a separate failure, and it is six for six. Three prompt rules had
-  been written against exactly that (never end without the summary, never
-  end with a subagent unfinished, prefer to review it yourself) and all
-  three were ignored. **An instruction the model does not follow is not a
-  control**, so `Task` came out of the allowlist: no delegate, nothing to
-  abandon, and the diff is already on disk. Same move as the diff file,
-  one level up. If a run without subagents still posts nothing, the thing
-  to question is whether this review is worth its cost, not which rule to
-  write next.
-
-  It did not come to that. The seventh run (35459324425) is the first that
-  worked: 35 turns, $1.37, **zero denials**, and a full review of the
-  layout engine, the config model and the `frame.rs`/`render.rs`
-  integration, with all seven review-fix claims in the PR body traced back
-  to the tests that pin them, and no blocking findings. Seven runs and
-  roughly $10 to get there, across four fixes — the denial reporter, git
-  whole, the diff as a file, and `Task` removed — of which only the first
-  was reasoned about correctly at the time. Three of the four explanations
-  written down between the third run and the sixth were falsified by the
-  next run. The execution file is what made each round tractable; the
-  theories about it mostly were not.
-
-  One immediate sting: **that first working run still went red**, because
-  the check was wrong. The review writes its summary *into* the tracking
-  comment (`update_claude_comment`, which is what `track_progress` does),
-  and `review-denials.sh` counted only `gh pr comment` and inline
-  comments. A false negative is the worse failure of the two — it marks a
-  good review as failed and teaches you to stop reading the check. Fixed
-  by testing the last tracking-comment write for an unchecked box, since
-  every checklist tick is the same call and only a summary has no `- [ ]`
-  left in it.
-- **2026-09-19 (Phase 22 and the consolidation, PR #78)** — Daniel asked
-  for one pull request: the setup phase built fully, the presets showing
-  every feature, the review workflow made simple, the skills accurate,
-  and the documents brought to the code with the work log split out.
-
-  **Phase 22, `garnish setup`**, built in one session over `src/setup/`
-  (draft, form, builder, pick, preview, paint, term, fuzzy, ui, app; 5 600
-  lines with tests). Decided while building, and written into SPEC § 14:
-  the draft is the config *file's* `toml::Table` with its order kept
-  (`toml`'s `preserve_order`), so a save writes only what the file and the
-  edits carry, rather than a resolved `Config` through `config show`'s
-  writer, which would have rewritten every key of a hand-written file; the
-  forms are key / value / default rows with one-key actions; the glyph
-  suggestions are one table in `icons.rs`; the placement map is
-  `Line::modules()` over `render_tree_at`, which keeps the row index per
-  line; `Painter::painted_style` gives the tick's colour rules (dim,
-  `Never`, the 256 quantisation) to the ratatui spans; `install::Steps` is
-  the plan the CLI and the screen both apply. Under it, `fixtures.rs`
-  embeds the sample payloads once (the docs table moved out of
-  `docs.rs`), the bare `garnish` on a terminal prints a pointer
-  (`GARNISH_STDIN_TTY` pins the check), and `setup --preset [--install]`
-  is the scriptable twin. Tests: snapshot goldens under
-  `tests/golden/setup/` at three sizes with the list of expected files
-  guarded, key and mouse scripts, the CLI twin end to end.
-
-  Three things the first green run hid. The setup goldens carried the
-  temporary home's path, so they could never match twice: the app now
-  shows paths under the home as `~/…` (a nicety on screen too) and
-  `for_test` passes the temporary home. A title on a column wrote a key
-  the parser rejects; `t` refuses on a column and names the row. And the
-  icon suggestions had shipped with *empty strings* where the Nerd Font
-  glyphs should have been (an editor dropped the raw private-use
-  characters), which the guard test skipped as "private use" because
-  `all` is true of nothing; the glyphs are `\u{…}` escapes now and the
-  test refuses an empty suggestion. Measured against `main`'s release
-  binary: 2.8 MB → 3.4 MB, and the end-to-end cold tick unchanged (about
-  2 ms either way over 200 runs), so no `setup` cargo feature.
-
-  **Nine gallery presets** (28 in all) show what none did: titles at
-  every position and a titled spacer, links and fixed-width text buttons,
-  the compaction scale with line bars and wall-clock resets, a 34-cell
-  boxed column with a `2fr` stack of titled rows and a bottom-aligned
-  column, a 72-column unicode layout with `max_width` caps, an ASCII-only
-  one with a custom `+-|` frame and `color = "never"`, half-speed
-  animation, a two-cell ticker, and `animate = false`. Writing them found
-  the preset test's slide check applied to every changed row of a preset
-  that carried an `overflow` key, so a text module's own scroll, a
-  spinner or a countdown crossing a boundary read as a bad slide; the
-  check is now for the line ticker alone, and a scrolled row carries
-  nothing that counts seconds (the rule is in `CLAUDE.md`).
-
-  **The review workflow** collects the pull request in job shell
-  (`pr.md`, `commits.md`, `diffstat.txt`, `files.txt`, `diff.patch`,
-  `checks.txt`) and hands the action a short prompt; the file tools,
-  `Bash` whole and the GitHub MCP tools are allowed and `Task` is not,
-  since an allowlist of verbs refused compound commands whatever it
-  carried. The denial step stays.
-  This pull request cannot be reviewed by it (the action refuses a
-  modified workflow), which the backlog notes. **The skills** are shorter
-  and point at `setup` first. **Documents**: `WORKLOG.md` holds this log,
-  `PLAN.md` is the drift (none), the done table and the backlog,
-  `CLAUDE.md` keeps every rule in fewer words and gained the setup and
-  preset conventions, `SPEC.md` lost its "target state" marks and records
-  the Phase 22 deviations, `README.md` and the guide are written around
-  `setup`, and `CHANGELOG.md` § Unreleased is the `v0.3.0` section.
-
-  The first push went red on CI for the reason `CLAUDE.md` § Toolchain
-  already named: the container's nightly was five days behind, and the
-  fresh one's `map_unwrap_or` catches `map(_).unwrap_or_default()` on an
-  Option at three sites in `src/setup/`, one of them in `#[cfg(test)]`.
-  Reproduced with a dated nightly installed beside the pinned one (so
-  the review agents' worktrees kept theirs), fixed with `map_or_default`,
-  green on both.
-
-  **Three adversarial reviews** (correctness, document conformance, a
-  mutation pass of 39 mutations over the new tests), each in its own
-  worktree with a no-git brief. What they found, all fixed with a test:
-  `p` and the picker's `e` replaced the draft over a file that does not
-  parse and `s` then overwrote it (the preset load refuses now, as the
-  picker's `Enter` did); a loaded preset counted as clean, so `q` quit
-  without asking and `p` replaced unsaved edits unasked (it is an edit,
-  and `p` over a dirty draft asks first); `try_set` let a bad value
-  through when the file already had a problem at that path; `b`, unbox
-  and every builder edit wrote straight into the draft, so a nested box
-  passed and an orphaned `[box.<name>]` was saved with nothing said
-  (every builder edit is tried and refused with the parser's message,
-  unbox drops an orphan, and a new problem an edit introduces is named
-  in the status bar); a file that only names a preset opened with an
-  empty row list; row-list clicks were measured against a model of the
-  line rather than the line drawn (the drawn chip ranges are recorded);
-  deleting the last inner row or column left `row = []` / `col = []`
-  that refused every edit; `t` with an empty input wrote `title = ""`;
-  a text module whose placement was refused still got its table and its
-  editor; the row form's "a new box name" entry was always refused; the
-  terminal guard never showed the cursor again and left raw mode on when
-  entering the alternate screen failed; the picker's width and height
-  warnings and the "colours off" note were appended to lines a narrow
-  terminal cuts (they have lines of their own now, facts first); the
-  status message promised that a save drops bad keys; the help page cut
-  its longest labels and its last rows at 80 × 24; an integer typed
-  above its `max` was clamped in silence (refused with the bound now);
-  the geometric dot marking an override could draw two cells. The
-  document review corrected a dozen § 14 wordings (the preview above the
-  list, `Esc`, the hand-written top-level forms, the suggestion sources,
-  the snapshot coverage, the `slow-motion` summary, the skill's `gap`
-  placement and `mktemp`). The mutation pass named 25 rules with no red
-  test; the tests added here cover the ones that matter (validation,
-  unset, the file path after `p`, `w`, list and preview clicks, the
-  second placement of a text module, the builder's edge rules, a
-  scrolled line's hit test), and PLAN's backlog carries the three that
-  need a helper or a spec decision. 275 → 284 tests.
-
-  Marked ready for review with the `claude-review` label, the pull
-  request's `review` check went red in thirteen seconds: the action had
-  skipped itself as `CLAUDE.md` says it does on a pull request that edits
-  the workflow file, and the report step then ran `main`'s copy of
-  `review-denials.sh` with an empty execution-file argument, which
-  `${1:?}` treats as a usage error. The step now says so and exits 0
-  before fetching the script, and the script takes an empty argument as
-  "no execution file"; neither is a review, and the fix reaches the
-  step's own path only once it is on `main`.
-
-  **Phase 23, usage views and formats** (the same day, after PR #78
-  merged). Decided with Daniel: the Tier A ideas left in
-  `FUTURE-SPEC.md` (A4 hide lists, A6 number formats, N11 + A10 pace and
-  elapsed, A13 separator colour) and four more module ids (A12 `version`;
-  A9 `sandbox`, `voice`, `account`), the fixed set growing from 21 to 25;
-  everything payload-only or a settings read, no new crate, no process
-  on the tick, and every config on disk rendering byte for byte as before
-  (the golden suite is the regression test: no existing golden moved).
-  Documents first (SPEC § 3, § 3.3, the new § 3.8, § 4; the phase in
-  PLAN), then small signed commits on one branch, one per layer, no
-  `gh stack` in the container. Decisions: `hide` is a hand-parsed module
-  key whose vocabulary derives from the schema's `measure` (`empty`
-  everywhere, `zero` for a count or an amount, `below:N`/`above:N` for a
-  percentage, `N` at most 1000), applied once in `render_group` from the
-  `Measure` a module attaches with one call, in union with
-  `hide_when_empty`; `[format]` is one table with a same-named per-module
-  override taking `inherit`, and `parens = "dim"` goes through one
-  `detail()` helper so `plain` stays one segment and today's bytes; pace
-  is arithmetic over `resets_at` and the window length (5 h, 7 d; `spend`
-  has no window, so no pace keys), eta shown only when it lands before
-  the reset, the elapsed cursor reusing the `marker` icon key; `separator_color
-  = "inherit"` takes the first coloured, non-dim segment of the module
-  before the separator; `account` is the first cached module outside the
-  repo group, so `Clock.workers` now gates `Ctx::cached` (a pinned
-  render never touches a cache directory; `git: false` alone covered the
-  repo modules) and `Clock.settings_keys` seeds the settings badges'
-  docs samples in-process. `sandbox.enabled` and `voice.enabled` were
-  verified on the Claude Code docs (the settings reference; the voice
-  dictation page, which also says the harness drops its own `hold space
-  to speak` hint under a custom status line), and `CLAUDE_CONFIG_DIR`
-  moves `~/.claude.json` with every other `~/.claude` path. `itertools`
-  left the dependency list with its last use. Four gallery presets (32
-  in all), seven config goldens.
-
-  **Three adversarial reviews** of the phase (correctness, SPEC
-  conformance, a mutation pass of 64 mutants), each in its own worktree
-  with a no-git brief; every finding fixed with a test. The two readers
-  agreed on the first: under `percent = "precise"` the bands and the
-  `below`/`above` rules compared the whole-number rounding while the row
-  printed one decimal (`23.5%` coloured as over `thresholds = [23.7]`),
-  and `zero` on an amount read a fixed half cent rather than the printed
-  `$0.004` or `$0`; one `shown` rounding per style now feeds both the
-  text and the compared number, and a tie rounds the same way in both.
-  Also found: `pace`, `pace_colors` and the elapsed marker kept rendering
-  after a window's reset had passed (the payload keeps the old
-  `resets_at`, which read as 100 % elapsed); `garnish preview` rendered
-  with the tick's clock, so a config placing `account` forked a worker
-  per fixture and left lock files under the fixtures' session ids (a
-  preview never reads the cache or spawns now, `Request.workers`; whether
-  it should also skip git and the settings chain, as the setup pane does,
-  is in the backlog); `read_account` and, on the tick path,
-  `claude_settings::read_file` opened a FIFO and waited for a writer for
-  ever (`open_regular` refuses anything but a regular file); `account`'s
-  `minimal` preset kept the icon; `style = "user"` left a lone icon for
-  `@host`; a negative zero printed its sign; a hide state was not
-  trimmed; the SPEC's `⇥1h37m`, the `version` table row and the `$1.2k`
-  rule for `whole`, and five stale counts. The mutation pass killed 55 of
-  64; six survivors got their tests (a module hidden by its list never
-  prints `–`, the marker needs its own switch, a zero delta prints bare,
-  the ratio's floor, the blank clause of an inherited separator, the
-  parse error's suffix, two formatter edges), one was equivalent (the
-  remaining clamp) and one unreachable (the order of the hide check and
-  the stale mapping, now said in a comment); three single-pin kills got
-  a unit test beside their golden. 284 → 312 tests.
-- **2026-09-20** — Setup refinements after Daniel's first use ("some
-  settings don't work", a suggested label, undo, easier columns and
-  boxes), on `claude/tui-presets-settings-bugs-ajz0wh`. A throwaway
-  harness drove every preset (the four built-ins and the 32 gallery
-  files) into the builder and walked every form and every field with
-  `→`, `←` and `Enter`, logging each status line and every parser problem
-  the draft gained; it found six bugs the snapshot tests had missed:
-  `SlotKind::parse` trimmed every value, so a separator picked from the
-  suggestions arrived as its glyph alone and `  ` as `""` (refused as
-  "not one cell" for `fill_char`); the `[colors]` form offered role
-  names, which `resolve_colors` refuses (a role defined by a role has no
-  ground); `blank` was offered on plain rows and the title keys inside a
-  named box, where the parser refuses any value; unsetting a row's `box`
-  in its form (or with `d`) left an orphaned `[box.<name>]` reporting on
-  every tick, and a name made for a box the parser then refused stayed
-  behind the same way; `try_set` took a value that left another key
-  reported (`fill = false` under a `fill_pattern`) with a plain "set",
-  the problem hidden behind that status; `custom…` opened an empty line
-  rather than the value in effect. Each fixed and pinned by a unit or
-  snapshot test; the harness was not kept, its checks being the tests.
-  Built: undo and redo (`u`/`U`, `Ctrl+Z`/`Ctrl+R`, in a form too) over
-  a history of the draft's tables taken around every key and click that
-  changes one, with the list cursor and the status of the time;
-  `Draft.dirty` became a comparison with `saved` (the table as read or
-  last saved), so an edit undone is not an edit, which also replaced
-  `set_path`/`mark_dirty` with `replace_table`; the hint bar as buttons
-  (`ui::hint_cells` measures what `hints` draws; the builder's bar cut
-  to what 80 columns hold, `u undo` on it); an input cursor; pickers
-  opening on the value in effect; `C` inserting after the selected
-  column and selecting the new one, `]`/`[` past the edge making a column
-  for the module (a plain row splitting from it; a module alone in its
-  column stays), `m` on a row of columns landing in its last column; `B`
-  boxing a row with the row above (joining its named box, or a new one
-  named after the title either row carried); the module's name, bare and
-  capitalised, as the first `label` suggestion; the top-level `preset`
-  swapping the rows when they were still the old preset's, saying which
-  happened. The help page holds 22 entries, exactly what 24 rows show.
-  Presets: every file passes `config check` and renders uncut at its
-  declared width; a read of all 32 renders found nothing beyond the
-  `sidebar-panels` `valign` question already in the backlog. CI's
-  nightly, a day newer than the container's, flagged two
-  `map(_).unwrap_or_default()` chains under `map_unwrap_or`; reproduced
-  and fixed with a dated nightly beside the pinned one (CLAUDE.md
-  § Toolchain).
-
-  **One adversarial review** in its own worktree (a no-git brief; the
-  permission classifier refused it a copy of the uncommitted tree, so it
-  read the checkout and mirrored the files into its scratchpad), against
-  the state after the hint-click bug was caught in the self-review (a
-  click on `u undo` ran the undo under `input()`'s snapshot, so the undo
-  itself was recorded as an edit and cleared the redo chain). Its four
-  findings, all taken with tests: `B` on a row carrying a title, joining
-  the named box above, was refused by the parser (a row in a named box
-  takes no title) and the whole edit reverted, so the "a run of rows a
-  key at a time" promise held only for bare rows (the title goes, the
-  status says so); `B` on a row leaving another box orphaned that box's
-  table, refused the same way (`Draft::prune_orphan_boxes`, one place,
-  also behind `b` and the forms); a row's, column's or box's form left
-  open across an undo edited a phantom at the same path (`row_fields`
-  and its kin return nothing for a missing table, the app closes such a
-  form on undo, a module's is rebuilt); picking the preset already in
-  effect claimed to replace the rows. Nits: `Target::BoxWith`'s payload
-  unused (now checked against the selection), a doc comment stacked on
-  the wrong function. Its missing-test list was taken in part (`]` from
-  a right group, `[` from a stack's inner row, `HISTORY_LIMIT`, box use
-  from a column or inner row, `hint_key`, `bare_key_of`); a two-cell
-  glyph under the input cursor and undo after a reload stay unpinned.
-  312 → 319 tests.
-- **2026-09-23** — Dependency sweep, no code change. `renovate.json` now
-  extends the shared `local>justanotherspy/renovate` preset in place of
-  `config:best-practices` (which the preset carries), so this repository
-  gets the same grouping, automerge and crate release-age rules as the
-  others. `cargo update` refreshed eleven transitive crates (the pending
-  lock file maintenance plus `instability`, `lru` and `thiserror`); every
-  direct dependency already resolved to its newest release, and none has
-  a newer major. `anthropics/claude-code-action` 1.0.231 → 1.0.233 (no
-  input changes); every other action pin is the latest release. `make
-  check` and `scripts/ci.sh` green on the 2026-09-22 nightly.
-- **2026-09-25** — A whole-codebase review at Daniel's request, then its
-  fixes. The review was read-only: 12 area reviewers, each followed by
-  an adversarial verifier. 287 findings; 17 refuted or duplicates, 250
-  confirmed, 8 plausible, and 12 found by the verifiers themselves (2
-  high, 34 medium, 158 low, 76 nit).
-  - *What it found, by theme:*
-    - **git.** The tick read `.git` with no regular-file check or bound, so
-      a FIFO `HEAD` hung every tick (git-01, high). `git status` ran a
-      repository's filter drivers and a partial clone lazy-fetched.
-      `commondir`/`gitdir:` could name any directory, so ref containment
-      contained nothing. `git` was looked up on `PATH` after the chdir.
-      Quoted `.git/config` values broke `sync`, and a pruned upstream
-      showed `✗` for good.
-    - **Never implemented.** The GC sweep never ran, `fetch_error` was
-      never shown, the reftable fallback SPEC § 6 promised was missing,
-      and so were `refresh` on payload-only modules, `colors.percent` and
-      SPEC § 5's internal-error line.
-    - **Wrong file written.** The worker never got `--config`. install,
-      init and setup wrote the XDG file over a `~/.garnish.toml` in use,
-      and ignored `CLAUDE_CONFIG_DIR`.
-    - **Blanked status line.** One wrong-typed payload field blanked
-      every row.
-    - **Layout.** The harness trims every row, not only the blank ones, so
-      rows starting with plain spaces slid left. Flex columns overflowed
-      their share, and `auto` columns in boxes were cut.
-    - **setup.** Edits were refused when a problem's row index shifted, `d`
-      deleted box and text tables, and Esc on "changed on disk" dropped
-      the edits.
-    - **The review workflow.** It planted a `contents: write` App token
-      in reach of the model's Bash, prompted with any commenter's text,
-      and any user's `@claude` cancelled a paid run. The release build
-      restored a cache a default-branch job could seed, and ran an
-      unpinned nextest.
-    - **Tests.** render.rs unit tests used the real clock, cache and
-      workers. The criterion bench spawned itself as a worker.
-  - *Decided with Daniel:*
-    - The dirty check is plumbing (`diff-index --cached` + `diff-files`,
-      `checkStat` pinned), accepting a touched-but-unchanged file as
-      dirty until the user's git refreshes its index.
-    - Rows starting with whitespace are held against the trim (an empty
-      SGR with colour on, U+2800 with colour off).
-    - `context.colors.percent` paints the percentage.
-    - A non-zero `refresh` on a payload-only module is a config problem.
-    - Reftable repositories fall back to the worker.
-    - A `[frame] pad` string is drawn as its text.
-    - An all-hidden render still clears the line (documented).
-    - A middle column in a box drops its fill-cell reservation when
-      `gap` ≥ 1.
-    - The workflow fixes go in their own PR (#85), so the code PR (#86)
-      can be reviewed by the unchanged workflow.
-    - The three rules the final review showed a file old garnish wrote
-      can trip (`refresh` ≥ 1 on a payload-only module, which the old
-      module form offered; `title_*` left without a title by the old
-      title removal; `thresholds` out of order) stay problems on the
-      tick, knowingly against CLAUDE.md's tightening rule; CHANGELOG
-      carries an upgrade note, and setup now removes a title's keys
-      together.
-  - *How it was built:* one fix batch per concern, each a subagent in its
-    own worktree working test-first under `make check`, merged into #86
-    one batch at a time. `config/mod.rs` and `setup/app.rs` were split
-    behaviour-free before their fixes.
-  - *What the fixing found:*
-    - A new git test read the clock before the fetch it measured, and
-      failed one run in six. That became a testing rule in `CLAUDE.md`.
-    - With `RUST_BACKTRACE=1` set, a quiet refusal spends 0.7 s capturing
-      a backtrace it never prints (backlog).
-    - `make check` does not run rustdoc `-D warnings`, so one pushed
-      commit needed a follow-up; `CLAUDE.md` now says so.
-    - The `config show` round trip over every fixture and preset took
-      48 s on the macOS runner, then crossed nextest's 60 s limit once the
-      review added fixtures; it and `tests/presets.rs` now run their
-      binaries in parallel.
-    - The gallery test never noticed `animated-dots`' four blank frames
-      because it looked for motion anywhere in the row. Each promise is
-      now checked on its own, and a test freezes a preset per promise to
-      prove the check fails. The frames are written as TOML escapes: the
-      fixing agent's own Edit tool turned `\uXXXX` into the glyph.
-    - Inside a box, the gap ≥ 1 decision changed one golden: the
-      `box-columns` "Panel" row now shows `42%` where it showed `4…`.
-    - Panicking in test builds on a read of an undeclared key found one
-      live case the source scan had missed: `spend` read the pace
-      switches it does not declare. Three planted typos were caught by
-      both layers.
-    - mod-16 was checked against the 2.1.282 binary: Claude Code writes
-      `.claude.json` through a temp file and a rename, and when the
-      rename fails (a bind-mounted file) truncates it and writes in
-      place, so a half-written read is possible; the `account` worker
-      retries once after a parse failure.
-    - `context.colors.percent` changed four colour goldens, each checked
-      at the escape-code level to differ only in that colour.
-  - *Conflicts on merge:* the CLI batch renamed `settings_files` to
-    `settings_chain` under the render batch's new `render::context`, and
-    two batches both reworded the `truncate`/`overflow` reference rows.
-    Resolved by hand, and the generated docs regenerated.
-  - What is left is in PLAN's backlog under *Left open by the 2026-09-25
-    review*. 319 → 501 tests. `make bench` after the last batch, all
-    within budget: warm mean 2.5–2.6 ms (p99 3.0–4.7 ms) for `default`,
-    `full`, every module and the new `warm-tz`; cold 4.6 ms; a sync
-    refresh 14.3 ms.
-  - *The final adversarial review* (2026-09-25 evening, four reviewers
-    over both PRs, then fixed by one agent per area):
-    - #85: setting the review's environment scrub on its own made the CLI
-      refuse to start for want of bubblewrap (high); the action's
-      isolation is now switched on whole. The token still reached
-      `.git/config`, the report step ran git in the model's checkout, the
-      edit tools were only left off the allowlist, the release smoke test
-      missed `⚠ config:` rows, `verify` took any custom policy, and a
-      script test died before its summary.
-    - Area B: a failed reftable worker respawned on every tick (high); a
-      newline in a merge ref or a 64 KiB branch name did the same; the
-      config parser cost up to 5 ms a tick on a big `.git/config`; lazy
-      fetch on an older git ran the repository's `uploadpack`;
-      `--short` named a branch `heads/main`; doctor's probe followed a
-      planted link; a FIFO swapped in after the check hung the open.
-    - Area C: `config path`, `setup` and `install` ignored the `--config`
-      the status line command passes; `"rate_limits": []` counted as a
-      subscription; a stderr nobody reads blanked the line;
-      `render --bogus` exited 2; `config show` wrote boxes no row joined;
-      a reinstall dropped an environment prefix.
-    - Area D: removing a title in setup left its decorations (a `⚠
-      config:` row); a `width = 0` column, `align` over a flex column, a
-      side-less custom box and empty custom caps each drew wrong.
-    - Kept on purpose: the three tightened rules (Daniel), absurd
-      durations (C9), the per-row cap pad (D6), context-refused picker
-      entries (D8); all in PLAN's backlog.
-  - *Verifying the fixes* (a workflow: a verifier per area tried to break
-    each fix, and two skeptics had to reproduce every failure it
-    claimed; 18 claims confirmed, 3 refuted):
-    - C1 was incomplete: the readers and the writers followed the user
-      file's command where a project's wins, a settings file past 1 MiB
-      lost the command, and `$HOME.x` or `--config=$HOME/x` read wrongly.
-      Now `CommandFrom::Chain`, the command `install` already parsed, and
-      a home directory spliced where `$HOME` stands.
-    - B10 regressed: pinning `core.trustctime=true` showed a clean tree as
-      dirty for good under a user's `trustctime = false`. Reverted, with a
-      test that such a tree reads clean.
-    - B3's speed-up had no guard: `bench/run.sh` gained `warm-bigconfig`.
-    - D2 and D5 were partial, and D5's filler ran into right-hand text; a
-      box too narrow to draw still added two lines. All fixed, with four
-      new config goldens; SPEC § 4.3 said an inner row takes `justify`,
-      which the parser never allowed.
-    - #85: the report step's fallback turned every API failure green,
-      `Task` was only left off the allowlist and still ran, and the stated
-      reason for disallowing the edit tools was wrong. All fixed.
-    - The nit asking to print an unresolved `--config` in backticks was
-      refuted (`{:?}` is garnish's convention, is the settings file's own
-      JSON spelling, and lets no escape byte through), and reverted.
-    - The workflow's worktrees start at `main`, not the PR head; the
-      verifiers noticed and exported the head themselves. Their scratch
-      builds (2.7 GB each) filled the disk twice: delete them as each
-      agent finishes.
-    - 501 → 538 tests.
-
-- **2026-09-26** — A second verification pass over the fixes of the
-  first (one verifier per group, two skeptics per new claim), then its
-  fixes. `main` moved to 9145f22 (Renovate #87, claude-code-action
-  v1.0.235) and was merged into #85 and #86; the review workflow on #86 is
-  byte-identical to `main`'s again.
-  - *#85*: every earlier fix held (reproduced through the action's own
-    argument parser, the pinned Agent SDK and CLI, and a mock API). New:
-    `Skill` still forked a subagent and `Workflow`, `CronCreate` and
-    `ScheduleWakeup` were still offered, because leaving a tool off the
-    allowlist does not remove it; now disallowed. Nothing tested the
-    report step or the disallowed list, so `scripts/test-scripts.sh` now
-    runs the step's shell out of the YAML with a stand-in `gh` and checks
-    the list. The action drops a `#` line in `claude_args` (CLAUDE.md
-    said it passed one through), and the allowlist named `TodoWrite` and
-    `LS`, which the pinned CLI no longer has.
-  - *config location*: the writers had started following a checkout's
-    own `.claude/` settings, so a cloned repository chose where `config
-    init` and `setup` wrote. A first fix (writers follow the user's files,
-    readers the project's) was attacked by a third verifier: `config path`
-    then answered for one side only, and the `garnish-statusline` skill,
-    which writes through `config path`, still replaced `~/.profile` with
-    TOML when a checkout named it. Decided (the conservative side,
-    Daniel's to revisit, PLAN backlog): a `--config` from a checkout's own
-    files is followed by no command, reading or writing, and refused on
-    one line like an unresolvable one (`WriteTarget::Checkout`); every
-    command otherwise names the same file. A command run by hand reads a
-    settings file whole (64 MiB bound), so past the tick's 1 MiB cap
-    `config path`, `config init` and `doctor` agree with `install`;
-    `doctor` reads the chain as Claude Code does, and the keys the tick
-    reads skip a file past its cap. `shell_words` split at Unicode
-    whitespace (a pasted non-breaking space cut the path) and spliced an
-    unquoted `$HOME` that `sh` would split; both fixed, a second `$HOME`
-    is refused, a quoted `--config` is cut to 200 characters, a
-    `GARNISH_CONFIG=` prefix counts, a program word `sh` would split runs
-    no garnish, and a second `--config` or one after `--` (both clap
-    errors) names no file. `doctor` no longer points `config init` at a
-    file it would refuse. The skill's write step stops on a refusal.
-    Three mutations the tests missed are now caught (the badge rows'
-    skip, the note's cut, the cap's `>`). A fourth verifier got round the
-    rule three ways, all closed: `install --settings` on a checkout's
-    file wrote the config it named (now a note, no file); a checkout's
-    `env` block, which Claude Code copies into the session (read from the
-    2.1.283 binary), set `GARNISH_CONFIG` or pointed
-    `GARNISH_MANAGED_SETTINGS` at itself (`config::hand_explicit` now
-    refuses a variable a checkout set, a relative hook is ignored); a
-    relative `CLAUDE_CONFIG_DIR` made the checkout the user's own (now
-    ignored). And a project running another status line pointed every
-    command at a file no tick read; the person's own garnish command now
-    names it. `setup --install` notes a command that reads another file
-    than the one it wrote; a `~` in a `GARNISH_CONFIG=` value and
-    arguments clap refuses name no file; a linked home or a checkout
-    file linked to the person's own counts as theirs. A fifth verifier,
-    running Claude Code 2.1.283 end to end, confirmed a project's `env`
-    block reaches the Bash tool, and got past the env check three ways
-    (a session in a subdirectory, an array value, a file serde refuses but
-    `JSON.parse` reads): guessing which checkout file set the variable was
-    the wrong shape. Now inside a session (`CLAUDECODE` present) a
-    `GARNISH_CONFIG` or managed-settings hook counts only when the
-    person's own settings set it. `doctor` no longer loads the refused
-    file (`config::load_exactly`); the setup notes compare a relative
-    path absolutely, cover a command that passes no config, and show
-    `~/…` on the screen. A sixth verifier (Claude Code end to end again)
-    found no way left for a checkout to choose the file, and seven smaller
-    things, fixed: a `~/g.toml` from the person's own `env` block (Claude
-    Code expands nothing there) was read against the working directory, so
-    `config init` made a `~` directory and a checkout could plant the
-    tick's config; a relative `GARNISH_CONFIG` is now ignored by the tick
-    and refused by hand. From a terminal the commands never saw an `env`
-    block's `GARNISH_CONFIG`, which is what the ticks read; now they follow
-    it. The platform file standing in for an ignored hook was still
-    demoted as the checkout's, and `doctor` showed the hook's file;
-    `managed-settings.d` drop-ins now vouch; the screen tilded a home
-    inside a longer path; five untested mutations now have tests. A
-    seventh verifier (Claude Code 2.1.283 again, `/etc` scenarios in a
-    private mount namespace) also found no checkout choosing the file,
-    and nine smaller things, fixed: an `env` value of another JSON type
-    was skipped where Claude Code takes its `String()` (`["/p"]` is
-    `/p`), so a lower file's value was named (`js_string`); the
-    `managed-settings.d` drop-ins vouched in a session but were not in the
-    chain, so `config path` answered two ways (now the managed layer,
-    `layer_of`, all of them, sorted, no longer the first 64 the directory
-    lists); `install` and the `setup --install` note ignored a managed
-    `env` value (`installed_env_target`); a project running another
-    program still had its `env` decide the person's config elsewhere; an
-    `env` value was reported as `statusLine.command`'s (`Unresolved` has
-    a `key`); the screen tilded a path inside quotes, which pasted made a
-    `~` directory; and a relative `--config` in the person's own command
-    (`--config=~/g.toml`, which `sh` leaves alone) made the tick read the
-    repository's file: the tick now ignores it, as it ignores a relative
-    `GARNISH_CONFIG`, and says so first on its `⚠ config:` row (the first
-    push asserted that row at the default width, and macOS's long temp
-    path cut it). The two mutations only a platform managed file could
-    show (`demote_hooked`, the drop-ins) are unit tests now, beside an
-    empty value and `install` following the user's `env`. An eighth
-    verifier found one way back in, new in that round: `install` read
-    the managed layer on its own, past the demotion of a managed file a
-    checkout pointed the hook at, and wrote the default config where that
-    file said while every other command refused (now it reads the layer
-    through `chain_files`). And nine smaller: `install` read the file it
-    rewrites as strings only; a hidden drop-in (`.x.json`, which Claude
-    Code skips) counted; `doctor` listed no drop-in (now `drop-in` rows,
-    whose keys the tick-read rows skip, since the tick reads none: PLAN
-    backlog); `js_string` wrote `1.0` where JavaScript writes `1`
-    (`js_number`, checked against node); the install screen's command
-    line and quoted spans still took a `~`; the unresolved note named no
-    file; the ignored `--config` row led with the long path of the file
-    read, which cut its reason at 80 columns (the row now names no file);
-    and four mutations survived (the platform guard's test was vacuous),
-    each now killed. Two macOS runs failed on tests of that work that
-    asserted on text naming a temporary file (a macOS temp path is four
-    times Linux's); the suite now passes under a 136-character `TMPDIR`.
-    A ninth verifier found no way in from a session: `install --settings`
-    a checkout's file, run from elsewhere, still wrote where the managed
-    file that file pointed the hook at said (the rewritten file now
-    counts for the demotion, `chain_files_rewriting`); a directory named
-    `*.json` counted as a drop-in; `tilde_paths` ignored backslash escapes
-    (`shell_quote`'s `'\''`); and four mutations survived that only a
-    platform managed directory could show, so the hook's file now brings
-    its drop-ins too and a CLI test reaches them. Accepted as nits (PLAN):
-    a halfway number, serde_json's inexact floats and `1e999`, a config
-    key named `--config`, and `install` refusing where `config path`
-    passes over a demoted file. A tenth verifier found every round-9 fix
-    holding and no way in from a session; from a terminal with the hook
-    exported, the other file of the rewritten file's `.claude` pair
-    naming the hook still let `install --settings` write (both now
-    count), and the hook bringing drop-ins opened a new door: a hook file
-    in a shared directory took drop-ins anyone could create there, so a
-    drop-in directory now counts only when root or the managed file's
-    owner owns it and nobody else can write to it (`guarded_dir`). An
-    unobservable `truncate` is gone, a single-quote case pins the
-    backslash rule, and bash's `$'…'` (only what the install screen
-    shows) is left as a nit (PLAN). An eleventh verifier found no way in
-    from a session, and the guard wrong: it also refused a group-writable
-    platform directory (root 0775 or setgid 2775), which Claude Code
-    reads, so in a session an organisation's drop-in value was refused
-    while the ticks read it; it checked a chain of links at its two ends
-    only; and three of its checks had no test. The hook's file brings no
-    drop-ins again (the platform's alone, unguarded, as Claude Code reads
-    them), the chain's decisions became pure functions a unit test gives
-    a drop-in (`chain_target`, `managed_env`), and the rewritten file's
-    `.claude` pair is found once resolved as well (a link, `x/..`, a bare
-    `settings.json`). Rounds 9 to 11 found nothing reachable from a
-    session, and the last fix removes code, so the rounds stop there.
-    `make bench` at 9417c5d: every scenario within budget (warm 2.13 to
-    2.37 ms mean, p99 at most 3.65 ms; cold 3.53 ms).
-  - *layout*: four of the layout follow-up's fixes held (under fuzz of
-    20 000 seeds × 211 widths, custom frames included); a fifth was
-    partial and one had regressed. Under uneven `custom` caps a row was
-    measured on the frame's narrowest cap pair and laid out on its own,
-    so a box that fitted only on its own lines was drawn and then cut
-    (its bottom edge and later rows gone, 19 seeds). Now `frame_plan`
-    measures each row on the caps it lands on, re-measuring until no row
-    moves (8 rounds at most; a frame that never settles keeps the
-    narrowest pair), and a box is drawn only whole. A `style = "none"`
-    box on a `width = 0` column made its row three lines tall
-    (`box_interior` now needs one cell). SPEC § 4.3 names the one place
-    text can meet the rule (a column narrower than its pads), a test pins
-    where a dropped `fr` column's gap goes, and CLAUDE.md has the
-    composer's real path. The in-process tick got slightly faster (each
-    row's height measured once, not twice: dashboard 70 → 64 µs).
-  - `make bench` at 5e95caf, the machine otherwise idle: every scenario
-    within budget. Warm means 2.57–2.89 ms (p99 3.2–4.4 ms), the new
-    `warm-bigconfig` the slowest at 2.89 ms; cold 4.5 ms; refresh-sync
-    15.2 ms.
+  so `Config::width` subtracts 4 and `install --padding` seeds
+  `padding = 2N`. Phase 11 (`align`, `durations = fixed`), byte-identical
+  by default. A live walkthrough with Daniel of every preset, theme,
+  frame, icon set and option found eleven bugs (wide COSMIC glyphs, a bad
+  colour discarding the whole config, powerline caps, separators, empty
+  rows) and produced SPEC § 4.1, § 3.7, § 4.2, § 12, § 13, planned as
+  Phases 12–18 in one `gh stack`. Phases 12, 14, 13, 15 landed (glyph
+  guard, per-key fallback, line keys, `time::frame`, `ansi::scroll`, the
+  ticker, text modules); the Phase 15 review found unsanitised gaps and
+  text-module names breaking the `config show` round trip.
+- **2026-09-06** — Phases 16–18: animation framework, the presets gallery
+  (`include_str!`, generated page), the three skills and `skills install`.
+  Reviews: multi-character spinner frames split, a short rule blinked,
+  skill frontmatter not YAML, `skills::install` followed symlinks. A
+  three-reviewer whole-stack pass hardened every row (`Segment::plain`/
+  `styled` reduce to plain text, sizes bounded after `width = i64::MAX`
+  aborted a tick, OSC 8 only for `http(s)://`) and made `config show`
+  round-trip. Decided with Daniel: ticker durations default to `fixed`, a
+  frozen ticker is cut with `…`, `blank = true` keeps an unframed spacer
+  (only colour off loses it: the harness trims raw bytes). Stack #13–#42
+  merged; `v0.2.0` tagged. Warm default tick 0.87 ms.
+- **2026-09-11** — Release pipeline with the Homebrew tap: tag → verify →
+  pre-release → four archives → cask rendered and `brew fetch`-checked →
+  Daniel's approval in the `release` environment → tap push → promote. Its
+  review fixed a `sha256 ""` from a failed substitution under `set -e`, a
+  per-tag concurrency group and an auto-created unprotected environment,
+  and moved the approval after the cask exists.
+- **2026-09-12** — *Code*: every open plan item closed: the killed-tick
+  test (dash's builtin `kill` takes neither `--` nor a negative pid, so
+  the `kill` binary), behind/diverged/`fetch_interval` tests against a
+  second clone, `Segment.text` private, `OptSpec::max` replacing a
+  key-name match (it caught `cost.decimals`, a 4 GB allocation per tick);
+  SPEC audited against the code and three § 9 promises given tests.
+  *Documents (PR #48)*: at Daniel's request the website was dropped and
+  SPEC § 14 became `garnish setup` (ratatui, preview through the real
+  render, editors from `ModuleSchema`, install through `install`);
+  FUTURE-SPEC's low-impact ideas chosen by "Tier A, no crate, no non-goal,
+  no tick-side write, module set unchanged" became Phases 19–20. Daniel's
+  layout ideas became one model (SPEC § 4.3): a row is columns, a column
+  is modules or a stack of rows, `1fr | auto | cells`, titles and boxes
+  as decorations, two levels deep; a *line* is a terminal line and a
+  *row* the addressable unit, so `[[row]]` with `[[line]]` and
+  `hide_empty_lines` as permanent aliases, and a plain row is one `1fr`
+  column so the default render stays byte-identical. Two spec reviews
+  returned 25 findings each, all taken. *Phase 19* (harness fidelity):
+  read from the 2.1.270 binary, the 13 000 buffer is unchanged, `COLUMNS`/
+  `LINES` are the full terminal, and the harness merges `dim` into every
+  piece, so FUTURE-SPEC A1's dim reset could never work and was not built
+  (SPEC § 2.1 records how to re-verify). Built: `animate` following
+  `prefersReducedMotion`, `install::replace_file` (never rewrite an
+  unparsable file), the doctor's settings rows, `# color:` goldens. A
+  five-lens review found symlink, size-bound and double-parse bugs in the
+  settings reads and test leaks (the checkout's `.claude/`,
+  `GARNISH_ANIMATE`, the machine's managed settings), all fixed.
+- **2026-09-13** — *Backlog decisions* (PR #50): `preview` draws every row
+  faint (the tick's bytes unchanged); `GARNISH_MANAGED_SETTINGS` names the
+  managed file or, empty, none, and every binary-run test sets it empty.
+  The height rule read from the 2.1.270 binary: three renderers; classic
+  cuts nothing, fullscreen gives the bottom block `⌊LINES / 2⌋`, the
+  DECSTBM split `LINES − 2`. Decided: the tick caps nothing, the § 14
+  picker warns against the fullscreen budget, `doctor` prints the `tui`
+  setting. *Phase 20* (per-module presentation): a four-lens trap-finding
+  pass over the plan settled the corners first (fish keeps `~`, GitLab by
+  host or `pr.kind = "mr"`, the ASCII pending glyph is `..` so the matrix
+  asserts cut ⇒ ellipsis). Layers: `COMMON_OPTS`, `max_width` (skipped at
+  0 so the default tick pays nothing), the schema matrix (about 100 000
+  renders, 0.6 s under rayon), `path.style = "fish"`, `branch.link` and
+  `text.url`, `context.scale = "usable"`, `reset` on the limit modules.
+  Lesson: a trap-finder agent ran `git stash` in the shared checkout while
+  the reset layer was half-written and three files silently reverted
+  (found in `git stash list`, re-applied by hand); since then every
+  subagent gets its own worktree and a brief forbidding git commands that
+  touch the tree.
+- **2026-09-14** — First macOS host: `make setup` died with `rustc: command
+  not found` because Homebrew's keg-only rustup keeps its proxies off
+  PATH. Fixed on the host; `scripts/setup.sh` now finds the proxies and
+  stops with a PATH note. `make install` built 0.2.0 unchanged.
+- **2026-09-16** — *Phase 20 review*: PR #51 replayed on `main` and given
+  the review it had skipped (three lenses, own worktrees, no-git briefs).
+  Lint policy clean; a mutation pass proved all eight new goldens real.
+  Found: the settings chain read on every `context` render, `branch.link`
+  building bad URLs (empty branch, an encoded port, `.`/`..` segments
+  walking the path up), `ansi::clusters` splitting flags and skin tones.
+  The schema matrix now sweeps every `Bool` and `Enum` option, not only
+  modules. Decided: `spend`'s reset takes the date form (a reset weeks out
+  read as tonight); a self-hosted GitLab without an MR is a documented
+  limitation, not a `branch.forge` key. *Height-rule review* of #50 (four
+  lenses; refuters died when credits ran out, judged by hand): `tui`
+  values Claude Code rejects are shown as written, the renderer is "asked
+  for" not asserted, `⌊LINES / 2⌋ − 5` is the ceiling for an empty prompt
+  rather than the rule, and `CLAUDE.md`'s re-verify anchors became quoted
+  strings, not minified names. Recorded: a failed, timed-out (600 s) or
+  empty run clears the status line. #50 and #51 merged.
+  *Audit through Phase 20* (seven read-only lenses, 194 → 227 tests):
+  two ways out of the repository (a `ref: ../../../secret` HEAD read any
+  file; a `.git/config` remote named `--upload-pack=<cmd>` ran it); four
+  unbounded things (a pipe read outliving the timeout behind an ssh
+  `ControlPersist` master, future stamps making locks and entries live for
+  ever, whole stderr cached, temp files left behind); empty env vars not
+  treated as unset (`XDG_CONFIG_HOME=` made a checkout's file the config);
+  nine wrong renders (a failed module losing its `✗`, `rgb_to_256` ignoring
+  xterm's cube levels, and so on); rules spelled per module consolidated
+  into one helper each (`lead`, `badge`, `glyph_prefix`, `cut_name`,
+  `IconSet::ellipsis`); five test blind spots (`Clock::fixed()` hides the
+  repo group, so `sync` was in no golden or bench; git helpers ran under
+  the developer's `gpgsign`). CI gained the shellcheck gate and `contents:
+  read`. The review of the audit found four regressions it had introduced,
+  the key one: consolidating the frame-list rule rejected
+  `separator_frames = []`, the line every `garnish config init` has ever
+  written, so every existing config would have printed `⚠ config:` on
+  every tick, and the docs-sync test had been "fixed" by changing the
+  generator to hide it. Also a bounded pipe read returning `Ok("")` that
+  `is_dirty` read as clean, and five fixes that stopped at the example
+  (`joinable_ref` is a name rule where the threat is a symlinked path;
+  `fetch_error` and `fetch_attempt` missed the bound and the future-stamp
+  rule). Lessons into `CLAUDE.md`: fix the shape, not the example; check
+  what is on disk before making a rule stricter. A fourth pass over the
+  branch's claims found `packed-refs` outside the symlink rule and a
+  working fetch recorded as failed.
+- **2026-09-17** — *The review workflow*: PR #66 merged; its own review
+  fanned out to four subagents, all refused, and ended green after 44 of
+  50 turns having posted nothing. Decided then (reversed on 09-19): allow
+  `Task`, cap turns at 100 since subagents spend from the same budget (an
+  earlier cap of 15 left a two-file review unwritten). Workflow fixes go
+  in alone because the action refused to run on a branch whose workflow
+  differed from `main`'s. *Phase 21* (the layout model): `[[row]]` with
+  the aliases kept (old fixtures stayed on the old names to pin them), the
+  config model three levels deep, and `src/layout.rs` replacing
+  `frame::compose_line` outright; all 227 goldens came out byte-identical
+  on the first green run, which is the proof. Building found six bugs
+  (column pads, emptied stacks, `truncate = false` on every column, a
+  one-cell text module losing its link twice) and two copies worth
+  removing (in-process tick 85 → 71 µs). Decided into SPEC § 4.3: caps
+  chosen over the lines that carry them, a box's pad is the frame's or one
+  cell, a box's edges do not animate. Reviews: a `debug_assert!` on the
+  render path (a wide title exited 101 and cleared the line), six wrong
+  renders, the `fr` remainder handed out per weight not per column; a
+  mutation pass found ten rules with no test (now six unit tests, six
+  config goldens) and two tests too weak to see their rule. Box runs now
+  join anywhere in the tree; a tall row takes the room of its widest cap
+  pair. 227 → 248 tests.
+- **2026-09-18** — A nightly roll turned every branch red: clippy's
+  `map_unwrap_or` widened to `map(_).unwrap_or_default()`. Fixed rather
+  than pinned (mechanical, and a pin needs lifting again). Lesson: CI
+  installs a fresh nightly while a container's is whatever its image was
+  built with (four days behind), so `make check` passed on code CI
+  rejected, and a grep missed a third site in `#[cfg(test)]` that only the
+  lib-test target compiles: `rustup update nightly` first, then one
+  `cargo clippy --all-targets`. The tell of a roll is failing lines
+  byte-identical on `main`.
+- **2026-09-19** — *The review workflow, seven runs to the first that
+  worked* (about $10, four fixes, three of four written explanations
+  falsified by the next run). A review "succeeded" with 10 denials and no
+  output; `scripts/review-denials.sh` now reads the action's execution
+  file and fails on a refusal or on a run with no summary, printing verbs
+  only (a public log), from the base branch's copy since the checkout is
+  untrusted; the checkout at `fetch-depth: 1` had no merge base. The next
+  runs showed an allowlist of verbs cannot work: it matches on a prefix
+  (`git --no-pager diff` is not `git diff`) and refuses a compound command
+  even when every part is allowed (`git → wc`). Five runs had died
+  obtaining or slicing a diff through `Bash`, so the job now writes the
+  diff to files in plain shell and the prompt points `Read`/`Grep` there;
+  denials fell to three. The sixth still posted nothing: the parent
+  stopped with a `Task` subagent mid-flight, six for six, despite three
+  prompt rules against it, so `Task` was removed (an instruction the model
+  does not follow is not a control). The seventh worked: 35 turns, $1.37,
+  zero denials, and still went red because the check missed a summary
+  written into the tracking comment (now: the last tracking write with no
+  `- [ ]`). The `concurrency` group belongs to the job: a workflow-level
+  one is claimed when a run is created, so a run the review's own comment
+  triggered cancelled the review.
+  *Phase 22 and the consolidation (PR #78)*: `garnish setup` built over
+  `src/setup/` (5 600 lines). Decided (SPEC § 14): the draft is the file's
+  `toml::Table` with its order kept, never a resolved `Config`, so a save
+  writes only what the file and the edits carry; glyph suggestions are one
+  table; `Line::modules()` is the placement map; `install::Steps` is shared
+  with the CLI; `setup --preset` is the scriptable twin; no `setup` cargo
+  feature (binary 2.8 → 3.4 MB, cold tick unchanged). The icon suggestions
+  had shipped empty strings where Nerd Font glyphs belonged (an editor
+  dropped the raw private-use characters, and the guard skipped them); now
+  `\u{…}` escapes and a test refuses an empty one. Setup goldens show the
+  temporary home as `~/…`. Nine gallery presets (28 in all); the slide
+  check now applies to the line ticker alone. The review workflow collects
+  the PR in job shell and allows the file tools, `Bash` whole and the
+  GitHub MCP tools; `WORKLOG.md` split out of `PLAN.md`. CI's newer
+  nightly flagged `map_unwrap_or` again; reproduced with a dated nightly
+  beside the pinned one. Three reviews (correctness, documents, 39
+  mutations) found edit-safety bugs (a preset load over an unparsable file
+  then saved over it, a loaded preset counted as clean, builder edits
+  bypassing the parser, orphaned `[box.<name>]`), hit-testing against a
+  model rather than the drawn line, terminal-guard leaks and narrow-screen
+  cuts; all fixed with tests. 275 → 284. The PR's review check went red in
+  13 s: the action skipped a PR that edits its workflow and `main`'s script
+  took the empty argument as a usage error (now reported, exit 0).
+  *Phase 23, usage views and formats* (after #78 merged): A4 hide lists,
+  A6 number formats, pace and elapsed, separator colour, and four module
+  ids (`version`, `sandbox`, `voice`, `account`; 21 → 25), all payload or
+  settings reads, no crate, no existing golden moved. Decided: `hide` is
+  hand-parsed with a vocabulary from the schema's `measure`, applied once
+  in `render_group`; `[format]` with per-module `inherit`; pace is
+  arithmetic over `resets_at` (`spend` has no window, so no pace);
+  `separator_color = "inherit"` takes the first coloured segment;
+  `account` is the first cached module outside the repo group, so
+  `Clock.workers` gates `Ctx::cached`; `sandbox.enabled`/`voice.enabled`
+  verified in the Claude Code docs; `itertools` dropped with its last use.
+  Reviews: `precise` percentages compared a different rounding than they
+  printed (one `shown` rounding now feeds both), pace kept rendering past
+  a reset, `preview` spawned workers per fixture, a FIFO settings file
+  blocked the tick (`open_regular`); 55 of 64 mutants killed, survivors
+  given tests. 284 → 312 tests.
+- **2026-09-20** — Setup refinements after Daniel's first use. A throwaway
+  harness walked every preset and form field with `→`, `←`, `Enter` and
+  found six bugs the snapshots missed (values trimmed so a picked
+  separator lost its spaces, role names offered where the parser takes
+  literals, keys offered that the parser refuses, orphaned boxes, a value
+  that left another key reported shown as plain "set", `custom…` opening
+  empty); the harness was not kept, its findings became tests. Built:
+  undo/redo over a history of draft tables taken around every input, so
+  new edit paths are undoable by construction; dirty is a comparison with
+  the saved table, not a flag; clickable hint bar; column and box
+  shortcuts (`C`, `]`/`[`, `B`). One review (own worktree, no git) found
+  `B` refused on titled rows, orphaned boxes (`prune_orphan_boxes`, one
+  place) and forms editing phantoms after undo. CI's nightly flagged
+  `map_unwrap_or` again, fixed beside a dated toolchain. 312 → 319 tests.
+- **2026-09-23** — Dependency sweep, no code change: `renovate.json`
+  extends the shared `local>justanotherspy/renovate` preset, `cargo
+  update` refreshed eleven transitive crates (every direct one already
+  newest), `claude-code-action` 1.0.231 → 1.0.233.
+- **2026-09-25** — Whole-codebase review at Daniel's request: 12 area
+  reviewers, each followed by an adversarial verifier; 287 findings, 250
+  confirmed (2 high, 34 medium, 158 low, 76 nit). Classes: git reads
+  unguarded (a FIFO `HEAD` hung every tick, `git status` ran filter
+  drivers, `commondir`/`gitdir:` escaped containment, `git` looked up
+  after the chdir); promises never implemented (GC sweep, `fetch_error`,
+  the reftable fallback); the wrong config file written (worker without
+  `--config`, `CLAUDE_CONFIG_DIR` ignored); one wrong-typed payload field
+  blanking every row; the harness trimming every row so leading spaces
+  slid left; setup edits refused or lost; the review workflow putting a
+  `contents: write` App token in reach of the model's Bash with any
+  commenter's text in the prompt. Decided with Daniel: the dirty check is
+  plumbing (`diff-index --cached` + `diff-files`, `checkStat` pinned),
+  accepting a touched-but-unchanged file as dirty; rows starting with
+  whitespace are held against the trim (empty SGR or U+2800); a non-zero
+  `refresh` on a payload-only module is a problem; reftable repositories
+  fall back to the worker; `context.colors.percent` paints the
+  percentage; a `[frame] pad` string is drawn as its text; an all-hidden
+  render still clears the line (documented); a middle column in a box
+  drops its fill-cell reservation when `gap` ≥ 1 (one golden moved,
+  `box-columns` shows `42%` for `4…`); the `account` worker retries once
+  after a parse failure, since Claude Code can truncate and rewrite
+  `.claude.json` in place (read from the 2.1.282 binary); workflow fixes
+  in their own PR (#85) so the
+  code PR (#86) is reviewed by an unchanged workflow; three tightened rules
+  an old garnish file can trip stay problems, knowingly against the
+  tightening rule, with an upgrade note in the CHANGELOG. Built as one
+  batch per concern, each a subagent in its own worktree. Lessons: a test
+  that read the clock before the event it measured failed one run in six;
+  `make check` skips rustdoc `-D warnings`; the `config show` round trip
+  crossed nextest's 60 s on macOS (now parallel); the gallery test missed
+  four blank frames (each motion promise now checked alone and proved able
+  to fail), and the fixing agent's own Edit tool turned `\uXXXX` into the
+  glyph; a test build panicking on undeclared key reads caught a live case
+  the source scan missed (`spend` reading pace switches it does not
+  declare); with `RUST_BACKTRACE=1` a quiet refusal spends 0.7 s on an
+  unprinted backtrace (backlog). Merge conflicts between batches were
+  resolved by hand and the generated docs regenerated. 319 → 501 tests;
+  `make bench` warm mean 2.5–2.6 ms, cold 4.6 ms. The final review (four
+  reviewers) found the environment scrub set alone stopped the CLI
+  starting (isolation now switched on whole), a failed reftable worker
+  respawning every tick, a big `.git/config` costing 5 ms a tick, commands
+  ignoring the `--config` the status line passes, `"rate_limits": []`
+  read as a subscription, and a stderr nobody reads blanking the line;
+  on #85 the token still reached `.git/config`, the report step ran git in
+  the model's checkout, and the edit tools were only left off the
+  allowlist. Kept on purpose, in PLAN's backlog: the three tightened
+  rules, absurd durations, the per-row cap pad, context-refused picker
+  entries.
+  Verifying the fixes (a verifier per area, two skeptics per claim, 18
+  confirmed, 3 refuted): pinning `core.trustctime=true` showed a clean
+  tree dirty for good (reverted); `Task` left off the allowlist still ran;
+  the report step's fallback turned API failures green; `warm-bigconfig`
+  added to the bench. Verifiers' scratch builds (2.7 GB each) filled the
+  disk twice. 501 → 538 tests.
+- **2026-09-26** — A second verification pass over the first's fixes (one
+  verifier per group, two skeptics per claim). `main` (Renovate #87,
+  claude-code-action v1.0.235) merged into #85 and #86. #85: every earlier
+  fix held (reproduced through the action's own parser, the pinned SDK
+  and CLI, a mock API); the action drops a `#` line in `claude_args`
+  (CLAUDE.md had said otherwise). `Skill` still forked a
+  subagent and `Workflow`, `CronCreate`, `ScheduleWakeup` were still
+  offered, because a tool left off the allowlist is not removed; now
+  `--disallowedTools`, held by `scripts/test-scripts.sh`. Config location,
+  eleven verifier rounds: the writers had started following a checkout's
+  own `.claude/` settings, so a cloned repository chose where `config
+  init` and `setup` wrote. Decided (conservative, Daniel's to revisit): a
+  `--config` from a settings file that is not the person's own is followed
+  by no command and refused on one line; every command names the same
+  file (splitting readers from writers made `config path` wrong for one
+  side). Rounds then closed a checkout's `env` block setting
+  `GARNISH_CONFIG` or the managed hook (guessing which file set it failed
+  three ways, so inside a session the variable counts only when the
+  person's own settings set it), a relative `CLAUDE_CONFIG_DIR` or
+  `--config`/`GARNISH_CONFIG` (ignored by the tick), `install` reading the
+  managed layer past the demotion, `shell_words` splitting at Unicode
+  whitespace, and `managed-settings.d` drop-ins. Letting the hook's file
+  bring drop-ins was tried and undone (a hook file in `/tmp` took anyone's
+  drop-ins; guarding the directory refused a group-writable platform one);
+  the chain's decisions became pure functions tested without the platform
+  directory. Rounds 9–11 found nothing reachable from a session and the
+  last fix removed code, so the rounds stopped. Accepted as nits (PLAN):
+  a halfway number, serde_json's inexact floats and `1e999`, bash's
+  `$'…'`. Mutations only a platform managed file could show survived the
+  whole suite until that logic took its paths as parameters and was
+  unit-tested pure (`demote_hooked`, `layer_of`); one platform-guard test
+  was vacuous because its case named another file. `make bench` at
+  9417c5d within budget (warm 2.13–2.37 ms). Lesson: two macOS runs
+  failed on tests asserting text that named a temp file (a macOS temp path
+  is about 60 characters to Linux's 15); the suite now passes under a
+  136-character `TMPDIR`. Layout (fuzz of 20 000 seeds × 211 widths,
+  custom frames included): under uneven `custom` caps a row's height was
+  measured on the frame's narrowest cap pair and laid out on its own caps,
+  so a box was drawn and then cut (19 seeds); `frame_plan` now measures
+  each row on the caps it lands on until nothing moves, and a box is
+  drawn only whole (dashboard tick 70 → 64 µs). `make bench` at 5e95caf:
+  warm means 2.57–2.89 ms (p99 3.2–4.4 ms), cold 4.5 ms, refresh-sync
+  15.2 ms. *Documents slimmed*: `CLAUDE.md` cut to its rules (the stories
+  stay here), `SPEC.md` to the design without provenance, `PLAN.md` to
+  terse backlog lines, this log compacted, and `README.md` rewritten as the
+  happy path (install, `garnish setup`, start Claude Code) linking to the
+  guide and reference. Decided: section numbers in `SPEC.md` and the
+  `CLAUDE.md` headings code cites stay fixed.
