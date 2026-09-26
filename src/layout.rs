@@ -282,10 +282,16 @@ impl Layout<'_> {
         let blocks = blocks(rows);
         // The frame's caps are decided over the lines that carry them: a
         // box draws its own ends, so its lines are not counted (SPEC § 4.3).
+        let fill = self.frame_fill();
         let framed: usize = blocks
             .iter()
             .filter(|b| b.boxed.is_none())
-            .map(|b| b.rows.iter().map(|(_, r)| self.row_height(r)).sum::<usize>())
+            .map(|b| {
+                b.rows
+                    .iter()
+                    .map(|(_, r)| self.row_height(r, self.frame_room(r), fill))
+                    .sum::<usize>()
+            })
             .sum();
         let mut out: Vec<Vec<Line>> = vec![Vec::new(); rows.len()];
         let mut index = 0_usize;
@@ -313,8 +319,8 @@ impl Layout<'_> {
                     .rows
                     .iter()
                     .map(|(at, row)| {
-                        let height = self.row_height(row);
-                        let fill = if self.fill { Fill::Rule } else { Fill::Packed };
+                        let fill = self.frame_fill();
+                        let height = self.row_height(row, self.frame_room(row), fill);
                         // A tall row's lines take different caps (`first`
                         // then `middle`), and a `custom` frame's need not
                         // be the same width: the columns share the room the
@@ -325,7 +331,7 @@ impl Layout<'_> {
                             .min()
                             .unwrap_or_else(|| self.inner_width(row, *index, framed));
                         let widths = self.share(row, inner, fill);
-                        let ends = ends_in_content(row, &widths);
+                        let ends = self.ends_in_content(row, &widths);
                         let lines = self
                             .row_columns(row, &widths, height, fill, Fit::default())
                             .into_iter()
@@ -373,7 +379,8 @@ impl Layout<'_> {
         let last = block.rows.last().map_or(0, |(at, _)| *at);
         let mut out: Vec<(usize, Vec<Line>)> = vec![(first, lines.next().into_iter().collect())];
         for (at, row) in &block.rows {
-            out.push((*at, lines.by_ref().take(self.row_height(row)).collect()));
+            let height = self.row_height(row, inner, Fill::from_box(&cfg));
+            out.push((*at, lines.by_ref().take(height).collect()));
         }
         out.push((last, lines.collect()));
         out
@@ -401,6 +408,49 @@ impl Layout<'_> {
         }
         let pad = if row_ends_in_content(row) { display_width(&self.chars.pad) } else { 0 };
         display_width(cap).saturating_add(pad)
+    }
+
+    /// The cells a row of the frame can count on whichever of the frame's
+    /// lines it lands on: the fewest any pair of caps leaves. Its height is
+    /// measured on these, before its lines are placed among the frame's
+    /// (a box too narrow to draw adds none, SPEC § 4.3); under a style,
+    /// whose caps are all one width, they are exactly the cells it is laid
+    /// out to.
+    fn frame_room(&self, row: &Row<'_>) -> usize {
+        [(0, 1), (0, 3), (1, 3), (2, 3)]
+            .into_iter()
+            .map(|(index, count)| self.inner_width(row, index, count))
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// How a row of the frame fills its empty cells.
+    const fn frame_fill(&self) -> Fill {
+        if self.fill { Fill::Rule } else { Fill::Packed }
+    }
+
+    /// [`row_ends_in_content`] for a row laid out to `widths`: a last column
+    /// that draws nothing at its share (it took no cells, being an `fr` one
+    /// whose share floored to nothing or one dropped from a row too narrow
+    /// for it, or its box does not fit them) leaves the column before it to
+    /// end the row, and that one keeps a pad of its own (SPEC § 4.3).
+    fn ends_in_content(&self, row: &Row<'_>, widths: &[usize]) -> bool {
+        let fits = |boxed: Option<&BoxRef>, width: usize| {
+            boxed.is_none_or(|b| {
+                self.box_interior(&self.box_chars(&self.box_cfg(b)), width).is_some()
+            })
+        };
+        let last_draws = row.cols.last().zip(widths.last()).is_some_and(|(col, w)| {
+            *w > 0
+                && fits(col.boxed, *w)
+                && match &col.content {
+                    Content::Groups { .. } => true,
+                    Content::Stack(rows) => {
+                        rows.iter().any(|r| fits(r.boxed, *w) && row_ends_in_content(r))
+                    }
+                }
+        });
+        last_draws && row_ends_in_content(row)
     }
 }
 
@@ -438,14 +488,6 @@ fn blocks<'a, 'b>(rows: &'b [Row<'a>]) -> Vec<Block<'a, 'b>> {
 /// row then ends in that rule, never in content.
 fn row_ends_in_content(row: &Row<'_>) -> bool {
     has_fr(row) && row.cols.last().is_some_and(col_ends_in_content)
-}
-
-/// [`row_ends_in_content`] for a row laid out to `widths`: a last column
-/// that took no cells (an `fr` one whose share floored to nothing, or one
-/// dropped from a row too narrow for it) draws nothing, and the column
-/// before it keeps a pad of its own (SPEC § 4.3).
-fn ends_in_content(row: &Row<'_>, widths: &[usize]) -> bool {
-    widths.last().is_some_and(|w| *w > 0) && row_ends_in_content(row)
 }
 
 /// Whether any column of the row shares the free width.
@@ -497,30 +539,53 @@ impl Fill {
 }
 
 /// Heights: a bare row is one line, a boxed one its lines plus two, and a
-/// row is as tall as its tallest column (SPEC § 4.3).
+/// row is as tall as its tallest column (SPEC § 4.3). Each is measured at
+/// the width it is laid out to: a box too narrow to draw there renders
+/// nothing, so it adds no lines.
 impl Layout<'_> {
-    fn row_height(&self, row: &Row<'_>) -> usize {
-        row.cols.iter().map(|c| self.col_height(c)).max().unwrap_or(1)
+    fn row_height(&self, row: &Row<'_>, width: usize, fill: Fill) -> usize {
+        let (widths, _) = self.shares(row, width, fill);
+        row.cols.iter().zip(&widths).map(|(c, w)| self.col_height(c, *w, fill)).max().unwrap_or(1)
     }
 
-    fn col_height(&self, col: &Col<'_>) -> usize {
-        let content = match &col.content {
+    /// A boxed column is its content plus the two edge lines, so a boxed
+    /// one-line column is a three-line box.
+    fn col_height(&self, col: &Col<'_>, width: usize, fill: Fill) -> usize {
+        let Some(boxed) = col.boxed else {
+            return self.content_height(col, width, fill);
+        };
+        let cfg = self.box_cfg(boxed);
+        self.box_interior(&self.box_chars(&cfg), width).map_or_else(
+            || self.content_height(col, width, fill),
+            |(inner, _)| self.content_height(col, inner, Fill::from_box(&cfg)).saturating_add(2),
+        )
+    }
+
+    /// A column's own lines: one for its groups, its blocks' for a stack.
+    fn content_height(&self, col: &Col<'_>, width: usize, fill: Fill) -> usize {
+        match &col.content {
             Content::Groups { .. } => 1,
             Content::Stack(rows) => {
-                blocks(rows).iter().map(|b| self.block_height(b)).sum::<usize>().max(1)
+                blocks(rows).iter().map(|b| self.block_height(b, width, fill)).sum::<usize>().max(1)
             }
-        };
-        // A boxed column is its content plus the two edge lines, so a boxed
-        // one-line column is a three-line box.
-        if col.boxed.is_some() { content.saturating_add(2) } else { content }
+        }
     }
 
     /// One block of a stack: its rows, plus the two edge lines when they are
-    /// inside a box. A top-level row's box is drawn by `boxed_block`, which
-    /// adds the two lines there instead.
-    fn block_height(&self, block: &Block<'_, '_>) -> usize {
-        let rows: usize = block.rows.iter().map(|(_, r)| self.row_height(r)).sum();
-        if block.boxed.is_some() { rows.saturating_add(2) } else { rows }
+    /// inside a box that draws. A top-level row's box is drawn by
+    /// `boxed_block`, which adds the two lines there instead.
+    fn block_height(&self, block: &Block<'_, '_>, width: usize, fill: Fill) -> usize {
+        let rows = |width: usize, fill: Fill| -> usize {
+            block.rows.iter().map(|(_, r)| self.row_height(r, width, fill)).sum()
+        };
+        let Some(boxed) = block.boxed else {
+            return rows(width, fill);
+        };
+        let cfg = self.box_cfg(boxed);
+        self.box_interior(&self.box_chars(&cfg), width).map_or_else(
+            || rows(width, fill),
+            |(interior, _)| rows(interior, Fill::from_box(&cfg)).saturating_add(2),
+        )
     }
 
     /// The pad inside a box: the frame's, or one cell when the frame has
@@ -648,7 +713,9 @@ impl Layout<'_> {
     }
 
     /// [`Self::share`] without the log, with the number of columns that
-    /// wanted cells and got none, which the log reports.
+    /// wanted cells and got none, which the log reports: a row's height is
+    /// measured on its shares before it is laid out, and the log would say
+    /// it all twice.
     fn shares(&self, row: &Row<'_>, width: usize, fill: Fill) -> (Vec<usize>, usize) {
         let want: Vec<usize> = row
             .cols
@@ -855,10 +922,17 @@ impl Layout<'_> {
         };
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
-        let Some((inner, pad)) = self.box_interior(&chars, width) else {
-            // Too narrow to draw at all: the column keeps its share and
-            // renders nothing, as a clamped column does (SPEC § 4.3).
-            return (0..height.max(1)).map(|_| vec![Draft::Space(width, Elem::Pad)]).collect();
+        // Too narrow to draw at all: the column keeps its share and renders
+        // nothing, and `col_height` gave it no edge lines (SPEC § 4.3). Its
+        // cells are empty cells like any other: rule on a one-line row under
+        // a rule, spaces on a taller one. A row too short for the edges is
+        // one measured where the box did not fit (on the fewest cells a
+        // custom frame's caps leave) and laid out where it does: it is not
+        // drawn there either, rather than drawn as a top edge alone.
+        let Some((inner, pad)) = self.box_interior(&chars, width).filter(|_| height > 2) else {
+            let empty =
+                if height > 1 { Draft::Space(width, Elem::Pad) } else { Self::filler(width, fill) };
+            return (0..height.max(1)).map(|_| vec![empty.clone()]).collect();
         };
         let interior = height.saturating_sub(2);
         // Inside its own box a column is padded by the box, not by the row.
@@ -958,9 +1032,11 @@ impl Layout<'_> {
         };
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
+        // Too narrow to draw: its rows' lines are empty, as an empty row's
+        // are, and the box adds none of its own (`block_height`).
         let Some((interior, pad)) = self.box_interior(&chars, width) else {
-            return (0..self.block_height(block))
-                .map(|_| vec![Draft::Space(width, Elem::Pad)])
+            return (0..self.block_height(block, width, fill))
+                .map(|_| vec![Self::filler(width, fill)])
                 .collect();
         };
         let body = self.block_body(block, interior, &cfg, fit);
@@ -969,7 +1045,7 @@ impl Layout<'_> {
 
     /// One bare row of a stack: its line with its title set into it.
     fn stack_row(&self, inner: &Row<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Vec<Draft>> {
-        let mut lines = self.row_body(inner, width, self.row_height(inner), fill, fit);
+        let mut lines = self.row_body(inner, width, self.row_height(inner, width, fill), fill, fit);
         // An inner row's title goes into its own first line.
         if let (Some(title), Some(first)) = (inner.title, lines.first_mut()) {
             self.place_title(first, title, fill);
@@ -994,8 +1070,8 @@ impl Layout<'_> {
             .rows
             .iter()
             .flat_map(|(_, row)| {
-                let mut lines =
-                    self.row_body(row, interior, self.row_height(row), fill, fit.in_box());
+                let height = self.row_height(row, interior, fill);
+                let mut lines = self.row_body(row, interior, height, fill, fit.in_box());
                 if row.blank {
                     mark_blank(&mut lines);
                 }
@@ -1734,7 +1810,7 @@ impl Layout<'_> {
 
     /// One row line between the frame's caps: line `index` of the `count`
     /// that carry them. `ends` is whether the row's content reaches the cap
-    /// ([`ends_in_content`]).
+    /// ([`Self::ends_in_content`]).
     fn wrap_frame(
         &self,
         drafts: Vec<Draft>,
@@ -1957,7 +2033,7 @@ mod tests {
             let widths = l.share(&row, inner, fill);
             let mut body = l.row_columns(&row, &widths, 1, fill, Fit::default());
             let drafts = body.pop().unwrap_or_default();
-            let ends = ends_in_content(&row, &widths);
+            let ends = l.ends_in_content(&row, &widths);
             let line = l.wrap_frame(drafts, (index, count), &row, fill, None, ends);
             Painter::PLAIN.paint(&line.segments())
         }
@@ -2661,7 +2737,7 @@ mod tests {
             let l = f.layout();
             let boxed = |text| Col { boxed: Some(&BoxRef::Anon), ..col(Width::Fr(1), text) };
             let r = row(vec![boxed("one"), boxed("two")], 2);
-            let inner = l.inner_width(&r, 0, l.row_height(&r));
+            let inner = l.inner_width(&r, 0, l.row_height(&r, l.frame_room(&r), Fill::Rule));
             let lines: Vec<Line> =
                 l.lines(std::slice::from_ref(&r)).into_iter().flatten().collect();
             let edges = |line: &Line| -> Vec<Range<usize>> {
@@ -2728,10 +2804,11 @@ mod tests {
                 (0..n).map(|i| row(vec![col(Width::Fr(1), &format!("r{i}"))], 1)).collect(),
             ),
         };
+        let height = |r: &Row<'_>| l.row_height(r, l.frame_room(r), Fill::Rule);
         let r = row(vec![stack(3, VAlign::Top, None), col(Width::Fr(1), "one")], 1);
-        assert_eq!(l.row_height(&r), 3);
+        assert_eq!(height(&r), 3);
         let r = row(vec![stack(2, VAlign::Top, Some(&BoxRef::Anon))], 1);
-        assert_eq!(l.row_height(&r), 4, "a boxed column is its content plus two edge lines");
+        assert_eq!(height(&r), 4, "a boxed column is its content plus two edge lines");
         // A stack is the *sum* of its rows' heights, not their count: three
         // boxed inner rows are three cells of content and six edge lines.
         let boxed_stack = Col {
@@ -2748,7 +2825,7 @@ mod tests {
                     .collect(),
             ),
         };
-        assert_eq!(l.row_height(&row(vec![boxed_stack], 1)), 9);
+        assert_eq!(height(&row(vec![boxed_stack], 1)), 9);
 
         // The short column's own line sits where `valign` says.
         let text = |rows: &[Row<'_>]| {
@@ -2763,6 +2840,79 @@ mod tests {
             let lines = text(&[row(vec![stack(3, VAlign::Top, None), short], 1)]);
             let found = lines.iter().position(|l| l.contains("short"));
             assert_eq!(found, Some(at), "{valign:?}: {lines:?}");
+        }
+    }
+
+    /// SPEC § 4.3: a box too narrow to draw (its corners or its sides do not
+    /// fit the column's share) renders nothing and adds no lines. It kept
+    /// its two edge lines, so its row came out two lines taller, empty ones
+    /// under a frame with caps, and a one-line row's gaps turned to spaces:
+    /// `╭─ ❖ Opus ───   ─── ⏱ 1h12m ─╮` over two empty framed lines.
+    #[test]
+    fn a_box_too_narrow_to_draw_adds_no_lines() {
+        let plus = || "+".to_owned();
+        let model = || col(Width::Fr(1), "❖ Opus");
+        let end = || col(Width::Fr(1), "end");
+        let boxed = |width| Col { boxed: Some(&BoxRef::Anon), ..col(width, "⠋ 16:00:00") };
+        let stacked = |width| Col {
+            content: Content::Stack(vec![Row {
+                boxed: Some(&BoxRef::Anon),
+                ..row(vec![col(Width::Fr(1), "⠋ 16:00:00")], 1)
+            }]),
+            ..col(width, "")
+        };
+        for (fill, width) in [true, false].into_iter().flat_map(|f| [40_usize, 60].map(|w| (f, w)))
+        {
+            // The rounded box needs two cells; a `custom` one with corners
+            // and no side needs two for its corners, one for none of it.
+            for custom in [false, true] {
+                let mut f = Fixture::new(FrameStyle::Rounded, fill, width);
+                if custom {
+                    f.chars.top_left = plus();
+                    f.chars.top_right = plus();
+                    f.chars.bottom_left = plus();
+                    f.chars.bottom_right = plus();
+                    f.chars.side = String::new();
+                }
+                let l = f.layout();
+                let lines = |cols: Vec<Col<'static>>, gap: usize| -> Vec<String> {
+                    let r = row(cols, gap);
+                    l.lines(std::slice::from_ref(&r))
+                        .into_iter()
+                        .flatten()
+                        .map(|l| show(&l))
+                        .collect()
+                };
+                for narrow in [
+                    boxed(Width::Cells(0)),
+                    boxed(Width::Cells(1)),
+                    stacked(Width::Cells(0)),
+                    stacked(Width::Cells(1)),
+                ] {
+                    let last = lines(vec![model(), narrow.clone()], 1);
+                    assert_eq!(last.len(), 1, "custom={custom}: {last:?}");
+                    // Its cells are empty ones, rule on a one-line row, and
+                    // as the last column it does not end the row in
+                    // content: the rule runs into the cap with no hole.
+                    let tail = last.first().and_then(|l| l.split_once("Opus ")).map(|(_, t)| t);
+                    assert!(
+                        !fill || tail.is_some_and(|t| t.chars().all(|c| c == '─')),
+                        "custom={custom}: {last:?}"
+                    );
+                    let between = lines(vec![model(), narrow, end()], 3);
+                    assert_eq!(between.len(), 1, "custom={custom}: {between:?}");
+                }
+                // A zero-width box takes no cells, no gap and no lines: the
+                // row is the row without it, its gap a rule again.
+                assert_eq!(
+                    lines(vec![model(), boxed(Width::Cells(0)), end()], 3),
+                    lines(vec![model(), end()], 3),
+                    "custom={custom}"
+                );
+                // Two cells hold either box: it draws, three lines tall.
+                let two = lines(vec![model(), boxed(Width::Cells(2))], 1);
+                assert_eq!(two.len(), 3, "custom={custom}: {two:?}");
+            }
         }
     }
 

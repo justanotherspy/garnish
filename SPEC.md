@@ -1241,7 +1241,8 @@ color = "accent"               # role or literal for the box's glyphs; default t
   stack of rows, each laid out to the column's width with the rules above
   (an inner row's `justify` overrides the column's). A row's height in
   lines is its content's: a bare row is one line, a boxed row its lines
-  plus two; a column's height is the sum of its rows'; the outer row is
+  plus two (a box too narrow to draw at its width adds none; see Boxes);
+  a column's height is the sum of its rows'; the outer row is
   as tall as its tallest column. A shorter stack is padded with empty
   lines placed by `valign` (which has no effect when every column is one
   line tall). Inner rows take no `[[row.col]]` and no `gap`; a column
@@ -1344,7 +1345,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
   whatever the side is, so a box too narrow for its corners renders
   nothing, as one too narrow for its sides does (2026-09-25: with corners
   and no side, a one-cell box drew `++`, overflowed the line and had it
-  recut to `…`).
+  recut to `…`). Nothing means nothing: its cells are empty cells (rule on
+  a one-line row, spaces on a taller one), it adds no lines to its row,
+  and a last column whose box does not fit does not end the row in
+  content, so the cap takes no pad (2026-09-26: it kept its two edge
+  lines, so its row came out two lines taller, empty framed lines under a
+  frame with caps, and a one-line row's gaps turned to spaces).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under
