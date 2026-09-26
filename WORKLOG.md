@@ -1139,8 +1139,10 @@ was built, what the reviews found and what was decided, not how.
     a `key`); the screen tilded a path inside quotes, which pasted made a
     `~` directory; and a relative `--config` in the person's own command
     (`--config=~/g.toml`, which `sh` leaves alone) made the tick read the
-    repository's file: the tick now reads the lookup's with a `⚠
-    config:` row. The two mutations only a platform managed file could
+    repository's file: the tick now ignores it, as it ignores a relative
+    `GARNISH_CONFIG`, and says so first on its `⚠ config:` row (the first
+    push asserted that row at the default width, and macOS's long temp
+    path cut it). The two mutations only a platform managed file could
     show (`demote_hooked`, the drop-ins) are unit tests now, beside an
     empty value and `install` following the user's `env`.
   - *layout*: four of the layout follow-up's fixes held (under fuzz of

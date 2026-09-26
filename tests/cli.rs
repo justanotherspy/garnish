@@ -1787,12 +1787,16 @@ fn a_settings_env_block_names_the_config_the_ticks_read() {
     // A relative `--config` too, and the row says why (verification of
     // 2026-09-26: `--config=~/g.toml`, which `sh` does not expand, read a
     // `~/g.toml` the session's repository shipped).
-    let tick = sh_tick(&format!("{} --config=rel.toml", env!("CARGO_BIN_EXE_garnish")), &home);
+    // The row names the file read first, and a macOS temp path is long.
+    let bin = env!("CARGO_BIN_EXE_garnish");
+    let tick = sh_tick(&format!("COLUMNS=400 {bin} --config=rel.toml"), &home);
     assert!(tick.contains("XDGFILE") && !tick.contains("RELFILE"), "{tick}");
-    assert!(
-        tick.contains("⚠ config:") && tick.contains("\"rel.toml\" is a relative path"),
-        "{tick}"
-    );
+    assert!(tick.contains("--config: \"rel.toml\" is a relative path"), "{tick}");
+    // The order goes on past it: an absolute `GARNISH_CONFIG` comes next.
+    let abs = home.join("abs.toml");
+    std::fs::write(&abs, text("ABSFILE")).unwrap();
+    let tick = sh_tick(&format!("GARNISH_CONFIG={} {bin} --config=rel.toml", abs.display()), &home);
+    assert!(tick.contains("ABSFILE") && tick.contains("⚠ config:"), "{tick}");
     // `preview`, run by hand, means the person's own directory.
     let payload = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/payloads/subscription-full.json");

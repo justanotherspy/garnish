@@ -54,23 +54,20 @@ pub fn render(req: &Request<'_>) -> String {
     };
     // A relative `--config` on the tick names a file in whatever directory
     // the harness runs it in, the session's repository, which could ship
-    // one (verification of 2026-09-26): the tick reads the lookup's file
-    // and says why. A person running `preview` means their own directory.
-    let loaded = req.config_path.filter(|p| req.workers && p.is_relative()).map_or_else(
-        || config::load_with(req.config_path, &SCHEMAS, &req.overlay),
-        |relative| {
-            let mut loaded = config::load_exactly(config::lookup().as_deref(), &SCHEMAS);
-            loaded.errors.push(config::ConfigError {
-                path: String::new(),
-                message: format!(
-                    "--config {:?} is a relative path, so the built-in lookup's config is used; pass an absolute one",
-                    relative.display().to_string()
-                ),
-                line: None,
-            });
-            loaded
-        },
-    );
+    // one (verification of 2026-09-26): the tick goes on as if it were
+    // not given and says why, first, since the row shows one problem. A
+    // person running `preview` means their own directory.
+    let ignored = req.config_path.filter(|p| req.workers && p.is_relative());
+    let mut loaded =
+        config::load_with(req.config_path.filter(|_| ignored.is_none()), &SCHEMAS, &req.overlay);
+    if let Some(relative) = ignored {
+        let message = format!(
+            "{:?} is a relative path, so it is ignored; pass an absolute one",
+            relative.display().to_string()
+        );
+        let error = config::ConfigError { path: "--config".to_owned(), message, line: None };
+        loaded.errors.insert(0, error);
+    }
     let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
     let clock = Clock { workers: req.workers, config_file, ..Clock::from_env() };
     render_loaded(&payload, &loaded, req.columns, req.no_color, req.dim, &clock)
