@@ -694,9 +694,8 @@ impl std::fmt::Display for Refusal {
             Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
             Self::UnresolvedConfig { settings, word } => write!(
                 f,
-                "{}: statusLine.command passes `--config {}`, which names no one file garnish can find; pass --config <FILE> to say which",
-                settings.display(),
-                crate::ansi::plain_text(word)
+                "{}: statusLine.command passes --config {word:?}, which names no one file garnish can find; pass --config <FILE> to say which",
+                settings.display()
             ),
             Self::Unparsable { path, problem } => write!(
                 f,
@@ -932,8 +931,7 @@ impl Steps {
                 path.display()
             )),
             ConfigStep::Unresolved(word) => notes.push(format!(
-                "note: statusLine.command passes `--config {}`, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which",
-                crate::ansi::plain_text(word)
+                "note: statusLine.command passes --config {word:?}, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which"
             )),
             ConfigStep::Exists { .. } | ConfigStep::Write { .. } | ConfigStep::Skipped => {}
         }

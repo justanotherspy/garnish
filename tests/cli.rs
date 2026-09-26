@@ -1373,7 +1373,7 @@ fn the_config_a_command_passes_is_the_config_the_writing_commands_write() {
     for args in [&["config", "path"][..], &["config", "init"], &["setup", "--preset", "minimal"]] {
         let (out, err, ok) = run(args, home, &[]);
         assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
-        assert!(err.contains("`--config rel.toml`") && err.contains("--config <FILE>"), "{err}");
+        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
     }
     assert!(!xdg.exists() && !home.join("rel.toml").exists());
     // A config named explicitly still wins over the command's.
@@ -1431,13 +1431,10 @@ fn the_commands_that_read_the_config_read_the_one_the_command_passes() {
     for args in [&["config", "check"][..], &["config", "show"], &preview] {
         let (out, err, ok) = run(args, home, &[]);
         assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
-        assert!(err.contains("`--config rel.toml`") && err.contains("--config <FILE>"), "{err}");
+        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
     }
     let (out, err, ok) = run(&["doctor"], home, &[]);
-    assert!(
-        ok && out.contains("`--config rel.toml`") && out.contains("garnish.toml ok"),
-        "{out}{err}"
-    );
+    assert!(ok && out.contains("\"rel.toml\"") && out.contains("garnish.toml ok"), "{out}{err}");
 
     // The command Claude Code runs here is the first file of the chain that
     // sets one (final review: the readers followed the user file's command
