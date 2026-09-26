@@ -955,6 +955,27 @@ fn worker_refs_that_are_not_files_fall_back_to_the_worker() {
     assert_eq!(out.matches('✗').count(), 2, "{out}");
 }
 
+/// The reftable fallback asked `symbolic-ref --short`, which spells a
+/// branch that shares its name with a tag `heads/main`: the row showed
+/// that, and `sync` looked `[branch "heads/main"]` up and found no
+/// upstream (review 2026-09-25). The full name, less `refs/heads/`, is the
+/// branch.
+#[test]
+fn worker_a_reftable_branch_named_like_a_tag_keeps_its_name() {
+    let env = setup();
+    config(&env, ONE_LINE);
+    git(&env.work, &["tag", "main"]);
+    let tables = env.work.join(".git").join("reftable").join("tables.list");
+    std::fs::create_dir_all(tables.parent().unwrap()).unwrap();
+    std::fs::write(&tables, "t\n").unwrap();
+    let (_, _, ok) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(ok);
+    run_workers(&env, &["branch", "sync"]);
+    let (out, _, _) = garnish(&env, &[], Some(&payload(&env.work)), &[]);
+    assert!(out.contains(" main ") && !out.contains("heads/"), "{out}");
+    assert!(out.contains("⇡1") && !out.contains('\u{f127}'), "{out}");
+}
+
 /// A reftable worker that fails (a git before 2.45 meeting the
 /// `refStorage` extension, a `safe.directory` refusal, the timeout) writes
 /// a failed entry, and a failed entry carries no `tables` stamp. The

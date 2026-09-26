@@ -1650,7 +1650,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   files) report no head to the tick and fall back to the workers (review
   2026-09-25, decided with Daniel: this sentence used to be all there was,
   and both modules rendered nothing): `branch`'s worker asks git
-  (`symbolic-ref -q --short HEAD`, else `rev-parse --verify HEAD` for a
+  (`symbolic-ref -q HEAD` less `refs/heads/`, not `--short`, which spells
+  a branch sharing its name with a tag `heads/<name>`; else `rev-parse
+  --verify HEAD` for a
   detached one, plus the commit for `show_sha`) and records `branch` and
   `detached`; `sync`'s resolves the branch the same way, reads the upstream
   from the config and checks its ref with `show-ref --verify`, recording

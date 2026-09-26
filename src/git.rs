@@ -199,20 +199,28 @@ pub fn reftable_stamp(dirs: &Dirs) -> Option<String> {
 const MAX_BRANCH_CHARS: usize = 4096;
 
 /// `HEAD` asked of git, for a repository whose refs are not files
-/// (reftable): `symbolic-ref -q --short HEAD` for a branch, and when that
-/// says it is detached, `rev-parse --verify HEAD` for the commit.
+/// (reftable).
+///
+/// `symbolic-ref -q HEAD` for a branch, named as [`head`] names one
+/// (`refs/heads/` dropped), and when that says it is detached,
+/// `rev-parse --verify HEAD` for the commit. Not `--short`, which spells a
+/// branch that shares its name with a tag `heads/<name>`: the row showed
+/// that, and `sync` found no `[branch "heads/<name>"]` upstream (review
+/// 2026-09-25).
 ///
 /// # Errors
 /// Propagates git failures (an unborn detached `HEAD` among them).
 pub fn head_from_git(cwd: &Path, timeout: Duration) -> Result<Head, String> {
-    let args = ["symbolic-ref", "-q", "--short", "HEAD"];
+    let args = ["symbolic-ref", "-q", "HEAD"];
     let asked = git_call(git_program()?, cwd, &args, timeout, Stdout::Read)?;
     let first_line = |bytes: &[u8]| {
         String::from_utf8_lossy(bytes).lines().next().unwrap_or("").trim().to_owned()
     };
     match asked.status.code() {
         Some(0) => {
-            let name: String = first_line(&asked.stdout).chars().take(MAX_BRANCH_CHARS).collect();
+            let full = first_line(&asked.stdout);
+            let short = full.strip_prefix("refs/heads/").unwrap_or(&full);
+            let name: String = short.chars().take(MAX_BRANCH_CHARS).collect();
             if name.is_empty() {
                 Err("git symbolic-ref printed no branch".to_owned())
             } else {
@@ -2546,6 +2554,22 @@ mod tests {
             .output()
             .unwrap();
         assert!(marker.exists(), "trustctime = false hashes the file");
+    }
+
+    /// The reftable fallback names the branch as [`head`] does: the full
+    /// ref less `refs/heads/`, never `--short`'s `heads/main` for a branch
+    /// that shares its name with a tag.
+    #[test]
+    fn head_from_git_names_a_branch_as_head_does() {
+        let (_d, work) = repo();
+        let t = Duration::from_secs(5);
+        git(&work, &["tag", "main"]);
+        assert_eq!(head_from_git(&work, t), Ok(Head::Branch("main".into())));
+        git(&work, &["checkout", "-q", "-b", "feature/x"]);
+        git(&work, &["tag", "feature/x"]);
+        assert_eq!(head_from_git(&work, t), Ok(Head::Branch("feature/x".into())));
+        git(&work, &["checkout", "-q", "--detach"]);
+        assert!(matches!(head_from_git(&work, t), Ok(Head::Detached(s)) if s.len() == 40));
     }
 
     /// Since git 2.35, porcelain `status` prints `# stash <n>` when
