@@ -1884,9 +1884,9 @@ impl Layout<'_> {
             // against the content, and every cell left over goes to the rule
             // after it: the free width no `fr` column took, and on a later
             // line of a tall row what a cap narrower than the first's (or
-            // none) leaves. So the rule never touches text, and every line
-            // is the same width. A line with no cap takes the pad only when
-            // it has the cells for it: nothing reserved them.
+            // none) leaves. So the rule never touches the content, and every
+            // line is the same width. A line with no cap takes the pad only
+            // when it has the cells for it: nothing reserved them.
             let used: usize = line.iter().map(Draft::cells).sum();
             let room = self.width.saturating_sub(used);
             let padded = ends && pad > 0 && (!cap.is_empty() || room >= pad);
@@ -2656,6 +2656,15 @@ mod tests {
                 assert_eq!(line.width(), width, "{}", show(line));
                 assert!(rules_into_cap(&show(line)), "{width}, gap {gap}: {}", show(line));
             }
+            // The `64fr` column is left when the `1fr` one is dropped, and
+            // the gap cells it freed are its own: the row ends in content,
+            // its pad and the cap, with no rule left over for after it.
+            let [_, r] = squeezed(gap);
+            let inner = l.inner_width(&r, 0, 1);
+            assert_eq!(l.share(&r, inner, Fill::Rule), [inner - 4 - gap, 0, 4], "{width}, {gap}");
+            let lines = l.lines(std::slice::from_ref(&r));
+            let text = lines.first().and_then(|r| r.first()).map(show).unwrap();
+            assert!(text.ends_with("─ end ──") && !text.ends_with(" end ───"), "{text}");
         }
         // A last `fr` column squeezed to nothing: the row ends in the rule,
         // which runs into the cap with no pad before it.
