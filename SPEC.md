@@ -1235,8 +1235,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   2026-09-25: it did, and left a hole in the rule). A row whose content
   does reach the cap keeps the cap's pad against that content, and any
   cells left over go to the rule behind it: content, pad, rule, cap, so
-  the rule never touches text (2026-09-26: the cells went between the
-  text and the pad). When the width runs out, the
+  the rule never touches that text (2026-09-26: the cells went between
+  the text and the pad; a column too narrow for its own pads is the one
+  exception, under Pads). When the width runs out, the
   row is laid out left to right, gap then column: a fixed or `auto`
   column takes at most what remains, and a column whose gap plus one
   cell does not fit renders nothing, as does everything to its right
@@ -1431,7 +1432,12 @@ color = "accent"               # role or literal for the box's glyphs; default t
   reaches (a flex column's two groups, a left- or right-justified lone
   group, and both ends of an `auto` column, whose declared width is its
   content plus those cells), and none where the rule already surrounds the
-  group or where the frame's cap or the box's side has padded it. A
+  group or where the frame's cap or the box's side has padded it. The one
+  exception is a column narrower than its text and its pads together: it
+  keeps what fits of the text, a one-cell column its `…`, and none of the
+  pads, so there alone the text can meet the rule beside it (found
+  2026-09-26 in a one-cell column before the free width, `├─ … …──┤`;
+  the rule is everywhere else kept off the text). A
   stack's column pads belong to the inner rows that reach its edges, as
   they would to the same modules unstacked. A box's
   interior pad is the frame's `pad`, or one cell when the frame has none,

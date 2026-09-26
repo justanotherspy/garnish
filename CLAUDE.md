@@ -613,8 +613,13 @@ for the contract and `docs/` for user docs.
   findings become tests).
 - **`frame.rs` owns the characters, `layout.rs` owns where they go.** A
   row is columns (SPEC § 4.3), so there is one composer for every shape:
-  `Layout::lines` → blocks → `row_body` → `wrap_frame` or `box_lines`
-  (the one place a box is drawn; `fit_title` places every title). A
+  `Layout::lines` → blocks → `row_columns` (a row of the frame through
+  `frame_plan` and `frame_row`, a row in a column or a box under
+  `row_body`) → `wrap_frame` or `box_lines` (the one place a box is
+  drawn; `fit_title` places every title). A row's height is measured at
+  the width it is laid out to, never another: measured on the frame's
+  narrowest caps and laid out on its own, a box was drawn and then cut
+  (2026-09-26). A
   column's `Fit` says which of its ends sit against a box side
   (`Fit::sides`), and `Draft::Blank` marks a line that may need
   `frame::BLANK_CELL` once the whole line is known. The cheapest proof
