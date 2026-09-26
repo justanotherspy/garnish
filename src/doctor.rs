@@ -14,8 +14,9 @@ use crate::modules::SCHEMAS;
 ///
 /// The settings chain is the current directory's (Claude Code's project
 /// directory when `doctor` runs where the session was started) and the
-/// user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`), the managed file first
-/// (the platform's, or what `GARNISH_MANAGED_SETTINGS` says).
+/// user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`), the managed layer first
+/// (the platform's file with its `managed-settings.d` drop-ins, or what
+/// `GARNISH_MANAGED_SETTINGS` says).
 ///
 /// The config is the one `config path` prints ([`config::read_target`]),
 /// the file the status line's ticks read.
@@ -25,28 +26,28 @@ pub fn report(config_path: Option<&Path>) -> String {
     let user = claude_settings::user_dir(home.as_deref());
     // The chain the config commands follow: inside a Claude Code session a
     // managed-settings hook only the person's own settings set.
-    let managed = config::hand_managed();
     report_with(
         &config::read_target(config_path),
         &Cache::from_env(),
-        managed.as_deref(),
+        &config::managed_layer(),
         std::env::current_dir().ok().as_deref(),
         user.as_deref(),
     )
 }
 
-/// Build the report against explicit cache, managed-file, project and
+/// Build the report against explicit cache, managed-layer, project and
 /// Claude user-directory locations.
 ///
-/// `managed` is `None` for a report that must not read the machine's
-/// organisation file, `user` (the directory holding the user
-/// `settings.json`, [`claude_settings::user_dir`]) when there is no home
+/// `managed` is the managed layer as [`config::managed_layer`] labels it,
+/// empty for a report that must not read the machine's organisation
+/// files; `user` (the directory holding the user `settings.json`,
+/// [`claude_settings::user_dir`]) is `None` when there is no home
 /// directory.
 #[must_use]
 pub fn report_with(
     config_file: &config::ReadTarget,
     cache: &Cache,
-    managed: Option<&Path>,
+    managed: &[(&'static str, PathBuf)],
     project: Option<&Path>,
     user: Option<&Path>,
 ) -> String {
@@ -85,7 +86,9 @@ pub fn report_with(
         }
     };
     let loaded = config::load_exactly(config_path.as_deref(), &SCHEMAS);
-    let chain = read_chain(&claude_settings::settings_chain(managed, project, user));
+    let mut files = managed.to_vec();
+    files.extend(claude_settings::settings_chain(None, project, user));
+    let chain = read_chain(&files);
     for row in settings_rows(&chain, project, &loaded.config, crate::time::animate_from_env()) {
         let _ = writeln!(o, "{row}");
     }
@@ -172,6 +175,9 @@ pub fn settings_rows(
             FileState::Invalid(e) => format!("{e}; garnish reads none of it"),
             FileState::Keys(keys) => match claude_settings::rejected(label, keys) {
                 Some(why) => format!("{why}; garnish reads none of it"),
+                None if *label == "drop-in" => {
+                    "ok, but a tick reads no drop-in: the keys a tick reads (prefersReducedMotion, the badges, auto-compaction) skip it".to_owned()
+                }
                 None if *past_tick_cap => format!(
                     "ok, but longer than the {} bytes a tick reads: the keys a tick reads (prefersReducedMotion, the badges, auto-compaction) skip it",
                     claude_settings::MAX_SETTINGS_BYTES
@@ -326,9 +332,9 @@ fn tui_row(chain: &[ChainEntry]) -> String {
                     || line_of(&value.to_string()),
                     |s| format!("{:?}", line_of(&crate::ansi::plain_text(s))),
                 );
-                skipped.push(if *label == "managed" {
+                skipped.push(if claude_settings::MANAGED_LABELS.contains(label) {
                     format!(
-                        "{shown} (managed) is not `default` or `fullscreen`, so Claude Code ignores it there"
+                        "{shown} ({label}) is not `default` or `fullscreen`, so Claude Code ignores it there"
                     )
                 } else {
                     format!(
@@ -365,12 +371,14 @@ fn resolved<T>(
 }
 
 /// [`resolved`] for a key garnish reads on the tick, which skips a file
-/// longer than it reads ([`claude_settings::read_keys`]).
+/// longer than it reads ([`claude_settings::read_keys`]) and reads no
+/// drop-in.
 fn resolved_on_tick<T>(
     chain: &[ChainEntry],
     pick: impl Fn(&FileKeys) -> Option<T>,
 ) -> Option<(T, &'static str)> {
-    first_set(chain.iter().filter(|(.., past_tick_cap)| !past_tick_cap), pick)
+    let read = |(label, .., past_tick_cap): &&ChainEntry| *label != "drop-in" && !past_tick_cap;
+    first_set(chain.iter().filter(read), pick)
 }
 
 /// The first of `entries` that sets the key `pick` names.
@@ -898,6 +906,45 @@ mod tests {
         assert!(rows.contains("  user     /nobody-home/u/.claude/settings.json  absent"), "{rows}");
     }
 
+    /// Verification of 2026-09-26: a `managed-settings.d` drop-in is in the
+    /// chain as Claude Code reads it, so its command is the one named (as
+    /// `config path` follows it), its bad `tui` is dropped on its own, and
+    /// the keys a tick reads, which reads no drop-in, skip it.
+    #[test]
+    fn a_drop_in_is_in_the_chain_but_not_in_what_a_tick_reads() {
+        let keys =
+            |json: &str| FileState::Keys(claude_settings::parse_settings_json(json).unwrap());
+        let chain = vec![
+            (
+                "drop-in",
+                PathBuf::from("/etc/claude-code/managed-settings.d/50.json"),
+                keys(
+                    r#"{"statusLine": {"command": "garnish --config /org.toml"},
+                    "sandbox": {"enabled": true}, "tui": "bogus"}"#,
+                ),
+                false,
+            ),
+            (
+                "managed",
+                PathBuf::from("/etc/claude-code/managed-settings.json"),
+                FileState::Absent,
+                false,
+            ),
+            (
+                "user",
+                PathBuf::from("/nobody-home/u/.claude/settings.json"),
+                keys(r#"{"sandbox": {"enabled": false}}"#),
+                false,
+            ),
+        ];
+        let (cfg, _) = config::parse("", &SCHEMAS);
+        let rows = settings_rows(&chain, None, &cfg, true).join("\n");
+        assert!(rows.contains("50.json  ok, but a tick reads no drop-in"), "{rows}");
+        assert!(rows.contains("command=garnish --config /org.toml (drop-in)"), "{rows}");
+        assert!(rows.contains("sandbox.enabled         false (user)"), "{rows}");
+        assert!(rows.contains("\"bogus\" (drop-in) is not `default` or `fullscreen`, so Claude Code ignores it there"), "{rows}");
+    }
+
     #[test]
     fn failed_entries_lists_only_err_entries() {
         let dir = tempfile::tempdir().unwrap();
@@ -1327,7 +1374,7 @@ mod tests {
         std::fs::write(cache.root().join("debug.log"), "1 pid=1 spawn sync failed: x\n").unwrap();
         let user = dir.path().join(".claude");
         let none = config::ReadTarget::File(dir.path().join("none.toml"));
-        let r = report_with(&none, &cache, None, None, Some(&user));
+        let r = report_with(&none, &cache, &[], None, Some(&user));
         assert!(r.contains("  user     ") && r.contains("  absent"), "{r}");
         assert!(r.contains("not configured (run `garnish install`)"), "{r}");
         assert!(r.contains("debug.log (last 1 of 1 lines)"), "{r}");

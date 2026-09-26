@@ -303,12 +303,13 @@ impl FileKeys {
 /// environment: JavaScript's `String()` of it (verification of 2026-09-26,
 /// 2.1.283: `["/p"]` is `/p`, `5` is `5`, `null` is `null`, an object is
 /// `[object Object]`), so a non-string value is as present as a string.
-fn js_string(value: &serde_json::Value) -> String {
+#[must_use]
+pub fn js_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Null => "null".to_owned(),
         serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Number(n) => n.as_f64().map_or_else(|| n.to_string(), js_number),
         serde_json::Value::Array(items) => items
             .iter()
             .map(|item| if item.is_null() { String::new() } else { js_string(item) })
@@ -316,6 +317,51 @@ fn js_string(value: &serde_json::Value) -> String {
             .join(","),
         serde_json::Value::Object(_) => "[object Object]".to_owned(),
     }
+}
+
+/// A number as JavaScript's `String()` writes it (ECMA-262
+/// `Number::toString`): the shortest digits that read back as `f`, plain
+/// from 1e-6 up to 1e21 and with an exponent outside, a whole number with
+/// no `.0`, and `-0` as `0` (verification of 2026-09-26: `1.0` was `1.0`
+/// where Claude Code's value is `1`).
+fn js_number(f: f64) -> String {
+    if f.is_nan() {
+        return "NaN".to_owned();
+    }
+    let sign = if f.is_sign_negative() { "-" } else { "" };
+    if f.is_infinite() {
+        return format!("{sign}Infinity");
+    }
+    if f.classify() == std::num::FpCategory::Zero {
+        return "0".to_owned();
+    }
+    // Rust's `{:e}` is the shortest round trip too: `d.ddde<exp>`.
+    let sci = format!("{:e}", f.abs());
+    let Some((mantissa, exp)) = sci.split_once('e') else { return f.to_string() };
+    let Ok(exp) = exp.parse::<i64>() else { return f.to_string() };
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let k = i64::try_from(digits.len()).unwrap_or(i64::MAX);
+    // The value is 0.<digits> × 10^n.
+    let n = exp.saturating_add(1);
+    let count = |cells: i64| usize::try_from(cells).unwrap_or(0);
+    let body = if k <= n && n <= 21 {
+        format!("{digits}{}", "0".repeat(count(n.saturating_sub(k))))
+    } else if 0 < n && n <= 21 {
+        let int: String = digits.chars().take(count(n)).collect();
+        let frac: String = digits.chars().skip(count(n)).collect();
+        format!("{int}.{frac}")
+    } else if -6 < n && n <= 0 {
+        format!("0.{}{digits}", "0".repeat(count(n.saturating_neg())))
+    } else {
+        let mut chars = digits.chars();
+        let first: String = chars.by_ref().take(1).collect();
+        let rest: String = chars.collect();
+        let point = if rest.is_empty() { "" } else { "." };
+        let e = n.saturating_sub(1);
+        let e_sign = if e < 0 { '-' } else { '+' };
+        format!("{first}{point}{rest}e{e_sign}{}", e.unsigned_abs())
+    };
+    format!("{sign}{body}")
 }
 
 /// Parse one settings file's text into the keys garnish reads. An empty
@@ -527,14 +573,21 @@ pub fn read_file_up_to(path: &Path, limit: u64) -> FileState {
 /// sets, or `None` when it reads it.
 ///
 /// Its schema takes only `default` and `fullscreen` for `tui`: another
-/// value in the managed file is dropped on its own, but any other file
-/// carrying one is not read at all, so none of its keys may count (SPEC
-/// § 7, the `tui` row of `doctor`).
+/// value in the managed layer ([`MANAGED_LABELS`]) is dropped on its own,
+/// but any other file carrying one is not read at all, so none of its keys
+/// may count (SPEC § 7, the `tui` row of `doctor`).
 #[must_use]
 pub fn rejected(label: &str, keys: &FileKeys) -> Option<&'static str> {
-    (label != "managed" && matches!(keys.tui, Some(Tui::Other(_))))
+    (!MANAGED_LABELS.contains(&label) && matches!(keys.tui, Some(Tui::Other(_))))
         .then_some("`tui` is not `default` or `fullscreen`, so Claude Code rejects this file")
 }
+
+/// The labels of the managed layer of a chain: the managed file and the
+/// `managed-settings.d` drop-ins Claude Code applies on top of it, where a
+/// value its schema refuses is dropped on its own (verification of
+/// 2026-09-26, 2.1.283: `Failed schema validation. This field was
+/// ignored.`).
+pub const MANAGED_LABELS: [&str; 2] = ["managed", "drop-in"];
 
 /// The keys of the files of a chain that Claude Code reads, in the
 /// chain's order (highest precedence first); a file that is absent, too
@@ -1002,6 +1055,26 @@ pub mod tests {
             ("true", "true"),
             (r#"{"a": 1}"#, "[object Object]"),
             ("[null, 1]", ",1"),
+            // Numbers as JavaScript prints them (node and Claude Code agree).
+            ("5", "5"),
+            ("1.0", "1"),
+            ("1e2", "100"),
+            ("-0.0", "0"),
+            ("1.5", "1.5"),
+            ("-1.25", "-1.25"),
+            ("0.000001", "0.000001"),
+            ("1e-7", "1e-7"),
+            ("-1.25e-8", "-1.25e-8"),
+            ("123456.789", "123456.789"),
+            ("0.1", "0.1"),
+            ("2.5e-5", "0.000025"),
+            ("123e-20", "1.23e-18"),
+            ("1e20", "100000000000000000000"),
+            ("1e21", "1e+21"),
+            ("1.5e300", "1.5e+300"),
+            ("9007199254740993", "9007199254740992"),
+            ("12345678901234567890", "12345678901234567000"),
+            (r#"["/x", 1.0]"#, "/x,1"),
         ] {
             let keys = keys_of(&format!(r#"{{"env": {{"GARNISH_CONFIG": {json}}}}}"#));
             assert_eq!(keys.env("GARNISH_CONFIG"), Some(want), "{json}");

@@ -32,7 +32,7 @@ pub use frame::{FillDirection, FrameCfg, SeparatorColor};
 pub use load::{
     CONFIG_ENV, Checkout, CommandFrom, ReadTarget, WriteTarget, default_path, explicit,
     hand_explicit, hand_managed, installed_env_target, load, load_exactly, load_with, locate,
-    lookup, parse, parse_table, parse_with, read_target, syntax_error, write_target,
+    lookup, managed_layer, parse, parse_table, parse_with, read_target, syntax_error, write_target,
 };
 pub(crate) use load::{env_path, xdg_base};
 pub(crate) use overrides::text_takes;

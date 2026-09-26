@@ -1144,7 +1144,22 @@ was built, what the reviews found and what was decided, not how.
     push asserted that row at the default width, and macOS's long temp
     path cut it). The two mutations only a platform managed file could
     show (`demote_hooked`, the drop-ins) are unit tests now, beside an
-    empty value and `install` following the user's `env`.
+    empty value and `install` following the user's `env`. An eighth
+    verifier found one way back in, new in that round: `install` read
+    the managed layer on its own, past the demotion of a managed file a
+    checkout pointed the hook at, and wrote the default config where that
+    file said while every other command refused (now it reads the layer
+    through `chain_files`). And nine smaller: `install` read the file it
+    rewrites as strings only; a hidden drop-in (`.x.json`, which Claude
+    Code skips) counted; `doctor` listed no drop-in (now `drop-in` rows,
+    whose keys the tick-read rows skip, since the tick reads none: PLAN
+    backlog); `js_string` wrote `1.0` where JavaScript writes `1`
+    (`js_number`, checked against node); the install screen's command
+    line and quoted spans still took a `~`; the unresolved note named no
+    file; the ignored `--config` row led with the long path of the file
+    read, which cut its reason at 80 columns (the row now names no file);
+    and four mutations survived (the platform guard's test was vacuous),
+    each now killed.
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was

@@ -65,7 +65,7 @@ pub fn render(req: &Request<'_>) -> String {
             "{:?} is a relative path, so it is ignored; pass an absolute one",
             relative.display().to_string()
         );
-        let error = config::ConfigError { path: "--config".to_owned(), message, line: None };
+        let error = config::ConfigError { path: IGNORED_FLAG.to_owned(), message, line: None };
         loaded.errors.insert(0, error);
     }
     let config_file = loaded.path.as_deref().and_then(|p| std::path::absolute(p).ok());
@@ -142,14 +142,21 @@ fn hold_leading_cells(row: String, mode: ColorMode) -> String {
     out
 }
 
+/// The path of the problem [`render`] reports for a relative `--config` it
+/// ignored on the tick.
+const IGNORED_FLAG: &str = "--config";
+
 /// The trailing `⚠ config: <path>:<line> <message>` line, truncated to the width.
 fn config_warning(loaded: &Loaded, width: usize) -> Vec<Segment> {
     let config = &loaded.config;
     let first = loaded.errors.first();
     let line = first.and_then(|e| e.line);
     // `<path>:<line> `; with no file (a bad `--theme`, say) there is no path
-    // to name, and a line alone reads `line N: `.
-    let origin = match (&loaded.path, line) {
+    // to name, and a line alone reads `line N: `. An ignored `--config` is
+    // no problem of the file read, whose long path would also cut the
+    // reason off the row.
+    let from_file = first.is_none_or(|e| e.path != IGNORED_FLAG);
+    let origin = match (loaded.path.as_ref().filter(|_| from_file), line) {
         (Some(p), Some(l)) => format!("{}:{l} ", p.display()),
         (Some(p), None) => format!("{} ", p.display()),
         (None, Some(l)) => format!("line {l}: "),

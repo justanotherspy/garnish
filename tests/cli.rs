@@ -1767,7 +1767,8 @@ fn a_settings_env_block_names_the_config_the_ticks_read() {
     assert!(!ok && err.contains("\"~/g.toml\"") && err.contains("no one file"), "{out}{err}");
     assert!(err.contains("env.GARNISH_CONFIG") && err.contains("expands nothing"), "{err}");
     let (out, err, ok) = run_in(&proj, &["install", "--no-skills", "--absolute"], &home, &[]);
-    assert!(ok && err.contains("note: env.GARNISH_CONFIG names the config"), "{out}{err}");
+    let note = "settings.json: env.GARNISH_CONFIG names the config";
+    assert!(ok && err.contains(note), "{out}{err}");
     assert!(err.contains("expands nothing") && !home.join("~").exists(), "{out}{err}");
     std::fs::remove_file(home.join(".claude/settings.json")).unwrap();
     let (out, err, ok) =
@@ -1787,11 +1788,15 @@ fn a_settings_env_block_names_the_config_the_ticks_read() {
     // A relative `--config` too, and the row says why (verification of
     // 2026-09-26: `--config=~/g.toml`, which `sh` does not expand, read a
     // `~/g.toml` the session's repository shipped).
-    // The row names the file read first, and a macOS temp path is long.
+    // The reason comes first, ahead of the file's own problems, and names
+    // no file, so it fits an 80-column terminal (a second verification: a
+    // long home path in front of it cut it off).
     let bin = env!("CARGO_BIN_EXE_garnish");
-    let tick = sh_tick(&format!("COLUMNS=400 {bin} --config=rel.toml"), &home);
+    std::fs::write(&xdg, format!("bogus_top = 1\n{}", text("XDGFILE"))).unwrap();
+    let tick = sh_tick(&format!("COLUMNS=80 {bin} --config=rel.toml"), &home);
     assert!(tick.contains("XDGFILE") && !tick.contains("RELFILE"), "{tick}");
-    assert!(tick.contains("--config: \"rel.toml\" is a relative path"), "{tick}");
+    let row = "⚠ config: --config: \"rel.toml\" is a relative path, so it is ignored";
+    assert!(tick.lines().any(|line| line.starts_with(row)), "{tick}");
     // The order goes on past it: an absolute `GARNISH_CONFIG` comes next.
     let abs = home.join("abs.toml");
     std::fs::write(&abs, text("ABSFILE")).unwrap();
@@ -1845,6 +1850,61 @@ fn every_env_value_counts_in_the_chain_as_claude_code_reads_it() {
     settings(&proj, "echo hi", serde_json::json!(""));
     let (out, err, ok) = path();
     assert!(ok && out.trim_end() == mine.to_str().unwrap(), "{out}{err}");
+    // `install` reads the file it rewrites the same way.
+    std::fs::remove_file(proj.join(".claude/settings.json")).unwrap();
+    settings(&home, "garnish", serde_json::json!([mine]));
+    let (out, err, ok) = run_in(&proj, &["install", "--no-skills", "--absolute"], &home, &[]);
+    assert!(ok && mine.exists() && !xdg.exists(), "{out}{err}");
+}
+
+/// Verification of 2026-09-26: `install` and `setup --install` follow a
+/// managed file's `env` value, which Claude Code puts above the file
+/// `install` rewrites, and read that layer as every other command does: a
+/// managed file a checkout pointed the hook at is the checkout's (a second
+/// verification: `install` alone wrote where it said).
+#[test]
+fn install_follows_the_managed_env_and_never_a_checkouts_managed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let proj = dir.path().join("proj");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(proj.join(".claude")).unwrap();
+    let status = serde_json::json!({"statusLine": {"type": "command", "command": "garnish"}});
+    std::fs::write(home.join(".claude/settings.json"), status.to_string()).unwrap();
+    let managed_env = |file: &Path, config: &Path| {
+        let json = serde_json::json!({"env": {"GARNISH_CONFIG": config}});
+        std::fs::write(file, json.to_string()).unwrap();
+    };
+    let install = ["install", "--no-skills", "--absolute"];
+    let xdg = home.join(".config/garnish/garnish.toml");
+
+    // The organisation's file: `install` writes its config there, and
+    // `setup --install` writes it too, with nothing to say.
+    let org = dir.path().join("org.json");
+    let org_config = dir.path().join("org.toml");
+    managed_env(&org, &org_config);
+    let hook = [("GARNISH_MANAGED_SETTINGS", org.to_str().unwrap())];
+    let (out, err, ok) = run_in(&proj, &install, &home, &hook);
+    assert!(ok && org_config.exists() && !xdg.exists(), "{out}{err}");
+    std::fs::remove_file(&org_config).unwrap();
+    let args = ["setup", "--preset", "minimal", "--install"];
+    let (out, err, ok) = run_in(&proj, &args, &home, &hook);
+    assert!(ok && org_config.exists() && !err.contains("reads "), "{out}{err}");
+
+    // A file of the checkout's own, which its `env` block points the hook
+    // at: no command follows it, `install` included.
+    let planted = proj.join(".claude/org.json");
+    let victim = home.join("victim.toml");
+    managed_env(&planted, &victim);
+    let names = serde_json::json!({"env": {"GARNISH_MANAGED_SETTINGS": planted}});
+    std::fs::write(proj.join(".claude/settings.json"), names.to_string()).unwrap();
+    let hook = [("GARNISH_MANAGED_SETTINGS", planted.to_str().unwrap())];
+    let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &hook);
+    assert!(!ok && err.contains("org.json: env.GARNISH_CONFIG names"), "{out}{err}");
+    let (out, err, ok) = run_in(&proj, &install, &home, &hook);
+    assert!(ok && !victim.exists(), "{out}{err}");
+    assert!(err.contains("org.json is not your own settings file"), "{out}{err}");
+    assert!(err.contains("its env.GARNISH_CONFIG names"), "{out}{err}");
 }
 
 /// A home reached through a link is still the person's: a session started

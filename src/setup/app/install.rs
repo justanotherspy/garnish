@@ -80,15 +80,12 @@ impl App {
                     "settings file   {}",
                     self.shown(&steps.plan.settings)
                 )));
-                // The command may name a config path under the home, which
-                // is shown as `~` like every path here.
-                let command = self.home.as_deref().map_or_else(
-                    || steps.command.clone(),
-                    |home| {
-                        let prefix = format!("{}/", home.display());
-                        steps.command.replace(&prefix, "~/")
-                    },
-                );
+                // Paths under the home read as `~/…`, as the rest of the
+                // screen shows them, where the shell would expand one.
+                let home = self.home.as_deref().map(|h| format!("{}/", h.display()));
+                let command = home
+                    .as_deref()
+                    .map_or_else(|| steps.command.clone(), |h| tilde_paths(&steps.command, h));
                 lines.push(Line::from(format!(
                     "statusLine      {{ \"type\": \"command\", \"command\": {command:?}, \"refreshInterval\": {}{} }}",
                     steps.plan.refresh_interval,
@@ -127,9 +124,6 @@ impl App {
                         self.shown(dir)
                     )));
                 }
-                // Paths under the home read as `~/…`, as the rest of the
-                // screen shows them.
-                let home = self.home.as_deref().map(|h| format!("{}/", h.display()));
                 for note in steps.notes() {
                     let note =
                         home.as_deref().map_or_else(|| note.clone(), |h| tilde_paths(&note, h));
@@ -168,11 +162,13 @@ impl App {
 /// `/`) shown as `~/…`: only where a path starts, at the start of the text
 /// or after a blank, never inside a longer path, and never inside quotes,
 /// where a `~` pasted into a shell names no home (verification of
-/// 2026-09-26: the pasted advice made a `~` directory).
+/// 2026-09-26: the pasted advice made a `~` directory, and the install
+/// screen's command line put a `~` inside quotes and inside a longer path).
 fn tilde_paths(text: &str, home: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     let mut starts_path = true;
+    let mut quote = None;
     while !rest.is_empty() {
         if starts_path && let Some(after) = rest.strip_prefix(home) {
             out.push_str("~/");
@@ -184,7 +180,12 @@ fn tilde_paths(text: &str, home: &str) -> String {
         let Some(c) = chars.next() else { break };
         out.push(c);
         rest = chars.as_str();
-        starts_path = c == ' ';
+        quote = match (quote, c) {
+            (None, '\'' | '"') => Some(c),
+            (Some(q), c) if c == q => None,
+            (quote, _) => quote,
+        };
+        starts_path = quote.is_none() && c == ' ';
     }
     out
 }
@@ -206,5 +207,20 @@ mod tests {
         );
         assert_eq!(tilde_paths("/home/u/x", home), "~/x");
         assert_eq!(tilde_paths("/home/user/x", home), "/home/user/x");
+        // A quoted path keeps its home whatever blanks it holds; the words
+        // after the quotes close are paths again.
+        for quoted in ["'/home/u/My /home/u/g.toml'", "\"/home/u/My /home/u/g.toml\""] {
+            let command = format!("garnish --config {quoted} /home/u/x");
+            let shown = format!("garnish --config {quoted} ~/x");
+            assert_eq!(tilde_paths(&command, home), shown);
+        }
+        assert_eq!(
+            tilde_paths("garnish --config=/home/u/g.toml", home),
+            "garnish --config=/home/u/g.toml"
+        );
+        assert_eq!(
+            tilde_paths("garnish --config /mnt/snap/home/u/g.toml", home),
+            "garnish --config /mnt/snap/home/u/g.toml"
+        );
     }
 }

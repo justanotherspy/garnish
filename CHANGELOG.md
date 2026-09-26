@@ -70,9 +70,10 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   when your own settings set it, and anywhere only as an absolute path
   (the tick ignores a relative one, and a relative `--config` too, with
   a `⚠ config:` row saying so); a `GARNISH_CONFIG` in your settings'
-  `env` block (the managed file's drop-ins included, any JSON value read
-  as Claude Code reads it) is the config the commands name from a
-  terminal too, and `install` writes its default config there;
+  `env` block (the managed file's drop-ins included, a hidden one not,
+  any JSON value read as Claude Code reads it) is the config the
+  commands name from a terminal too, and `install` writes its default
+  config there; `doctor` lists the drop-ins;
   `install --settings` on such a file writes no config it names. When the project runs another status line, your own garnish
   command still names your config, and `setup --install` says so when
   the command it keeps reads another file than the one it wrote. `$HOME`

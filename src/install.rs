@@ -867,16 +867,19 @@ pub enum ConfigStep {
     /// written, since it could land where the command never reads, and the
     /// report says so.
     Unresolved {
+        /// The settings file naming it: the one rewritten, or a managed
+        /// file whose `env` block Claude Code puts above it.
+        settings: PathBuf,
         /// The key naming it: `statusLine.command` or `env.GARNISH_CONFIG`.
         key: &'static str,
         /// The value, as written.
         word: String,
     },
-    /// The settings file is not the person's own and its command names
-    /// this config (`config::WriteTarget::Checkout`): no default config is
-    /// written, since garnish never writes a file such a file chooses, and
-    /// the report says so.
-    Checkout(PathBuf),
+    /// A settings file that is not the person's own names the config
+    /// (`config::WriteTarget::Checkout`): no default config is written,
+    /// since garnish never writes a file such a file chooses, and the
+    /// report says so.
+    Checkout(crate::config::Checkout),
     /// `setup` writes its own config there, and the command written reads
     /// `reads` instead: nothing is written for it, and the report says so.
     Elsewhere {
@@ -991,11 +994,12 @@ impl Steps {
             .filter(|p| *p <= MAX_PADDING);
         let padding = options.padding.or(kept).map(|p| p.saturating_mul(2));
         // The `GARNISH_CONFIG` the file's `env` block gives the command,
-        // which the merge keeps.
+        // which the merge keeps, of any JSON type as Claude Code reads it.
         let env = current
             .get("env")
             .and_then(|env| env.get(crate::config::CONFIG_ENV))
-            .and_then(Value::as_str);
+            .map(crate::claude_settings::js_string);
+        let env = env.as_deref();
         let config = if options.write_config {
             // The file the written command reads: the explicit one, else
             // the one the kept command passes, else the default. The
@@ -1022,8 +1026,10 @@ impl Steps {
                         what: "the config goes",
                     });
                 }
-                WriteTarget::Unresolved { key, word, .. } => ConfigStep::Unresolved { key, word },
-                WriteTarget::Checkout(checkout) => ConfigStep::Checkout(checkout.path),
+                WriteTarget::Unresolved { settings, key, word } => {
+                    ConfigStep::Unresolved { settings, key, word }
+                }
+                WriteTarget::Checkout(checkout) => ConfigStep::Checkout(checkout),
             }
         } else {
             // What `setup` writes against what the command written reads
@@ -1127,15 +1133,17 @@ impl Steps {
                 "note: {} already exists; set `padding = {p}` in it to match statusLine.padding",
                 path.display()
             )),
-            ConfigStep::Unresolved { key, word } => notes.push(format!(
-                "note: {key} names the config {:?}, which is no one file garnish can find{}, so no default config is written; pass --config <FILE> to say which",
+            ConfigStep::Unresolved { settings, key, word } => notes.push(format!(
+                "note: {}: {key} names the config {:?}, which is no one file garnish can find{}, so no default config is written; pass --config <FILE> to say which",
+                settings.display(),
                 shown_word(word),
                 expands_nothing(key)
             )),
-            ConfigStep::Checkout(path) => notes.push(format!(
-                "note: {} is not your own settings file, and garnish never writes the config {:?} it names, so no default config is written; pass --config <FILE> to say which",
-                self.plan.settings.display(),
-                shown_word(&path.to_string_lossy())
+            ConfigStep::Checkout(checkout) => notes.push(format!(
+                "note: {} is not your own settings file, and garnish never writes the config {:?} its {} names, so no default config is written; pass --config <FILE> to say which",
+                checkout.settings.as_deref().unwrap_or(&self.plan.settings).display(),
+                shown_word(&checkout.path.to_string_lossy()),
+                checkout.key
             )),
             ConfigStep::Elsewhere { written, reads } => notes.push(format!(
                 "note: the status line command reads {}, not {}; `garnish --config {} install` points it there",

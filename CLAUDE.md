@@ -182,7 +182,9 @@ documents *first*, with the reason, then start coding.
   file (`/etc/claude-code/…`, root's), so logic that depends on it takes
   the paths as parameters and is unit-tested pure (`demote_hooked`,
   `layer_of`, `own_settings_files_in`); two mutations of it survived the
-  whole suite until then. A scratch export of the crate (`git archive` into a directory) built
+  whole suite until then. Each case of such a test must set up the input
+  its guard exists for: the first platform-guard case named another
+  file, so it passed with the guard deleted. A scratch export of the crate (`git archive` into a directory) built
   with the same `CARGO_TARGET_DIR` clobbers the checkout's artifacts,
   since cargo's metadata hash leaves the path out: give the export
   another `version` in its own `Cargo.toml` (the dependencies stay
@@ -547,8 +549,11 @@ for the contract and `docs/` for user docs.
   relative one (Claude Code passes `"~/g.toml"` unexpanded); a settings
   `env` block's `GARNISH_CONFIG` is part of what the ticks read when the
   command passes no `--config`, so `command_target` follows it
-  (`env_target`) for a terminal that never sees the block; `doctor`
-  shows the chain from `config::hand_managed`; `doctor` loads a refused
+  (`env_target`) for a terminal that never sees the block; every reader
+  of the managed layer goes through `chain_files`, which demotes a
+  managed file a checkout named, and `install` reading it on its own
+  wrote where such a file said; `doctor` shows the chain from
+  `config::managed_layer`; `doctor` loads a refused
   config's stand-in through `config::load_exactly`, never `load`, which
   would locate the refused file again) and its twin
   `config::read_target` (the same order without
