@@ -12,8 +12,8 @@
 # Row 1: a one-cell boxed column. Row 2: a zero-width one between two
 # columns, which takes no gap either: the row is the row without it. Row 3:
 # a one-cell column holding a stack with a boxed row. Row 4: row 2 with a
-# `style = "none"` box, which has no glyphs and so fits any cell, but not
-# the none of a zero-width column: it made its row three lines tall.
+# `style = "none"` box, which has no glyphs and so fits in one cell, but a
+# zero-width column has none: it made its row three lines tall.
 
 [box.x]
 style = "none"

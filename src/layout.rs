@@ -982,8 +982,8 @@ impl Layout<'_> {
     /// they would leave nothing to draw in. The corners are drawn whatever
     /// the side is, so a `custom` box with corners and no side needs their
     /// cells too, or its top and bottom lines would overflow. A box of no
-    /// glyphs (`style = "none"`) needs a cell all the same: in the none of a
-    /// `width = 0` column it would add its two lines and draw nothing.
+    /// glyphs (`style = "none"`) still needs one cell: a `width = 0` column
+    /// has none, and the box would add its two lines there and draw nothing.
     fn box_interior(&self, chars: &BoxChars, width: usize) -> Option<(usize, usize)> {
         let sides = display_width(&chars.side).saturating_mul(2);
         let pair = |a: &str, b: &str| display_width(a).saturating_add(display_width(b));
