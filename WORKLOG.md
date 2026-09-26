@@ -1089,4 +1089,17 @@ was built, what the reviews found and what was decided, not how.
     errors) names no file. `doctor` no longer points `config init` at a
     file it would refuse. The skill's write step stops on a refusal.
     Three mutations the tests missed are now caught (the badge rows'
-    skip, the note's cut, the cap's `>`).
+    skip, the note's cut, the cap's `>`). A fourth verifier got round the
+    rule three ways, all closed: `install --settings` on a checkout's
+    file wrote the config it named (now a note, no file); a checkout's
+    `env` block, which Claude Code copies into the session (read from the
+    2.1.283 binary), set `GARNISH_CONFIG` or pointed
+    `GARNISH_MANAGED_SETTINGS` at itself (`config::hand_explicit` now
+    refuses a variable a checkout set, a relative hook is ignored); a
+    relative `CLAUDE_CONFIG_DIR` made the checkout the user's own (now
+    ignored). And a project running another status line pointed every
+    command at a file no tick read; the person's own garnish command now
+    names it. `setup --install` notes a command that reads another file
+    than the one it wrote; a `~` in a `GARNISH_CONFIG=` value and
+    arguments clap refuses name no file; a linked home or a checkout
+    file linked to the person's own counts as theirs.

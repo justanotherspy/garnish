@@ -442,7 +442,8 @@ fn run_command() -> Result<()> {
                 absolute,
                 write_config: !no_config,
                 write_skills: !no_skills,
-                config_path: config::explicit(config_path),
+                config_path: explicit_or_quiet(config_path)?,
+                config_written: None,
             };
             let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
             print_install(&steps, dry_run)
@@ -795,6 +796,16 @@ pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
     target_or_quiet(explicit, "the config goes")
 }
 
+/// The config named explicitly ([`config::hand_explicit`]: `--config`,
+/// else a `GARNISH_CONFIG` the person set), or a [`Quiet`] refusal when a
+/// checkout's settings set that variable.
+///
+/// # Errors
+/// [`Quiet`] after the one-line note.
+pub fn explicit_or_quiet(flag: Option<&Path>) -> Result<Option<PathBuf>> {
+    config::hand_explicit(flag).map_err(|checkout| refusal(Refusal::CheckoutConfig(checkout)))
+}
+
 /// The config a command run by hand reads ([`config::read_target`]: the
 /// file `config path` prints, or `None` for the built-in defaults), or a
 /// [`Quiet`] refusal where `config path` refuses.
@@ -805,9 +816,7 @@ fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
         config::ReadTarget::Unresolved { settings, word } => {
             Err(refusal(Refusal::UnresolvedConfig { settings, word }))
         }
-        config::ReadTarget::Checkout { settings, path } => {
-            Err(refusal(Refusal::CheckoutConfig { settings, path }))
-        }
+        config::ReadTarget::Checkout(checkout) => Err(refusal(Refusal::CheckoutConfig(checkout))),
     }
 }
 
@@ -821,9 +830,7 @@ fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBu
         config::WriteTarget::Unresolved { settings, word } => {
             Err(refusal(Refusal::UnresolvedConfig { settings, word }))
         }
-        config::WriteTarget::Checkout { settings, path } => {
-            Err(refusal(Refusal::CheckoutConfig { settings, path }))
-        }
+        config::WriteTarget::Checkout(checkout) => Err(refusal(Refusal::CheckoutConfig(checkout))),
     }
 }
 

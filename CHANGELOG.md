@@ -61,11 +61,17 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   `init`, `preview`, `doctor`, `setup` and `install`) instead of a
   default file the status line never reads; a `--config` that names no
   one file (a relative path) is refused on one line, never guessed.
-  A `--config` passed by a project's own `.claude/` settings is followed
-  by none of them: a cloned repository never chooses a file garnish reads
-  or writes, and each command says so on one line (`garnish --config
-  FILE …` names the file yourself). `$HOME` and a `GARNISH_CONFIG=`
-  prefix in the command are read as `sh` reads them, and a settings file
+  A config a project's own `.claude/` settings name (by the command's
+  `--config`, or by `GARNISH_CONFIG` in their `env` block, which Claude
+  Code copies into the session) is followed by none of them: a cloned
+  repository never chooses a file garnish reads or writes, and each
+  command says so on one line (`garnish --config FILE …` names the file
+  yourself); `install --settings` on such a file writes no config it
+  names. When the project runs another status line, your own garnish
+  command still names your config, and `setup --install` says so when
+  the command it keeps reads another file than the one it wrote. `$HOME`
+  and a `GARNISH_CONFIG=` prefix in the command are read as `sh` reads
+  them, a relative `CLAUDE_CONFIG_DIR` is ignored, and a settings file
   over 1 MiB no longer loses its command for the commands run by hand.
 - `CLAUDE_CONFIG_DIR` is honoured for `settings.json`, the skills and the
   settings chain.

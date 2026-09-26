@@ -30,8 +30,9 @@ mod vocab;
 pub(crate) use frame::FRAME_KEYS;
 pub use frame::{FillDirection, FrameCfg, SeparatorColor};
 pub use load::{
-    CONFIG_ENV, CommandFrom, ReadTarget, WriteTarget, default_path, explicit, load, load_with,
-    locate, parse, parse_table, parse_with, read_target, syntax_error, write_target,
+    CONFIG_ENV, Checkout, CommandFrom, ReadTarget, WriteTarget, default_path, explicit,
+    hand_explicit, load, load_with, locate, parse, parse_table, parse_with, read_target,
+    syntax_error, write_target,
 };
 pub(crate) use load::{env_path, xdg_base};
 pub(crate) use overrides::text_takes;

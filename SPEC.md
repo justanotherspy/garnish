@@ -746,44 +746,56 @@ Claude Code runs from the current directory, the first file of the
 settings chain (§ 2.3) that sets one, as `doctor` shows it, for every
 command run by hand: `config path` prints the file, `config check`,
 `config show`, `preview` and `doctor` read it, and `config init` and
-`setup` write it. When that command comes from a checkout's own
-`.claude/` settings (a local or project file outside the user settings
-directory: a repository nobody here may have built) and passes a
-`--config`, garnish follows it for none of them, reading or writing:
-they refuse as for a value that names no one file (below), and `doctor`
-says so (verification of 2026-09-26: `config init`, `setup` and the
+`setup` write it. When that command runs another program, the person's
+own garnish command (the managed or user file's) still names their
+config. A settings file is the person's own when it is the managed file
+or sits in their settings directory (`CLAUDE_CONFIG_DIR`, else
+`~/.claude`, also `~/.claude` itself, by its path or the one it links
+to); any other local or project file is a checkout's, a repository
+nobody here may have built. When a checkout's file names the config,
+by the command's `--config` or `GARNISH_CONFIG=` prefix, by a
+`GARNISH_CONFIG` its `env` block sets (Claude Code copies that block
+into the session, so the variable garnish sees came from the checkout),
+or by pointing `GARNISH_MANAGED_SETTINGS` at a file through the same
+block, garnish follows it for none of them, reading or writing: they
+refuse as for a value that names no one file (below), and `doctor` says
+so (verification of 2026-09-26: `config init`, `setup` and the
 `garnish-statusline` skill wrote wherever a cloned repository named,
-`~/.profile` included); a command there that passes no `--config`
-leaves the file to the lookup. For `install` the command is the one in
-the file it rewrites (`--settings`, else the user file); `install` keeps
-it, writing the default config there when it is missing and checking its
-`padding` against that file. A command run by hand reads a settings file
-whole, as Claude Code does (within 64 MiB), not under the tick's 1 MiB
-cap. The tick and its workers never read the settings file for this: the
-harness passes the tick the command's `--config`, and the tick passes it
-on. The value is read as `sh` would pass it: words part at a space, a
-tab or a newline (not at any other Unicode blank), an unquoted `~` at its
-start, and one `$HOME` or `${HOME}` wherever it stands, is the home
-directory, with the rest of the word glued on as the shell glues it
-(`$HOME.x` is a file beside the home directory's name, not in it); a
-program word the shell would split runs no garnish, and after a `--`
-clap reads no `--config`. One that names no one file (a relative path,
-which the harness resolves in whatever directory it runs the command
-from, a second `$HOME`, an unquoted `$HOME` when the home directory holds
-a blank or a glob character, which the shell would split or expand, a
-second `--config`, which clap refuses, or any other expansion) is never
-guessed at: `install` writes no default config and says why, `doctor`
-says so and shows what the lookup finds, and the others refuse with a
-one-line note asking for `--config`, the value cut to 200 characters
-(2026-09-25 review:
+`~/.profile` included); a command there that passes no config leaves the
+file to the lookup. For `install` the command is the one in the file it
+rewrites (`--settings`, else the user file); `install` keeps it, writing
+the default config there when it is missing and checking its `padding`
+against that file, but writes no config a `--settings` file that is not
+the person's own names (it says why). `setup --install` says so when the
+command it keeps reads another file than the one it wrote. A command run
+by hand reads a settings file whole, as Claude Code does (within 64
+MiB), not under the tick's 1 MiB cap. The tick and its workers never
+read the settings file for this: the harness passes the tick the
+command's `--config`, and the tick passes it on. The value is read as
+`sh` would pass it: words part at a space, a tab or a newline (not at
+any other Unicode blank), an unquoted `~` at its start, and one `$HOME`
+or `${HOME}` wherever it stands, is the home directory, with the rest of
+the word glued on as the shell glues it (`$HOME.x` is a file beside the
+home directory's name, not in it); a program word the shell would split
+runs no garnish. One that names no one file (a relative path, which the
+harness resolves in whatever directory it runs the command from, a
+second `$HOME`, an unquoted `$HOME` when the home directory holds a
+blank or a glob character, which the shell would split or expand, a `~`
+in a `GARNISH_CONFIG=` value, arguments clap refuses (a second
+`--config`, one with no value, anything after `--`), or any other
+expansion) is never guessed at: `install` writes no default config and
+says why, `doctor` says so and shows what the lookup finds, and the
+others refuse with a one-line note asking for `--config`, the value cut
+to 200 characters (2026-09-25 review:
 `install` and `setup --preset P --install` kept the command's `--config
 X` but wrote a default file it never read, and then `config path` named
 a file `config check` did not check; its final review found the readers
 following the user file's command where a project's won, and `$HOME.x`
 or `--config=$HOME/x` read wrongly). An empty variable is unset (§ 5), and a relative
 `XDG_CONFIG_HOME` (like a relative `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR`
-for the cache root, § 6) is ignored, as the XDG Base Directory spec says:
-it would name a file in the session's repository.
+for the cache root, § 6, a relative `CLAUDE_CONFIG_DIR` and a relative
+`GARNISH_MANAGED_SETTINGS`) is ignored, as the XDG Base Directory spec
+says: it would name a file in the session's repository.
 
 ```toml
 preset = "default"        # default | minimal | full | compact
@@ -1983,7 +1995,7 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
-| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets |
+| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets, and a relative path is ignored (§ 4) |
 | `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish` (§ 7, § 14), so the pointer path is testable without a pty |
 | `GARNISH_TEST_PANIC` | debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row of § 5 is testable through the binary |
 

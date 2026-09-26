@@ -290,21 +290,24 @@ pub enum CommandConfig {
 #[must_use]
 pub fn command_config(command: &str, home: Option<&Path>) -> Option<CommandConfig> {
     let words = shell_words(command);
-    let at = garnish_at(&words, command)?;
-    let program = words.get(at)?;
-    if program.home.is_some() && program.expanded(home).is_none() {
-        return None;
-    }
-    let flags = config_flags(words.get(at.saturating_add(1)..)?, command);
+    let at = program_at(&words, command, home)?;
+    let args = words.get(at.saturating_add(1)..)?;
+    // The arguments as written: what a note quotes when clap would refuse
+    // them, so that the ticks read no file at all.
+    let span = || {
+        let (first, last) = (args.first()?, args.last()?);
+        command.get(first.start..last.end).map(|s| CommandConfig::Unresolved(s.to_owned()))
+    };
+    let (flags, refused) = config_flags(args, command);
     let (value, written) = match flags.as_slice() {
         [] => env_config(words.get(..at)?, command)?,
         [one] => one.clone(),
-        // clap refuses a second `--config`, so the ticks read no file.
-        [(first, _), .., (last, _)] => {
-            let span = command.get(first.start..last.end).unwrap_or_default();
-            return Some(CommandConfig::Unresolved(span.to_owned()));
-        }
+        // clap refuses a second `--config`.
+        [_, _, ..] => return span(),
     };
+    if refused {
+        return span();
+    }
     let path = value.literal.then(|| value.expanded(home)).flatten().map(PathBuf::from);
     Some(
         path.filter(|p| p.is_absolute())
@@ -312,10 +315,27 @@ pub fn command_config(command: &str, home: Option<&Path>) -> Option<CommandConfi
     )
 }
 
+/// Whether a `statusLine.command` runs garnish ([`garnish_at`]) from a
+/// program word the shell passes whole.
+#[must_use]
+pub fn runs_garnish(command: &str, home: Option<&Path>) -> bool {
+    program_at(&shell_words(command), command, home).is_some()
+}
+
+/// [`garnish_at`], unless the program word holds a home directory the
+/// shell would split (or there is none to expand), so that it runs no
+/// garnish at all.
+fn program_at(words: &[Word], command: &str, home: Option<&Path>) -> Option<usize> {
+    let at = garnish_at(words, command)?;
+    let program = words.get(at)?;
+    (program.home.is_none() || program.expanded(home).is_some()).then_some(at)
+}
+
 /// Each `--config` (or `--config=`) value among a garnish command's
-/// arguments, with the value as written, up to a `--`, after which clap
-/// reads no option.
-fn config_flags(args: &[Word], command: &str) -> Vec<(Word, String)> {
+/// arguments, with the value as written, and whether clap refuses the
+/// arguments: a `--config` with no value, or anything after `--` (garnish
+/// takes no positional argument).
+fn config_flags(args: &[Word], command: &str) -> (Vec<(Word, String)>, bool) {
     const FLAG: &str = "--config=";
     let raw = |w: &Word| command.get(w.start..w.end).unwrap_or_default().to_owned();
     let plain = |w: &Word, text: &str| w.literal && w.home.is_none() && w.text == text;
@@ -328,10 +348,10 @@ fn config_flags(args: &[Word], command: &str) -> Vec<(Word, String)> {
             continue;
         }
         if plain(word, "--") {
-            break;
+            return (found, args.next().is_some());
         }
         if plain(word, "--config") {
-            let Some(value) = args.next() else { break };
+            let Some(value) = args.next() else { return (found, true) };
             found.push((value.clone(), raw(value)));
         } else if let Some(rest) = word.text.strip_prefix(FLAG) {
             let raw = raw(word);
@@ -340,12 +360,14 @@ fn config_flags(args: &[Word], command: &str) -> Vec<(Word, String)> {
             found.push((Word { text: rest.to_owned(), home, ..word.clone() }, written));
         }
     }
-    found
+    (found, false)
 }
 
 /// The value of the last `GARNISH_CONFIG=` assignment among the words
 /// before the program (the shell's own rule), with the value as written;
 /// `None` without one, or when it is empty, which garnish reads as unset.
+/// A `~` in it is left to the shell (which expands one after the `=` or a
+/// `:`), so the value names no one file garnish can find.
 fn env_config(prefix: &[Word], command: &str) -> Option<(Word, String)> {
     const VAR: &str = "GARNISH_CONFIG=";
     let word = prefix.iter().rev().find(|w| {
@@ -355,7 +377,14 @@ fn env_config(prefix: &[Word], command: &str) -> Option<(Word, String)> {
         word.text.strip_prefix(VAR).filter(|rest| !rest.is_empty() || word.home.is_some())?;
     let written = command.get(word.start..word.end)?.strip_prefix(VAR)?.to_owned();
     let home = word.home.map(|h| h.saturating_sub(VAR.len()));
-    Some((Word { text: rest.to_owned(), home, ..word.clone() }, written))
+    let literal = word.literal && !written.contains('~');
+    Some((Word { text: rest.to_owned(), home, literal, ..word.clone() }, written))
+}
+
+/// Whether two paths name one file: the same path or, when both exist, the
+/// same file once links are followed.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || std::fs::canonicalize(a).is_ok_and(|a| std::fs::canonicalize(b).is_ok_and(|b| a == b))
 }
 
 /// The path this binary is known by, for `install --absolute`: the first
@@ -704,10 +733,14 @@ pub struct Options {
     /// Write the bundled skills (`--no-skills` clears it).
     pub write_skills: bool,
     /// The config named explicitly, `--config` or else `GARNISH_CONFIG`
-    /// ([`crate::config::explicit`]; the caller reads the variable, so a
-    /// plan reads no environment for it): the default config goes there,
+    /// ([`crate::config::hand_explicit`]; the caller reads the variable, so
+    /// a plan reads no environment for it): the default config goes there,
     /// and the command written passes it with `--config`.
     pub config_path: Option<PathBuf>,
+    /// The config the caller writes itself (`setup`, with `write_config`
+    /// off): when the command written reads another, the plan notes it
+    /// ([`ConfigStep::Elsewhere`]).
+    pub config_written: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -720,6 +753,7 @@ impl Default for Options {
             write_config: true,
             write_skills: true,
             config_path: None,
+            config_written: None,
         }
     }
 }
@@ -754,15 +788,9 @@ pub enum Refusal {
         /// The value, as the command spells it.
         word: String,
     },
-    /// The `statusLine.command` Claude Code runs here comes from a
-    /// checkout's own settings file and passes `--config path`, a file
-    /// garnish never follows (`config::WriteTarget::Checkout`).
-    CheckoutConfig {
-        /// The settings file.
-        settings: PathBuf,
-        /// The file its command names.
-        path: PathBuf,
-    },
+    /// A settings file that is not the person's own names the config: a
+    /// file garnish never follows.
+    CheckoutConfig(crate::config::Checkout),
     /// Anything the file system refused, naming the file.
     Io(String),
 }
@@ -776,15 +804,16 @@ impl std::fmt::Display for Refusal {
             Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
             Self::UnresolvedConfig { settings, word } => write!(
                 f,
-                "{}: statusLine.command passes --config {:?}, which names no one file garnish can find; pass --config <FILE> to say which",
+                "{}: statusLine.command names the config {:?}, which is no one file garnish can find; pass --config <FILE> to say which",
                 settings.display(),
                 shown_word(word)
             ),
-            Self::CheckoutConfig { settings, path } => write!(
+            Self::CheckoutConfig(c) => write!(
                 f,
-                "{}: statusLine.command passes --config {:?}, a file this checkout's own settings choose, which garnish never follows; pass --config <FILE> to say which",
-                settings.display(),
-                shown_word(&path.to_string_lossy())
+                "{}: {} names the config {:?}, but this settings file is a checkout's, not yours, and garnish never follows a file one chooses; pass --config <FILE> to say which",
+                c.settings.display(),
+                c.key,
+                shown_word(&c.path.to_string_lossy())
             ),
             Self::Unparsable { path, problem } => write!(
                 f,
@@ -808,6 +837,19 @@ pub enum ConfigStep {
     /// written, since it could land where the command never reads, and
     /// the report says so.
     Unresolved(String),
+    /// The settings file is not the person's own and its command names
+    /// this config (`config::WriteTarget::Checkout`): no default config is
+    /// written, since garnish never writes a file such a file chooses, and
+    /// the report says so.
+    Checkout(PathBuf),
+    /// `setup` writes its own config there, and the command written reads
+    /// `reads` instead: nothing is written for it, and the report says so.
+    Elsewhere {
+        /// The config the caller writes.
+        written: PathBuf,
+        /// The config the command reads.
+        reads: PathBuf,
+    },
     /// A config already exists there; `padding` is the value it would need
     /// to match `statusLine.padding` when it has another, which the report
     /// notes.
@@ -939,13 +981,21 @@ impl Steps {
                     });
                 }
                 WriteTarget::Unresolved { word, .. } => ConfigStep::Unresolved(word),
-                // Only the settings chain yields it, never a file named here.
-                WriteTarget::Checkout { settings, path } => {
-                    return Err(Refusal::CheckoutConfig { settings, path });
-                }
+                WriteTarget::Checkout(checkout) => ConfigStep::Checkout(checkout.path),
             }
         } else {
-            ConfigStep::Skipped
+            // What `setup` writes against what the command written reads
+            // (verification of 2026-09-26: a preset went where nothing read
+            // it, without a word).
+            let home = crate::claude_settings::home_dir();
+            match (&options.config_written, command_config(&command, home.as_deref())) {
+                (Some(written), Some(CommandConfig::File(reads)))
+                    if !same_file(written, &reads) =>
+                {
+                    ConfigStep::Elsewhere { written: written.clone(), reads }
+                }
+                _ => ConfigStep::Skipped,
+            }
         };
         let skills = options.write_skills.then(|| crate::skills::default_dir(&plan.settings));
         Ok(Self { plan, existing, merged, command, config, skills, found })
@@ -993,7 +1043,11 @@ impl Steps {
                     seeded(*padding)
                 ));
             }
-            ConfigStep::Exists { .. } | ConfigStep::Skipped | ConfigStep::Unresolved(_) => {}
+            ConfigStep::Exists { .. }
+            | ConfigStep::Skipped
+            | ConfigStep::Unresolved(_)
+            | ConfigStep::Checkout(_)
+            | ConfigStep::Elsewhere { .. } => {}
         }
         if let Some(dir) = &self.skills {
             lines.push(format!(
@@ -1006,9 +1060,9 @@ impl Steps {
     }
 
     /// The advice a plan carries whether it is applied or not: the PATH
-    /// warning, the `padding` a config that already exists would need, and
-    /// why no default config is written for a `--config` that names no one
-    /// file.
+    /// warning, the `padding` a config that already exists would need, why
+    /// no default config is written for a config garnish does not follow,
+    /// and a command that reads another config than the one `setup` writes.
     #[must_use]
     pub fn notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
@@ -1024,8 +1078,19 @@ impl Steps {
                 path.display()
             )),
             ConfigStep::Unresolved(word) => notes.push(format!(
-                "note: statusLine.command passes --config {:?}, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which",
+                "note: statusLine.command names the config {:?}, which is no one file garnish can find, so no default config is written; pass --config <FILE> to say which",
                 shown_word(word)
+            )),
+            ConfigStep::Checkout(path) => notes.push(format!(
+                "note: {} is not your own settings file, and garnish never writes the config {:?} it names, so no default config is written; pass --config <FILE> to say which",
+                self.plan.settings.display(),
+                shown_word(&path.to_string_lossy())
+            )),
+            ConfigStep::Elsewhere { written, reads } => notes.push(format!(
+                "note: the status line command reads {}, not {}; `garnish --config {} install` points it there",
+                reads.display(),
+                written.display(),
+                shell_quote(&written.to_string_lossy())
             )),
             ConfigStep::Exists { .. } | ConfigStep::Write { .. } | ConfigStep::Skipped => {}
         }
@@ -1253,7 +1318,7 @@ mod tests {
             settings: PathBuf::from("/s.json"),
             word: "\"~/w\u{1b}.toml\"".to_owned(),
         };
-        assert!(short.to_string().contains(r#"--config "\"~/w\u{1b}.toml\"""#), "{short}");
+        assert!(short.to_string().contains(r#"the config "\"~/w\u{1b}.toml\"""#), "{short}");
         // `install`'s note too.
         let dir = tempfile::tempdir().unwrap();
         let settings = dir.path().join("settings.json");
@@ -1263,7 +1328,7 @@ mod tests {
         let options =
             Options { settings: Some(settings), write_skills: false, ..Options::default() };
         let notes = Steps::plan(&options).unwrap().notes();
-        let note = notes.iter().find(|n| n.contains("names no one file")).unwrap();
+        let note = notes.iter().find(|n| n.contains("is no one file")).unwrap();
         assert!(note.chars().count() < 400, "{} characters", note.chars().count());
     }
 
@@ -1319,7 +1384,14 @@ mod tests {
             ("GARNISH_CONFIG=/a GARNISH_CONFIG= garnish", None),
             ("MY_GARNISH_CONFIG=/e.toml garnish", None),
             ("garnish -- --config /x.toml", None),
-            ("garnish --config /a --config=/b", unresolved("/a --config=/b")),
+            ("garnish --config /a --config=/b", unresolved("--config /a --config=/b")),
+            ("garnish --config /a --config", unresolved("--config /a --config")),
+            ("garnish --config /a -- --config /b", unresolved("--config /a -- --config /b")),
+            ("garnish --config /a --", file("/a")),
+            ("GARNISH_CONFIG=/a garnish --config", unresolved("--config")),
+            // A `~` after the `=` or a `:` of an assignment is the shell's.
+            ("GARNISH_CONFIG=/a:~/b garnish", unresolved("/a:~/b")),
+            ("GARNISH_CONFIG=~/b garnish", unresolved("~/b")),
         ] {
             assert_eq!(command_config(command, home), want, "{command}");
         }

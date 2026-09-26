@@ -76,11 +76,8 @@ pub fn report_with(
             };
             (None, Some(refusal.to_string()))
         }
-        config::ReadTarget::Checkout { settings, path } => {
-            let refusal = crate::install::Refusal::CheckoutConfig {
-                settings: settings.clone(),
-                path: path.clone(),
-            };
+        config::ReadTarget::Checkout(checkout) => {
+            let refusal = crate::install::Refusal::CheckoutConfig(checkout.clone());
             (None, Some(refusal.to_string()))
         }
     };

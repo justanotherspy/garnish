@@ -528,11 +528,15 @@ for the contract and `docs/` for user docs.
   `--config` the garnish `statusLine.command` passes, else the one
   `locate` finds, else the default; the command is `CommandFrom::Chain`,
   the one Claude Code runs here, except for `install`, which passes the
-  one it read from the file it rewrites as `CommandFrom::Given`; a
-  `--config` from a checkout's own `.claude/` is `WriteTarget::Checkout`,
-  refused like `Unresolved`, never followed; callers resolve
-  `GARNISH_CONFIG` into `Options.config_path`, so a plan reads no
-  environment) and its twin `config::read_target` (the same order without
+  one it read from the file it rewrites as `CommandFrom::Given`; a config
+  a settings file that is not the person's own names (`load::users`: the
+  managed file or one in their settings directory, by path or link) is a
+  `config::Checkout`, refused like `Unresolved`, never followed; callers
+  resolve `GARNISH_CONFIG` through `config::hand_explicit`
+  (`cli::explicit_or_quiet`), which refuses one a checkout's `env` block
+  set, since Claude Code copies that block into the session; the tick's
+  `explicit` takes the variable as it comes) and its twin
+  `config::read_target` (the same order without
   the default, for the commands a person runs to look at their config:
   `config check`, `config show`, `preview`, `doctor`, so they read the
   file `config path` prints and refuse where it refuses; a command run by

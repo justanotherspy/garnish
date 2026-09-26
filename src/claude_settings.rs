@@ -110,12 +110,16 @@ pub fn managed_settings_path() -> Option<PathBuf> {
 }
 
 /// [`managed_settings_path`] for an explicit value of the hook.
+///
+/// A relative value counts as unset: it would name a file in whatever
+/// directory garnish runs from, a checkout's own (verification of
+/// 2026-09-26).
 #[must_use]
 pub fn managed_settings_from(hook: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     match hook {
         Some(v) if v.is_empty() => None,
-        Some(v) => Some(PathBuf::from(v)),
-        None => Some(platform_managed_settings()),
+        Some(v) if Path::new(v).is_absolute() => Some(PathBuf::from(v)),
+        Some(_) | None => Some(platform_managed_settings()),
     }
 }
 
@@ -140,10 +144,12 @@ pub fn home_dir() -> Option<PathBuf> {
 pub const CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 
 /// `CLAUDE_CONFIG_DIR` as the process has it: `None` when unset or empty
-/// (the SPEC § 5 rule for a path variable).
+/// (the SPEC § 5 rule for a path variable), or relative, which would make
+/// the checkout garnish runs in the user's own directory (the `XDG_*` rule,
+/// `config::xdg_base`).
 #[must_use]
 pub fn config_dir_from_env() -> Option<PathBuf> {
-    crate::config::env_path(CONFIG_DIR_ENV)
+    crate::config::env_path(CONFIG_DIR_ENV).filter(|dir| dir.is_absolute())
 }
 
 /// Where the file Claude Code keeps for itself lives (the sign-in, the MCP
@@ -277,6 +283,19 @@ pub struct FileKeys {
     pub voice_enabled: Option<bool>,
     /// `tui`, as written: which renderer draws the screen (SPEC § 2.1).
     pub tui: Option<Tui>,
+    /// The `GARNISH_*` entries of the `env` block, which Claude Code copies
+    /// into the session's environment: a hand-run command tells a
+    /// `GARNISH_CONFIG` a checkout set from one the person set by them
+    /// (SPEC § 4).
+    pub garnish_env: Vec<(String, String)>,
+}
+
+impl FileKeys {
+    /// The value this file's `env` block gives the variable `name`.
+    #[must_use]
+    pub fn env(&self, name: &str) -> Option<&str> {
+        self.garnish_env.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
+    }
 }
 
 /// Parse one settings file's text into the keys garnish reads. An empty
@@ -320,6 +339,17 @@ pub fn parse_settings_json(text: &str) -> Result<FileKeys, String> {
                 sandbox_enabled: switch("sandbox"),
                 voice_enabled: switch("voice"),
                 tui: v.get("tui").map(Tui::from_json),
+                garnish_env: v.get("env").and_then(serde_json::Value::as_object).map_or_else(
+                    Vec::new,
+                    |env| {
+                        env.iter()
+                            .filter(|(key, _)| key.starts_with("GARNISH_"))
+                            .filter_map(|(key, value)| {
+                                value.as_str().map(|value| (key.clone(), value.to_owned()))
+                            })
+                            .collect()
+                    },
+                ),
             })
         }
         Ok(_) => Err("not a JSON object".to_owned()),
@@ -925,7 +955,26 @@ pub mod tests {
             managed_settings_from(Some(std::ffi::OsStr::new("/tmp/m.json"))),
             Some(PathBuf::from("/tmp/m.json"))
         );
+        // A relative one would name a checkout's file (verification of
+        // 2026-09-26): it counts as unset.
+        assert_eq!(
+            managed_settings_from(Some(std::ffi::OsStr::new(".claude/settings.json"))),
+            Some(platform.clone())
+        );
         assert_eq!(settings_chain(Some(&platform), None, None), vec![("managed", platform)]);
         assert_eq!(settings_chain(None, None, None), Vec::new());
+    }
+
+    /// The `GARNISH_*` entries of a file's `env` block are kept, strings
+    /// only, and nothing else of it.
+    #[test]
+    fn the_garnish_entries_of_the_env_block_are_read() {
+        let keys = keys_of(
+            r#"{"env": {"GARNISH_CONFIG": "/x.toml", "GARNISH_ANIMATE": 0, "PATH": "/bin"}}"#,
+        );
+        assert_eq!(keys.garnish_env, [("GARNISH_CONFIG".to_owned(), "/x.toml".to_owned())]);
+        assert_eq!(keys.env("GARNISH_CONFIG"), Some("/x.toml"));
+        assert_eq!(keys.env("PATH"), None);
+        assert_eq!(keys_of(r#"{"env": []}"#).garnish_env, []);
     }
 }

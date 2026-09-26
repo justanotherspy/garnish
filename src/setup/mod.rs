@@ -55,8 +55,8 @@ pub fn run(args: &Args<'_>) -> Result<()> {
         );
         return Err(crate::cli::Quiet.into());
     }
+    let options = install_options(crate::cli::explicit_or_quiet(args.config_path)?, &target);
     let draft = Draft::open(Some(target));
-    let options = install_options(crate::config::explicit(args.config_path));
     let no_color = crate::config::no_color_env();
     let home = crate::claude_settings::home_dir();
     let mut app = App::new(draft, Preview::live(), options, home, no_color);
@@ -64,15 +64,23 @@ pub fn run(args: &Args<'_>) -> Result<()> {
     Ok(())
 }
 
-/// The install plan `setup` makes (SPEC § 14): `garnish install`'s
-/// defaults, the config named explicitly, and no config step.
+/// The install plan `setup` makes (SPEC § 14).
+///
+/// `garnish install`'s defaults, the config named explicitly, and no config
+/// step beyond a note when the command would read another file than
+/// `written`, the one `setup` writes.
 ///
 /// The draft is `setup`'s config. A default file written under an unsaved
 /// draft read as a change on disk at the next save, whose default answer
 /// reloaded it over the edits; `setup --preset` writes its file itself.
 #[must_use]
-pub fn install_options(config_path: Option<PathBuf>) -> crate::install::Options {
-    crate::install::Options { config_path, write_config: false, ..Default::default() }
+pub fn install_options(config_path: Option<PathBuf>, written: &Path) -> crate::install::Options {
+    crate::install::Options {
+        config_path,
+        write_config: false,
+        config_written: Some(written.to_path_buf()),
+        ..Default::default()
+    }
 }
 
 /// `setup --preset <name> [--install]`: the preset is written with the § 5
@@ -88,10 +96,9 @@ fn preset_twin(
     // Planned before anything is written, as `garnish install` plans: a
     // settings file it refuses must leave the config untouched too, not
     // half the request applied.
+    let explicit = crate::cli::explicit_or_quiet(config_path)?;
     let steps = install
-        .then(|| {
-            crate::install::Steps::plan(&install_options(crate::config::explicit(config_path)))
-        })
+        .then(|| crate::install::Steps::plan(&install_options(explicit, target)))
         .transpose()
         .map_err(crate::cli::refusal)?;
     let backup = crate::install::write_config(target, &text, true).map_err(crate::cli::refusal)?;
@@ -148,7 +155,8 @@ pub fn for_test(text: &str, path: Option<PathBuf>, home: &Path) -> App {
     let draft = path.map_or_else(|| Draft::from_text(text), |p| Draft::open(Some(p)));
     let options = crate::install::Options {
         settings: Some(home.join(".claude").join("settings.json")),
-        ..install_options(None)
+        config_written: None,
+        ..install_options(None, Path::new(""))
     };
     let preview = Preview::new(crate::render::Clock::fixed(), true);
     App::new(draft, preview, options, Some(home.to_path_buf()), false)

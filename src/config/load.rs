@@ -53,6 +53,44 @@ pub fn explicit(flag: Option<&Path>) -> Option<PathBuf> {
     flag.map(Path::to_path_buf).or_else(|| env_path(CONFIG_ENV))
 }
 
+/// [`explicit`] for a command run by hand (SPEC § 4).
+///
+/// A `GARNISH_CONFIG` that a checkout's own settings set in their `env`
+/// block, which Claude Code copies into the session, is a [`Checkout`]
+/// instead, since the person never named it (verification of 2026-09-26).
+///
+/// # Errors
+/// That [`Checkout`].
+pub fn hand_explicit(flag: Option<&Path>) -> Result<Option<PathBuf>, Checkout> {
+    if flag.is_some() {
+        return Ok(explicit(flag));
+    }
+    let Some(value) = env_path(CONFIG_ENV) else { return Ok(None) };
+    let named = |keys: &crate::claude_settings::FileKeys| {
+        keys.env(CONFIG_ENV).is_some_and(|set| Path::new(set) == value)
+    };
+    match chain_files().into_iter().find(|file| !file.own && named(&file.keys)) {
+        Some(file) => Err(Checkout { settings: file.path, key: "env.GARNISH_CONFIG", path: value }),
+        None => Ok(Some(value)),
+    }
+}
+
+/// A config that a settings file which is not the person's own names.
+///
+/// A checkout's `statusLine.command` or `env` block, or a `--settings` file
+/// elsewhere. garnish never reads or writes a file a repository nobody here
+/// may have built chooses (CLAUDE.md, "The repository is not the user's
+/// file"), so it is refused like [`WriteTarget::Unresolved`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkout {
+    /// The settings file.
+    pub settings: PathBuf,
+    /// The key naming it: `statusLine.command` or `env.GARNISH_CONFIG`.
+    pub key: &'static str,
+    /// The file it names.
+    pub path: PathBuf,
+}
+
 /// Locate the config file: explicit path > `GARNISH_CONFIG` > XDG > `~/.garnish.toml`.
 #[must_use]
 pub fn locate(flag: Option<&Path>) -> Option<PathBuf> {
@@ -91,17 +129,8 @@ pub enum WriteTarget {
         /// The value, as the command spells it.
         word: String,
     },
-    /// The garnish `statusLine.command` Claude Code runs here comes from a
-    /// checkout's own `.claude/` settings, and passes `--config path`:
-    /// garnish never reads or writes a file a repository nobody here may
-    /// have built chooses (CLAUDE.md, "The repository is not the user's
-    /// file"), so it is refused like [`WriteTarget::Unresolved`].
-    Checkout {
-        /// The settings file.
-        settings: PathBuf,
-        /// The file its command names.
-        path: PathBuf,
-    },
+    /// A settings file that is not the person's own names the config.
+    Checkout(Checkout),
 }
 
 /// Which `statusLine.command` a config target follows ([`write_target`],
@@ -139,8 +168,10 @@ pub enum CommandFrom<'a> {
 /// user's config would stop applying without a word.
 #[must_use]
 pub fn write_target(flag: Option<&Path>, from: CommandFrom<'_>) -> WriteTarget {
-    if let Some(p) = explicit(flag) {
-        return WriteTarget::File(p);
+    match hand_explicit(flag) {
+        Err(checkout) => return WriteTarget::Checkout(checkout),
+        Ok(Some(p)) => return WriteTarget::File(p),
+        Ok(None) => {}
     }
     command_target(from).unwrap_or_else(|| {
         locate(None).or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
@@ -163,12 +194,7 @@ pub enum ReadTarget {
         word: String,
     },
     /// As [`WriteTarget::Checkout`].
-    Checkout {
-        /// The settings file.
-        settings: PathBuf,
-        /// The file its command names.
-        path: PathBuf,
-    },
+    Checkout(Checkout),
 }
 
 /// The config a command run by hand reads (SPEC § 4).
@@ -181,57 +207,114 @@ pub enum ReadTarget {
 /// and the tick passes it on, so neither reads the settings file.
 #[must_use]
 pub fn read_target(flag: Option<&Path>) -> ReadTarget {
-    if let Some(p) = explicit(flag) {
-        return ReadTarget::File(p);
-    }
-    match command_target(CommandFrom::Chain) {
+    let target = match hand_explicit(flag) {
+        Err(checkout) => return ReadTarget::Checkout(checkout),
+        Ok(Some(p)) => return ReadTarget::File(p),
+        Ok(None) => command_target(CommandFrom::Chain),
+    };
+    match target {
         Some(WriteTarget::File(p)) => ReadTarget::File(p),
         Some(WriteTarget::Unresolved { settings, word }) => {
             ReadTarget::Unresolved { settings, word }
         }
-        Some(WriteTarget::Checkout { settings, path }) => ReadTarget::Checkout { settings, path },
+        Some(WriteTarget::Checkout(checkout)) => ReadTarget::Checkout(checkout),
         Some(WriteTarget::NoHome) | None => {
             locate(None).map_or(ReadTarget::Defaults, ReadTarget::File)
         }
     }
 }
 
+/// One file of the current directory's settings chain as a command run by
+/// hand reads it ([`chain_files`]).
+struct ChainFile {
+    /// `managed`, `local`, `project` or `user`.
+    label: &'static str,
+    /// The file.
+    path: PathBuf,
+    /// What it sets.
+    keys: crate::claude_settings::FileKeys,
+    /// The person's own: the managed file (unless a checkout's `env` block
+    /// named it) or one in their settings directory ([`users`]); any other
+    /// local or project file is a checkout's.
+    own: bool,
+}
+
+/// The settings chain of the current directory, each file read whole, as
+/// Claude Code reads it (the cap on a settings file protects the tick, and
+/// only a command run by hand is here: final review of 2026-09-25), a file
+/// Claude Code rejects left out.
+fn chain_files() -> Vec<ChainFile> {
+    use crate::claude_settings as cs;
+    let home = cs::home_dir();
+    let project = std::env::current_dir().ok();
+    let user = cs::user_dir(home.as_deref());
+    let managed = cs::managed_settings_path();
+    let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
+    let mut files: Vec<ChainFile> = chain
+        .into_iter()
+        .filter_map(|(label, path)| {
+            match cs::read_file_up_to(&path, cs::MAX_COMMAND_SETTINGS_BYTES) {
+                cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
+                    let own = !matches!(label, "local" | "project")
+                        || users(&path, user.as_deref(), home.as_deref());
+                    Some(ChainFile { label, path, keys, own })
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    // A managed file that a checkout's `env` block named is the checkout's.
+    let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
+    let names_hook = |file: &ChainFile| {
+        file.keys
+            .env(cs::MANAGED_SETTINGS_ENV)
+            .is_some_and(|set| hook.as_deref() == Some(std::ffi::OsStr::new(set)))
+    };
+    if files.iter().any(|file| !file.own && names_hook(file)) {
+        for file in files.iter_mut().filter(|file| file.label == "managed") {
+            file.own = false;
+        }
+    }
+    files
+}
+
 /// The `--config` the garnish `statusLine.command` of `from` passes, as a
 /// [`WriteTarget::File`], [`WriteTarget::Unresolved`] or
 /// [`WriteTarget::Checkout`]; `None` when there is no such command or it
 /// passes none.
+///
+/// Through the chain it is the command Claude Code runs here or, when that
+/// one runs another program, the person's own garnish command, which still
+/// names the config their status line reads elsewhere.
 fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
-    let (settings, command, checkout) = match from {
+    let (settings, command, own) = match from {
         CommandFrom::Given { settings, command } => {
-            (settings.to_path_buf(), command?.to_owned(), false)
+            let user = cs::user_dir(home.as_deref());
+            let own = users(settings, user.as_deref(), home.as_deref());
+            (settings.to_path_buf(), command?.to_owned(), own)
         }
         CommandFrom::Chain => {
-            let project = std::env::current_dir().ok();
-            let user = cs::user_dir(home.as_deref());
-            let managed = cs::managed_settings_path();
-            let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
-            // Read whole, as Claude Code reads it: the cap on a settings
-            // file protects the tick, and only a command run by hand is here
-            // (final review of 2026-09-25: past the cap `install` and every
-            // other command named different configs).
-            let (label, file, command) = chain.into_iter().find_map(|(label, file)| {
-                match cs::read_file_up_to(&file, cs::MAX_COMMAND_SETTINGS_BYTES) {
-                    cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
-                        keys.status_line_command.map(|command| (label, file, command))
-                    }
-                    _ => None,
-                }
-            })?;
-            let checkout = matches!(label, "local" | "project")
-                && !user.as_deref().is_some_and(|dir| in_dir(&file, dir));
-            (file, command, checkout)
+            let files = chain_files();
+            let garnish = |file: &ChainFile| {
+                file.keys
+                    .status_line_command
+                    .as_deref()
+                    .is_some_and(|command| crate::install::runs_garnish(command, home.as_deref()))
+            };
+            let runs = files.iter().find(|file| file.keys.status_line_command.is_some())?;
+            let file = if garnish(runs) {
+                runs
+            } else {
+                files.iter().find(|file| file.own && garnish(file))?
+            };
+            (file.path.clone(), file.keys.status_line_command.clone()?, file.own)
         }
     };
     match crate::install::command_config(&command, home.as_deref())? {
-        crate::install::CommandConfig::File(path) if checkout => {
-            Some(WriteTarget::Checkout { settings, path })
+        crate::install::CommandConfig::File(path) if !own => {
+            Some(WriteTarget::Checkout(Checkout { settings, key: "statusLine.command", path }))
         }
         crate::install::CommandConfig::File(p) => Some(WriteTarget::File(p)),
         crate::install::CommandConfig::Unresolved(word) => {
@@ -240,16 +323,24 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     }
 }
 
-/// Whether `file` sits directly in `dir`: a project's `.claude/` that is
-/// the user settings directory itself (a session started in the home
-/// directory) holds the user's own files, not a checkout's.
-fn in_dir(file: &Path, dir: &Path) -> bool {
-    let same = |a: &Path, b: &Path| {
-        a == b
-            || std::fs::canonicalize(a)
-                .is_ok_and(|a| std::fs::canonicalize(b).is_ok_and(|b| a == b))
-    };
-    file.parent().is_some_and(|parent| same(parent, dir))
+/// Whether a settings file is one of the person's own: directly in their
+/// settings directory `user` or in `~/.claude` (a session started in the
+/// home directory reads their files as its project's), by its own path or
+/// the one it links to. Anything else is a checkout's, or unknown.
+fn users(file: &Path, user: Option<&Path>, home: Option<&Path>) -> bool {
+    let canonical = |p: &Path| std::fs::canonicalize(p).ok();
+    let dirs: Vec<PathBuf> = [user.map(Path::to_path_buf), home.map(|h| h.join(".claude"))]
+        .into_iter()
+        .flatten()
+        .flat_map(|dir| [canonical(&dir), Some(dir)])
+        .flatten()
+        .collect();
+    let parents = [
+        file.parent().map(Path::to_path_buf),
+        file.parent().and_then(canonical),
+        canonical(file).and_then(|f| f.parent().map(Path::to_path_buf)),
+    ];
+    parents.into_iter().flatten().any(|parent| dirs.contains(&parent))
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported

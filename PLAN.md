@@ -172,8 +172,11 @@ Open items only; closed ones are in `WORKLOG.md`.
     bounded); without `--absolute` a reinstall replaces an absolute
     program word with the bare `garnish`, and `setup --preset P --install`
     always writes the bare word; an explicit `--config` reinstall drops the
-    old command's prefix and arguments; `exec garnish …` and `env -i
-    garnish …` read as not garnish; one
+    old command's prefix and arguments; `exec garnish …`, `env -i
+    garnish …`, `env A=1 env garnish …`, `export GARNISH_CONFIG=…;
+    garnish` and bash's `GARNISH_CONFIG+=…` read as not garnish or as
+    passing no config (safe in a checkout: the lookup is the person's);
+    one
     nested-box mistake is reported twice (the nesting and "no row joins
     this box"); a worker given a `--config` that names a missing file runs
     on the defaults without saying so (it could record a failure);
@@ -193,17 +196,22 @@ Open items only; closed ones are in `WORKLOG.md`.
     after the last column's text; under uneven `custom` caps, heights use
     the narrowest cap pair, so a box that fits only on the wider lines is
     drawn as empty cells
-  - config location, Daniel's call (verification of 2026-09-26): a
-    `--config` that a checkout's own `.claude/` settings pass (a local or
-    project file outside the user settings directory) is followed by no
-    command run by hand, reading or writing; each refuses on one line and
-    `--config FILE` names it. Alternatives: follow it for the readers only
-    (tried: `config path` then answered for one side, and the
-    `garnish-statusline` skill writes through it), or trust a project
-    Claude Code itself trusts (`hasTrustDialogAccepted` in
-    `~/.claude.json`, an undocumented key). Also open: `$HOME$HOME`,
-    `~/$HOME`, `${HOME-x}` and a `~` after `GARNISH_CONFIG=` name one file
-    to `sh` and are refused as naming none
+  - config location, Daniel's call (verification of 2026-09-26): a config
+    that a checkout's own `.claude/` settings name (a local or project
+    file outside the person's settings directory: the command's
+    `--config`, a `GARNISH_CONFIG` its `env` block sets, a managed-settings
+    hook it points at itself) is followed by no command run by hand,
+    reading or writing; each refuses on one line and `--config FILE` names
+    it. Alternatives: follow it for the readers only (tried: `config
+    path` then answered for one side, and the `garnish-statusline` skill
+    writes through it), or trust a project Claude Code itself trusts
+    (`hasTrustDialogAccepted` in `~/.claude.json`, an undocumented key).
+    Not guarded: a checkout's `env` block can also set `GARNISH_CACHE_DIR`,
+    `GARNISH_DEBUG` and the other hooks for the tick, whose files are
+    garnish-named (the tick reading a checkout's config is Claude Code's
+    workspace-trust matter). Also open: `$HOME$HOME`, `~/$HOME`,
+    `${HOME-x}` and a `~` after `GARNISH_CONFIG=` name one file to `sh`
+    and are refused as naming none
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)
