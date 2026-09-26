@@ -600,10 +600,11 @@ its `✗`, `context` before the first response, `cache` without a ratio), is
 ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
 2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
 on the first tick of every session. One character in an ascii row is not
-7-bit, and it is not a mark: with colour off, the braille blank U+2800
-that holds a row's leading cells through the harness's trim (§ 2.1: a
+7-bit, and it is not a mark: the braille blank U+2800, which with colour
+off holds a row's leading cells through the harness's trim (§ 2.1: a
 row that would start with whitespace, such as a right group alone under
-`style = "none"`) and that `blank = true` puts in a spacer (§ 4.1). The
+`style = "none"`), and which `blank = true` puts in a spacer in either
+colour mode (§ 4.1). The
 only 7-bit character that takes a cell and shows nothing is the space,
 which the trim removes, so the alternative is a row drawn shifted left or
 dropped.
@@ -1239,7 +1240,10 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the right, so its bars did not stack.)
 - **Stacks and height.** `[[row.col.row]]` entries make the column a
   stack of rows, each laid out to the column's width with the rules above
-  (an inner row's `justify` overrides the column's). A row's height in
+  (an inner row takes no `justify` of its own, and the parser reports one
+  as an unknown key: its modules sit where the column's `justify` says;
+  2026-09-26: this said an inner row's `justify` overrode the column's,
+  which no config could write). A row's height in
   lines is its content's: a bare row is one line, a boxed row its lines
   plus two (a box too narrow to draw at its width adds none; see Boxes);
   a column's height is the sum of its rows'; the outer row is
@@ -1341,7 +1345,8 @@ color = "accent"               # role or literal for the box's glyphs; default t
   drawn rounded. A `custom` frame adds `top_left`, `top_right`,
   `bottom_left`, `bottom_right` and `side`, one cell each (reported
   otherwise, the style's glyph stays); every glyph passes the § 4.1
-  width guard. Any of the five may be left empty; the corners are drawn
+  width guard. Any of the five may be left unset, and is then empty (an
+  explicit empty string is refused as not one cell wide); the corners are drawn
   whatever the side is, so a box too narrow for its corners renders
   nothing, as one too narrow for its sides does (2026-09-25: with corners
   and no side, a one-cell box drew `++`, overflowed the line and had it

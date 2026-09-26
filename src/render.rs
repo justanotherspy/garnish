@@ -497,12 +497,10 @@ fn render_row<'a>(
                     // as a row's wins over the frame's (SPEC § 4.3).
                     let sep = inner.separator.as_deref().unwrap_or(separator);
                     let mut rendered = render_row(ctx, config, inner, sep, ellipsis);
-                    // …and its own `justify` wins over the column's, which is
-                    // what places the stack when the inner row says nothing.
+                    // An inner row takes no `justify` (the parser reports one,
+                    // SPEC § 4.3), so the column's places its modules.
                     for c in &mut rendered.cols {
-                        if !c.cfg.justify_set {
-                            c.justify = col.justify;
-                        }
+                        c.justify = col.justify;
                     }
                     rendered
                 })
@@ -1683,6 +1681,25 @@ mod tests {
                 let leading = out.lines().filter(|l| l.starts_with(BLANK_CELL)).count();
                 assert_eq!(leading, if text == held { 2 } else { 0 }, "{}: {out}", f.name);
             }
+        }
+        // With colour on the trim holder is not the braille blank (an empty
+        // SGR does its job, or the rule's colour codes do), but a `blank`
+        // spacer carries it in either colour mode (§ 4.1): the ascii row
+        // that leads with it is the spacer's alone.
+        let coloured = loaded(&format!("color = \"always\"\n{held}"));
+        assert_eq!(coloured.errors, Vec::new());
+        for f in &crate::fixtures::FIXTURES {
+            let payload = Payload::parse(f.text).unwrap();
+            let out = render_loaded(&payload, &coloured, Some(100), false, false, &Clock::fixed());
+            assert!(out.contains('\u{1b}'), "{}: colour is on: {out:?}", f.name);
+            let plain = strip_ansi(&out);
+            for l in plain.lines() {
+                let rest = l.strip_prefix(BLANK_CELL).unwrap_or(l);
+                assert!(rest.is_ascii(), "{}: {l:?}", f.name);
+            }
+            assert_eq!(out.matches(BLANK_CELL).count(), 1, "{}: {out:?}", f.name);
+            let spacer = plain.lines().last().unwrap_or_default();
+            assert!(spacer.starts_with(BLANK_CELL), "{}: {plain:?}", f.name);
         }
         let every = render_plain(&fixture("pre-first-response"), &loaded(&every), Some(100));
         assert!(every.lines().any(|l| l.trim_end().ends_with("-------------------| -")), "{every}");
