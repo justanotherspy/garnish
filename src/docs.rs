@@ -1434,7 +1434,7 @@ fn environment_section(o: &mut String) {
     );
     let _ = writeln!(
         o,
-        "| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's, with the `managed-settings.d` drop-ins beside it for the commands you run; empty means there is none, and a relative path is ignored. |"
+        "| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's and its `managed-settings.d` drop-ins; empty means there is none, and a relative path is ignored. |"
     );
     let _ = writeln!(
         o,

@@ -247,7 +247,10 @@ Open items only; closed ones are in `WORKLOG.md`.
     floats a bit off (`6e26`), which `install` also writes back into the
     settings file it rewrites (a serde_json feature, Daniel's call); a
     config key literally named `--config` loses its file on the `⚠`
-    row; a relative `export
+    row; the install screen's command line takes bash's `$'…'` for
+    unquoted, so a `~` can show inside one (display only); `report`'s
+    and `managed_layer`'s one-line glue over the platform's drop-in
+    directory has no test (the logic under it has); a relative `export
     GARNISH_CONFIG=g.toml` that used to work from one directory now
     reads the lookup's file (the tick) or is refused (by hand)
   - modules: the key scan finds a key read but not declared; the reverse,

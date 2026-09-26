@@ -1182,7 +1182,17 @@ was built, what the reviews found and what was decided, not how.
     owner owns it and nobody else can write to it (`guarded_dir`). An
     unobservable `truncate` is gone, a single-quote case pins the
     backslash rule, and bash's `$'…'` (only what the install screen
-    shows) is left as a nit.
+    shows) is left as a nit (PLAN). An eleventh verifier found no way in
+    from a session, and the guard wrong: it also refused a group-writable
+    platform directory (root 0775 or setgid 2775), which Claude Code
+    reads, so in a session an organisation's drop-in value was refused
+    while the ticks read it; it checked a chain of links at its two ends
+    only; and three of its checks had no test. The hook's file brings no
+    drop-ins again (the platform's alone, unguarded, as Claude Code reads
+    them), the chain's decisions became pure functions a unit test gives
+    a drop-in (`chain_target`, `managed_env`), and the rewritten file's
+    `.claude` pair is found once resolved as well (a link, `x/..`, a bare
+    `settings.json`).
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was

@@ -182,11 +182,12 @@ documents *first*, with the reason, then start coding.
   file (`/etc/claude-code/…`, root's), so logic that depends on it takes
   the paths as parameters and is unit-tested pure (`demote_hooked`,
   `layer_of`, `own_settings_files_in`); two mutations of it survived the
-  whole suite until then. The hook's managed file brings the drop-ins
-  beside it as the platform's does (from a directory only its owner or
-  root can write to), which is how a CLI test reaches the managed layer
-  (four more mutations survived until it did); such a test sets the
-  drop-in directory's mode itself, since a runner's umask may differ.
+  whole suite until then. The decisions over the chain are pure
+  functions over `ChainFile`s (`chain_target`, `managed_env`), so a
+  drop-in is tested without the platform's directory. Letting the hook's
+  file bring drop-ins to reach them from a CLI test was tried and
+  undone: a hook file in `/tmp` took anyone's drop-ins, and guarding the
+  directory refused a group-writable platform one Claude Code reads.
   Each case of such a test must set up the input its guard exists for:
   the first platform-guard case named another file, so it passed with
   the guard deleted. A macOS temporary path is about 60 characters where

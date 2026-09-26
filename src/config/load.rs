@@ -119,16 +119,13 @@ const MAX_DROP_IN_ENTRIES: usize = 4096;
 /// `managed`, which Claude Code applies on top of it, in name order (the
 /// last one wins a key it shares with another); a hidden one (`.x.json`)
 /// is switched off and only a file or a link counts, as Claude Code has it
-/// (verification of 2026-09-26, 2.1.283). The directory counts only when
-/// it is the organisation's ([`guarded_dir`]).
+/// (verification of 2026-09-26, 2.1.283).
 fn drop_ins(managed: &Path) -> Vec<PathBuf> {
     let shown =
         |path: &Path| path.file_name().is_some_and(|name| !name.to_string_lossy().starts_with('.'));
     let mut files: Vec<PathBuf> = managed
         .parent()
-        .map(|dir| dir.join("managed-settings.d"))
-        .filter(|dir| guarded_dir(dir, managed))
-        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .and_then(|dir| std::fs::read_dir(dir.join("managed-settings.d")).ok())
         .map_or_else(Vec::new, |entries| {
             entries
                 .take(MAX_DROP_IN_ENTRIES)
@@ -140,22 +137,6 @@ fn drop_ins(managed: &Path) -> Vec<PathBuf> {
         });
     files.sort();
     files
-}
-
-/// Whether the drop-in directory `dir` beside the managed file `managed`
-/// is the organisation's: a directory that belongs to root or to the
-/// managed file's owner, and that nobody else can write to, both the
-/// entry (a link) and what it names. A managed file the hook names in a
-/// shared directory (`/tmp`) would otherwise take drop-ins anyone there
-/// can create (a second verification of 2026-09-26).
-fn guarded_dir(dir: &Path, managed: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-    let owner = std::fs::metadata(managed).ok().map(|m| m.uid());
-    let trusted = |uid: u32| uid == 0 || Some(uid) == owner;
-    let entry = std::fs::symlink_metadata(dir).is_ok_and(|m| trusted(m.uid()));
-    let target = std::fs::metadata(dir)
-        .is_ok_and(|m| m.is_dir() && trusted(m.uid()) && m.mode() & 0o022 == 0);
-    entry && target
 }
 
 /// The settings files that are the person's (or their organisation's) own
@@ -378,18 +359,24 @@ struct ChainFile {
 /// The managed layer of the settings chain for a command run by hand.
 ///
 /// Labelled as `doctor` shows it: the managed file ([`hand_managed`],
-/// `managed`) and the drop-ins beside it (`drop-in`), highest precedence
-/// first (the last drop-in by name, then the others, then the file). The
-/// hook's file stands in for the platform's, drop-ins and all, which is
-/// also how the tests reach this layer.
+/// `managed`) and, when it is the platform's, the drop-ins beside it
+/// (`drop-in`), highest precedence first (the last drop-in by name, then
+/// the others, then the file). The hook's file stands in for the managed
+/// file alone: with its drop-ins, a hook file in a shared directory took
+/// drop-ins anyone could put beside it, and guarding that directory also
+/// refused a group-writable platform one Claude Code reads (second and
+/// third verifications of 2026-09-26).
 #[must_use]
 pub fn managed_layer() -> Vec<(&'static str, PathBuf)> {
-    hand_managed().map_or_else(Vec::new, layer_of)
+    let platform = crate::claude_settings::platform_managed_settings();
+    hand_managed().map_or_else(Vec::new, |managed| layer_of(managed, &platform))
 }
 
-/// [`managed_layer`] for the managed file `managed`.
-fn layer_of(managed: PathBuf) -> Vec<(&'static str, PathBuf)> {
-    let mut layer: Vec<_> = drop_ins(&managed).into_iter().map(|file| ("drop-in", file)).collect();
+/// [`managed_layer`] for the managed file `managed` when the platform's
+/// is `platform`.
+fn layer_of(managed: PathBuf, platform: &Path) -> Vec<(&'static str, PathBuf)> {
+    let drop_ins = if managed == platform { drop_ins(&managed) } else { Vec::new() };
+    let mut layer: Vec<_> = drop_ins.into_iter().map(|file| ("drop-in", file)).collect();
     layer.reverse();
     layer.push(("managed", managed));
     layer
@@ -431,19 +418,10 @@ fn chain_files_rewriting(rewritten: Option<&Path>) -> Vec<ChainFile> {
         _ => None,
     };
     let mut files: Vec<ChainFile> = chain.filter_map(read).collect();
-    // The rewritten file and, in a `.claude` directory, the other of its
-    // project's pair, either of which can name the hook (a third
-    // verification: the local file named it, `install` rewrote the other).
-    let pair = rewritten
-        .and_then(Path::parent)
-        .filter(|dir| dir.file_name().is_some_and(|name| name == ".claude"))
-        .map_or_else(Vec::new, |dir| {
-            vec![("local", dir.join("settings.local.json")), ("project", dir.join("settings.json"))]
-        });
     let extra: Vec<ChainFile> = rewritten
         .map(|path| ("project", path.to_path_buf()))
         .into_iter()
-        .chain(pair)
+        .chain(rewritten.map_or_else(Vec::new, claude_pair))
         .filter(|(_, path)| !files.iter().any(|file| file.path == *path))
         .filter_map(read)
         .collect();
@@ -454,8 +432,32 @@ fn chain_files_rewriting(rewritten: Option<&Path>) -> Vec<ChainFile> {
     files
 }
 
+/// The project settings pair beside `file` (`settings.local.json` and
+/// `settings.json`), either of which can name the hook, when `file` sits
+/// in a `.claude` directory as written or once resolved (a third and a
+/// fourth verification of 2026-09-26: the local file named it and
+/// `install` rewrote the other, then the same through a link, `x/..` or a
+/// bare `settings.json`).
+fn claude_pair(file: &Path) -> Vec<(&'static str, PathBuf)> {
+    let parent =
+        file.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let resolved = std::fs::canonicalize(file)
+        .ok()
+        .and_then(|file| file.parent().map(Path::to_path_buf))
+        .or_else(|| std::fs::canonicalize(parent).ok());
+    let mut dirs = vec![parent.to_path_buf()];
+    dirs.extend(resolved);
+    dirs.dedup();
+    dirs.into_iter()
+        .filter(|dir| dir.file_name().is_some_and(|name| name == ".claude"))
+        .flat_map(|dir| {
+            [("local", dir.join("settings.local.json")), ("project", dir.join("settings.json"))]
+        })
+        .collect()
+}
+
 /// A managed layer that a checkout's `env` block named through the hook is
-/// the checkout's, drop-ins and all: when the hook is in use at all
+/// the checkout's, every file of it: when the hook is in use at all
 /// (`managed`, the file the layer ends in, is the hook's; inside a session
 /// `hand_managed` puts the platform's in its place), it names a file other
 /// than the platform's own `platform`, and a file that is not the person's
@@ -506,28 +508,39 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
                 .and_then(|command| flag_target(settings, command, own, home.as_deref()))
                 .or_else(|| installed_env_target(settings, env))
         }
-        CommandFrom::Chain => {
-            let files = chain_files();
-            let garnish = |file: &ChainFile| {
-                file.keys
-                    .status_line_command
-                    .as_deref()
-                    .is_some_and(|command| crate::install::runs_garnish(command, home.as_deref()))
-            };
-            let runs = files.iter().find(|file| file.keys.status_line_command.is_some())?;
-            let here = garnish(runs);
-            let file =
-                if here { runs } else { files.iter().find(|file| file.own && garnish(file))? };
-            let command = file.keys.status_line_command.as_deref()?;
-            flag_target(&file.path, command, file.own, home.as_deref()).or_else(|| {
-                let (file, value) = files
-                    .iter()
-                    .filter(|file| here || file.own)
-                    .find_map(|file| file.keys.env(CONFIG_ENV).map(|value| (file, value)))?;
-                env_target(&file.path, file.own, value)
-            })
-        }
+        CommandFrom::Chain => chain_target(&chain_files(), home.as_deref()),
     }
+}
+
+/// [`command_target`] through the chain `files`, highest precedence first.
+fn chain_target(files: &[ChainFile], home: Option<&Path>) -> Option<WriteTarget> {
+    let garnish = |file: &ChainFile| {
+        file.keys
+            .status_line_command
+            .as_deref()
+            .is_some_and(|command| crate::install::runs_garnish(command, home))
+    };
+    let runs = files.iter().find(|file| file.keys.status_line_command.is_some())?;
+    let here = garnish(runs);
+    let file = if here { runs } else { files.iter().find(|file| file.own && garnish(file))? };
+    let command = file.keys.status_line_command.as_deref()?;
+    flag_target(&file.path, command, file.own, home).or_else(|| {
+        let (file, value) = files
+            .iter()
+            .filter(|file| here || file.own)
+            .find_map(|file| file.keys.env(CONFIG_ENV).map(|value| (file, value)))?;
+        env_target(&file.path, file.own, value)
+    })
+}
+
+/// The first file of the managed layer of `files` that sets
+/// `GARNISH_CONFIG`, with the value: Claude Code puts that layer above
+/// every other file, so its value, even an empty one, is the command's.
+fn managed_env(files: &[ChainFile]) -> Option<(&ChainFile, &str)> {
+    files
+        .iter()
+        .filter(|file| crate::claude_settings::MANAGED_LABELS.contains(&file.label))
+        .find_map(|file| file.keys.env(CONFIG_ENV).map(|value| (file, value)))
 }
 
 /// The `GARNISH_CONFIG` a command `install` writes into `settings` gets
@@ -545,13 +558,9 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
 pub fn installed_env_target(settings: &Path, env: Option<&str>) -> Option<WriteTarget> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
-    let managed = chain_files_rewriting(Some(settings)).into_iter().find_map(|file| {
-        let managed = cs::MANAGED_LABELS.contains(&file.label);
-        let value = file.keys.env(CONFIG_ENV).filter(|_| managed);
-        value.map(str::to_owned).map(|value| (file, value))
-    });
-    if let Some((file, value)) = managed {
-        env_target(&file.path, file.own, &value)
+    let files = chain_files_rewriting(Some(settings));
+    if let Some((file, value)) = managed_env(&files) {
+        env_target(&file.path, file.own, value)
     } else {
         let user = cs::user_dir(home.as_deref());
         let own = users(settings, user.as_deref(), home.as_deref());
@@ -890,21 +899,81 @@ mod tests {
         let alone = dir.path().join("elsewhere/managed-settings.json");
         assert_eq!(own_settings_files_in(&alone, None), std::slice::from_ref(&alone));
         // The chain's managed layer puts them highest precedence first: the
-        // last by name wins, the managed file loses to every drop-in; a file
-        // with no drop-ins beside it is the layer alone.
-        let layer = layer_of(managed.clone());
+        // last by name wins, the managed file loses to every drop-in, and
+        // a managed file the hook names brings none, whatever sits beside
+        // it (a group-writable platform directory still counts).
+        std::fs::set_permissions(&drop_dir, mode(0o775)).unwrap();
+        let layer = layer_of(managed.clone(), &managed);
         assert_eq!(layer.len(), 402 + links);
         assert_eq!(layer.first(), Some(&("drop-in", drop_dir.join("x399.json"))));
         assert_eq!(layer.get(400 + links), Some(&("drop-in", drop_dir.join("10-garnish.json"))));
         assert_eq!(layer.last(), Some(&("managed", managed.clone())));
-        assert_eq!(layer_of(alone.clone()), [("managed", alone)]);
-        // A directory others can write to is nobody's in particular (a
-        // managed file the hook names in `/tmp`, say): its drop-ins are
-        // not the organisation's.
-        std::fs::set_permissions(&drop_dir, mode(0o777)).unwrap();
-        assert_eq!(layer_of(managed.clone()), [("managed", managed.clone())]);
-        std::fs::set_permissions(&drop_dir, mode(0o775)).unwrap();
-        assert_eq!(layer_of(managed.clone()), [("managed", managed)]);
+        assert_eq!(layer_of(managed.clone(), &alone), [("managed", managed)]);
+    }
+
+    /// Verification of 2026-09-26: a drop-in is part of the managed layer
+    /// wherever the config is named: its command and its `env` value win
+    /// over the managed file's, a demoted one names no file, and
+    /// `install` takes the first value the layer sets, even an empty one.
+    #[test]
+    fn a_drop_in_names_the_config_above_the_managed_file() {
+        let command = |config: &str| {
+            format!(r#"{{"statusLine": {{"command": "garnish --config {config}"}}}}"#)
+        };
+        let env = |config: &str| format!(r#"{{"env": {{"GARNISH_CONFIG": "{config}"}}}}"#);
+        let file = |p: &str| Some(WriteTarget::File(p.into()));
+        let files = [
+            chain_file("drop-in", &command("/drop.toml"), true),
+            chain_file("managed", &command("/base.toml"), true),
+            chain_file("user", r#"{"statusLine": {"command": "garnish"}}"#, true),
+        ];
+        assert_eq!(chain_target(&files, None), file("/drop.toml"));
+        let files = [
+            chain_file("drop-in", &env("/drop.toml"), true),
+            chain_file("managed", &env("/base.toml"), true),
+            chain_file("user", r#"{"statusLine": {"command": "garnish"}}"#, true),
+        ];
+        assert_eq!(chain_target(&files, None), file("/drop.toml"));
+        let (from, value) = managed_env(&files).unwrap();
+        assert_eq!((from.label, value), ("drop-in", "/drop.toml"));
+        let demoted = [
+            chain_file("drop-in", &env("/drop.toml"), false),
+            chain_file("user", r#"{"statusLine": {"command": "garnish"}}"#, true),
+        ];
+        assert!(matches!(chain_target(&demoted, None), Some(WriteTarget::Checkout(_))));
+        let empty =
+            [chain_file("drop-in", &env(""), true), chain_file("managed", &env("/b"), true)];
+        assert_eq!(managed_env(&empty).map(|(_, value)| value), Some(""));
+        let none = [chain_file("project", &env("/p.toml"), false)];
+        assert!(managed_env(&none).is_none(), "only the managed layer");
+    }
+
+    /// Verification of 2026-09-26: the pair beside a rewritten file is
+    /// found as written and once resolved, so a link or `x/..` to a
+    /// checkout's `.claude` file finds the other file of its pair.
+    #[test]
+    fn the_pair_beside_a_rewritten_file_is_found_through_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude = dir.path().join("proj/.claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::write(claude.join("settings.json"), "{}").unwrap();
+        let local = ("local", claude.join("settings.local.json"));
+        assert!(claude_pair(&claude.join("settings.json")).contains(&local));
+        let dotted = claude.join("x/../settings.json");
+        std::fs::create_dir(claude.join("x")).unwrap();
+        let resolved = std::fs::canonicalize(&claude).unwrap().join("settings.local.json");
+        assert!(
+            claude_pair(&dotted).contains(&("local", resolved.clone())),
+            "{:?}",
+            claude_pair(&dotted)
+        );
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("s.json");
+            std::os::unix::fs::symlink(claude.join("settings.json"), &link).unwrap();
+            assert!(claude_pair(&link).contains(&("local", resolved)));
+        }
+        assert_eq!(claude_pair(&dir.path().join("settings.json")), []);
     }
 
     /// Verification of 2026-09-26: an empty `GARNISH_CONFIG` names nothing,
