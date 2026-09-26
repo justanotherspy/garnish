@@ -165,8 +165,9 @@ Open items only; closed ones are in `WORKLOG.md`.
     item above); some setup pickers offer entries the parser then refuses
     in context (the `box` picker on an inner row of a boxed column,
     `fill_pattern` under `fill = false`, an empty `custom…`), each refused
-    cleanly; at `COLUMNS=10` a `custom` frame whose caps and a wide `pad`
-    exceed the box is recut to `…`; absurd payload numbers still print
+    cleanly; at the narrowest boxes (`COLUMNS` 10–17, a box of 10–13
+    cells) a `custom` frame whose caps and a wide `pad` exceed the box is
+    recut to `…`; absurd payload numbers still print
     long durations, countdowns and token counts (percent and cost are
     bounded); without `--absolute` a reinstall replaces an absolute
     program word with the bare `garnish`, and `setup --preset P --install`
@@ -176,7 +177,13 @@ Open items only; closed ones are in `WORKLOG.md`.
     file it rewrites, so in a project whose own `statusLine.command` wins,
     `install` and the other commands can name different configs; one
     nested-box mistake is reported twice (the nesting and "no row joins
-    this box")
+    this box"); a worker given a `--config` that names a missing file runs
+    on the defaults without saying so (it could record a failure);
+    `head_from_git` (the reftable fallback) cuts a name past 4096
+    characters where `head()` refuses one; the `.git/config` section
+    skipper is slower than a plain parse on a crafted 1 MiB file of short
+    backslash-continued lines (11 ms against 7, bounded by the cap; every
+    other hostile shape measured got faster)
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)

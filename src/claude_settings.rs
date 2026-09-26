@@ -385,10 +385,10 @@ fn not_regular() -> std::io::Error {
 /// `open` on a FIFO waits for a writer for ever, and a repository nobody
 /// here built can put one at `.claude/settings.json` (CLAUDE.md, "The
 /// repository is not the user's file"). The path is checked first, so a
-/// device is never opened, and then the handle: whoever can write the
-/// directory can swap a FIFO in between the two, so the open does not
-/// wait ([`O_NONBLOCK`]) and what it opened is checked again (review
-/// 2026-09-25). The file comes with the length its handle gives;
+/// device or FIFO found there is never opened, and then the handle:
+/// whoever can write the directory can swap one in between the two, and
+/// then it is opened, but the open does not wait ([`O_NONBLOCK`]) and what
+/// it opened is refused by the second check (review 2026-09-25). The file comes with the length its handle gives;
 /// `Ok(None)` when there is nothing at `path`; a symlink is followed.
 ///
 /// # Errors

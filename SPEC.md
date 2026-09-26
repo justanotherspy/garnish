@@ -1684,9 +1684,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   worktree `gitdir`, symref chains capped at 5). Every such read is a
   bounded read of a regular file (a FIFO or a link to `/dev/zero` is
   refused, not opened: an archive can carry either and the tick repeats
-  the read every second; the open is `O_NONBLOCK` and the handle is
-  checked again, since whoever can write the directory can swap a FIFO in
-  after the check, review 2026-09-25), contained in the git directory, and a symbolic
+  the read every second; whoever can write the directory can swap one in
+  after the check, so the open is `O_NONBLOCK`, which never waits, and the
+  handle is checked again and refused, review 2026-09-25), contained in the git directory, and a symbolic
   ref may only point under `refs/` or at a capitalised pseudo-ref, as git's
   own `refname_is_safe` has it; a `.git` file's `gitdir:` and a `commondir`
   count only when they name a git directory by git's test (a `HEAD`, an
@@ -1745,14 +1745,18 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   repository's own `.git/config` defines, so in an unpacked archive it ran
   that command on every refresh. `dirty` is `git diff-index --cached --quiet
   HEAD` (anything in the index before the first commit) plus `git -c
-  core.checkStat=default -c core.trustctime=true diff-files --quiet
-  --ignore-submodules=dirty`, which compare stat data and stop at the
-  first difference; the stat rule is pinned, ctime included (which
-  extraction sets, so a crafted index cannot match it; review
-  2026-09-25), so a repository cannot relax it until its files look
-  "racily clean" and get hashed, and a submodule's own dirtiness (a `git
-  status` inside it) is not asked. The accepted cost: a file touched without
-  changing reads as dirty until the user's own git refreshes the index.
+  core.checkStat=default diff-files --quiet --ignore-submodules=dirty`,
+  which compare stat data and stop at the first difference; the stat rule
+  is pinned so a repository cannot relax it until its files look "racily
+  clean" and get hashed, and a submodule's own dirtiness (a `git status`
+  inside it) is not asked. `core.trustctime` stays the repository's:
+  pinned to `true`, it showed a tree git calls clean as dirty for good
+  wherever it is `false` (git's advice where a backup tool or a crawler
+  touches ctime; no refresh rewrites the index's ctime), while with it
+  `false` a crafted index still has to match the file's inode, which an
+  archive cannot arrange (final review of 2026-09-25). The accepted cost: a
+  file touched without changing reads as dirty until the user's own git
+  refreshes the index.
   `status.showStash` no longer matters (porcelain printed `# stash N`).
 - **Fetch** (opt-in, `fetch_interval`) passes `--no-auto-maintenance`,
   `--recurse-submodules=no`, `--upload-pack git-upload-pack` and the remote
@@ -1804,6 +1808,7 @@ Measured with hyperfine (`bench/run.sh`, release build, `-N`, warmup 20,
 | warm tick, full preset (the default rows, every option) | < 3 ms | < 8 ms |
 | warm tick, one row of every module id (settings badges, `account`) | < 3 ms | < 8 ms |
 | warm tick, default preset, `TZ` naming a zone | < 3 ms | < 8 ms |
+| warm tick, default preset, a `.git/config` of 5000 branch sections | < 3 ms | < 8 ms |
 | cold tick (empty cache, git repo) | < 30 ms | — |
 | `refresh --module sync` worker (rev-list, no fetch) | < 50 ms | — |
 

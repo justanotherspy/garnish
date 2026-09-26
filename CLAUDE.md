@@ -170,7 +170,14 @@ documents *first*, with the reason, then start coding.
   the box" holds only with `fill = true` or on a boxed line; otherwise a
   line is at most the box. Never edit a source while a background `make
   check` runs: nextest and the doctests compile after clippy, so the run
-  no longer checks the tree being committed.
+  no longer checks the tree being committed. On a noisy host
+  `valgrind --tool=callgrind` instruction counts are a stable
+  before/after measure where hyperfine's σ is a millisecond, and a
+  `make bench` with agents building beside it is over budget in every
+  scenario: gate on a quiet machine. A PATH-shim `git` that appends
+  `CALL $*` and the variables asked about to a log is how a test sees the
+  child's arguments and environment (`recorded_git_calls`); print only
+  the variables asked about, since a whole environment lands in a CI log.
 - **The payload is read field by field.** A scalar field takes
   `#[serde(deserialize_with = "or_none")]`, a struct-typed one
   `object_or_none` (serde reads a struct from a JSON array by position,
@@ -813,7 +820,13 @@ is that garnish does it on a *timer*, so the rules are:
   anywhere. `git::read_ref_file` resolves the path and requires it to stay
   inside the git directory; every ref read goes through it. Every file
   under `.git` is read through `claude_settings::read_regular` (regular
-  files only, capped: a FIFO hung every tick), and a `gitdir:` or
+  files only, capped: a FIFO hung every tick; the path is checked, then
+  opened `O_NONBLOCK`, a per-platform constant with no libc, and the
+  handle checked again, since a FIFO swapped in after the check hung the
+  open). `.git/config` is streamed 64 KiB at a time through
+  `claude_settings::open_regular`, and a section other than the branch's
+  is jumped over unparsed (5000 sections cost 5 ms a tick before;
+  `bench/run.sh`'s `warm-bigconfig` now gates it). A `gitdir:` or
   `commondir` counts only when it is a git directory by git's own test,
   since the containment check is only as good as the directory it
   contains to. A symbolic ref may point only under `refs/` or at a
@@ -822,11 +835,17 @@ is that garnish does it on a *timer*, so the rules are:
   unasked.** `run_git` prepends `NO_COMMAND_HOOKS` (`-c core.fsmonitor=`),
   runs the `git` found on an absolute `PATH` entry (never a `git` the
   checkout ships), removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
-  kin, and sets `GIT_NO_LAZY_FETCH=1` (git 2.44 and later). Filter drivers
+  kin, sets `GIT_NO_LAZY_FETCH=1` (honoured since the May 2024 security
+  releases, 2.39.4 onward) and, on every call but `fetch`,
+  `GIT_ALLOW_PROTOCOL` empty (`git_call`; `fetch` goes through `git_with`
+  and keeps the user's own), which any git honours, so a lazy fetch in a
+  partial clone can never run the repository's `uploadpack`. Filter drivers
   (`filter.<d>.clean`/`process`) are not cleared; instead nothing on the
   worker path may run a git command that hashes worktree content
   (`status`, porcelain `diff`, `add`): `is_dirty` is `diff-index --cached`
-  plus `diff-files` with `core.checkStat=default` pinned. `fetch` passes
+  plus `diff-files` with `core.checkStat=default` pinned. `core.trustctime`
+  is deliberately *not* pinned: pinned to `true` it showed a tree git calls
+  clean as dirty for good wherever the user set it `false`. `fetch` passes
   `--upload-pack git-upload-pack`, `--no-auto-maintenance`,
   `--recurse-submodules=no`, the remote after `--`, and
   `SSH_ASKPASS_REQUIRE=force` with a failing `SSH_ASKPASS`.
@@ -857,6 +876,12 @@ is that garnish does it on a *timer*, so the rules are:
   "not fresh": that spawns a worker on every tick while git is broken.
 - Entries carry the situation they were computed for (`head`, `upstream`);
   renders pass a validator to `Ctx::cached` so a branch switch is a miss.
+  A validator must accept a failed entry, which carries no values: the
+  reftable one compared `tables` alone and respawned on every tick.
+- `Cache::write` stores a failed entry naming the value when the text
+  would not read back as the same entry, or is over 64 KiB: a value the
+  entry cannot carry (a line break in an upstream, a 64 KiB branch name)
+  was a miss on every tick, and so a worker on every tick.
 - `refresh = 0` is only legal for payload-only modules, and they take only
   0: config validation rejects 0 for a cached module and anything else for
   a payload-only one (it would do nothing).
@@ -866,7 +891,9 @@ is that garnish does it on a *timer*, so the rules are:
   like a key hash, a session directory named like a sanitised id, every
   file inside with a garnish name, never through a link.
 - Every temporary file is unlinked first, then created with `create_new`,
-  so a planted link at a predictable name is never followed. The
+  so a planted link at a predictable name is never followed (`doctor`'s
+  write probe too, through `cache::create_fresh` and
+  `cache::create_private_dir`). The
   last-resort root under the temp directory is `garnish-<uid>`, created
   0700, and refused (no cache, no workers, `doctor` says why) when it is a
   link, writable by others, or someone else's.

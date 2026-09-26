@@ -10,6 +10,9 @@
 #                 lookup are timed too
 #   warm-tz       warm-default with TZ naming a zone (TZ=Europe/Berlin), the
 #                 zone lookup containers and CI machines take
+#   warm-bigconfig  warm-default in a repository whose .git/config holds
+#                 5000 branch sections, the current branch's last: `sync`
+#                 reads that file on every tick
 #   cold          empty cache each run, workers really spawned (first tick of a session)
 #   refresh-sync  the background worker for one cached module
 #
@@ -53,6 +56,21 @@ git init -q -b main "$repo"
   git push -q -u origin main
   echo change > f1.txt
 )
+# Its current branch's section comes after 5000 others (final review of
+# 2026-09-25: the config parser took 5 ms a tick here, and nothing timed it).
+big="$work/big"
+git init -q -b main "$big"
+(
+  cd "$big"
+  git remote add origin "$origin"
+  echo x > x.txt
+  git add . && git commit -qm init
+  git fetch -q origin
+  awk 'BEGIN { for (i = 1; i <= 5000; i++)
+    printf "[branch \"topic/b%d\"]\n\tremote = origin\n\tmerge = refs/heads/topic/b%d\n", i, i }' \
+    >> .git/config
+  git branch -q --set-upstream-to=origin/main main
+)
 
 # A realistic payload whose cwd is the temp repo, in the session the seeding
 # refresh below writes session-scoped entries for.
@@ -60,6 +78,10 @@ payload="$work/payload.json"
 jq --arg cwd "$repo" '.cwd = $cwd | .workspace.current_dir = $cwd | .workspace.project_dir = $cwd
     | .session_id = "sess-bench"' \
   tests/fixtures/payloads/subscription-full.json > "$payload"
+big_payload="$work/big-payload.json"
+jq --arg cwd "$big" '.cwd = $cwd | .workspace.current_dir = $cwd | .workspace.project_dir = $cwd
+    | .session_id = "sess-bench"' \
+  tests/fixtures/payloads/subscription-full.json > "$big_payload"
 
 cache="$work/cache"
 full_cfg="$work/full.toml"
@@ -81,6 +103,7 @@ export GARNISH_MANAGED_SETTINGS=
 
 # Seed the cache with a real refresh so warm ticks read entries within TTL.
 "$BIN" --config "$empty_cfg" refresh --all --session sess-bench --cwd "$repo" >/dev/null
+"$BIN" --config "$empty_cfg" refresh --all --session sess-bench --cwd "$big" >/dev/null
 
 hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
   --export-json "$OUT/warm-default.json" \
@@ -101,6 +124,10 @@ hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
     --export-json "$OUT/warm-tz.json" \
     -n warm-tz "$BIN --config $empty_cfg"
 )
+
+hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$big_payload" \
+  --export-json "$OUT/warm-bigconfig.json" \
+  -n warm-bigconfig "$BIN --config $empty_cfg"
 
 # Cold: empty cache, and the tick really spawns its detached workers (that
 # spawn is the dominant cold cost). The workers outlive the tick, so each

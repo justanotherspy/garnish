@@ -11,12 +11,23 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 - A FIFO or an endless file under `.git` can no longer hang the status
   line: every file there is read only when it is a regular file, up to a
-  size cap. A `gitdir:` or `commondir` counts only when it points at a
-  real git directory.
+  size cap, even when one is swapped in after the check. A `gitdir:` or
+  `commondir` counts only when it points at a real git directory.
 - The dirty check never runs a repository's filter drivers: it asks git's
   plumbing, which compares stat data and never hashes file content. A file
   touched without changing now reads as dirty until your own git
-  refreshes its index. A partial clone never fetches lazily.
+  refreshes its index. A partial clone never fetches lazily, and no git
+  call but `fetch` may use any transport, so a hostile partial clone
+  cannot run its own `uploadpack` even on an older git.
+- A branch or upstream name git cannot have written (a line break, or
+  more than 4096 characters) reads as none, instead of a permanent `⟳`
+  and a worker on every tick.
+- `sync` no longer slows the tick for a large `.git/config`: about 2.3 ms
+  instead of 5.3 ms with 5000 branch sections. Config parsing follows git
+  more closely (`\` before CRLF continues a line, a byte-order mark is
+  skipped, an unknown escape ends the line).
+- `doctor`'s cache probe never writes through a planted link, and creates
+  a missing cache root private to you.
 - Workers take `git` only from absolute `PATH` entries (never a `git` the
   checkout ships), ignore an inherited `GIT_DIR` or `GIT_WORK_TREE`, and
   bound what they read from git. A background `fetch` starts no
@@ -34,9 +45,12 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   shows the previous branch's counts.
 - The fetch-age hint counts from the last fetch that worked, and
   `garnish doctor` lists fetches that keep failing.
-- `branch` and `sync` work in reftable repositories.
+- `branch` and `sync` work in reftable repositories; where git fails
+  there, a worker runs once per refresh instead of on every tick, and a
+  branch that shares its name with a tag shows as `main`, not
+  `heads/main`, with its upstream found.
 - `--config` on the status line command now reaches the background
-  workers.
+  workers, a path that is not UTF-8 included.
 
 *Install, config location and the CLI*
 
