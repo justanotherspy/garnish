@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Print one release's section of CHANGELOG.md on stdout, in the shape of the
 # release's tag message (CLAUDE.md § Release process): the heading text
-# without its `## ` as the subject line, a blank line, then the body.
+# without its `## ` as the subject line, a blank line, then the body. Tag
+# with `git tag -s vX.Y.Z --cleanup=verbatim -F -`: git's default cleanup
+# strips every line starting with `#`, a `### ` subheading included.
 #
 #   scripts/changelog-section.sh 0.2.0            the "## 0.2.0 …" section
 #   scripts/changelog-section.sh v0.2.0           the same (a leading v is dropped)
@@ -19,7 +21,7 @@ version=""
 for arg in "$@"; do
   case "$arg" in
     --body) body_only=1 ;;
-    -h | --help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     -*) echo "changelog-section: unknown flag $arg" >&2; exit 2 ;;
     *) version="$arg" ;;
   esac
