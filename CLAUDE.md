@@ -526,19 +526,25 @@ for the contract and `docs/` for user docs.
 - **One helper per rule, and new code uses it.** `config::write_target`
   (the file a writing command writes: the explicit one, else the
   `--config` the garnish `statusLine.command` passes, else the one
-  `locate` finds, else the default; the command is `CommandFrom::Chain`,
-  the one Claude Code runs here, except for `install`, which passes the
+  `locate` finds, else the default; the command is `CommandFrom::User`,
+  the managed and user files' alone, since a checkout's `.claude/` never
+  chooses a file garnish writes, except for `install`, which passes the
   one it read from the file it rewrites as `CommandFrom::Given`; callers
   resolve `GARNISH_CONFIG` into `Options.config_path`, so a plan reads no
   environment) and its twin
-  `config::read_target` (the same order without the default, for the
-  commands a person runs to look at their config: `config check`,
-  `config show`, `preview`, `doctor`; the tick and its workers use
-  `locate` alone and never read the settings file),
+  `config::read_target` (the same order without the default, following
+  `CommandFrom::Chain`, the command Claude Code runs here, for the
+  commands a person runs to look at their config: `config path`, `config
+  check`, `config show`, `preview`, `doctor`; they read a settings file
+  whole through `claude_settings::read_file_up_to`, where the tick's
+  `read_file` stops at 1 MiB; the tick and its workers use `locate` alone
+  and never read the settings file for this),
   `install::shell_words` (the one splitter for a `statusLine.command`, as
-  `sh` splits it, past `NAME=value` words and a leading `env`; a word
-  records where the home directory goes, `Word::expanded` splices it in,
-  never `Path::join`, which turned `$HOME.x` into a file inside it),
+  `sh` splits it, at space, tab and newline only, past `NAME=value` words
+  and a leading `env`; a word records where its one home directory goes,
+  and `Word::expanded` splices it in, never `Path::join`, which turned
+  `$HOME.x` into a file inside it, and refuses an unquoted one the shell
+  would split or glob),
   `debug::stderr_line` (the render path's only stderr writer: it ignores a
   failed write, since `eprintln!` panics on a stderr nobody reads; a
   source scan allows the macros only in `cli.rs` and `setup/`),

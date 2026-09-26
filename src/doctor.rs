@@ -93,16 +93,31 @@ pub fn report_with(
 }
 
 /// One file of the settings chain as `doctor` reads it: its label
-/// (`managed`, `local`, `project`, `user`), its path and what it holds.
-pub type ChainEntry = (&'static str, PathBuf, FileState);
+/// (`managed`, `local`, `project`, `user`), its path, what it holds as
+/// Claude Code reads it, and whether it is longer than the
+/// [`claude_settings::MAX_SETTINGS_BYTES`] a tick reads, so that the keys
+/// garnish reads on the tick skip it.
+pub type ChainEntry = (&'static str, PathBuf, FileState, bool);
 
 /// A settings chain (the labelled paths of
 /// [`claude_settings::settings_chain`]), read.
+///
+/// Whole, within [`claude_settings::MAX_COMMAND_SETTINGS_BYTES`], as
+/// Claude Code reads it: most rows are about what Claude Code does with a
+/// key (follow-up review of 2026-09-25: past the tick's cap the report said
+/// the status line was not configured while Claude Code ran it).
 #[must_use]
 pub fn read_chain(chain: &[(&'static str, PathBuf)]) -> Vec<ChainEntry> {
     chain
         .iter()
-        .map(|(label, path)| (*label, path.clone(), claude_settings::read_file(path)))
+        .map(|(label, path)| {
+            let state =
+                claude_settings::read_file_up_to(path, claude_settings::MAX_COMMAND_SETTINGS_BYTES);
+            let past_tick_cap = matches!(state, FileState::Keys(_))
+                && std::fs::metadata(path)
+                    .is_ok_and(|m| m.len() > claude_settings::MAX_SETTINGS_BYTES);
+            (*label, path.clone(), state, past_tick_cap)
+        })
         .collect()
 }
 
@@ -142,13 +157,19 @@ pub fn settings_rows(
         .map_or_else(|| "no project directory".to_owned(), |dir| format!("for {}", tilde(dir)));
     let mut rows =
         vec![row("claude settings", &format!("({scope}; the first file that sets a key wins)"))];
-    for (label, path, state) in chain {
+    for (label, path, state, past_tick_cap) in chain {
         let status = match state {
             FileState::Absent => "absent".to_owned(),
             FileState::Unreadable(e) => format!("unreadable: {e}"),
             FileState::Invalid(e) => format!("{e}; garnish reads none of it"),
-            FileState::Keys(keys) => claude_settings::rejected(label, keys)
-                .map_or_else(|| "ok".to_owned(), |why| format!("{why}; garnish reads none of it")),
+            FileState::Keys(keys) => match claude_settings::rejected(label, keys) {
+                Some(why) => format!("{why}; garnish reads none of it"),
+                None if *past_tick_cap => format!(
+                    "ok, but longer than the {} bytes a tick reads: prefersReducedMotion and the badges skip it",
+                    claude_settings::MAX_SETTINGS_BYTES
+                ),
+                None => "ok".to_owned(),
+            },
         };
         // Only the project's own files are named relative to it: a user or
         // managed file under it (a project at `/`) would lose its root.
@@ -158,7 +179,7 @@ pub fn settings_rows(
             .map_or_else(|| tilde(path), |rel| rel.display().to_string());
         rows.push(format!("  {label:<8} {shown}  {status}"));
     }
-    if !chain.iter().any(|(label, _, _)| *label == "user") {
+    if !chain.iter().any(|(label, ..)| *label == "user") {
         rows.push("  user     unknown: HOME is not set".to_owned());
     }
     match resolved(chain, |k| k.status_line_command.clone()) {
@@ -168,7 +189,7 @@ pub fn settings_rows(
         }
         None => rows.push(row("statusLine", "not configured (run `garnish install`)")),
     }
-    let reduced = resolved(chain, |k| k.reduced_motion);
+    let reduced = resolved_on_tick(chain, |k| k.reduced_motion);
     let reduced_on = reduced.as_ref().is_some_and(|(on, _)| *on);
     let animating = session_animate && config.animate.unwrap_or(!reduced_on);
     let interval = resolved(chain, |k| k.refresh_interval);
@@ -254,7 +275,7 @@ fn switch_row(
     id: &str,
     pick: impl Fn(&FileKeys) -> Option<bool>,
 ) -> String {
-    let value = resolved(chain, pick);
+    let value = resolved_on_tick(chain, pick);
     let on = value.as_ref().is_some_and(|(on, _)| *on);
     let mut text =
         value.as_ref().map_or_else(|| "unset".to_owned(), |(on, from)| format!("{on} ({from})"));
@@ -278,7 +299,7 @@ fn switch_row(
 fn tui_row(chain: &[ChainEntry]) -> String {
     let mut skipped = Vec::new();
     let mut decided = None;
-    for (label, _, state) in chain {
+    for (label, _, state, _) in chain {
         let FileState::Keys(keys) = state else { continue };
         match &keys.tui {
             None => {}
@@ -332,7 +353,24 @@ fn resolved<T>(
     chain: &[ChainEntry],
     pick: impl Fn(&FileKeys) -> Option<T>,
 ) -> Option<(T, &'static str)> {
-    chain.iter().find_map(|(label, _, state)| match state {
+    first_set(chain.iter(), pick)
+}
+
+/// [`resolved`] for a key garnish reads on the tick, which skips a file
+/// longer than it reads ([`claude_settings::read_keys`]).
+fn resolved_on_tick<T>(
+    chain: &[ChainEntry],
+    pick: impl Fn(&FileKeys) -> Option<T>,
+) -> Option<(T, &'static str)> {
+    first_set(chain.iter().filter(|(.., past_tick_cap)| !past_tick_cap), pick)
+}
+
+/// The first of `entries` that sets the key `pick` names.
+fn first_set<'a, T>(
+    mut entries: impl Iterator<Item = &'a ChainEntry>,
+    pick: impl Fn(&FileKeys) -> Option<T>,
+) -> Option<(T, &'static str)> {
+    entries.find_map(|(label, _, state, _)| match state {
         FileState::Keys(keys) if claude_settings::rejected(label, keys).is_none() => {
             pick(keys).map(|value| (value, *label))
         }
@@ -827,9 +865,14 @@ mod tests {
     #[test]
     fn only_the_project_files_are_shown_relative_to_it() {
         let chain = vec![
-            ("managed", PathBuf::from("/etc/m.json"), FileState::Absent),
-            ("local", PathBuf::from("/.claude/settings.local.json"), FileState::Absent),
-            ("user", PathBuf::from("/nobody-home/u/.claude/settings.json"), FileState::Absent),
+            ("managed", PathBuf::from("/etc/m.json"), FileState::Absent, false),
+            ("local", PathBuf::from("/.claude/settings.local.json"), FileState::Absent, false),
+            (
+                "user",
+                PathBuf::from("/nobody-home/u/.claude/settings.json"),
+                FileState::Absent,
+                false,
+            ),
         ];
         let (cfg, _) = config::parse("", &SCHEMAS);
         let rows = settings_rows(&chain, Some(Path::new("/")), &cfg, true).join("\n");
@@ -1065,7 +1108,7 @@ mod tests {
             read_chain(&claude_settings::settings_chain(None, p, user.as_deref()))
         };
         let read = chain(Some(&proj), Some(&home));
-        let labels: Vec<&str> = read.iter().map(|(l, _, _)| *l).collect();
+        let labels: Vec<&str> = read.iter().map(|(l, ..)| *l).collect();
         assert_eq!(labels, ["local", "project", "user"]);
         assert!(matches!(read[0].2, FileState::Invalid(_)), "{:?}", read[0]);
         let (cfg, errs) = config::parse("[[line]]\nmodules = [\"vim\", \"clock\"]\n", &SCHEMAS);
@@ -1375,5 +1418,33 @@ mod tests {
         assert!(!local.ends_with(" ok") && local.contains("rejects this file"), "{text}");
         let motion = rows.iter().find(|r| r.starts_with("prefersReducedMotion")).unwrap();
         assert!(motion.ends_with("false (user)"), "{text}");
+    }
+
+    /// Follow-up review of 2026-09-25: a settings file past the tick's
+    /// read cap is still one Claude Code reads, so its status line command
+    /// and its other Claude Code keys count (the report said "not
+    /// configured" while Claude Code ran the command), and only the keys a
+    /// tick reads skip it.
+    #[test]
+    fn a_settings_file_past_the_tick_cap_counts_for_claude_code_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let proj = dir.path().join("proj");
+        let user = dir.path().join("home/.claude");
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        std::fs::create_dir_all(&user).unwrap();
+        let filler = "x".repeat(usize::try_from(claude_settings::MAX_SETTINGS_BYTES).unwrap());
+        let big = serde_json::json!({"filler": filler, "prefersReducedMotion": true,
+            "statusLine": {"type": "command", "command": "garnish", "padding": 1}});
+        std::fs::write(proj.join(".claude/settings.local.json"), big.to_string()).unwrap();
+        std::fs::write(user.join("settings.json"), r#"{"prefersReducedMotion": false}"#).unwrap();
+        let chain = read_chain(&claude_settings::settings_chain(None, Some(&proj), Some(&user)));
+        let (cfg, _) = config::parse("padding = 2\n", &SCHEMAS);
+        let rows = settings_rows(&chain, Some(&proj), &cfg, true);
+        let text = rows.join("\n");
+        let row = |key: &str| rows.iter().find(|r| r.starts_with(key)).unwrap();
+        assert!(row("  local ").contains("ok, but longer than"), "{text}");
+        assert!(row("statusLine").ends_with("command=garnish (local)"), "{text}");
+        assert!(row("  padding").ends_with("1 (local)"), "{text}");
+        assert!(row("prefersReducedMotion").ends_with("false (user)"), "{text}");
     }
 }

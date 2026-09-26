@@ -100,7 +100,13 @@ pub enum CommandFrom<'a> {
     /// The one Claude Code runs from the current directory: the first file
     /// of the settings chain that sets it (managed > local > project >
     /// user, a file Claude Code rejects skipped), as `doctor` shows it.
+    /// For the commands that only read a config.
     Chain,
+    /// The same, from the managed and user files alone: a command that
+    /// writes a config never lets the current directory's checkout, a
+    /// repository nobody here may have built, choose the file it writes
+    /// (CLAUDE.md, "The repository is not the user's file").
+    User,
     /// This command, read from this settings file: `install`, which
     /// rewrites that file and has read all of it already.
     Given {
@@ -116,8 +122,9 @@ pub enum CommandFrom<'a> {
 /// The one named explicitly (`flag`, else `GARNISH_CONFIG`); else the one
 /// the garnish `statusLine.command` of `from` passes with `--config`,
 /// since that is the file its ticks read; else [`locate`]'s; else
-/// [`default_path`]. `config init`, `config path`, `setup` and `install`'s
-/// default config all go through here.
+/// [`default_path`]. `config init` and `setup` go through here with
+/// [`CommandFrom::User`], `install`'s default config with
+/// [`CommandFrom::Given`].
 ///
 /// A default file written while the command names another would never be
 /// read, and one written at the default path while `~/.garnish.toml` is
@@ -153,9 +160,9 @@ pub enum ReadTarget {
 /// The config a command run by hand reads (SPEC § 4).
 ///
 /// [`write_target`]'s order without its default path, following the
-/// command of [`CommandFrom::Chain`], so `config check`, `config show`,
-/// `preview` and `doctor` look at the file `config path` prints, the one
-/// the status line's ticks read. The tick itself and its workers use
+/// command of [`CommandFrom::Chain`], so `config path`, `config check`,
+/// `config show`, `preview` and `doctor` look at the file the status
+/// line's ticks read here. The tick itself and its workers use
 /// [`locate`] alone: the harness hands the tick the command's `--config`,
 /// and the tick passes it on, so neither reads the settings file.
 #[must_use]
@@ -182,16 +189,25 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     let home = cs::home_dir();
     let (settings, command) = match from {
         CommandFrom::Given { settings, command } => (settings.to_path_buf(), command?.to_owned()),
-        CommandFrom::Chain => {
-            let project = std::env::current_dir().ok();
+        CommandFrom::Chain | CommandFrom::User => {
+            let project = match from {
+                CommandFrom::Chain => std::env::current_dir().ok(),
+                _ => None,
+            };
             let user = cs::user_dir(home.as_deref());
             let managed = cs::managed_settings_path();
             let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
-            chain.into_iter().find_map(|(label, file)| match cs::read_file(&file) {
-                cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
-                    keys.status_line_command.map(|command| (file, command))
+            // Read whole, as Claude Code reads it: the cap on a settings
+            // file protects the tick, and only a command run by hand is here
+            // (final review of 2026-09-25: past the cap `install` and every
+            // other command named different configs).
+            chain.into_iter().find_map(|(label, file)| {
+                match cs::read_file_up_to(&file, cs::MAX_COMMAND_SETTINGS_BYTES) {
+                    cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
+                        keys.status_line_command.map(|command| (file, command))
+                    }
+                    _ => None,
                 }
-                _ => None,
             })?
         }
     };

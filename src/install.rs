@@ -90,18 +90,30 @@ struct Word {
     /// an unquoted `~` alone or before a `/` at the word's start, or one
     /// `$HOME` or `${HOME}` anywhere outside single quotes, which `sh`
     /// expands wherever it stands (`$HOME.x` is the home directory with
-    /// `.x` after it, not a file inside it).
+    /// `.x` after it, not a file inside it). A second `$HOME` makes the
+    /// word not [`Word::literal`].
     home: Option<usize>,
+    /// The home directory came from a `$HOME` outside double quotes, which
+    /// `sh` field-splits and globs, where a `~` or a quoted `"$HOME"` it
+    /// passes whole.
+    home_split: bool,
 }
 
 impl Word {
     /// The word as the shell passes it, the home directory spliced in at
-    /// [`Word::home`]; `None` when it has a home and `home` is `None`.
+    /// [`Word::home`]; `None` when it has a home and `home` is `None`, or
+    /// when an unquoted `$HOME` would be split or globbed (a home with a
+    /// blank or `*?[` in it) into something other than one file.
     fn expanded(&self, home: Option<&Path>) -> Option<std::ffi::OsString> {
         let Some(at) = self.home else { return Some(self.text.clone().into()) };
+        let home = home?;
+        let splits = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'*' | b'?' | b'[');
+        if self.home_split && home.as_os_str().as_encoded_bytes().iter().any(splits) {
+            return None;
+        }
         let (before, after) = self.text.split_at_checked(at)?;
         let mut word = std::ffi::OsString::from(before);
-        word.push(home?);
+        word.push(home);
         word.push(after);
         Some(word)
     }
@@ -111,16 +123,18 @@ impl Word {
 /// unquoted `;`, `|`, `&`, newline or leading `#`): enough to find the
 /// program a `statusLine.command` runs and what it passes it.
 ///
-/// Quotes and backslashes are taken out as `sh` takes them out, and a
-/// leading home directory is recognised ([`Word::home`]); any other
-/// expansion makes the word not [`Word::literal`], so nothing is ever read
-/// as a path the shell would not pass.
+/// Words end at `sh`'s blanks alone (space, tab, newline: a non-breaking
+/// space or a carriage return is part of a word). Quotes and backslashes
+/// are taken out as `sh` takes them out, and where the home directory goes
+/// is recorded ([`Word::home`]); any other expansion makes the word not
+/// [`Word::literal`], so nothing is ever read as a path the shell would
+/// not pass.
 fn shell_words(command: &str) -> Vec<Word> {
     let mut words = Vec::new();
     let mut word: Option<Word> = None;
     let mut quote: Option<char> = None;
     let mut chars = command.char_indices().peekable();
-    let ends = |c: char| c.is_whitespace() || matches!(c, ';' | '|' | '&');
+    let ends = |c: char| matches!(c, ' ' | '\t' | '\n' | ';' | '|' | '&');
     while let Some((at, c)) = chars.next() {
         if quote.is_none() && (ends(c) || (c == '#' && word.is_none())) {
             if let Some(mut done) = word.take() {
@@ -139,6 +153,7 @@ fn shell_words(command: &str) -> Vec<Word> {
             end: at,
             literal: true,
             home: None,
+            home_split: false,
         });
         match (quote, c) {
             (Some('\''), '\'') | (Some('"'), '"') => quote = None,
@@ -175,6 +190,7 @@ fn shell_words(command: &str) -> Vec<Word> {
                 if home > 0 && w.home.is_none() {
                     chars.nth(home.saturating_sub(1));
                     w.home = Some(w.text.len());
+                    w.home_split = quote.is_none();
                 } else {
                     w.literal = false;
                     w.text.push(c);
@@ -235,6 +251,22 @@ fn garnish_at(words: &[Word], command: &str) -> Option<usize> {
         (at, program) = rest.find(|(_, w)| !assignment(w))?;
     }
     named(program, "garnish").then_some(at)
+}
+
+/// Most characters of a `--config` word a note quotes: the word comes from
+/// a settings file, which a project may carry, so a note stays one line's
+/// worth (as `doctor` cuts the command it echoes).
+const MAX_SHOWN_WORD_CHARS: usize = 200;
+
+/// `word` cut to [`MAX_SHOWN_WORD_CHARS`], with `…` when something was cut;
+/// quoted with `{:?}` by the caller, which also keeps a control character
+/// from reaching the terminal.
+fn shown_word(word: &str) -> String {
+    let mut shown: String = word.chars().take(MAX_SHOWN_WORD_CHARS).collect();
+    if word.chars().nth(MAX_SHOWN_WORD_CHARS).is_some() {
+        shown.push('…');
+    }
+    shown
 }
 
 /// What the `--config` of a garnish `statusLine.command` names.
@@ -694,8 +726,9 @@ impl std::fmt::Display for Refusal {
             Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
             Self::UnresolvedConfig { settings, word } => write!(
                 f,
-                "{}: statusLine.command passes --config {word:?}, which names no one file garnish can find; pass --config <FILE> to say which",
-                settings.display()
+                "{}: statusLine.command passes --config {:?}, which names no one file garnish can find; pass --config <FILE> to say which",
+                settings.display(),
+                shown_word(word)
             ),
             Self::Unparsable { path, problem } => write!(
                 f,
@@ -931,7 +964,8 @@ impl Steps {
                 path.display()
             )),
             ConfigStep::Unresolved(word) => notes.push(format!(
-                "note: statusLine.command passes --config {word:?}, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which"
+                "note: statusLine.command passes --config {:?}, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which",
+                shown_word(word)
             )),
             ConfigStep::Exists { .. } | ConfigStep::Write { .. } | ConfigStep::Skipped => {}
         }
@@ -1117,6 +1151,49 @@ mod tests {
         assert_eq!(split("a#b"), [word("a#b", true, None)], "a `#` inside a word is text");
         let words = shell_words("  x 'y z' ");
         assert_eq!((words[0].start, words[0].end, words[1].start, words[1].end), (2, 3, 4, 9));
+        // `sh`'s blanks alone end a word (verification of 2026-09-26: a
+        // non-breaking space pasted from a web page cut the path short).
+        assert_eq!(
+            split("a\u{a0}b c\r\td"),
+            [word("a\u{a0}b", true, None), word("c\r", true, None), word("d", true, None)]
+        );
+    }
+
+    /// The home directory an unquoted `$HOME` spells is split and globbed by
+    /// `sh`, so a home with a blank or a glob character in it names no one
+    /// file; quoted, or as `~`, it passes whole.
+    #[test]
+    fn a_home_the_shell_would_split_names_no_file() {
+        let home = Some(Path::new("/my home"));
+        let file = |p: &str| Some(CommandConfig::File(PathBuf::from(p)));
+        let unresolved = |w: &str| Some(CommandConfig::Unresolved(w.to_owned()));
+        for (command, want) in [
+            ("garnish --config $HOME/w.toml", unresolved("$HOME/w.toml")),
+            ("garnish --config=${HOME}/w.toml", unresolved("${HOME}/w.toml")),
+            ("garnish --config \"$HOME/w.toml\"", file("/my home/w.toml")),
+            ("garnish --config ~/w.toml", file("/my home/w.toml")),
+        ] {
+            assert_eq!(command_config(command, home), want, "{command}");
+        }
+        let glob = Some(Path::new("/h*"));
+        assert_eq!(command_config("garnish --config $HOME/w", glob), unresolved("$HOME/w"));
+        assert_eq!(command_config("garnish --config \"$HOME/w\"", glob), file("/h*/w"));
+    }
+
+    /// A quoted `--config` word is cut to a line's worth: it comes from a
+    /// settings file a project may carry.
+    #[test]
+    fn a_quoted_config_word_is_cut() {
+        let long = "x".repeat(5000);
+        let note = Refusal::UnresolvedConfig { settings: PathBuf::from("/s.json"), word: long }
+            .to_string();
+        assert!(note.chars().count() < 400, "{} characters", note.chars().count());
+        assert!(note.contains(&format!("\"{}…\"", "x".repeat(MAX_SHOWN_WORD_CHARS))), "{note}");
+        let short = Refusal::UnresolvedConfig {
+            settings: PathBuf::from("/s.json"),
+            word: "\"~/w\u{1b}.toml\"".to_owned(),
+        };
+        assert!(short.to_string().contains(r#"--config "\"~/w\u{1b}.toml\"""#), "{short}");
     }
 
     /// The config a garnish command passes is the file its ticks read: an

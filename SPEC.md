@@ -740,30 +740,41 @@ none, so a new file never hides an existing `~/.garnish.toml` (2026-09-25
 review: `install` wrote the XDG default and the user's config silently
 stopped applying). Without `--config` and `GARNISH_CONFIG`, a garnish
 `statusLine.command` that passes its own `--config` names the file
-instead, since that is the one its ticks read. The command is the one
-Claude Code runs from the current directory, the first file of the
-settings chain (§ 2.3) that sets one, as `doctor` shows it; for `install`
-it is the one in the file it rewrites (`--settings`, else the user file),
-read in full. `config path` prints that file, `config check`, `config
-show`, `preview` and `doctor` read it, `config init` and `setup` write
-it, and `install` keeps it, writing the default config there when it is
-missing and checking its `padding` against that file. The tick and its
-workers never read the settings file for this: the harness passes the
-tick the command's `--config`, and the tick passes it on. The value is
-read as `sh` would pass it: an unquoted `~` at its start, and a `$HOME`
-or `${HOME}` wherever it stands, is the home directory, with the rest of
-the word glued on as the shell glues it (`$HOME.x` is a file beside the
-home directory's name, not in it); one that names no one
-file (a relative path, which the harness resolves in whatever directory
-it runs the command from, or any other expansion) is never guessed at:
-`install` writes no default config and says why, `doctor` says so and
-shows what the lookup finds, and the others refuse with a one-line note
-asking for `--config` (2026-09-25 review: `install` and `setup --preset P
---install` kept the command's `--config X` but wrote a default file it
-never read, and then `config path` named a file `config check` did not
-check; its final review found the readers following the user file's
-command where a project's won, and `$HOME.x` or `--config=$HOME/x` read
-wrongly). An empty variable is unset (§ 5), and a relative
+instead, since that is the one its ticks read. For the commands that
+read a config (`config path`, which prints it, `config check`, `config
+show`, `preview` and `doctor`) the command is the one Claude Code runs
+from the current directory, the first file of the settings chain (§ 2.3)
+that sets one, as `doctor` shows it. For `config init` and `setup`, which
+write it, it is the first of the managed and user files alone: a
+checkout's own `.claude/` settings may be a repository nobody here
+built, and never choose a file garnish writes (follow-up review of
+2026-09-25), so inside a project whose settings pass another `--config`,
+`config path` names that file while `config init` writes the one the
+user's own command passes, else the lookup's. For
+`install` it is the one in the file it rewrites (`--settings`, else the
+user file); `install` keeps it, writing the default config there when it
+is missing and checking its `padding` against that file. A command run
+by hand reads a settings file whole, as Claude Code does (within 64 MiB),
+not under the tick's 1 MiB cap. The tick and its workers never read the
+settings file for this: the harness passes the tick the command's
+`--config`, and the tick passes it on. The value is read as `sh` would
+pass it: words part at a space, a tab or a newline (not at any other
+Unicode blank), an unquoted `~` at its start, and one `$HOME` or
+`${HOME}` wherever it stands, is the home directory, with the rest of the
+word glued on as the shell glues it (`$HOME.x` is a file beside the home
+directory's name, not in it); one that names no one file (a relative
+path, which the harness resolves in whatever directory it runs the
+command from, a second `$HOME`, an unquoted `$HOME` when the home
+directory holds a blank or a glob character, which the shell would split
+or expand, or any other expansion) is never guessed at: `install` writes
+no default config and says why, `doctor` says so and shows what the
+lookup finds, and the others refuse with a one-line note asking for
+`--config`, the value cut to 200 characters (2026-09-25 review:
+`install` and `setup --preset P --install` kept the command's `--config
+X` but wrote a default file it never read, and then `config path` named
+a file `config check` did not check; its final review found the readers
+following the user file's command where a project's won, and `$HOME.x`
+or `--config=$HOME/x` read wrongly). An empty variable is unset (§ 5), and a relative
 `XDG_CONFIG_HOME` (like a relative `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR`
 for the cache root, § 6) is ignored, as the XDG Base Directory spec says:
 it would name a file in the session's repository.
@@ -1817,7 +1828,7 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
 | `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help`; the tick passes its own `--config` ahead of it (§ 6) |
 | `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json (`--settings`, else the user file of § 2.3, which `CLAUDE_CONFIG_DIR` moves) through symlinks, keeping permissions and every key's place, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent (§ 4's write target), seeded with `padding = 2N` from `--padding N` or else the `statusLine.padding` the file already has (N ≤ 32767; when a config already exists with another `padding`, a stderr note names the value to set); warn on stderr if not on PATH. The command is `garnish`, or with `--absolute` the path this binary is found by: the first `garnish` on PATH, else the path it was run by, that is this very file, else `current_exe()` (a package manager's launcher, not the versioned file it links to, which the next upgrade deletes); a path is shell-quoted where it needs to be. With an explicit config (`--config`, else `GARNISH_CONFIG`) the command is `<program> --config <absolute path>`, so the tick reads that file; otherwise a command that already runs garnish keeps its arguments and only its program word is replaced (2026-09-25 review: a reinstall dropped a hand-written `--config`, and `--config X install` wrote a command that never read X). The program word is found as `sh` splits the command, past any `NAME=value` words and a leading `env` with the assignments after it, and that prefix is kept too (2026-09-25 review: `GARNISH_ANIMATE=0 garnish --config X` read as not running garnish and lost its `--config`). `--refresh-interval` is at least 1, and `--dry-run` says a settings file already up to date is left alone. |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown (a limit's reset in any form but `absolute`, or its `eta`) or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `statusLine.padding` (suggesting the config's `padding = 2N` when it has another value, the most common cause of rows cut with `…`, 2026-09-25 review), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown; such a rejected file's own row says so instead of `ok`, and neither `doctor` nor the tick takes any key from it, 2026-09-25 review) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5). The project's own files are named relative to it, every other path with the home as `~`; a config that cannot be read is named as such, not as one with a bad key. |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses, each read whole as Claude Code reads it; a file past the 1 MiB a tick reads says so, and `prefersReducedMotion`, `sandbox.enabled` and `voice.enabled`, which the tick reads, skip it) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown (a limit's reset in any form but `absolute`, or its `eta`) or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `statusLine.padding` (suggesting the config's `padding = 2N` when it has another value, the most common cause of rows cut with `…`, 2026-09-25 review), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown; such a rejected file's own row says so instead of `ok`, and neither `doctor` nor the tick takes any key from it, 2026-09-25 review) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5). The project's own files are named relative to it, every other path with the home as `~`; a config that cannot be read is named as such, not as one with a bad key. |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
 | `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (`$CLAUDE_CONFIG_DIR/skills/` when that is set, § 2.3; or `D`); `install` runs this too unless `--no-skills` |

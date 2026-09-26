@@ -128,7 +128,10 @@ reads FILE, and a later `install` keeps the arguments and any
 `NAME=value` prefix a garnish command already has; a `--config FILE` kept
 that way is the file every other command then uses: `config path`,
 `config check`, `config show`, `preview`, `doctor`, `config init`, `setup`
-and `install`). The equivalent by hand:
+and `install`; inside a project whose own `.claude/` settings run garnish
+with another `--config`, the commands that read a config follow that one,
+as Claude Code does there, while `config init` and `setup` still write
+yours). The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }

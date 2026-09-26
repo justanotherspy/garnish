@@ -1452,7 +1452,38 @@ fn the_commands_that_read_the_config_read_the_one_the_command_passes() {
     }
     let (out, err, ok) = run(&["doctor"], home, &[]);
     assert!(ok && out.contains("local.toml ok") && !out.contains("work.toml"), "{out}{err}");
+    // The commands that write a config never follow the checkout's own
+    // files (follow-up review: a cloned repository chose the file `config
+    // init` and `setup` wrote): they write the user's command's file.
+    let (_, err, ok) = run(&["config", "init"], home, &[]);
+    assert!(!ok && err.contains("work.toml exists") && !err.contains("local"), "{err}");
+    let (out, err, ok) = run(&["setup", "--preset", "minimal"], home, &[]);
+    assert!(ok && out.contains("work.toml (backup: ") && !out.contains("local"), "{out}{err}");
+    assert_eq!(std::fs::read_to_string(&local).unwrap(), text("LOCALFILE"));
+    // A file Claude Code rejects is skipped: the next one's command counts.
+    let rejected = serde_json::json!({"tui": "bogus", "statusLine": {"type": "command",
+        "command": format!("garnish --config {}", local.display())}});
+    std::fs::write(home.join(".claude/settings.local.json"), rejected.to_string()).unwrap();
+    let (out, err, ok) = run(&["config", "path"], home, &[]);
+    assert!(ok && out.trim_end() == work.to_str().unwrap(), "{out}{err}");
     std::fs::remove_file(home.join(".claude/settings.local.json")).unwrap();
+
+    // `$HOME` is read where the shell expands it, and a home the shell
+    // would split names no one file.
+    let h = home.display();
+    for (command, file) in [
+        ("garnish --config=$HOME/w.toml", format!("{h}/w.toml")),
+        ("garnish --config $HOME.w.toml", format!("{h}.w.toml")),
+    ] {
+        hook(command);
+        let (out, err, ok) = run(&["config", "path"], home, &[]);
+        assert!(ok && out.trim_end() == file, "{command}: {out}{err}");
+    }
+    let spaced = home.join("my home");
+    std::fs::create_dir_all(&spaced).unwrap();
+    hook("garnish --config $HOME/w.toml");
+    let (out, err, ok) = run(&["config", "path"], home, &[("HOME", spaced.to_str().unwrap())]);
+    assert!(!ok && out.is_empty() && err.contains("\"$HOME/w.toml\""), "{out}{err}");
 
     // A config named explicitly still wins over the command's.
     let (out, err, ok) =
@@ -1483,6 +1514,15 @@ fn install_follows_the_command_of_a_settings_file_past_the_read_cap() {
     assert!(ok, "{out}{err}");
     assert!(!home.join(".config/garnish/garnish.toml").exists(), "{out}{err}");
     assert!(err.contains("work.toml already exists"), "{out}{err}");
+    // The other commands read the settings file past the cap too, so they
+    // name the file `install` kept (follow-up review: `config path` named
+    // the default one and `config init` wrote it).
+    let (out, err, ok) = run(&["config", "path"], home, &[]);
+    assert!(ok && out.trim_end() == work.to_str().unwrap(), "{out}{err}");
+    let (_, err, ok) = run(&["config", "init"], home, &[]);
+    assert!(!ok && err.contains("work.toml exists"), "{err}");
+    let (out, err, ok) = run(&["doctor"], home, &[]);
+    assert!(ok && out.contains("work.toml ok"), "{out}{err}");
 }
 
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,

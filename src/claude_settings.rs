@@ -213,6 +213,12 @@ pub fn settings_chain(
 /// file nobody controls cannot make a tick slow.
 pub const MAX_SETTINGS_BYTES: u64 = 1 << 20;
 
+/// Most bytes a command run by hand reads of a settings file to find its
+/// `statusLine.command` ([`read_file_up_to`]): no tick waits on it, so the
+/// file is read as Claude Code reads it, whole, within a bound that only a
+/// file nobody wrote by hand can reach.
+pub const MAX_COMMAND_SETTINGS_BYTES: u64 = 64 << 20;
+
 /// The `tui` key: which renderer Claude Code draws the screen with, which
 /// decides what a tall status line does (SPEC § 2.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -443,20 +449,25 @@ pub fn read_regular(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>>
 /// Read one settings file of the chain, at most [`MAX_SETTINGS_BYTES`] of it.
 #[must_use]
 pub fn read_file(path: &Path) -> FileState {
+    read_file_up_to(path, MAX_SETTINGS_BYTES)
+}
+
+/// [`read_file`] with another cap: [`MAX_COMMAND_SETTINGS_BYTES`] for a
+/// command run by hand looking for the `statusLine.command`.
+#[must_use]
+pub fn read_file_up_to(path: &Path, limit: u64) -> FileState {
     // Bytes first, then UTF-8: reading straight into a `String` validates
     // the *truncated* stream, so a file over the cap whose cut lands inside
     // a multi-byte character failed as "unreadable: stream did not contain
     // valid UTF-8" and sent the reader looking for corruption that was not
     // there. One byte past the cap tells an over-long file from one at it.
-    let bytes = match read_regular(path, MAX_SETTINGS_BYTES.saturating_add(1)) {
+    let bytes = match read_regular(path, limit.saturating_add(1)) {
         Ok(Some(bytes)) => bytes,
         Ok(None) => return FileState::Absent,
         Err(e) => return FileState::Unreadable(e.to_string()),
     };
-    if u64::try_from(bytes.len()).is_ok_and(|n| n > MAX_SETTINGS_BYTES) {
-        return FileState::Invalid(format!(
-            "longer than the {MAX_SETTINGS_BYTES} bytes garnish reads"
-        ));
+    if u64::try_from(bytes.len()).is_ok_and(|n| n > limit) {
+        return FileState::Invalid(format!("longer than the {limit} bytes garnish reads"));
     }
     match String::from_utf8(bytes) {
         Ok(text) => parse_settings_json(&text).map_or_else(FileState::Invalid, FileState::Keys),
