@@ -76,7 +76,7 @@ pub fn shell_quote(word: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Word {
     /// The word with its quotes and escapes taken out, and without the
-    /// home directory it begins with when [`Word::home`] says so.
+    /// home directory [`Word::home`] places in it.
     text: String,
     /// Where the word starts in the command line, in bytes.
     start: usize,
@@ -86,9 +86,25 @@ struct Word {
     /// directory) spells it: every quote closed, nothing expanded, globbed
     /// or redirected.
     literal: bool,
-    /// The word begins with the home directory: an unquoted `~` alone or
-    /// before a `/`, or a `$HOME` or `${HOME}` with nothing before it.
-    home: bool,
+    /// Where in `text` (a byte offset) the shell puts the home directory:
+    /// an unquoted `~` alone or before a `/` at the word's start, or one
+    /// `$HOME` or `${HOME}` anywhere outside single quotes, which `sh`
+    /// expands wherever it stands (`$HOME.x` is the home directory with
+    /// `.x` after it, not a file inside it).
+    home: Option<usize>,
+}
+
+impl Word {
+    /// The word as the shell passes it, the home directory spliced in at
+    /// [`Word::home`]; `None` when it has a home and `home` is `None`.
+    fn expanded(&self, home: Option<&Path>) -> Option<std::ffi::OsString> {
+        let Some(at) = self.home else { return Some(self.text.clone().into()) };
+        let (before, after) = self.text.split_at_checked(at)?;
+        let mut word = std::ffi::OsString::from(before);
+        word.push(home?);
+        word.push(after);
+        Some(word)
+    }
 }
 
 /// The words of `command` up to the end of its first simple command (an
@@ -122,7 +138,7 @@ fn shell_words(command: &str) -> Vec<Word> {
             start: at,
             end: at,
             literal: true,
-            home: false,
+            home: None,
         });
         match (quote, c) {
             (Some('\''), '\'') | (Some('"'), '"') => quote = None,
@@ -156,9 +172,9 @@ fn shell_words(command: &str) -> Vec<Word> {
                 } else {
                     0
                 };
-                if home > 0 && w.text.is_empty() && !w.home {
+                if home > 0 && w.home.is_none() {
                     chars.nth(home.saturating_sub(1));
-                    w.home = true;
+                    w.home = Some(w.text.len());
                 } else {
                     w.literal = false;
                     w.text.push(c);
@@ -166,7 +182,7 @@ fn shell_words(command: &str) -> Vec<Word> {
             }
             (None, '~') if !started => {
                 if chars.peek().is_none_or(|&(_, next)| next == '/' || ends(next)) {
-                    w.home = true;
+                    w.home = Some(0);
                 } else {
                     // `~user`, which garnish does not look up.
                     w.literal = false;
@@ -204,8 +220,14 @@ fn is_assignment(raw: &str) -> bool {
 /// program, `env` with an option included.
 fn garnish_at(words: &[Word], command: &str) -> Option<usize> {
     let assignment = |w: &Word| command.get(w.start..w.end).is_some_and(is_assignment);
+    // A name after a home directory must follow it whole (`~/bin/garnish`).
     let named = |w: &Word, name: &str| {
-        w.literal && (w.text.ends_with(&format!("/{name}")) || (!w.home && w.text == name))
+        let path = format!("/{name}");
+        w.literal
+            && w.home.map_or_else(
+                || w.text == name || w.text.ends_with(&path),
+                |at| w.text.get(at..).is_some_and(|rest| rest.ends_with(&path)),
+            )
     };
     let mut rest = words.iter().enumerate().skip_while(|(_, w)| assignment(w));
     let (mut at, mut program) = rest.next()?;
@@ -230,35 +252,33 @@ pub enum CommandConfig {
 /// The config file a garnish `statusLine.command` passes with `--config`
 /// (or `--config=`), which is the file its ticks read; `None` when the
 /// command does not run garnish ([`garnish_at`]) or passes no config.
-/// `home` stands for a leading `~`, `$HOME` or `${HOME}`.
+/// `home` is what `~`, `$HOME` and `${HOME}` expand to ([`Word::home`]).
 #[must_use]
 pub fn command_config(command: &str, home: Option<&Path>) -> Option<CommandConfig> {
+    const FLAG: &str = "--config=";
     let words = shell_words(command);
     let at = garnish_at(&words, command)?;
     let raw = |w: &Word| command.get(w.start..w.end).unwrap_or_default().to_owned();
     let mut args = words.iter().skip(at).skip(1);
     let (value, written) = loop {
         let word = args.next()?;
-        if word.home {
+        // A home directory among the flag's own letters makes it another
+        // word (`$HOME--config`, `--config$HOME`).
+        if word.home.is_some_and(|h| h < FLAG.len()) {
             continue;
         }
-        if word.literal && word.text == "--config" {
+        if word.literal && word.home.is_none() && word.text == "--config" {
             let value = args.next()?;
             break (value.clone(), raw(value));
         }
-        if let Some(rest) = word.text.strip_prefix("--config=") {
+        if let Some(rest) = word.text.strip_prefix(FLAG) {
             let raw = raw(word);
-            let written = raw.strip_prefix("--config=").map_or_else(|| raw.clone(), str::to_owned);
-            break (Word { text: rest.to_owned(), ..word.clone() }, written);
+            let written = raw.strip_prefix(FLAG).map_or_else(|| raw.clone(), str::to_owned);
+            let home = word.home.map(|h| h.saturating_sub(FLAG.len()));
+            break (Word { text: rest.to_owned(), home, ..word.clone() }, written);
         }
     };
-    let path = if !value.literal {
-        None
-    } else if value.home {
-        home.map(|h| h.join(value.text.trim_start_matches('/')))
-    } else {
-        Some(PathBuf::from(&value.text))
-    };
+    let path = value.literal.then(|| value.expanded(home)).flatten().map(PathBuf::from);
     Some(
         path.filter(|p| p.is_absolute())
             .map_or(CommandConfig::Unresolved(written), CommandConfig::File),
@@ -674,8 +694,9 @@ impl std::fmt::Display for Refusal {
             Self::Exists(path) => write!(f, "{} exists; pass --force to overwrite", path.display()),
             Self::UnresolvedConfig { settings, word } => write!(
                 f,
-                "{}: statusLine.command passes --config {word:?}, which names no one file garnish can find; pass --config <FILE> to say which",
-                settings.display()
+                "{}: statusLine.command passes `--config {}`, which names no one file garnish can find; pass --config <FILE> to say which",
+                settings.display(),
+                crate::ansi::plain_text(word)
             ),
             Self::Unparsable { path, problem } => write!(
                 f,
@@ -794,7 +815,8 @@ impl Steps {
         let current = settings_object(existing.as_deref().unwrap_or("")).map_err(unparsable)?;
         let status = current.get("statusLine");
         let merged = merge(existing.as_deref().unwrap_or(""), &plan).map_err(unparsable)?;
-        let command = plan.command(status.and_then(|s| s.get("command")).and_then(Value::as_str));
+        let old_command = status.and_then(|s| s.get("command")).and_then(Value::as_str);
+        let command = plan.command(old_command);
         // The harness pads both sides, so the config mirrors
         // statusLine.padding doubled (SPEC § 2.1): the flag's, else the one
         // the file keeps, which the merge leaves in place.
@@ -805,9 +827,14 @@ impl Steps {
         let padding = options.padding.or(kept).map(|p| p.saturating_mul(2));
         let config = if options.write_config {
             // The file the written command reads: the explicit one, else
-            // the one the kept command passes, else the default.
-            match crate::config::write_target(options.config_path.as_deref(), Some(&plan.settings))
-            {
+            // the one the kept command passes, else the default. The
+            // command is the one just read from the file being rewritten,
+            // whatever its size, never a second, capped read of it.
+            let from = crate::config::CommandFrom::Given {
+                settings: &plan.settings,
+                command: old_command,
+            };
+            match crate::config::write_target(options.config_path.as_deref(), from) {
                 WriteTarget::File(path) if path.exists() => {
                     // Noted only when the file says otherwise, so a
                     // reinstall over a matching config is quiet.
@@ -905,7 +932,8 @@ impl Steps {
                 path.display()
             )),
             ConfigStep::Unresolved(word) => notes.push(format!(
-                "note: statusLine.command passes --config {word:?}, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which"
+                "note: statusLine.command passes `--config {}`, which names no one file garnish can find, so no default config is written; pass --config <FILE> to say which",
+                crate::ansi::plain_text(word)
             )),
             ConfigStep::Exists { .. } | ConfigStep::Write { .. } | ConfigStep::Skipped => {}
         }
@@ -1024,31 +1052,41 @@ mod tests {
         assert!(merged.contains("\"command\": \"garnish --config /x.toml\""), "{merged}");
     }
 
-    /// The splitter takes quotes and backslashes out as `sh` does, knows a
-    /// leading home directory, marks every other expansion, and stops at
-    /// the end of the first simple command.
+    /// The splitter takes quotes and backslashes out as `sh` does, knows
+    /// where the home directory goes, marks every other expansion, and
+    /// stops at the end of the first simple command.
     #[test]
     fn shell_words_split_as_sh_does() {
-        let split = |command: &str| -> Vec<(String, bool, bool)> {
+        let split = |command: &str| -> Vec<(String, bool, Option<usize>)> {
             shell_words(command).into_iter().map(|w| (w.text, w.literal, w.home)).collect()
         };
-        let word = |text: &str, literal: bool, home: bool| (text.to_owned(), literal, home);
+        let word =
+            |text: &str, literal: bool, home: Option<usize>| (text.to_owned(), literal, home);
         assert_eq!(
             split(r#"  a 'b c'"d e"f\ g  "h\"i\$j\k" "#),
-            [
-                word("a", true, false),
-                word("b cd ef g", true, false),
-                word(r#"h"i$j\k"#, true, false)
-            ]
+            [word("a", true, None), word("b cd ef g", true, None), word(r#"h"i$j\k"#, true, None)]
         );
         assert_eq!(
             split(r#"~ ~/x "$HOME/y" ${HOME} ''$HOME/z"#),
             [
-                word("", true, true),
-                word("/x", true, true),
-                word("/y", true, true),
-                word("", true, true),
-                word("/z", true, true)
+                word("", true, Some(0)),
+                word("/x", true, Some(0)),
+                word("/y", true, Some(0)),
+                word("", true, Some(0)),
+                word("/z", true, Some(0))
+            ]
+        );
+        // `$HOME` expands wherever it stands, and what follows it is glued
+        // on, not joined as a path (final review: `$HOME.w` read as a file
+        // inside the home directory, `--config=$HOME/w` as no file at all).
+        assert_eq!(
+            split(r#"a$HOME $HOME.w "${HOME}"_w --config=$HOME/w '$HOME'"#),
+            [
+                word("a", true, Some(1)),
+                word(".w", true, Some(0)),
+                word("_w", true, Some(0)),
+                word("--config=/w", true, Some(9)),
+                word("$HOME", true, None)
             ]
         );
         // Anything the shell would rewrite, or that garnish cannot follow.
@@ -1056,7 +1094,7 @@ mod tests {
             "~root/x",
             "$HOMEX",
             "${HOME:-/x}",
-            "a$HOME",
+            "$HOME$HOME",
             "$X",
             "`pwd`/x",
             "\"$(pwd)\"",
@@ -1072,17 +1110,13 @@ mod tests {
         // A `~` quoted or past the start stays a `~`, and `\$HOME` stays text.
         assert_eq!(
             split(r#""~/x"x~ \$HOME"#),
-            [word("~/xx~", true, false), word("$HOME", true, false)]
+            [word("~/xx~", true, None), word("$HOME", true, None)]
         );
         // The first simple command only.
         for command in ["a b; c", "a b | c", "a b && c", "a b\nc", "a b # c", "a b&c"] {
-            assert_eq!(
-                split(command),
-                [word("a", true, false), word("b", true, false)],
-                "{command}"
-            );
+            assert_eq!(split(command), [word("a", true, None), word("b", true, None)], "{command}");
         }
-        assert_eq!(split("a#b"), [word("a#b", true, false)], "a `#` inside a word is text");
+        assert_eq!(split("a#b"), [word("a#b", true, None)], "a `#` inside a word is text");
         let words = shell_words("  x 'y z' ");
         assert_eq!((words[0].start, words[0].end, words[1].start, words[1].end), (2, 3, 4, 9));
     }
@@ -1106,7 +1140,17 @@ mod tests {
             ("garnish --config ${HOME}/w.toml", file("/h/w.toml")),
             ("garnish --config w.toml", unresolved("w.toml")),
             ("garnish --config=~/w.toml", unresolved("~/w.toml")),
-            ("garnish --config=$HOME/w.toml", unresolved("$HOME/w.toml")),
+            // Final review: `$HOME` is spliced in where it stands, as `sh`
+            // does, in a `--config=` word too.
+            ("garnish --config=$HOME/w.toml", file("/h/w.toml")),
+            ("garnish --config=\"${HOME}/w\"", file("/h/w")),
+            ("garnish --config ${HOME}w.toml", file("/hw.toml")),
+            ("garnish --config \"$HOME\"w.toml", file("/hw.toml")),
+            ("garnish --config $HOME.w.toml", file("/h.w.toml")),
+            ("garnish --config $HOME-w.toml", file("/h-w.toml")),
+            ("garnish --config a$HOME", unresolved("a$HOME")),
+            ("garnish --config$HOME /x.toml", None),
+            ("garnish $HOME--config /x.toml", None),
             ("garnish \"--config=/a b\"", file("/a b")),
             ("garnish --config \"~/w.toml\"", unresolved("\"~/w.toml\"")),
             ("garnish --config $XDG_CONFIG_HOME/g.toml", unresolved("$XDG_CONFIG_HOME/g.toml")),

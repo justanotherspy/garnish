@@ -93,24 +93,42 @@ pub enum WriteTarget {
     },
 }
 
+/// Which `statusLine.command` a config target follows ([`write_target`],
+/// [`read_target`]).
+#[derive(Debug, Clone, Copy)]
+pub enum CommandFrom<'a> {
+    /// The one Claude Code runs from the current directory: the first file
+    /// of the settings chain that sets it (managed > local > project >
+    /// user, a file Claude Code rejects skipped), as `doctor` shows it.
+    Chain,
+    /// This command, read from this settings file: `install`, which
+    /// rewrites that file and has read all of it already.
+    Given {
+        /// The settings file.
+        settings: &'a Path,
+        /// Its `statusLine.command`, if it has one.
+        command: Option<&'a str>,
+    },
+}
+
 /// The file a command that writes a config writes (SPEC § 4).
 ///
 /// The one named explicitly (`flag`, else `GARNISH_CONFIG`); else the one
-/// the garnish `statusLine.command` of `settings` (the user settings file
-/// when `None`) passes with `--config`, since that is the file its ticks
-/// read; else [`locate`]'s; else [`default_path`]. `config init`, `config
-/// path`, `setup` and `install`'s default config all go through here.
+/// the garnish `statusLine.command` of `from` passes with `--config`,
+/// since that is the file its ticks read; else [`locate`]'s; else
+/// [`default_path`]. `config init`, `config path`, `setup` and `install`'s
+/// default config all go through here.
 ///
 /// A default file written while the command names another would never be
 /// read, and one written at the default path while `~/.garnish.toml` is
 /// the config would be preferred to it by [`locate`]: either way the
 /// user's config would stop applying without a word.
 #[must_use]
-pub fn write_target(flag: Option<&Path>, settings: Option<&Path>) -> WriteTarget {
+pub fn write_target(flag: Option<&Path>, from: CommandFrom<'_>) -> WriteTarget {
     if let Some(p) = explicit(flag) {
         return WriteTarget::File(p);
     }
-    command_target(settings).unwrap_or_else(|| {
+    command_target(from).unwrap_or_else(|| {
         locate(None).or_else(default_path).map_or(WriteTarget::NoHome, WriteTarget::File)
     })
 }
@@ -134,9 +152,10 @@ pub enum ReadTarget {
 
 /// The config a command run by hand reads (SPEC § 4).
 ///
-/// [`write_target`]'s order without its default path, so `config check`,
-/// `config show`, `preview` and `doctor` look at the file `config path`
-/// prints, the one the status line's ticks read. The tick itself and its workers use
+/// [`write_target`]'s order without its default path, following the
+/// command of [`CommandFrom::Chain`], so `config check`, `config show`,
+/// `preview` and `doctor` look at the file `config path` prints, the one
+/// the status line's ticks read. The tick itself and its workers use
 /// [`locate`] alone: the harness hands the tick the command's `--config`,
 /// and the tick passes it on, so neither reads the settings file.
 #[must_use]
@@ -144,7 +163,7 @@ pub fn read_target(flag: Option<&Path>) -> ReadTarget {
     if let Some(p) = explicit(flag) {
         return ReadTarget::File(p);
     }
-    match command_target(None) {
+    match command_target(CommandFrom::Chain) {
         Some(WriteTarget::File(p)) => ReadTarget::File(p),
         Some(WriteTarget::Unresolved { settings, word }) => {
             ReadTarget::Unresolved { settings, word }
@@ -155,18 +174,27 @@ pub fn read_target(flag: Option<&Path>) -> ReadTarget {
     }
 }
 
-/// The `--config` the garnish `statusLine.command` of `settings` (the user
-/// settings file when `None`) passes, as a [`WriteTarget::File`] or
-/// [`WriteTarget::Unresolved`]; `None` when there is no such command or it
-/// passes none.
-fn command_target(settings: Option<&Path>) -> Option<WriteTarget> {
-    let settings =
-        settings.map(Path::to_path_buf).or_else(crate::install::default_settings_path)?;
-    let command = match crate::claude_settings::read_file(&settings) {
-        crate::claude_settings::FileState::Keys(keys) => keys.status_line_command,
-        _ => None,
-    }?;
-    let home = crate::claude_settings::home_dir();
+/// The `--config` the garnish `statusLine.command` of `from` passes, as a
+/// [`WriteTarget::File`] or [`WriteTarget::Unresolved`]; `None` when there
+/// is no such command or it passes none.
+fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
+    use crate::claude_settings as cs;
+    let home = cs::home_dir();
+    let (settings, command) = match from {
+        CommandFrom::Given { settings, command } => (settings.to_path_buf(), command?.to_owned()),
+        CommandFrom::Chain => {
+            let project = std::env::current_dir().ok();
+            let user = cs::user_dir(home.as_deref());
+            let managed = cs::managed_settings_path();
+            let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
+            chain.into_iter().find_map(|(label, file)| match cs::read_file(&file) {
+                cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
+                    keys.status_line_command.map(|command| (file, command))
+                }
+                _ => None,
+            })?
+        }
+    };
     match crate::install::command_config(&command, home.as_deref())? {
         crate::install::CommandConfig::File(p) => Some(WriteTarget::File(p)),
         crate::install::CommandConfig::Unresolved(word) => {

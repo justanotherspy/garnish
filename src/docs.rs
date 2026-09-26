@@ -1028,7 +1028,7 @@ pub fn config_page() -> String {
     let _ = writeln!(o, "# Configuration reference\n");
     let _ = writeln!(
         o,
-        "garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init`, `garnish setup` and `garnish install` write the file found this way, and the XDG one only when there is none. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.\n"
+        "garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init`, `garnish setup` and `garnish install` write the file found this way, and the XDG one only when there is none. When the `statusLine.command` Claude Code runs passes its own `--config` (and neither `--config` nor `$GARNISH_CONFIG` names another), that file is the one every command but the status line itself uses: `config path`, `config check`, `config show`, `config init`, `preview`, `doctor`, `setup` and `install`. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.\n"
     );
     let _ = writeln!(
         o,

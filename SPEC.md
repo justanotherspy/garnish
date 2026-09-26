@@ -738,16 +738,21 @@ writes the file this order finds and the XDG path only when there is
 none, so a new file never hides an existing `~/.garnish.toml` (2026-09-25
 review: `install` wrote the XDG default and the user's config silently
 stopped applying). Without `--config` and `GARNISH_CONFIG`, a garnish
-`statusLine.command` in the user settings file (`install --settings`'s
-file for `install`) that passes its own `--config` names the file
-instead, since that is the one its ticks read: `config path` prints it,
-`config check`, `config show`, `preview` and `doctor` read it, `config
-init` and `setup` write it, and `install` keeps it, writing the default
-config there when it is missing and checking its `padding` against that
-file. The tick and its workers never read the settings file for this:
-the harness passes the tick the command's `--config`, and the tick passes
-it on. The value is read as `sh` would pass it, a leading
-`~`, `$HOME` or `${HOME}` as the home directory; one that names no one
+`statusLine.command` that passes its own `--config` names the file
+instead, since that is the one its ticks read. The command is the one
+Claude Code runs from the current directory, the first file of the
+settings chain (§ 2.3) that sets one, as `doctor` shows it; for `install`
+it is the one in the file it rewrites (`--settings`, else the user file),
+read in full. `config path` prints that file, `config check`, `config
+show`, `preview` and `doctor` read it, `config init` and `setup` write
+it, and `install` keeps it, writing the default config there when it is
+missing and checking its `padding` against that file. The tick and its
+workers never read the settings file for this: the harness passes the
+tick the command's `--config`, and the tick passes it on. The value is
+read as `sh` would pass it: an unquoted `~` at its start, and a `$HOME`
+or `${HOME}` wherever it stands, is the home directory, with the rest of
+the word glued on as the shell glues it (`$HOME.x` is a file beside the
+home directory's name, not in it); one that names no one
 file (a relative path, which the harness resolves in whatever directory
 it runs the command from, or any other expansion) is never guessed at:
 `install` writes no default config and says why, `doctor` says so and
@@ -755,7 +760,9 @@ shows what the lookup finds, and the others refuse with a one-line note
 asking for `--config` (2026-09-25 review: `install` and `setup --preset P
 --install` kept the command's `--config X` but wrote a default file it
 never read, and then `config path` named a file `config check` did not
-check). An empty variable is unset (§ 5), and a relative
+check; its final review found the readers following the user file's
+command where a project's won, and `$HOME.x` or `--config=$HOME/x` read
+wrongly). An empty variable is unset (§ 5), and a relative
 `XDG_CONFIG_HOME` (like a relative `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR`
 for the cache root, § 6) is ignored, as the XDG Base Directory spec says:
 it would name a file in the session's repository.

@@ -1373,7 +1373,7 @@ fn the_config_a_command_passes_is_the_config_the_writing_commands_write() {
     for args in [&["config", "path"][..], &["config", "init"], &["setup", "--preset", "minimal"]] {
         let (out, err, ok) = run(args, home, &[]);
         assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
-        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
+        assert!(err.contains("`--config rel.toml`") && err.contains("--config <FILE>"), "{err}");
     }
     assert!(!xdg.exists() && !home.join("rel.toml").exists());
     // A config named explicitly still wins over the command's.
@@ -1431,15 +1431,61 @@ fn the_commands_that_read_the_config_read_the_one_the_command_passes() {
     for args in [&["config", "check"][..], &["config", "show"], &preview] {
         let (out, err, ok) = run(args, home, &[]);
         assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
-        assert!(err.contains("\"rel.toml\"") && err.contains("--config <FILE>"), "{err}");
+        assert!(err.contains("`--config rel.toml`") && err.contains("--config <FILE>"), "{err}");
     }
     let (out, err, ok) = run(&["doctor"], home, &[]);
-    assert!(ok && out.contains("\"rel.toml\"") && out.contains("garnish.toml ok"), "{out}{err}");
+    assert!(
+        ok && out.contains("`--config rel.toml`") && out.contains("garnish.toml ok"),
+        "{out}{err}"
+    );
+
+    // The command Claude Code runs here is the first file of the chain that
+    // sets one (final review: the readers followed the user file's command
+    // while doctor showed a local one winning). The local file wins here.
+    hook(&format!("garnish --config {}", work.display()));
+    let local = home.join("local.toml");
+    std::fs::write(&local, text("LOCALFILE")).unwrap();
+    let status = serde_json::json!({"statusLine": {"type": "command",
+        "command": format!("garnish --config {}", local.display())}});
+    std::fs::write(home.join(".claude/settings.local.json"), status.to_string()).unwrap();
+    for args in [&["config", "path"][..], &["config", "check"], &["config", "show"], &preview] {
+        let (out, err, _) = run(args, home, &[]);
+        assert!(!out.contains("work.toml") && !out.contains("WORKFILE"), "{args:?}: {out}{err}");
+        assert!(out.contains("local.toml") || out.contains("LOCALFILE"), "{args:?}: {out}{err}");
+    }
+    let (out, err, ok) = run(&["doctor"], home, &[]);
+    assert!(ok && out.contains("local.toml ok") && !out.contains("work.toml"), "{out}{err}");
+    std::fs::remove_file(home.join(".claude/settings.local.json")).unwrap();
 
     // A config named explicitly still wins over the command's.
     let (out, err, ok) =
         run(&["config", "check"], home, &[("GARNISH_CONFIG", xdg.to_str().unwrap())]);
     assert!(ok && out.trim_end().ends_with("garnish.toml: ok"), "{out}{err}");
+}
+
+/// Final review: `install` reads the whole settings file it rewrites, so
+/// the config its command passes counts even past the 1 MiB a tick reads
+/// of a settings file; it used to be read again under that cap, dropped,
+/// and a default config written that the command never reads.
+#[test]
+fn install_follows_the_command_of_a_settings_file_past_the_read_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let settings = home.join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let work = home.join("work.toml");
+    std::fs::write(&work, "padding = 4\n").unwrap();
+    let big = "x".repeat(1_100_000);
+    let command = format!("garnish --config {}", work.display());
+    let status = serde_json::json!({
+        "filler": big,
+        "statusLine": {"type": "command", "padding": 1, "command": command}
+    });
+    std::fs::write(&settings, status.to_string()).unwrap();
+    let (out, err, ok) = run(&["install", "--no-skills", "--absolute"], home, &[]);
+    assert!(ok, "{out}{err}");
+    assert!(!home.join(".config/garnish/garnish.toml").exists(), "{out}{err}");
+    assert!(err.contains("work.toml already exists"), "{out}{err}");
 }
 
 /// SPEC § 4: `~/.garnish.toml` is the config when there is no XDG file,

@@ -512,14 +512,19 @@ for the contract and `docs/` for user docs.
 - **One helper per rule, and new code uses it.** `config::write_target`
   (the file a writing command writes: the explicit one, else the
   `--config` the garnish `statusLine.command` passes, else the one
-  `locate` finds, else the default; callers resolve `GARNISH_CONFIG` into
-  `Options.config_path`, so a plan reads no environment) and its twin
+  `locate` finds, else the default; the command is `CommandFrom::Chain`,
+  the one Claude Code runs here, except for `install`, which passes the
+  one it read from the file it rewrites as `CommandFrom::Given`; callers
+  resolve `GARNISH_CONFIG` into `Options.config_path`, so a plan reads no
+  environment) and its twin
   `config::read_target` (the same order without the default, for the
   commands a person runs to look at their config: `config check`,
   `config show`, `preview`, `doctor`; the tick and its workers use
   `locate` alone and never read the settings file),
   `install::shell_words` (the one splitter for a `statusLine.command`, as
-  `sh` splits it, past `NAME=value` words and a leading `env`),
+  `sh` splits it, past `NAME=value` words and a leading `env`; a word
+  records where the home directory goes, `Word::expanded` splices it in,
+  never `Path::join`, which turned `$HOME.x` into a file inside it),
   `debug::stderr_line` (the render path's only stderr writer: it ignores a
   failed write, since `eprintln!` panics on a stderr nobody reads; a
   source scan allows the macros only in `cli.rs` and `setup/`),

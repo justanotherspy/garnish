@@ -809,7 +809,7 @@ fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
 
 /// [`config_target_or_quiet`], with `what` finishing the no-home note.
 fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBuf> {
-    match config::write_target(explicit, None) {
+    match config::write_target(explicit, config::CommandFrom::Chain) {
         config::WriteTarget::File(path) => Ok(path),
         config::WriteTarget::NoHome => {
             Err(refusal(Refusal::NoHome { flag: "--config <FILE>", what }))

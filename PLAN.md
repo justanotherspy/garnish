@@ -159,8 +159,6 @@ Open items only; closed ones are in `WORKLOG.md`.
   - install: `install --dry-run`'s skills line says "would write" when they
     are up to date; `Steps::apply` does not re-read the settings file (the
     setup screen re-plans before applying)
-  - payload: a nested payload struct still accepts a JSON array
-    positionally (serde's sequence form); harmless
   - the final review's leftovers (2026-09-25): the cap pad is decided per
     row, so a visible `[frame] pad` shows on the padding lines of a
     multi-line row beside nothing (the cap-side twin of the prefix-pad
@@ -174,9 +172,11 @@ Open items only; closed ones are in `WORKLOG.md`.
     program word with the bare `garnish`, and `setup --preset P --install`
     always writes the bare word; an explicit `--config` reinstall drops the
     old command's prefix and arguments; `exec garnish …` and `env -i
-    garnish …` read as not garnish; the writers look at the user settings
-    file only, not a project's `statusLine.command`; one nested-box
-    mistake is reported twice (the nesting and "no row joins this box")
+    garnish …` read as not garnish; `install` follows the command of the
+    file it rewrites, so in a project whose own `statusLine.command` wins,
+    `install` and the other commands can name different configs; one
+    nested-box mistake is reported twice (the nesting and "no row joins
+    this box")
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)
