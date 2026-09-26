@@ -209,8 +209,9 @@ claim, which embeds the numeric owner and repository IDs
   (each naming the `CLAUDE.md` rule it comes from), how to post, how to
   write (terse, under 120 words a comment, a suggestion block over
   prose), and never to end without the summary.
-- **The read tools, `TodoWrite`, `Bash` whole and the GitHub MCP tools
-  are allowed; `Task` and the edit tools are disallowed.** Bash
+- **The read tools, `Bash` whole and the GitHub MCP tools are allowed;
+  everything that delegates or schedules work, and the edit tools, are
+  disallowed.** Bash
   whole is safe only because of what is in its reach, so that is pinned
   down: the action is given the job's own token (`github_token`), capped by
   the job's `contents: read`. Without it the action mints a Claude GitHub
@@ -227,10 +228,14 @@ claim, which embeds the numeric owner and repository IDs
   set on its own: without the isolation step's bubblewrap the CLI refuses
   to start, and with it the CLI runs in `default` permission mode, not tag
   mode's `acceptEdits`. **A tool left off `--allowedTools` is still on the
-  model's list**, and calling it is a refusal (a red check) or, for
-  `Task`, simply runs (the final review launched one under the fixed
-  flags), so what a review must not use is named in `--disallowedTools`,
-  which takes it off the list. The Claude GitHub App is no longer needed by the
+  model's list**, and calling it is either a refusal (a red check) or, for
+  many, simply runs: `Task` launched a subagent under the fixed flags,
+  `Skill` forks one (the CLI ships a `code-review` skill that answers a
+  review request), and the scheduling and task-list tools need no
+  permission. So what a review must not use is named in
+  `--disallowedTools` (`Task`, `Skill`, `Workflow`, `CronCreate`,
+  `ScheduleWakeup` and the edit tools), which takes it off the list;
+  `scripts/test-scripts.sh` holds the workflow to that. The Claude GitHub App is no longer needed by the
   workflow; uninstalling it from the repository removes the `contents:
   write` token the id token could be exchanged for. The checkout is
   disposable, and an allowlist of verbs cannot
@@ -246,8 +251,10 @@ claim, which embeds the numeric owner and repository IDs
   tick and (once) subagent is a turn; at 15 a review of a two-file diff
   died unwritten. The cap is 100, and Sonnet 5 at `--effort high` is what
   pays for it (about 2.5x cheaper per token than Opus 5). `claude_args` is
-  a block scalar whose every line reaches the CLI verbatim, so a `#` line
-  inside it is an argument, not a comment.
+  a block scalar the action parses as shell words; the pinned action
+  (v1.0.234) drops a line whose first non-blank character is `#`, but the
+  notes stay above the block anyway, where no parser can take one for an
+  argument.
 - **`track_progress: true`** posts a tracking comment and the review
   writes its summary *into* it (`update_claude_comment`); a summary is
   the last such write with no `- [ ]` left in it, which is what
