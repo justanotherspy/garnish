@@ -193,9 +193,12 @@ Open items only; closed ones are in `WORKLOG.md`.
     (`⏱ 1h12m ────────── ──`), and deciding that from the drawn cells would
     change the pad beside a boxed last column; inside a `fill = true` box a
     row whose `fr` columns are all squeezed out puts the freed rule right
-    after the last column's text; under uneven `custom` caps, heights use
-    the narrowest cap pair, so a box that fits only on the wider lines is
-    drawn as empty cells
+    after the last column's text; a frame whose row heights never settle
+    (a box that fits under the narrow `single` caps but not under the
+    `first` and `last` its lines would take) is laid out to the narrowest
+    pair; pads are judged by the cells a column is given, not those it
+    draws, so a one-cell `…` meets the rule beside it (SPEC § 4.3 names
+    the exception) and a column cut to nothing keeps its pad
   - config location, Daniel's call (verification of 2026-09-26): a config
     that a checkout's own `.claude/` settings name (a local or project
     file outside the person's settings directory: the command's

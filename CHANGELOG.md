@@ -156,7 +156,10 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   row, instead of cutting the whole line to `…` or leaving two empty
   framed lines; a tall row under `custom` caps that leave a later line's
   right cap narrower or empty fills the box on every line, and its rule
-  never runs into a right group's text.
+  never runs into a right group's text; under such caps a box that fits
+  on its own row's lines is drawn whole instead of losing its bottom edge
+  and the rows after it, and a `style = "none"` box on a `width = 0`
+  column no longer makes its row three lines tall.
 - A bad payload says why on stderr and in the `GARNISH_DEBUG` log.
 
 *Config*

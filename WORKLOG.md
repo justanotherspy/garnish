@@ -1113,3 +1113,18 @@ was built, what the reviews found and what was decided, not how.
     file (`config::load_exactly`); the setup notes compare a relative
     path absolutely, cover a command that passes no config, and show
     `~/…` on the screen.
+  - *layout*: four of the layout follow-up's fixes held (under fuzz of
+    20 000 seeds × 211 widths, custom frames included); a fifth was
+    partial and one had regressed. Under uneven `custom` caps a row was
+    measured on the frame's narrowest cap pair and laid out on its own,
+    so a box that fitted only on its own lines was drawn and then cut
+    (its bottom edge and later rows gone, 19 seeds). Now `frame_plan`
+    measures each row on the caps it lands on, re-measuring until no row
+    moves (8 rounds at most; a frame that never settles keeps the
+    narrowest pair), and a box is drawn only whole. A `style = "none"`
+    box on a `width = 0` column made its row three lines tall
+    (`box_interior` now needs one cell). SPEC § 4.3 names the one place
+    text can meet the rule (a column narrower than its pads), a test pins
+    where a dropped `fr` column's gap goes, and CLAUDE.md has the
+    composer's real path. The in-process tick got slightly faster (each
+    row's height measured once, not twice: dashboard 70 → 64 µs).
