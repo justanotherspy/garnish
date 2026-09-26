@@ -1393,7 +1393,10 @@ color = "accent"               # role or literal for the box's glyphs; default t
   and a last column whose box does not fit does not end the row in
   content, so the cap takes no pad (2026-09-26: it kept its two edge
   lines, so its row came out two lines taller, empty framed lines under a
-  frame with caps, and a one-line row's gaps turned to spaces).
+  frame with caps, and a one-line row's gaps turned to spaces). A box
+  with no glyphs (`style = "none"`) fits any one cell, and a `width = 0`
+  column has none to give it, so it too adds no lines (2026-09-26: it
+  fitted the column's no cells and made its row three lines tall).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under

@@ -981,13 +981,15 @@ impl Layout<'_> {
     /// content: `None` when even the sides do not fit, and no pads when
     /// they would leave nothing to draw in. The corners are drawn whatever
     /// the side is, so a `custom` box with corners and no side needs their
-    /// cells too, or its top and bottom lines would overflow.
+    /// cells too, or its top and bottom lines would overflow. A box of no
+    /// glyphs (`style = "none"`) needs a cell all the same: in the none of a
+    /// `width = 0` column it would add its two lines and draw nothing.
     fn box_interior(&self, chars: &BoxChars, width: usize) -> Option<(usize, usize)> {
         let sides = display_width(&chars.side).saturating_mul(2);
         let pair = |a: &str, b: &str| display_width(a).saturating_add(display_width(b));
         let corners = pair(&chars.top_left, &chars.top_right)
             .max(pair(&chars.bottom_left, &chars.bottom_right));
-        if width < corners {
+        if width < corners.max(1) {
             return None;
         }
         let left = width.checked_sub(sides)?;
@@ -2889,16 +2891,21 @@ mod tests {
     /// fit the column's share) renders nothing and adds no lines. It kept
     /// its two edge lines, so its row came out two lines taller, empty ones
     /// under a frame with caps, and a one-line row's gaps turned to spaces:
-    /// `╭─ ❖ Opus ───   ─── ⏱ 1h12m ─╮` over two empty framed lines.
+    /// `╭─ ❖ Opus ───   ─── ⏱ 1h12m ─╮` over two empty framed lines. A box
+    /// with no glyphs at all (`style = "none"`) fits in any cell, but a
+    /// zero-width column has none to give it: it counted as drawn in no
+    /// cells, and its row came out three lines tall all the same.
     #[test]
     fn a_box_too_narrow_to_draw_adds_no_lines() {
         let plus = || "+".to_owned();
         let model = || col(Width::Fr(1), "❖ Opus");
         let end = || col(Width::Fr(1), "end");
-        let boxed = |width| Col { boxed: Some(&BoxRef::Anon), ..col(width, "⠋ 16:00:00") };
-        let stacked = |width| Col {
+        let invisible: &'static BoxRef = Box::leak(Box::new(BoxRef::Named("x".to_owned())));
+        let boxed =
+            |b: &'static BoxRef, width| Col { boxed: Some(b), ..col(width, "⠋ 16:00:00") };
+        let stacked = |b: &'static BoxRef, width| Col {
             content: Content::Stack(vec![Row {
-                boxed: Some(&BoxRef::Anon),
+                boxed: Some(b),
                 ..row(vec![col(Width::Fr(1), "⠋ 16:00:00")], 1)
             }]),
             ..col(width, "")
@@ -2906,16 +2913,23 @@ mod tests {
         for (fill, width) in [true, false].into_iter().flat_map(|f| [40_usize, 60].map(|w| (f, w)))
         {
             // The rounded box needs two cells; a `custom` one with corners
-            // and no side needs two for its corners, one for none of it.
-            for custom in [false, true] {
+            // and no side needs two for its corners; a `none` one needs one.
+            for glyphs in ["rounded", "corners", "none"] {
                 let mut f = Fixture::new(FrameStyle::Rounded, fill, width);
-                if custom {
+                if glyphs == "corners" {
                     f.chars.top_left = plus();
                     f.chars.top_right = plus();
                     f.chars.bottom_left = plus();
                     f.chars.bottom_right = plus();
                     f.chars.side = String::new();
                 }
+                f.boxes.insert(
+                    "x".to_owned(),
+                    BoxCfg { style: Some(FrameStyle::None), ..BoxCfg::default() },
+                );
+                let (b, needs) = if glyphs == "none" { (invisible, 1) } else { (&BoxRef::Anon, 2) };
+                let boxed = |width| boxed(b, width);
+                let stacked = |width| stacked(b, width);
                 let l = f.layout();
                 let lines = |cols: Vec<Col<'static>>, gap: usize| -> Vec<String> {
                     let r = row(cols, gap);
@@ -2925,35 +2939,32 @@ mod tests {
                         .map(|l| show(&l))
                         .collect()
                 };
-                for narrow in [
-                    boxed(Width::Cells(0)),
-                    boxed(Width::Cells(1)),
-                    stacked(Width::Cells(0)),
-                    stacked(Width::Cells(1)),
-                ] {
+                let narrow =
+                    (0..needs).flat_map(|w| [boxed(Width::Cells(w)), stacked(Width::Cells(w))]);
+                for narrow in narrow {
                     let last = lines(vec![model(), narrow.clone()], 1);
-                    assert_eq!(last.len(), 1, "custom={custom}: {last:?}");
+                    assert_eq!(last.len(), 1, "{glyphs}: {last:?}");
                     // Its cells are empty ones, rule on a one-line row, and
                     // as the last column it does not end the row in
                     // content: the rule runs into the cap with no hole.
                     let tail = last.first().and_then(|l| l.split_once("Opus ")).map(|(_, t)| t);
                     assert!(
                         !fill || tail.is_some_and(|t| t.chars().all(|c| c == '─')),
-                        "custom={custom}: {last:?}"
+                        "{glyphs}: {last:?}"
                     );
                     let between = lines(vec![model(), narrow, end()], 3);
-                    assert_eq!(between.len(), 1, "custom={custom}: {between:?}");
+                    assert_eq!(between.len(), 1, "{glyphs}: {between:?}");
                 }
                 // A zero-width box takes no cells, no gap and no lines: the
                 // row is the row without it, its gap a rule again.
                 assert_eq!(
                     lines(vec![model(), boxed(Width::Cells(0)), end()], 3),
                     lines(vec![model(), end()], 3),
-                    "custom={custom}"
+                    "{glyphs}"
                 );
-                // Two cells hold either box: it draws, three lines tall.
-                let two = lines(vec![model(), boxed(Width::Cells(2))], 1);
-                assert_eq!(two.len(), 3, "custom={custom}: {two:?}");
+                // The cells it needs hold it: it draws, three lines tall.
+                let two = lines(vec![model(), boxed(Width::Cells(needs))], 1);
+                assert_eq!(two.len(), 3, "{glyphs}: {two:?}");
             }
         }
     }
