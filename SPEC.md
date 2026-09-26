@@ -738,10 +738,16 @@ that writes a config (`config init`, `setup`, `install`'s default file)
 writes the file this order finds and the XDG path only when there is
 none, so a new file never hides an existing `~/.garnish.toml` (2026-09-25
 review: `install` wrote the XDG default and the user's config silently
-stopped applying). Without `--config` and `GARNISH_CONFIG`, a garnish
+stopped applying). `GARNISH_CONFIG` counts only as an absolute path: a
+relative one would name a file in whatever directory the tick runs in,
+the session's repository (Claude Code passes a settings `env` value
+unexpanded, so `"~/g.toml"` is relative), so the tick ignores it and a
+command run by hand refuses it. Without `--config` and `GARNISH_CONFIG`, a garnish
 `statusLine.command` that passes its own `--config` (or, without one, a
-`GARNISH_CONFIG=` assignment before the program) names the file
-instead, since that is the one its ticks read. The command is the one
+`GARNISH_CONFIG=` assignment before the program, else the
+`GARNISH_CONFIG` a settings file's `env` block gives it, the first the
+chain sets) names the file instead, since that is the one its ticks
+read. The command is the one
 Claude Code runs from the current directory, the first file of the
 settings chain (§ 2.3) that sets one, as `doctor` shows it, for every
 command run by hand: `config path` prints the file, `config check`,
@@ -764,10 +770,11 @@ session (`CLAUDECODE` is set, even to nothing) the environment carries
 the `env` blocks of every settings file Claude Code read, a checkout's
 included, in whatever directory the command runs and whatever JSON the
 value was: so there a `GARNISH_CONFIG` counts only when the person's own
-settings (the user file, or the platform's managed file) set that value,
-and a `GARNISH_MANAGED_SETTINGS` likewise, else the platform's managed
-file stands; outside one, a `GARNISH_CONFIG` the current directory's
-checkout files set is refused too. For `install` the command is the one in the file it
+settings (the user file, the platform's managed file or a
+`managed-settings.d/*.json` drop-in beside it) set that value, and a
+`GARNISH_MANAGED_SETTINGS` likewise, else the platform's managed file
+stands, in `doctor`'s chain too; outside one, a `GARNISH_CONFIG` the
+current directory's checkout files set is refused too. For `install` the command is the one in the file it
 rewrites (`--settings`, else the user file); `install` keeps it, writing
 the default config there when it is missing and checking its `padding`
 against that file, but writes no config a `--settings` file that is not
@@ -2013,7 +2020,7 @@ per-module render cost.
 |---|---|
 | `GARNISH_NOW` | freeze `time::now()` (epoch seconds or RFC 3339) |
 | `GARNISH_CACHE_DIR` | cache root override |
-| `GARNISH_CONFIG` | config path override |
+| `GARNISH_CONFIG` | config path override, absolute only (§ 4) |
 | `GARNISH_NO_SPAWN` | record intended worker spawns instead of spawning |
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |

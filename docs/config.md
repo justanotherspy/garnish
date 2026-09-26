@@ -322,7 +322,7 @@ Every module accepts `enabled`, `preset`, `refresh` (the seconds a cached module
 |---|---|
 | `COLUMNS` | Terminal width (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. The lines are rendered 4 cells narrower, plus `padding`: the width of Claude Code's status line box. |
 | `NO_COLOR` | Disables escape codes under `color = "auto"` when set and not empty (no-color.org). |
-| `GARNISH_CONFIG` | Config file path. |
+| `GARNISH_CONFIG` | Config file path, absolute; a relative one is ignored. |
 | `GARNISH_CACHE_DIR` | Cache root (default `$XDG_RUNTIME_DIR/garnish`, `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish`). |
 | `GARNISH_NOW` | Freeze the clock (epoch seconds or RFC 3339) for reproducible renders. |
 | `GARNISH_NO_SPAWN` | Log intended background refreshes to `<cache>/spawns.log` instead of spawning them (tests). |

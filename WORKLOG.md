@@ -1112,7 +1112,18 @@ was built, what the reviews found and what was decided, not how.
     person's own settings set it. `doctor` no longer loads the refused
     file (`config::load_exactly`); the setup notes compare a relative
     path absolutely, cover a command that passes no config, and show
-    `~/…` on the screen.
+    `~/…` on the screen. A sixth verifier (Claude Code end to end again)
+    found no way left for a checkout to choose the file, and seven smaller
+    things, fixed: a `~/g.toml` from the person's own `env` block (Claude
+    Code expands nothing there) was read against the working directory, so
+    `config init` made a `~` directory and a checkout could plant the
+    tick's config; a relative `GARNISH_CONFIG` is now ignored by the tick
+    and refused by hand. From a terminal the commands never saw an `env`
+    block's `GARNISH_CONFIG`, which is what the ticks read; now they follow
+    it. The platform file standing in for an ignored hook was still
+    demoted as the checkout's, and `doctor` showed the hook's file;
+    `managed-settings.d` drop-ins now vouch; the screen tilded a home
+    inside a longer path; five untested mutations now have tests.
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was

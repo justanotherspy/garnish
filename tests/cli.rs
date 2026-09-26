@@ -1665,6 +1665,25 @@ fn a_claude_code_session_trusts_only_the_persons_own_env() {
     let hook = [("CLAUDECODE", "1"), ("GARNISH_MANAGED_SETTINGS", own.to_str().unwrap())];
     let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &hook);
     assert!(ok && !out.contains(".profile"), "{out}{err}");
+    let (out, err, ok) = run_in(&sub, &["doctor"], &home, &hook);
+    let managed_row = format!("managed  {}", own.display());
+    assert!(ok && !out.contains(&managed_row), "the ignored hook's file is shown:\n{out}{err}");
+    // A blanked `CLAUDECODE` is still a session.
+    let blanked = [("CLAUDECODE", ""), ("GARNISH_CONFIG", victim.to_str().unwrap())];
+    let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &blanked);
+    assert!(!ok && err.contains("inside Claude Code"), "{out}{err}");
+    // A file the hook names vouches for nothing, even one that sets the
+    // value as a string.
+    let named = proj.join(".claude/named.json");
+    let sets = serde_json::json!({"env": {"GARNISH_CONFIG": victim}});
+    std::fs::write(&named, sets.to_string()).unwrap();
+    let both = [
+        ("CLAUDECODE", "1"),
+        ("GARNISH_CONFIG", victim.to_str().unwrap()),
+        ("GARNISH_MANAGED_SETTINGS", named.to_str().unwrap()),
+    ];
+    let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &both);
+    assert!(!ok && err.contains("inside Claude Code"), "{out}{err}");
     // The person's own settings set it: it counts.
     let mine = home.join("mine.toml");
     let user = serde_json::json!({"env": {"GARNISH_CONFIG": mine}});
@@ -1672,7 +1691,90 @@ fn a_claude_code_session_trusts_only_the_persons_own_env() {
     let vouched = [("CLAUDECODE", "1"), ("GARNISH_CONFIG", mine.to_str().unwrap())];
     let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &vouched);
     assert!(ok && out.trim_end() == mine.to_str().unwrap(), "{out}{err}");
+    // A hook they set counts too, and its command names the config.
+    let org = dir.path().join("org.json");
+    let theirs = home.join("theirs.toml");
+    let org_settings = serde_json::json!({"statusLine": {"type": "command",
+        "command": format!("garnish --config {}", theirs.display())}});
+    std::fs::write(&org, org_settings.to_string()).unwrap();
+    let user = serde_json::json!({"env": {"GARNISH_MANAGED_SETTINGS": org}});
+    std::fs::write(home.join(".claude/settings.json"), user.to_string()).unwrap();
+    let hook = [("CLAUDECODE", "1"), ("GARNISH_MANAGED_SETTINGS", org.to_str().unwrap())];
+    let (out, err, ok) = run_in(&sub, &["config", "path"], &home, &hook);
+    assert!(ok && out.trim_end() == theirs.to_str().unwrap(), "{out}{err}");
+    // A relative value, which Claude Code passes unexpanded, names no file,
+    // even from the person's own settings (verification of 2026-09-26:
+    // `config init` made a `~` directory where it ran).
+    let user = serde_json::json!({"env": {"GARNISH_CONFIG": "~/g.toml"}});
+    std::fs::write(home.join(".claude/settings.json"), user.to_string()).unwrap();
+    let tilde = [("CLAUDECODE", "1"), ("GARNISH_CONFIG", "~/g.toml")];
+    for args in [&["config", "path"][..], &["config", "init"]] {
+        let (out, err, ok) = run_in(&sub, args, &home, &tilde);
+        assert!(!ok && err.contains("a relative path"), "{args:?}: {out}{err}");
+    }
+    assert!(!sub.join("~").exists());
     assert_eq!(std::fs::read_to_string(&victim).unwrap(), "export PATH\n");
+}
+
+/// Verification of 2026-09-26: a settings `env` block's `GARNISH_CONFIG`
+/// is what the ticks read when the command passes no `--config`, so the
+/// commands run from a terminal, which never see that block in their own
+/// environment, name it too; a checkout's is refused and a relative one
+/// names no file. A relative `GARNISH_CONFIG` is never the tick's config.
+#[test]
+fn a_settings_env_block_names_the_config_the_ticks_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let proj = dir.path().join("proj");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(proj.join(".claude")).unwrap();
+    let settings = |dir: &Path, json: serde_json::Value| {
+        std::fs::write(dir.join(".claude/settings.json"), json.to_string()).unwrap();
+    };
+    let mine = home.join("mine.toml");
+    settings(
+        &home,
+        serde_json::json!({"env": {"GARNISH_CONFIG": mine},
+            "statusLine": {"type": "command", "command": "garnish"}}),
+    );
+    let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &[]);
+    assert!(ok && out.trim_end() == mine.to_str().unwrap(), "{out}{err}");
+    // `setup --install` keeps that command, which reads what it wrote.
+    let args = ["setup", "--preset", "minimal", "--install"];
+    let (out, err, ok) = run_in(&proj, &args, &home, &[]);
+    assert!(ok && mine.exists() && !err.contains("reads "), "{out}{err}");
+    // A checkout's block is refused.
+    settings(
+        &proj,
+        serde_json::json!({"env": {"GARNISH_CONFIG": home.join(".profile")},
+            "statusLine": {"type": "command", "command": "garnish"}}),
+    );
+    let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &[]);
+    assert!(!ok && err.contains("settings.json: env.GARNISH_CONFIG names"), "{out}{err}");
+    std::fs::remove_file(proj.join(".claude/settings.json")).unwrap();
+    // A relative one names no file, in a block or in the environment.
+    settings(
+        &home,
+        serde_json::json!({"env": {"GARNISH_CONFIG": "~/g.toml"},
+            "statusLine": {"type": "command", "command": "garnish"}}),
+    );
+    let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &[]);
+    assert!(!ok && err.contains("\"~/g.toml\"") && err.contains("no one file"), "{out}{err}");
+    std::fs::remove_file(home.join(".claude/settings.json")).unwrap();
+    let (out, err, ok) =
+        run_in(&proj, &["config", "path"], &home, &[("GARNISH_CONFIG", "rel.toml")]);
+    assert!(!ok && err.contains("a relative path"), "{out}{err}");
+    // The tick ignores a relative one and reads the lookup's file.
+    let text = |marker: &str| {
+        format!("[[line]]\nmodules = [\"text.m\"]\n[modules.text.m]\ntext = \"{marker}\"\n")
+    };
+    let xdg = home.join(".config/garnish/garnish.toml");
+    std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+    std::fs::write(&xdg, text("XDGFILE")).unwrap();
+    std::fs::write(home.join("rel.toml"), text("RELFILE")).unwrap();
+    let tick =
+        sh_tick(&format!("GARNISH_CONFIG=rel.toml {}", env!("CARGO_BIN_EXE_garnish")), &home);
+    assert!(tick.contains("XDGFILE") && !tick.contains("RELFILE"), "{tick}");
 }
 
 /// A home reached through a link is still the person's: a session started

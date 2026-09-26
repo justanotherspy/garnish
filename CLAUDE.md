@@ -539,7 +539,12 @@ for the contract and `docs/` for user docs.
   settings set that value, and the managed-settings hook likewise
   (`hand_managed`); guessing which checkout file set it failed three ways
   (a subdirectory, a non-string value, a file serde refuses); the tick's
-  `explicit` takes the variable as it comes; `doctor` loads a refused
+  `explicit` takes an absolute variable as it comes and ignores a
+  relative one (Claude Code passes `"~/g.toml"` unexpanded); a settings
+  `env` block's `GARNISH_CONFIG` is part of what the ticks read when the
+  command passes no `--config`, so `command_target` follows it
+  (`env_target`) for a terminal that never sees the block; `doctor`
+  shows the chain from `config::hand_managed`; `doctor` loads a refused
   config's stand-in through `config::load_exactly`, never `load`, which
   would locate the refused file again) and its twin
   `config::read_target` (the same order without

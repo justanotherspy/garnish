@@ -23,7 +23,9 @@ use crate::modules::SCHEMAS;
 pub fn report(config_path: Option<&Path>) -> String {
     let home = claude_settings::home_dir();
     let user = claude_settings::user_dir(home.as_deref());
-    let managed = claude_settings::managed_settings_path();
+    // The chain the config commands follow: inside a Claude Code session a
+    // managed-settings hook only the person's own settings set.
+    let managed = config::hand_managed();
     report_with(
         &config::read_target(config_path),
         &Cache::from_env(),

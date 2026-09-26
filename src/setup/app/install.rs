@@ -132,7 +132,7 @@ impl App {
                 let home = self.home.as_deref().map(|h| format!("{}/", h.display()));
                 for note in steps.notes() {
                     let note =
-                        home.as_deref().map_or_else(|| note.clone(), |h| note.replace(h, "~/"));
+                        home.as_deref().map_or_else(|| note.clone(), |h| tilde_paths(&note, h));
                     lines.push(Line::from(Span::styled(note, Chrome::warn())));
                 }
                 lines.push(Line::from(""));
@@ -161,5 +161,47 @@ impl App {
             Rect { height: area.height.saturating_sub(2), ..area },
         );
         self.draw_status(frame, area, &[("enter", "apply"), ("esc", "back"), ("?", "help")]);
+    }
+}
+
+/// `text` with every path that starts with `home` (a directory ending in
+/// `/`) shown as `~/…`: only where a path can start, at the start of the
+/// text or after a blank or a quote, never inside a longer path.
+fn tilde_paths(text: &str, home: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut starts_path = true;
+    while !rest.is_empty() {
+        if starts_path && let Some(after) = rest.strip_prefix(home) {
+            out.push_str("~/");
+            rest = after;
+            starts_path = false;
+            continue;
+        }
+        let mut chars = rest.chars();
+        let Some(c) = chars.next() else { break };
+        out.push(c);
+        rest = chars.as_str();
+        starts_path = matches!(c, ' ' | '\'' | '"');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tilde_paths;
+
+    /// Verification of 2026-09-26: the home is shortened only where a path
+    /// starts, so a path that merely contains it keeps its name.
+    #[test]
+    fn a_note_shows_only_paths_under_the_home_with_a_tilde() {
+        let home = "/home/u/";
+        let note = "note: reads /home/u/a.toml, not /mnt/snap/home/u/g.toml; `garnish --config '/home/u/b' install`";
+        assert_eq!(
+            tilde_paths(note, home),
+            "note: reads ~/a.toml, not /mnt/snap/home/u/g.toml; `garnish --config '~/b' install`"
+        );
+        assert_eq!(tilde_paths("/home/u/x", home), "~/x");
+        assert_eq!(tilde_paths("/home/user/x", home), "/home/user/x");
     }
 }

@@ -46,20 +46,27 @@ fn config_home() -> Option<PathBuf> {
         .or_else(|| crate::claude_settings::home_dir().map(|h| h.join(".config")))
 }
 
-/// The config file named explicitly: `--config` (`flag`), else
-/// `GARNISH_CONFIG`; `None` when neither names one.
+/// The config file named explicitly: `--config` (`flag`), else an
+/// absolute `GARNISH_CONFIG`; `None` when neither names one.
+///
+/// A relative `GARNISH_CONFIG` is ignored, as a relative `XDG_*` base is: it
+/// would name a file in whatever directory the tick runs in, the session's
+/// repository (verification of 2026-09-26: Claude Code passes a settings
+/// `env` value unexpanded, so `"~/g.toml"` made a checkout's own `~/g.toml`
+/// the config).
 #[must_use]
 pub fn explicit(flag: Option<&Path>) -> Option<PathBuf> {
-    flag.map(Path::to_path_buf).or_else(|| env_path(CONFIG_ENV))
+    flag.map(Path::to_path_buf).or_else(|| env_path(CONFIG_ENV).filter(|p| p.is_absolute()))
 }
 
 /// [`explicit`] for a command run by hand (SPEC § 4).
 ///
-/// Inside a Claude Code session the environment carries the `env` blocks of
-/// every settings file Claude Code read, a checkout's included, so a
-/// `GARNISH_CONFIG` there counts only when the person's own settings set
-/// that very value (`own_env_sets`); anywhere, one that the current
-/// directory's checkout files set is a [`Checkout`] (verification of
+/// A relative `GARNISH_CONFIG` is refused rather than ignored, so the
+/// person hears why. Inside a Claude Code session the environment carries
+/// the `env` blocks of every settings file Claude Code read, a checkout's
+/// included, so a `GARNISH_CONFIG` there counts only when the person's own
+/// settings set that very value (`own_env_sets`); anywhere, one that the
+/// current directory's checkout files set is a [`Checkout`] (verification of
 /// 2026-09-26: matching the checkout's files alone missed a session in a
 /// subdirectory, a non-string value and a file serde refuses).
 ///
@@ -71,7 +78,7 @@ pub fn hand_explicit(flag: Option<&Path>) -> Result<Option<PathBuf>, Checkout> {
     }
     let Some(value) = env_path(CONFIG_ENV) else { return Ok(None) };
     let refused = |settings| Err(Checkout { settings, key: "GARNISH_CONFIG", path: value.clone() });
-    if in_claude_code() && !own_env_sets(CONFIG_ENV, value.as_os_str()) {
+    if value.is_relative() || (in_claude_code() && !own_env_sets(CONFIG_ENV, value.as_os_str())) {
         return refused(None);
     }
     let named = |keys: &crate::claude_settings::FileKeys| {
@@ -91,14 +98,11 @@ fn in_claude_code() -> bool {
 }
 
 /// Whether the person's own settings set the variable `name` to `value` in
-/// their `env` block: the user file, or the managed file the platform
-/// names (never one a variable names, which the session may have from a
-/// checkout).
+/// their `env` block ([`own_settings_files`]).
 fn own_env_sets(name: &str, value: &std::ffi::OsStr) -> bool {
     use crate::claude_settings as cs;
-    let user = cs::user_dir(cs::home_dir().as_deref()).map(|dir| dir.join("settings.json"));
-    [Some(cs::platform_managed_settings()), user].into_iter().flatten().any(|file| {
-        match cs::read_file_up_to(&file, cs::MAX_COMMAND_SETTINGS_BYTES) {
+    own_settings_files().iter().any(|file| {
+        match cs::read_file_up_to(file, cs::MAX_COMMAND_SETTINGS_BYTES) {
             cs::FileState::Keys(keys) => {
                 keys.env(name).is_some_and(|set| std::ffi::OsStr::new(set) == value)
             }
@@ -107,12 +111,42 @@ fn own_env_sets(name: &str, value: &std::ffi::OsStr) -> bool {
     })
 }
 
-/// The managed settings file for a command run by hand: the hook's
-/// ([`crate::claude_settings::managed_settings_path`]), unless inside a
-/// Claude Code session the person's own settings do not set it, in which
-/// case the platform's; a checkout's `env` block could have pointed it at
-/// the checkout's own file.
-fn hand_managed() -> Option<PathBuf> {
+/// Most drop-in files of the managed settings directory garnish reads.
+const MAX_DROP_INS: usize = 64;
+
+/// The settings files that are the person's (or their organisation's) own
+/// wherever garnish runs: the managed file the platform names, the
+/// `managed-settings.d/*.json` drop-ins beside it (which Claude Code
+/// applies too), and the user file; never a file a variable names, which
+/// the session may have from a checkout.
+fn own_settings_files() -> Vec<PathBuf> {
+    use crate::claude_settings as cs;
+    let managed = cs::platform_managed_settings();
+    let mut drop_ins: Vec<PathBuf> = managed
+        .parent()
+        .and_then(|dir| std::fs::read_dir(dir.join("managed-settings.d")).ok())
+        .map_or_else(Vec::new, |entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+                .take(MAX_DROP_INS)
+                .collect()
+        });
+    drop_ins.sort();
+    let user = cs::user_dir(cs::home_dir().as_deref()).map(|dir| dir.join("settings.json"));
+    std::iter::once(managed).chain(drop_ins).chain(user).collect()
+}
+
+/// The managed settings file for a command run by hand.
+///
+/// The hook's (`claude_settings::managed_settings_path`), unless
+/// inside a Claude Code session the person's own settings do not set it,
+/// in which case the platform's; a checkout's `env` block could have
+/// pointed it at the checkout's own file. `doctor` shows the chain it
+/// starts.
+#[must_use]
+pub fn hand_managed() -> Option<PathBuf> {
     use crate::claude_settings as cs;
     let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
     // An empty hook (no managed file) is left alone: it can only drop a
@@ -129,19 +163,20 @@ fn hand_managed() -> Option<PathBuf> {
     }
 }
 
-/// A config that a settings file which is not the person's own names.
+/// A config garnish does not follow for where its name came from.
 ///
 /// A checkout's `statusLine.command` or `env` block, a `--settings` file
-/// elsewhere, or a `GARNISH_CONFIG` none of the person's own settings set
-/// inside a Claude Code session. garnish never reads or writes a file a
-/// repository nobody here may have built chooses (CLAUDE.md, "The
-/// repository is not the user's file"), so it is refused like
-/// [`WriteTarget::Unresolved`].
+/// elsewhere, a `GARNISH_CONFIG` none of the person's own settings set
+/// inside a Claude Code session, or a relative `GARNISH_CONFIG`. garnish
+/// never reads or writes a file a repository nobody here may have built
+/// chooses (CLAUDE.md, "The repository is not the user's file"), so it is
+/// refused like [`WriteTarget::Unresolved`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkout {
     /// The settings file, when one is known to name it.
     pub settings: Option<PathBuf>,
-    /// The key naming it: `statusLine.command` or `GARNISH_CONFIG`.
+    /// The key naming it: `statusLine.command`, `env.GARNISH_CONFIG` or
+    /// `GARNISH_CONFIG`.
     pub key: &'static str,
     /// The file it names.
     pub path: PathBuf,
@@ -210,6 +245,8 @@ pub enum CommandFrom<'a> {
         settings: &'a Path,
         /// Its `statusLine.command`, if it has one.
         command: Option<&'a str>,
+        /// Its `env.GARNISH_CONFIG`, if it sets one.
+        env: Option<&'a str>,
     },
 }
 
@@ -322,14 +359,19 @@ fn chain_files() -> Vec<ChainFile> {
             }
         })
         .collect();
-    // A managed file that a checkout's `env` block named is the checkout's.
+    // A managed file that a checkout's `env` block named through the hook
+    // is the checkout's (when the hook is in use at all: `hand_managed`
+    // puts the platform's file in its place inside a session).
     let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
+    let hook_in_use = hook
+        .as_deref()
+        .is_some_and(|hook| managed.as_deref() == Some(Path::new(hook)) && !hook.is_empty());
     let names_hook = |file: &ChainFile| {
         file.keys
             .env(cs::MANAGED_SETTINGS_ENV)
             .is_some_and(|set| hook.as_deref() == Some(std::ffi::OsStr::new(set)))
     };
-    if files.iter().any(|file| !file.own && names_hook(file)) {
+    if hook_in_use && files.iter().any(|file| !file.own && names_hook(file)) {
         for file in files.iter_mut().filter(|file| file.label == "managed") {
             file.own = false;
         }
@@ -337,22 +379,27 @@ fn chain_files() -> Vec<ChainFile> {
     files
 }
 
-/// The `--config` the garnish `statusLine.command` of `from` passes, as a
-/// [`WriteTarget::File`], [`WriteTarget::Unresolved`] or
-/// [`WriteTarget::Checkout`]; `None` when there is no such command or it
-/// passes none.
+/// The config the garnish `statusLine.command` of `from` has its ticks
+/// read, as a [`WriteTarget::File`], [`WriteTarget::Unresolved`] or
+/// [`WriteTarget::Checkout`]: the one it passes with `--config`, else the
+/// `GARNISH_CONFIG` a settings `env` block gives it (Claude Code copies the
+/// block into the command's environment); `None` when there is no such
+/// command or neither names one.
 ///
 /// Through the chain it is the command Claude Code runs here or, when that
 /// one runs another program, the person's own garnish command, which still
-/// names the config their status line reads elsewhere.
+/// names the config their status line reads elsewhere; its `env` value is
+/// the first the chain sets, as Claude Code's precedence has it.
 fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
-    let (settings, command, own) = match from {
-        CommandFrom::Given { settings, command } => {
+    match from {
+        CommandFrom::Given { settings, command, env } => {
             let user = cs::user_dir(home.as_deref());
             let own = users(settings, user.as_deref(), home.as_deref());
-            (settings.to_path_buf(), command?.to_owned(), own)
+            command
+                .and_then(|command| flag_target(settings, command, own, home.as_deref()))
+                .or_else(|| env.and_then(|value| env_target(settings, own, value)))
         }
         CommandFrom::Chain => {
             let files = chain_files();
@@ -368,10 +415,25 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
             } else {
                 files.iter().find(|file| file.own && garnish(file))?
             };
-            (file.path.clone(), file.keys.status_line_command.clone()?, file.own)
+            let command = file.keys.status_line_command.as_deref()?;
+            flag_target(&file.path, command, file.own, home.as_deref()).or_else(|| {
+                let set = files.iter().find_map(|f| f.keys.env(CONFIG_ENV).map(|v| (f, v)))?;
+                env_target(&set.0.path, set.0.own, set.1)
+            })
         }
-    };
-    match crate::install::command_config(&command, home.as_deref())? {
+    }
+}
+
+/// The `--config` of `command`, from the settings file `settings`, which is
+/// the person's own when `own`.
+fn flag_target(
+    settings: &Path,
+    command: &str,
+    own: bool,
+    home: Option<&Path>,
+) -> Option<WriteTarget> {
+    let settings = settings.to_path_buf();
+    match crate::install::command_config(command, home)? {
         crate::install::CommandConfig::File(path) if !own => {
             let settings = Some(settings);
             Some(WriteTarget::Checkout(Checkout { settings, key: "statusLine.command", path }))
@@ -381,6 +443,25 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
             Some(WriteTarget::Unresolved { settings, word })
         }
     }
+}
+
+/// The `GARNISH_CONFIG` a settings file's `env` block sets (`value`, as
+/// written: Claude Code expands nothing in it), from `settings`, the
+/// person's own when `own`; `None` for an empty one, which is unset.
+fn env_target(settings: &Path, own: bool, value: &str) -> Option<WriteTarget> {
+    if value.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(value);
+    let settings = settings.to_path_buf();
+    Some(if own && path.is_absolute() {
+        WriteTarget::File(path)
+    } else if own {
+        WriteTarget::Unresolved { settings, word: value.to_owned() }
+    } else {
+        let settings = Some(settings);
+        WriteTarget::Checkout(Checkout { settings, key: "env.GARNISH_CONFIG", path })
+    })
 }
 
 /// Whether a settings file is one of the person's own: directly in their

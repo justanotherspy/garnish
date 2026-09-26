@@ -212,7 +212,13 @@ Open items only; closed ones are in `WORKLOG.md`.
     Inside a Claude Code session a `GARNISH_CONFIG` or managed-settings
     hook counts only when the person's own settings set it, so one they
     export in their shell before starting Claude Code is refused there
-    (`--config` works). Not guarded: a checkout's `env` block can also set
+    (`--config` works); a `GARNISH_CONFIG` of `~/…` in a settings `env`
+    block (which Claude Code does not expand) is refused rather than
+    expanded; an empty managed-settings hook a checkout's block sets
+    hides the organisation's managed command (it can only remove a file
+    from the chain, so the person's own then decide); the empty-hook
+    exception has no hermetic test (it would need a platform managed
+    file). Not guarded: a checkout's `env` block can also set
     `GARNISH_CACHE_DIR`, `GARNISH_DEBUG` and the other hooks for the tick,
     whose files are garnish-named (the tick reading a checkout's config is
     Claude Code's workspace-trust matter). The project directory is the

@@ -1408,7 +1408,10 @@ fn environment_section(o: &mut String) {
         o,
         "| `NO_COLOR` | Disables escape codes under `color = \"auto\"` when set and not empty (no-color.org). |"
     );
-    let _ = writeln!(o, "| `GARNISH_CONFIG` | Config file path. |");
+    let _ = writeln!(
+        o,
+        "| `GARNISH_CONFIG` | Config file path, absolute; a relative one is ignored. |"
+    );
     let _ = writeln!(
         o,
         "| `GARNISH_CACHE_DIR` | Cache root (default `$XDG_RUNTIME_DIR/garnish`, `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish`). |"

@@ -819,6 +819,11 @@ impl std::fmt::Display for Refusal {
                         settings.display(),
                         c.key
                     ),
+                    None if c.path.is_relative() => write!(
+                        f,
+                        "{} names the config {shown:?}, a relative path, which is no one file garnish can find; pass --config <FILE> to say which",
+                        c.key
+                    ),
                     None => write!(
                         f,
                         "{} names the config {shown:?}, but inside Claude Code a project's settings can set it and none of your own does, so garnish does not follow it; pass --config <FILE> to say which",
@@ -966,6 +971,12 @@ impl Steps {
             .and_then(Value::as_u64)
             .filter(|p| *p <= MAX_PADDING);
         let padding = options.padding.or(kept).map(|p| p.saturating_mul(2));
+        // The `GARNISH_CONFIG` the file's `env` block gives the command,
+        // which the merge keeps.
+        let env = current
+            .get("env")
+            .and_then(|env| env.get(crate::config::CONFIG_ENV))
+            .and_then(Value::as_str);
         let config = if options.write_config {
             // The file the written command reads: the explicit one, else
             // the one the kept command passes, else the default. The
@@ -974,6 +985,7 @@ impl Steps {
             let from = crate::config::CommandFrom::Given {
                 settings: &plan.settings,
                 command: old_command,
+                env,
             };
             match crate::config::write_target(options.config_path.as_deref(), from) {
                 WriteTarget::File(path) if path.exists() => {
@@ -997,13 +1009,16 @@ impl Steps {
         } else {
             // What `setup` writes against what the command written reads
             // (verification of 2026-09-26: a preset went where nothing read
-            // it, without a word).
-            // A command that passes no config reads the lookup's file.
+            // it, without a word). A command that passes no config reads the
+            // `env` block's, else the lookup's file.
             let home = crate::claude_settings::home_dir();
             let reads = match command_config(&command, home.as_deref()) {
                 Some(CommandConfig::File(reads)) => Some(reads),
                 Some(CommandConfig::Unresolved(_)) => None,
-                None => crate::config::lookup().or_else(crate::config::default_path),
+                None => env.filter(|value| !value.is_empty()).map(PathBuf::from).map_or_else(
+                    || crate::config::lookup().or_else(crate::config::default_path),
+                    |set| Some(set).filter(|p| p.is_absolute()),
+                ),
             };
             match (&options.config_written, reads) {
                 (Some(written), Some(reads)) if !same_file(written, &reads) => {
