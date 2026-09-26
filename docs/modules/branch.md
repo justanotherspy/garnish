@@ -2,9 +2,9 @@
 
 Checked-out branch (or detached HEAD).
 
-The current branch read from the repository without spawning git; a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).
+The current branch read from the repository without spawning git (in a reftable repository, whose refs are not files, the background worker asks git instead); a detached HEAD shows the short commit. The `full` preset adds the short SHA and a dirty marker (computed by the background worker).
 
-**Sources:** `worktree.branch`, `.git/HEAD`, `git status (worker)`
+**Sources:** `worktree.branch`, `.git/HEAD`, `git diff-index and diff-files (worker)`
 
 **Refresh:** cached, refreshed in the background every 5 s
 
@@ -33,16 +33,16 @@ The current branch read from the repository without spawning git; a detached HEA
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `5` | `5` | `5` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | integer ≥ 1 | `5` | `5` | `5` | Seconds a cached value lives before a background worker refreshes it. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the branch icon. |
 | `show_sha` | bool | `false` | `false` | `true` | Append the short commit SHA. |
-| `dirty` | bool | `false` | `false` | `true` | Show a marker when the tree has changes. |
+| `dirty` | bool | `false` | `false` | `true` | Show a marker when tracked files have staged or unstaged changes (untracked files do not count; a file touched without changing counts until git next refreshes its index, since garnish never reads file contents). |
 | `max_length` | integer | `40` | `40` | `40` | Cut the name itself to this many characters with `…` (`..` in the ascii set; 0 = no limit); the common `max_width` caps the whole module in cells instead. |
 | `link` | bool | `false` | `false` | `false` | Link the name to the branch on the forge (`https://<host>/<owner>/<name>/tree/<branch>`, `/-/tree/` on GitLab), built from `workspace.repo` in the payload; nothing is linked without it or on a detached HEAD. GitLab is recognised by a host named after it or an open merge request, so a self-hosted GitLab on an unrelated host name links to `/tree/` until one is open. |
 

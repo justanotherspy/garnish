@@ -7,6 +7,24 @@ pub const fn clamp_percent(value: f64) -> f64 {
     if value.is_nan() { 0.0 } else { value.clamp(0.0, 100.0) }
 }
 
+/// The largest amount a formatter prints.
+///
+/// A percentage allowed past 100 (`spend`) and a cost stop here, so an
+/// absurd payload number (`1e300`, or an infinity from arithmetic) reads as
+/// a large value rather than a 300-digit one. No real session comes near it.
+pub const MAX_SHOWN: f64 = 99_999.0;
+
+/// An amount as the formatters print it.
+///
+/// NaN and anything at or below zero are `0` (a negative zero would print
+/// its sign), anything above [`MAX_SHOWN`] is [`MAX_SHOWN`]. The one place
+/// both rules live, so the printed number and the one a band or a `hide`
+/// rule compares agree.
+#[must_use]
+pub const fn shown_amount(value: f64) -> f64 {
+    if value.is_nan() || value <= 0.0 { 0.0 } else { value.min(MAX_SHOWN) }
+}
+
 /// Round a non-negative float to the nearest integer, saturating at `u64::MAX`.
 /// Negative and NaN inputs give zero.
 #[must_use]
@@ -40,6 +58,14 @@ pub fn u64_to_f64(value: u64) -> f64 {
     let hi = u32::try_from(value >> 32).unwrap_or(u32::MAX);
     let lo = u32::try_from(value & 0xFFFF_FFFF).unwrap_or(u32::MAX);
     f64::from(hi).mul_add(4_294_967_296.0, f64::from(lo))
+}
+
+/// Convert an `i64` to `f64` with its sign (lossy above 2^53 in magnitude,
+/// as [`u64_to_f64`] is).
+#[must_use]
+pub fn i64_to_f64(value: i64) -> f64 {
+    let magnitude = u64_to_f64(value.unsigned_abs());
+    if value < 0 { -magnitude } else { magnitude }
 }
 
 /// `usize` → `f64` via `u64`.
@@ -83,6 +109,21 @@ mod tests {
         assert_eq!(u64_to_f64(u64::from(u32::MAX) + 1), 4_294_967_296.0);
         assert_eq!(usize_to_f64(7), 7.0);
         assert_eq!(u64_to_usize(9), 9);
+        assert_eq!(i64_to_f64(-10), -10.0);
+        assert_eq!(i64_to_f64(42), 42.0);
+        assert_eq!(i64_to_f64(i64::MIN), -9_223_372_036_854_775_808.0);
+    }
+
+    #[test]
+    fn shown_amounts_are_finite_non_negative_and_bounded() {
+        assert_eq!(shown_amount(42.5), 42.5);
+        assert_eq!(shown_amount(MAX_SHOWN), MAX_SHOWN);
+        for absurd in [1e300, f64::MAX, f64::INFINITY] {
+            assert_eq!(shown_amount(absurd), MAX_SHOWN, "{absurd}");
+        }
+        for nothing in [0.0, -0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            assert!(shown_amount(nothing) == 0.0 && shown_amount(nothing).is_sign_positive());
+        }
     }
 
     #[test]

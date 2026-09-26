@@ -6,7 +6,7 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 
 **Sources:** `model.display_name`, `model.id`, `fast_mode`, `thinking.enabled`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,12 +33,12 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the model icon. |
 | `show_id` | bool | `false` | `false` | `true` | Append the raw model id. |
@@ -51,7 +51,7 @@ Shows `model.display_name`. A bolt appears when fast mode is on; the `full` pres
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `model` | `U+EB08` | `❖` | `🤖` | `` | Model icon. |
+| `model` | `U+EB08` | `❖` | `🤖` | — | Model icon. |
 | `fast` | `U+F0E7` | `⚡` | `⚡` | `!` | Fast mode. |
 | `thinking` | `U+F0EB` | `⋯` | `💭` | `~` | Extended thinking. |
 

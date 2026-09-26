@@ -12,18 +12,20 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 
 | preset | render |
 |---|---|
-| `minimal` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `default` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `full` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `minimal` | — |
+| `default` | — |
+| `full` | — |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `unicode` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `emoji` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
-| `ascii` | `(shown inside a git repository with an upstream, e.g. `⇡2 ⇣1`)` |
+| `nerd` | — |
+| `unicode` | — |
+| `emoji` | — |
+| `ascii` | — |
+
+Nothing to show above (—): the counts come from a git repository with an upstream, which a sample never reads. In one, the default preset prints for example `⇡2 ⇣1` with unicode icons: two commits to push, one to pull.
 
 ## Options
 
@@ -33,12 +35,12 @@ Ahead/behind counts against `@{upstream}` using the remote-tracking refs already
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `5` | `5` | `5` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | integer ≥ 1 | `5` | `5` | `5` | Seconds a cached value lives before a background worker refreshes it. |
 | `hide` | list of `empty`, `zero` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine; `zero` when the count is zero. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_zero` | bool | `false` | `false` | `false` | Show `0` counts instead of hiding them. |
 | `show_upstream` | bool | `false` | `false` | `true` | Show the upstream name. |

@@ -1,0 +1,22 @@
+# fixture: subscription-full
+# columns: 80
+# icons: unicode
+# A stack keeps its column's pads (SPEC § 4.3 Pads): the one-row stack in
+# the first column draws exactly what the same modules draw without the
+# stack, a pad between the effort bar and the gap's rule. The inner row
+# used to take its pads from itself, and the bar ran into the rule.
+
+[[row]]
+[[row.col]]
+[[row.col.row]]
+modules = ["model"]
+right = ["effort"]
+[[row.col]]
+modules = ["clock"]
+
+[[row]]
+[[row.col]]
+modules = ["model"]
+right = ["effort"]
+[[row.col]]
+modules = ["clock"]

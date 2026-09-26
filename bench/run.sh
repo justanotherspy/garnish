@@ -4,7 +4,15 @@
 # Scenarios (all with a frozen clock, a private cache dir and spawning
 # disabled so only the tick itself is measured):
 #   warm-default  seeded cache, default preset, inside a git repo
-#   warm-full     seeded cache, full preset (every module, every option)
+#   warm-full     seeded cache, full preset (the default rows, every option)
+#   warm-all      seeded cache, one row holding every module id, so the
+#                 settings-chain badges and the session-scoped `account`
+#                 lookup are timed too
+#   warm-tz       warm-default with TZ naming a zone (TZ=Europe/Berlin), the
+#                 zone lookup containers and CI machines take
+#   warm-bigconfig  warm-default in a repository whose .git/config holds
+#                 5000 branch sections, the current branch's last: `sync`
+#                 reads that file on every tick
 #   cold          empty cache each run, workers really spawned (first tick of a session)
 #   refresh-sync  the background worker for one cached module
 #
@@ -12,6 +20,12 @@
 # refresh mean < 50 ms. Results land in bench/results/*.json; check.sh gates.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# The developer's shell must not reach the timed binary: GARNISH_DEBUG alone
+# appends a debug.log line per tick.
+unset GARNISH_DEBUG GARNISH_ANIMATE GARNISH_CONFIG TZ CLAUDE_CONFIG_DIR \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_AUTOCOMPACT_PCT_OVERRIDE \
+  DISABLE_AUTO_COMPACT DISABLE_COMPACT
 
 WARMUP="${WARMUP:-20}"
 RUNS="${RUNS:-300}"
@@ -42,17 +56,45 @@ git init -q -b main "$repo"
   git push -q -u origin main
   echo change > f1.txt
 )
+# Its current branch's section comes after 5000 others (final review of
+# 2026-09-25: the config parser took 5 ms a tick here, and nothing timed it).
+big="$work/big"
+git init -q -b main "$big"
+(
+  cd "$big"
+  git remote add origin "$origin"
+  echo x > x.txt
+  git add . && git commit -qm init
+  git fetch -q origin
+  awk 'BEGIN { for (i = 1; i <= 5000; i++)
+    printf "[branch \"topic/b%d\"]\n\tremote = origin\n\tmerge = refs/heads/topic/b%d\n", i, i }' \
+    >> .git/config
+  git branch -q --set-upstream-to=origin/main main
+)
 
-# A realistic payload whose cwd is the temp repo.
+# A realistic payload whose cwd is the temp repo, in the session the seeding
+# refresh below writes session-scoped entries for.
 payload="$work/payload.json"
-jq --arg cwd "$repo" '.cwd = $cwd | .workspace.current_dir = $cwd | .workspace.project_dir = $cwd' \
+jq --arg cwd "$repo" '.cwd = $cwd | .workspace.current_dir = $cwd | .workspace.project_dir = $cwd
+    | .session_id = "sess-bench"' \
   tests/fixtures/payloads/subscription-full.json > "$payload"
+big_payload="$work/big-payload.json"
+jq --arg cwd "$big" '.cwd = $cwd | .workspace.current_dir = $cwd | .workspace.project_dir = $cwd
+    | .session_id = "sess-bench"' \
+  tests/fixtures/payloads/subscription-full.json > "$big_payload"
 
 cache="$work/cache"
 full_cfg="$work/full.toml"
 printf 'preset = "full"\n' > "$full_cfg"
 empty_cfg="$work/empty.toml"
 : > "$empty_cfg"
+# Every module id the binary knows, from `garnish modules` (the text.<name>
+# family needs a definition, so it is left out).
+all_cfg="$work/all.toml"
+"$BIN" modules | awk '
+  $1 !~ /^text\./ { ids = ids (ids == "" ? "" : ", ") "\"" $1 "\"" }
+  END { print "[[row]]"; print "modules = [" ids "]" }
+' > "$all_cfg"
 
 export GARNISH_NOW=1738425600 GARNISH_NO_SPAWN=1 COLUMNS=120 HOME="$work"
 export GARNISH_CACHE_DIR="$cache"
@@ -61,6 +103,7 @@ export GARNISH_MANAGED_SETTINGS=
 
 # Seed the cache with a real refresh so warm ticks read entries within TTL.
 "$BIN" --config "$empty_cfg" refresh --all --session sess-bench --cwd "$repo" >/dev/null
+"$BIN" --config "$empty_cfg" refresh --all --session sess-bench --cwd "$big" >/dev/null
 
 hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
   --export-json "$OUT/warm-default.json" \
@@ -70,12 +113,41 @@ hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
   --export-json "$OUT/warm-full.json" \
   -n warm-full "$BIN --config $full_cfg"
 
+hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
+  --export-json "$OUT/warm-all.json" \
+  -n warm-all "$BIN --config $all_cfg"
+
+# Exported for this run alone: `env TZ=… garnish` would time `env` too.
+(
+  export TZ=Europe/Berlin
+  hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$payload" \
+    --export-json "$OUT/warm-tz.json" \
+    -n warm-tz "$BIN --config $empty_cfg"
+)
+
+hyperfine --warmup "$WARMUP" --runs "$RUNS" -N --input "$big_payload" \
+  --export-json "$OUT/warm-bigconfig.json" \
+  -n warm-bigconfig "$BIN --config $empty_cfg"
+
 # Cold: empty cache, and the tick really spawns its detached workers (that
-# spawn is the dominant cold cost). Each run gets its own cache dir so a
-# worker still finishing cannot race the next run's cleanup.
+# spawn is the dominant cold cost). The workers outlive the tick, so each
+# prepare waits for the previous run's locks to go (a worker still writing
+# would otherwise leave a fresh entry, and the next run would time a warm
+# tick) before clearing the directory.
 cold_cache="$work/cold-cache"
+cold_prepare="$work/cold-prepare.sh"
+cat > "$cold_prepare" <<EOF
+#!/bin/sh
+i=0
+while [ -n "\$(find "$cold_cache" -name '*.lock' 2>/dev/null)" ] && [ \$i -lt 200 ]; do
+  sleep 0.01
+  i=\$((i + 1))
+done
+rm -rf "$cold_cache"
+EOF
+chmod +x "$cold_prepare"
 hyperfine --warmup 5 --runs 100 --input "$payload" \
-  --prepare "rm -rf $cold_cache || true" \
+  --prepare "$cold_prepare" \
   --export-json "$OUT/cold.json" \
   -n cold "env -u GARNISH_NO_SPAWN GARNISH_CACHE_DIR=$cold_cache $BIN --config $empty_cfg"
 sleep 1

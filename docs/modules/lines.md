@@ -6,7 +6,7 @@ Lines added and removed this session.
 
 **Sources:** `cost.total_lines_added`, `cost.total_lines_removed`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,12 +33,12 @@ Lines added and removed this session.
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty`, `zero` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine; `zero` when the count is zero. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the icon. |
 | `show_net` | bool | `false` | `false` | `true` | Append the net change. |
@@ -50,9 +50,9 @@ Lines added and removed this session.
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `lines` | `U+F440` | `Δ` | `📝` | `` | Diff icon. |
-| `added` | `+` | `+` | `+` | `+` | Added glyph. |
-| `removed` | `−` | `−` | `−` | `-` | Removed glyph. |
+| `lines` | `U+F440` | `Δ` | `📝` | — | Diff icon. |
+| `added` | `+` | `+` | `+` | `+` | Lines-added glyph. |
+| `removed` | `−` | `−` | `−` | `-` | Lines-removed glyph. |
 
 Also try (`lines`: `U+F457` `U+F0CB` `Δ` `∆`).
 
@@ -66,6 +66,6 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent2` | Icon. |
-| `added` | `ok` | Added count. |
-| `removed` | `danger` | Removed count. |
+| `added` | `ok` | Lines added. |
+| `removed` | `danger` | Lines removed. |
 | `net` | `muted` | Net delta. |

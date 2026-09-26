@@ -1,16 +1,16 @@
 //! `session`, `api`, `cache`, `clock`: time spent, time waiting, prompt cache
 //! health, and the wall clock with a spinner.
 
-use jiff::tz::TimeZone;
-
 use crate::ansi::{Segment, Style};
 use crate::config::schema::{
-    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Value,
+    ColorSpec, IconSpec, Kind, MeasureKind, ModuleCfg, ModuleSchema, OptSpec, Rule, Value,
 };
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::{Ctx, Module, Rendered, badge, detail, glyph_prefix, lead, seg};
+use super::{
+    Ctx, IconShown, Module, Rendered, badge, detail, glyph_prefix, lead, seg, show_icon_opt,
+};
 
 /// `session`: wall-clock session duration.
 pub struct SessionModule;
@@ -25,8 +25,7 @@ impl Module for SessionModule {
             sources: &["cost.total_duration_ms"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_start",
                     Kind::Bool,
@@ -81,8 +80,7 @@ impl Module for ApiModule {
             sources: &["cost.total_api_duration_ms", "cost.total_duration_ms"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new(
                     "show_share",
                     Kind::Bool,
@@ -134,12 +132,11 @@ impl Module for CacheModule {
             id: "cache",
             measure: Some(MeasureKind::Percent),
             summary: "Prompt cache hit ratio, TTL and warmth.",
-            doc: "Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-read share), the cache lifetime badge (`5m` or `1h`), and a live countdown until the cached prefix goes cold. Shows `–` before the first API response.",
+            doc: "Hit ratio from `prompt_cache.hit_ratio` (falls back to the last request's cache-read share), the cache lifetime badge (`5m` or `1h`), and a live countdown until the cached prefix goes cold. Shows `–` (`-` in the ascii set) before the first API response.",
             sources: &["prompt_cache.*", "context_window.current_usage"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the icon.", IconShown::ExceptMinimal),
                 OptSpec::new("show_ttl", Kind::Bool, "Show the TTL badge.", Value::Bool(true))
                     .minimal(Value::Bool(false)),
                 OptSpec::new(
@@ -201,7 +198,8 @@ impl Module for CacheModule {
                 .saturating_add(u.cache_creation_input_tokens.unwrap_or(0));
             (total > 0).then(|| crate::num::u64_to_f64(read) / crate::num::u64_to_f64(total))
         });
-        let text = ratio.map_or_else(|| "–".to_owned(), |r| ctx.percent(cfg, r * 100.0));
+        let text = ratio
+            .map_or_else(|| ctx.icons.placeholder().to_owned(), |r| ctx.percent(cfg, r * 100.0));
         segs.push(Segment::styled(text, Style::fg(cfg.color("percent")).bolded()));
         let measure = ratio.map(|r| super::Measure::Percent(ctx.percent_shown(cfg, r * 100.0)));
         let Some(pc) = pc else { return Rendered::fresh(segs).measured(measure) };
@@ -268,9 +266,10 @@ impl Module for ClockModule {
                 OptSpec::new(
                     "tz",
                     Kind::Str,
-                    "IANA time zone; empty means the system zone.",
+                    "Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone. One this machine cannot resolve is reported and the system zone stands in.",
                     Value::Str(String::new()),
-                ),
+                )
+                .rule(Rule::TimeZone),
             ],
             icons: vec![IconSpec {
                 key: "spinner",
@@ -286,11 +285,9 @@ impl Module for ClockModule {
     }
 
     fn render(&self, ctx: &Ctx<'_>, cfg: &ModuleCfg) -> Rendered {
-        let tz = cfg.str("tz");
-        let zone = (!tz.is_empty())
-            .then(|| TimeZone::get(tz).ok())
-            .flatten()
-            .unwrap_or_else(|| ctx.tz.clone());
+        // `tz` was resolved once, by the parser, which reported one that
+        // names no zone.
+        let zone = cfg.zone().cloned().unwrap_or_else(|| ctx.tz.clone());
         let zoned = ctx.now.to_zoned(zone);
         let mut segs: Vec<Segment> = Vec::new();
         if cfg.bool("spinner") {
@@ -329,5 +326,30 @@ impl Module for ClockModule {
             segs.push(seg(cfg, format!(" {}", zoned.strftime("%:z")), "date"));
         }
         Rendered::fresh(segs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::modules::SCHEMAS;
+    use crate::render::{Clock, render_plain_at};
+
+    /// mod-08: the clock's `tz` is the zone it shows, not the tick's: under
+    /// the pinned clock (UTC, 2025-02-01 16:00) a POSIX rule, which needs
+    /// no zoneinfo file, moves the time and the offset; an empty one is the
+    /// tick's own zone.
+    #[test]
+    fn the_clocks_own_zone_moves_its_time() {
+        let payload = crate::fixtures::payload("subscription-full");
+        let render = |tz: &str| {
+            let text = format!(
+                "[frame]\nstyle = \"none\"\nfill = false\n[[row]]\nmodules = [\"clock\"]\n[modules.clock]\nspinner = false\nutc_offset = true\ntz = \"{tz}\"\n"
+            );
+            let (cfg, errs) = crate::config::parse(&text, &SCHEMAS);
+            assert_eq!(errs, Vec::new(), "{tz}");
+            render_plain_at(&payload, &cfg, Some(80), &Clock::fixed()).trim().to_owned()
+        };
+        assert_eq!(render("JST-9"), "01:00:00 +09:00");
+        assert_eq!(render(""), "16:00:00 +00:00");
     }
 }

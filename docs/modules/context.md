@@ -6,7 +6,7 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 
 **Sources:** `context_window.used_percentage`, `context_window.context_window_size`, `exceeds_200k_tokens`, `~/.claude/settings.json autoCompactWindow/autoCompactEnabled`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,12 +33,12 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty`, `below:N`, `above:N` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine; `below:N` and `above:N` compare the percentage the row prints. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `width` | integer ≤ 1024 | `0` | `20` | `30` | Bar width in cells; 0 hides the bar. |
 | `bar` | `blocks` \| `line` | `"blocks"` | `"blocks"` | `"blocks"` | Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. |
@@ -63,9 +63,9 @@ A smooth bar spanning the full context window (`context_window.context_window_si
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `context` | `U+F2DB` | `⊞` | `🧠` | `ctx:` | Context icon. |
-| `fill` | `█` | `█` | `█` | `#` | Filled cell. |
-| `empty` | `░` | `░` | `░` | `-` | Empty cell. |
-| `marker` | `▏` | `▏` | `▏` | `|` | Compaction marker. |
+| `fill` | `█` | `█` | `█` | `#` | Filled bar cell. |
+| `empty` | `░` | `░` | `░` | `-` | Empty bar cell. |
+| `marker` | `▏` | `▏` | `▏` | `\|` | Compaction marker. |
 | `compact` | `⤓` | `⤓` | `⤓` | `compact@` | Compaction label glyph. |
 | `exceeds` | `‼` | `‼` | `‼` | `!!` | Exceeds-200k indicator. |
 | `warn` | `U+F071` | `⚠` | `⚠` | `!` | Warning badge. |
@@ -82,7 +82,7 @@ Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width c
 | key | default | description |
 |---|---|---|
 | `icon` | `accent` | Icon. |
-| `percent` | `text` | Percentage text. |
+| `percent` | `text` | Percentage text (the band colour is the bar's). |
 | `empty` | `muted` | Empty part of the bar. |
 | `marker` | `warn` | Compaction marker. |
 | `exceeds` | `danger` | Exceeds-200k indicator. |

@@ -6,7 +6,7 @@ The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and 
 
 **Sources:** `version`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,12 +33,12 @@ The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and 
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `false` | `true` | Show the icon. |
 
@@ -48,7 +48,9 @@ The payload's `version`, printed dim as `v2.1.270`: what a bug report needs and 
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `version` | `U+F02C` | `⊛` | `📦` | `` | Version icon. |
+| `version` | `U+F02C` | `⊛` | `📦` | — | Version icon. |
+
+Also try (`version`: `U+F02C` `U+F02B` `U+F1B2` `⊛` `#` `v`).
 
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 

@@ -179,7 +179,8 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Build from a palette plus role overrides (already validated color strings).
+    /// Build from a palette plus role overrides, colours the config has
+    /// already parsed; a role without one takes the palette's.
     #[must_use]
     pub fn from_palette(palette: &Palette, overrides: &BTreeMap<Role, Color>) -> Self {
         let colors = Role::ALL
@@ -208,13 +209,17 @@ impl Theme {
         Role::parse(spec).map_or_else(|| Color::parse(spec), |r| Some(self.role(r)))
     }
 
-    /// Band color for a percentage against ascending thresholds.
+    /// Band color for a percentage: the band is the number of thresholds
+    /// it has reached.
     ///
     /// `thresholds = [50, 75, 90]` gives band1 below 50, band2 below 75,
-    /// band3 below 90, band4 at or above 90.
+    /// band3 below 90, band4 at or above 90. Counting every threshold
+    /// reached, not the run of them from the start, gives the same band
+    /// for the same list in any order (the parser refuses one out of order
+    /// anyway, SPEC § 4).
     #[must_use]
     pub fn band(&self, percent: f64, thresholds: &[f64], bands: &[Color]) -> Color {
-        let idx = thresholds.iter().take_while(|&&t| percent >= t).count();
+        let idx = thresholds.iter().filter(|&&t| percent >= t).count();
         let role_band = [Role::Band1, Role::Band2, Role::Band3, Role::Band4]
             .get(idx.min(3))
             .copied()
@@ -336,5 +341,13 @@ mod tests {
         assert_eq!(t.band(95.0, &th, &bands[..2]), Color::Ansi(3));
         // no bands at all: theme roles
         assert_eq!(t.band(95.0, &th, &[]), t.role(Role::Band4));
+        // txt-05: the band is the number of thresholds reached, whatever
+        // their order (the parser refuses a list out of order, and nothing
+        // here depends on it holding): 80 reaches 50 and 75 of these.
+        assert_eq!(t.band(80.0, &[90.0, 50.0, 75.0], &bands), Color::Ansi(5));
+        for p in 0..=120 {
+            let p = f64::from(p);
+            assert_eq!(t.band(p, &[90.0, 75.0, 50.0], &bands), t.band(p, &th, &bands), "{p}");
+        }
     }
 }

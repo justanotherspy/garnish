@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::app::{Action, Key};
-use super::ui::{Chrome, cells, centered, clip, hints, window};
+use super::ui::{Chrome, cells, centered, clip, hints, move_cursor, window};
 
 /// What a chosen value is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,8 +36,11 @@ pub enum Target {
 pub struct Choice {
     /// What the list shows.
     pub label: Line<'static>,
-    /// The text the filter matches and the value that is picked.
+    /// The value that is picked, and the text the filter matches first.
     pub value: String,
+    /// What the label says about the value (a summary, the role a colour
+    /// is the theme's for), which the filter matches after every value.
+    pub note: String,
     /// Picking it opens an input for a typed value instead.
     pub custom: bool,
 }
@@ -46,7 +49,12 @@ impl Choice {
     /// A plain entry whose label is its value.
     #[must_use]
     pub fn plain(value: &str) -> Self {
-        Self { label: Line::from(value.to_owned()), value: value.to_owned(), custom: false }
+        Self {
+            label: Line::from(value.to_owned()),
+            value: value.to_owned(),
+            note: String::new(),
+            custom: false,
+        }
     }
 
     /// An entry shown as `value  note`.
@@ -59,6 +67,7 @@ impl Choice {
                 Span::styled(note.to_owned(), Chrome::muted()),
             ]),
             value: value.to_owned(),
+            note: note.to_owned(),
             custom: false,
         }
     }
@@ -69,6 +78,7 @@ impl Choice {
         Self {
             label: Line::from(Span::styled(format!("{what}…"), Chrome::title())),
             value: String::new(),
+            note: String::new(),
             custom: true,
         }
     }
@@ -119,17 +129,32 @@ impl Choose {
         }
     }
 
-    /// The entries that match the filter, best first.
+    /// The entries that match the filter, best first: every entry whose
+    /// value matches (fuzzily), then every other whose note holds the
+    /// filter as written (a note is prose, where a subsequence matches
+    /// nearly anything), each once, two entries sharing a value included;
+    /// the `custom…` entry last.
     #[must_use]
     pub fn matching(&self) -> Vec<&Choice> {
         if self.filter.is_empty() {
             return self.items.iter().collect();
         }
-        let ranked = super::fuzzy::rank(&self.filter, self.items.iter().map(|c| c.value.as_str()));
-        let mut out: Vec<&Choice> = ranked
+        let by_value: Vec<usize> =
+            super::fuzzy::rank(&self.filter, self.items.iter().map(|c| c.value.as_str()))
+                .into_iter()
+                .filter(|i| self.items.get(*i).is_some_and(|c| !c.custom))
+                .collect();
+        let query = self.filter.trim().to_lowercase();
+        let mut by_note: Vec<(usize, usize)> = self
+            .items
             .iter()
-            .filter_map(|v| self.items.iter().find(|c| c.value == *v && !c.custom))
+            .enumerate()
+            .filter(|(i, c)| !c.custom && !by_value.contains(i))
+            .filter_map(|(i, c)| c.note.to_lowercase().find(&query).map(|at| (at, i)))
             .collect();
+        by_note.sort_unstable();
+        let order = by_value.into_iter().chain(by_note.into_iter().map(|(_, i)| i));
+        let mut out: Vec<&Choice> = order.filter_map(|i| self.items.get(i)).collect();
         out.extend(self.items.iter().filter(|c| c.custom));
         out
     }
@@ -137,32 +162,14 @@ impl Choose {
     /// Handle a key: the outcome says what to do.
     pub fn handle(&mut self, key: Key) -> Outcome {
         let n = self.matching().len();
+        if let Some(cursor) =
+            move_cursor(self.cursor, n, if key == Key::Tab { Key::Down } else { key })
+        {
+            self.cursor = cursor;
+            return Outcome::default();
+        }
         match key {
             Key::Esc => Outcome::close(),
-            Key::Up => {
-                self.cursor = self.cursor.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Down | Key::Tab => {
-                self.cursor = self.cursor.saturating_add(1).checked_rem(n.max(1)).unwrap_or(0);
-                Outcome::default()
-            }
-            Key::PageUp => {
-                self.cursor = self.cursor.saturating_sub(10);
-                Outcome::default()
-            }
-            Key::PageDown => {
-                self.cursor = self.cursor.saturating_add(10).min(n.saturating_sub(1));
-                Outcome::default()
-            }
-            Key::Home => {
-                self.cursor = 0;
-                Outcome::default()
-            }
-            Key::End => {
-                self.cursor = n.saturating_sub(1);
-                Outcome::default()
-            }
             Key::Backspace => {
                 self.filter.pop();
                 self.cursor = 0;
@@ -209,7 +216,8 @@ impl Choose {
             .max(self.title.len().saturating_add(4))
             .saturating_add(6)
             .clamp(30, 70);
-        let height = matching.len().saturating_add(5).clamp(7, usize::from(area.height));
+        // Not `clamp`: it panics when the area is shorter than the minimum.
+        let height = matching.len().saturating_add(5).max(7).min(usize::from(area.height));
         let rect = centered(area, cells(width), cells(height));
         frame.render_widget(Clear, rect);
         let block =
@@ -389,60 +397,85 @@ pub enum Question {
     /// The file changed on disk since it was read: `true` overwrites,
     /// `false` reloads.
     OverwriteOrReload,
-    /// Drop the `[modules.text.<name>]` table whose last placement went.
-    DropText(String),
+    /// Drop the `[modules.text.<name>]` tables whose last placements went.
+    DropText(Vec<String>),
     /// Replace a draft with unsaved edits by the named preset.
     ReplaceDraft(String),
+    /// Write the picker's preset over a config file that appeared or
+    /// changed since `setup` opened.
+    ApplyPreset,
     /// Apply the install plan.
     Install,
 }
 
-/// A yes/no question.
+/// A yes/no question, with a third answer that does nothing when both of
+/// the others act.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Confirm {
     /// The question, one or two lines.
     pub text: Vec<String>,
     /// The two answers, `yes` first.
     pub answers: (String, String),
-    /// Which is highlighted.
-    pub yes: bool,
+    /// The answer that closes the question and does nothing, when it has
+    /// one: then it is the default, and what `Esc` means.
+    pub cancel: Option<String>,
+    /// The highlighted answer: 0 is `yes`, 1 `no`, 2 the cancel.
+    pub focus: usize,
     /// What a `yes` (or `no`) does.
     pub question: Question,
 }
 
 impl Confirm {
-    /// A question with `yes`/`no` answers.
+    /// A question with `yes`/`no` answers, opening on `no`.
     #[must_use]
     pub fn new(question: Question, text: &[&str], yes: &str, no: &str) -> Self {
         Self {
             text: text.iter().map(|s| (*s).to_owned()).collect(),
             answers: (yes.to_owned(), no.to_owned()),
-            yes: false,
+            cancel: None,
+            focus: 1,
             question,
         }
     }
 
+    /// With a third answer that does nothing, the one it opens on: for a
+    /// question whose `yes` and `no` both act, so that neither `Esc` nor a
+    /// reflexive `Enter` does either.
+    #[must_use]
+    pub fn or_cancel(mut self, label: &str) -> Self {
+        self.cancel = Some(label.to_owned());
+        self.focus = 2;
+        self
+    }
+
+    const fn answer_count(&self) -> usize {
+        if self.cancel.is_some() { 3 } else { 2 }
+    }
+
     /// Handle a key.
     pub fn handle(&mut self, key: Key) -> Outcome {
+        let answer = |yes: bool| Outcome {
+            close: true,
+            push: None,
+            actions: vec![Action::Answered(self.question.clone(), yes)],
+        };
+        let n = self.answer_count();
         match key {
-            Key::Esc | Key::Char('n') => Outcome {
-                close: true,
-                push: None,
-                actions: vec![Action::Answered(self.question.clone(), false)],
-            },
-            Key::Char('y') => Outcome {
-                close: true,
-                push: None,
-                actions: vec![Action::Answered(self.question.clone(), true)],
-            },
-            Key::Left | Key::Right | Key::Tab | Key::Up | Key::Down => {
-                self.yes = !self.yes;
+            Key::Esc if self.cancel.is_some() => Outcome::close(),
+            Key::Esc | Key::Char('n') => answer(false),
+            Key::Char('y') => answer(true),
+            Key::Left | Key::Up | Key::BackTab => {
+                self.focus = self.focus.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
                 Outcome::default()
             }
-            Key::Enter => Outcome {
-                close: true,
-                push: None,
-                actions: vec![Action::Answered(self.question.clone(), self.yes)],
+            Key::Right | Key::Down | Key::Tab => {
+                self.focus = self.focus.saturating_add(1).checked_rem(n).unwrap_or(0);
+                Outcome::default()
+            }
+            Key::Enter => match self.focus {
+                0 => answer(true),
+                1 => answer(false),
+                _ => Outcome::close(),
             },
             _ => Outcome::default(),
         }
@@ -450,8 +483,25 @@ impl Confirm {
 
     /// Draw the question as a dialog over `area`.
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let pick = |on: bool, text: &str| {
+            Span::styled(format!(" {text} "), if on { Chrome::selected() } else { Style::new() })
+        };
+        let mut answers = vec![
+            pick(self.focus == 0, &self.answers.0),
+            Span::raw("   "),
+            pick(self.focus == 1, &self.answers.1),
+        ];
+        if let Some(cancel) = &self.cancel {
+            answers.push(Span::raw("   "));
+            answers.push(pick(self.focus == 2, cancel));
+        }
+        answers.push(Span::raw("     "));
+        let keys = if self.cancel.is_some() { "y / n / esc" } else { "y / n / enter" };
+        answers.push(Span::styled(keys, Chrome::muted()));
+        let answers = Line::from(answers);
+        let text_width = self.text.iter().map(|t| crate::ansi::display_width(t)).max().unwrap_or(0);
         let width =
-            self.text.iter().map(String::len).max().unwrap_or(0).saturating_add(6).clamp(36, 72);
+            text_width.saturating_add(6).max(answers.width().saturating_add(2)).clamp(36, 72);
         let height = self.text.len().saturating_add(4);
         let rect = centered(area, cells(width), cells(height));
         frame.render_widget(Clear, rect);
@@ -461,16 +511,7 @@ impl Confirm {
         let mut lines: Vec<Line<'static>> =
             self.text.iter().map(|t| Line::from(t.clone())).collect();
         lines.push(Line::from(""));
-        let pick = |on: bool, text: &str| {
-            Span::styled(format!(" {text} "), if on { Chrome::selected() } else { Style::new() })
-        };
-        lines.push(Line::from(vec![
-            pick(self.yes, &self.answers.0),
-            Span::raw("   "),
-            pick(!self.yes, &self.answers.1),
-            Span::raw("     "),
-            Span::styled("y / n / enter", Chrome::muted()),
-        ]));
+        lines.push(answers);
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -563,6 +604,18 @@ impl Outcome {
     pub const fn close() -> Self {
         Self { close: true, push: None, actions: Vec::new() }
     }
+
+    /// Keep the layer and apply `action`.
+    #[must_use]
+    pub fn act(action: Action) -> Self {
+        Self { close: false, push: None, actions: vec![action] }
+    }
+
+    /// Keep the layer and open `layer` on top of it.
+    #[must_use]
+    pub const fn open(layer: Layer) -> Self {
+        Self { close: false, push: Some(layer), actions: Vec::new() }
+    }
 }
 
 #[cfg(test)]
@@ -597,6 +650,46 @@ mod tests {
         let out = c.handle(Key::Enter);
         assert!(matches!(out.push, Some(Layer::Input(_))), "custom opens an input");
         assert!(c.handle(Key::Esc).close);
+    }
+
+    /// frm-17: under a filter every entry shows once, two entries with one
+    /// value included, and a note is searched after the values.
+    #[test]
+    fn a_filtered_list_shows_each_entry_once_and_searches_notes_last() {
+        let items = vec![
+            Choice::noted("default", "the theme's text"),
+            Choice::noted("default", "a named colour"),
+            Choice::noted("red", "the theme's error"),
+            Choice::noted("text", "a role"),
+        ];
+        let mut c = Choose::new("Colour", items, Target::Columns);
+        for ch in "def".chars() {
+            c.handle(Key::Char(ch));
+        }
+        let notes: Vec<&str> = c.matching().iter().map(|c| c.note.as_str()).collect();
+        assert_eq!(notes, ["the theme's text", "a named colour"]);
+        let mut blank =
+            Choose::new("Blank", vec![Choice::plain("a"), Choice::custom("x")], Target::Columns);
+        blank.handle(Key::Char(' '));
+        assert_eq!(blank.matching().iter().filter(|c| c.custom).count(), 1, "custom once");
+        c.handle(Key::Backspace);
+        c.handle(Key::Backspace);
+        c.handle(Key::Backspace);
+        for ch in "text".chars() {
+            c.handle(Key::Char(ch));
+        }
+        let values: Vec<&str> = c.matching().iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(values, ["text", "default"], "the value's match first, then the note's");
+    }
+
+    /// frm-16: a list drawn into an area shorter than its seven-row
+    /// minimum is cut to the area, not a panic in `clamp`.
+    #[test]
+    fn a_list_draws_into_an_area_shorter_than_its_minimum() {
+        let items = vec![Choice::plain("a"), Choice::plain("b"), Choice::plain("c")];
+        let mut c = Choose::new("Pick", items, Target::AddModule);
+        let Ok(mut terminal) = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 5));
+        let Ok(_) = terminal.draw(|f| c.draw(f, f.area()));
     }
 
     #[test]
@@ -641,6 +734,25 @@ mod tests {
         assert_eq!(
             q.handle(Key::Esc).actions,
             vec![Action::Answered(Question::QuitUnsaved, false)]
+        );
+        // app-06: a question whose two answers both act opens on the third,
+        // which does nothing, as `Esc` does; each act needs its own key.
+        let mut c = Confirm::new(Question::OverwriteOrReload, &["Changed?"], "overwrite", "reload")
+            .or_cancel("keep editing");
+        assert_eq!(c.handle(Key::Enter), Outcome::close());
+        assert_eq!(c.handle(Key::Esc), Outcome::close());
+        c.handle(Key::Left);
+        assert_eq!(
+            c.handle(Key::Enter).actions,
+            vec![Action::Answered(Question::OverwriteOrReload, false)]
+        );
+        c.handle(Key::Right);
+        assert_eq!(c.focus, 2);
+        c.handle(Key::Right);
+        assert_eq!(c.focus, 0, "wraps");
+        assert_eq!(
+            c.handle(Key::Char('y')).actions,
+            vec![Action::Answered(Question::OverwriteOrReload, true)]
         );
         let h = Help { title: "Keys".into(), keys: vec![("q".into(), "quit".into())] };
         assert!(h.handle(Key::Char('x')).close);

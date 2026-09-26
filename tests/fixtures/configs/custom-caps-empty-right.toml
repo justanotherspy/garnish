@@ -1,0 +1,24 @@
+# fixture: subscription-full
+# columns: 44
+# icons: unicode
+# A tall row under a `custom` frame whose right caps differ: the first is
+# two cells, the others are empty. The row is laid out to the room the
+# widest pair leaves, and a later line's spare cells go to the rule (SPEC
+# § 4.3), an empty cap's as a narrower one's: they used to go only before a
+# cap, so the second and third lines came out two cells short of the box.
+[frame]
+style = "custom"
+fill_char = "-"
+first = "["
+middle = "|"
+last = "["
+right_first = "你"
+
+[[row]]
+[[row.col]]
+[[row.col.row]]
+modules = ["model"]
+[[row.col.row]]
+modules = ["clock"]
+[[row.col.row]]
+modules = ["session"]

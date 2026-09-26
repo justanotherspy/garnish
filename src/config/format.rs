@@ -7,8 +7,7 @@
 use crate::modules::util;
 
 /// How token counts print.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TokenStyle {
     /// `12k`, `128k`, `1.0M`.
     #[default]
@@ -20,8 +19,7 @@ pub enum TokenStyle {
 }
 
 /// How percentages print.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PercentStyle {
     /// `42%`.
     #[default]
@@ -31,8 +29,7 @@ pub enum PercentStyle {
 }
 
 /// How money prints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CostStyle {
     /// `$1.23` (`cost.decimals` places; `$1.2k` from a thousand up).
     #[default]
@@ -42,8 +39,7 @@ pub enum CostStyle {
 }
 
 /// How a parenthesised detail is drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParensStyle {
     /// In the colour of the value it follows, as one segment with it.
     #[default]
@@ -66,8 +62,8 @@ pub struct FormatCfg {
 }
 
 impl TokenStyle {
-    /// The config names, for messages.
-    pub const CHOICES: &'static str = "compact, precise, whole";
+    /// Every style, in the order the reference lists them.
+    pub const ALL: [Self; 3] = [Self::Compact, Self::Precise, Self::Whole];
 
     /// Config name.
     #[must_use]
@@ -83,7 +79,7 @@ impl TokenStyle {
     /// anything else, which the parser has already refused).
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
-        [Self::Compact, Self::Precise, Self::Whole].into_iter().find(|s| s.name() == name)
+        Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
     /// A token count in this style.
@@ -98,8 +94,8 @@ impl TokenStyle {
 }
 
 impl PercentStyle {
-    /// The config names, for messages.
-    pub const CHOICES: &'static str = "whole, precise";
+    /// Every style, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::Whole, Self::Precise];
 
     /// Config name.
     #[must_use]
@@ -113,24 +109,19 @@ impl PercentStyle {
     /// The style a module option names, or `None` for `inherit`.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
-        [Self::Whole, Self::Precise].into_iter().find(|s| s.name() == name)
+        Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
     /// The number this style prints for `p`, as a number: what a band
     /// threshold and a `below:N` / `above:N` rule compare, so they agree
     /// with the printed value at the boundaries whatever the style (SPEC
     /// § 3, § 4). `clamp` holds it to `0..=100`; off, it may pass 100
-    /// (`spend`). NaN and anything at or below zero are 0 (a negative
-    /// zero would print its sign).
+    /// (`spend`) up to [`crate::num::MAX_SHOWN`]. NaN and anything at or
+    /// below zero are 0 ([`crate::num::shown_amount`]).
     #[must_use]
     pub fn shown(self, p: f64, clamp: bool) -> f64 {
-        let p = if p.is_nan() || p <= 0.0 {
-            0.0
-        } else if clamp {
-            p.min(100.0)
-        } else {
-            p
-        };
+        let p = crate::num::shown_amount(p);
+        let p = if clamp { p.min(100.0) } else { p };
         match self {
             Self::Whole => crate::num::u64_to_f64(crate::num::round_to_u64(p)),
             // Rounded here rather than by the formatter, so the compared
@@ -152,8 +143,8 @@ impl PercentStyle {
 }
 
 impl CostStyle {
-    /// The config names, for messages.
-    pub const CHOICES: &'static str = "precise, whole";
+    /// Every style, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::Precise, Self::Whole];
 
     /// Config name.
     #[must_use]
@@ -167,18 +158,16 @@ impl CostStyle {
     /// The style a module option names, or `None` for `inherit`.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
-        [Self::Precise, Self::Whole].into_iter().find(|s| s.name() == name)
+        Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
     /// The amount this style prints for `usd`, as a number: what `zero` in
     /// a `hide` list reads (SPEC § 3), rounded to the places printed
-    /// (`decimals` under `precise`, none under `whole`). NaN and anything
-    /// at or below zero are 0 (a negative zero would print its sign).
+    /// (`decimals` under `precise`, none under `whole`), and bounded like
+    /// every printed amount ([`crate::num::shown_amount`]).
     #[must_use]
     pub fn shown(self, usd: f64, decimals: usize) -> f64 {
-        if usd.is_nan() || usd <= 0.0 {
-            return 0.0;
-        }
+        let usd = crate::num::shown_amount(usd);
         let places = match self {
             Self::Precise => decimals.min(crate::config::MAX_DECIMALS),
             Self::Whole => 0,
@@ -201,8 +190,8 @@ impl CostStyle {
 }
 
 impl ParensStyle {
-    /// The config names, for messages.
-    pub const CHOICES: &'static str = "plain, dim";
+    /// Both styles, in the order the reference lists them.
+    pub const ALL: [Self; 2] = [Self::Plain, Self::Dim];
 
     /// Config name.
     #[must_use]
@@ -259,27 +248,26 @@ mod tests {
         // The defaults are the old rendering, so a config without the
         // table renders byte for byte as before.
         assert_eq!(FormatCfg::default().tokens.format(12_345), util::tokens(12_345));
-        assert_eq!(FormatCfg::default().percent.format(41.6, true), util::percent(41.6));
+        assert_eq!(FormatCfg::default().percent.format(41.6, true), "42%");
         assert_eq!(FormatCfg::default().cost.format(1.2345, 2), util::dollars(1.2345, 2));
         assert_eq!(FormatCfg::default().parens, ParensStyle::Plain);
     }
 
     #[test]
     fn names_round_trip_and_inherit_is_none() {
-        for s in [TokenStyle::Compact, TokenStyle::Precise, TokenStyle::Whole] {
+        for s in TokenStyle::ALL {
             assert_eq!(TokenStyle::parse(s.name()), Some(s));
         }
-        for s in [PercentStyle::Whole, PercentStyle::Precise] {
+        for s in PercentStyle::ALL {
             assert_eq!(PercentStyle::parse(s.name()), Some(s));
         }
-        for s in [CostStyle::Precise, CostStyle::Whole] {
+        for s in CostStyle::ALL {
             assert_eq!(CostStyle::parse(s.name()), Some(s));
         }
         assert_eq!(TokenStyle::parse("inherit"), None);
         assert_eq!(PercentStyle::parse("compact"), None);
         assert_eq!(CostStyle::parse(""), None);
         assert_eq!(ParensStyle::Dim.name(), "dim");
-        assert!(TokenStyle::CHOICES.contains("precise") && ParensStyle::CHOICES.contains("dim"));
     }
 
     /// SPEC § 3, § 4: what a band or a `hide` rule compares is the number
@@ -312,5 +300,25 @@ mod tests {
         assert_eq!(CostStyle::Whole.format(1000.0, 2), "$1.0k");
         assert_eq!(CostStyle::Whole.format(999.4, 2), "$999");
         assert_eq!(PercentStyle::Precise.format(f64::NAN, false), "0.0%");
+    }
+
+    /// An absurd number prints as a bounded one, and the bound is what a
+    /// band compares too: `1e308` used to print 20 digits of `u64::MAX`, or
+    /// `inf%`, and a cost of `1e300` about 300 digits.
+    #[test]
+    fn absurd_amounts_print_bounded() {
+        for p in [1e308, f64::INFINITY] {
+            assert_eq!(PercentStyle::Whole.format(p, false), "99999%");
+            assert_eq!(PercentStyle::Precise.format(p, false), "99999.0%");
+            assert_eq!(PercentStyle::Whole.shown(p, false), crate::num::MAX_SHOWN);
+            assert_eq!(PercentStyle::Whole.format(p, true), "100%");
+        }
+        for usd in [1e300, f64::INFINITY] {
+            assert_eq!(CostStyle::Precise.format(usd, 2), "$100.0k");
+            assert_eq!(CostStyle::Whole.format(usd, 2), "$100.0k");
+            assert_eq!(CostStyle::Precise.shown(usd, 2), crate::num::MAX_SHOWN);
+            assert!(crate::ansi::display_width(&util::dollars(usd, 2)) <= 8);
+        }
+        assert_eq!(CostStyle::Precise.format(-f64::INFINITY, 2), "$0.00");
     }
 }

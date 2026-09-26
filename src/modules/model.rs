@@ -5,7 +5,7 @@ use crate::ansi::{Segment, Style};
 use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, ModuleSchema, OptSpec, Value};
 use crate::icons::glyph;
 
-use super::{Ctx, Module, Rendered, badge, lead, seg};
+use super::{Ctx, IconShown, Module, Rendered, badge, close_up, lead, seg, show_icon_opt};
 
 /// `model`: display name, fast-mode and thinking glyphs, optionally the model id.
 pub struct ModelModule;
@@ -20,8 +20,7 @@ impl Module for ModelModule {
             sources: &["model.display_name", "model.id", "fast_mode", "thinking.enabled"],
             refresh: 0,
             opts: vec![
-                OptSpec::new("show_icon", Kind::Bool, "Show the model icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the model icon.", IconShown::ExceptMinimal),
                 OptSpec::new("show_id", Kind::Bool, "Append the raw model id.", Value::Bool(false))
                     .full(Value::Bool(true)),
                 OptSpec::new(
@@ -115,8 +114,7 @@ impl Module for EffortModule {
                 )
                 .minimal(Value::Str("word".into()))
                 .full(Value::Str("both".into())),
-                OptSpec::new("show_icon", Kind::Bool, "Show the effort icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the effort icon.", IconShown::ExceptMinimal),
             ],
             icons: vec![
                 IconSpec {
@@ -146,6 +144,7 @@ impl Module for EffortModule {
         let steps = LEVELS.iter().position(|l| *l == level).map_or(0, |i| i.saturating_add(1));
         let style = cfg.str("style");
         let mut segs: Vec<Segment> = lead(cfg, "effort");
+        let first = segs.len();
         if style != "word" {
             let scale: Vec<char> = cfg.icon("scale").chars().collect();
             let lit: String = scale.iter().take(steps).collect();
@@ -158,9 +157,9 @@ impl Module for EffortModule {
             }
         }
         if style != "scale" {
-            let prefix = if style == "both" { " " } else { "" };
-            segs.push(seg(cfg, format!("{prefix}{level}"), "word"));
+            segs.push(seg(cfg, format!(" {level}"), "word"));
         }
+        close_up(&mut segs, first);
         Rendered::fresh(segs)
     }
 }
@@ -185,8 +184,7 @@ impl Module for StyleModule {
                     Value::Bool(true),
                 )
                 .full(Value::Bool(false)),
-                OptSpec::new("show_icon", Kind::Bool, "Show the style icon.", Value::Bool(true))
-                    .minimal(Value::Bool(false)),
+                show_icon_opt("Show the style icon.", IconShown::ExceptMinimal),
             ],
             icons: vec![IconSpec {
                 key: "style",
@@ -210,5 +208,39 @@ impl Module for StyleModule {
         let mut segs: Vec<Segment> = lead(cfg, "style");
         segs.push(seg(cfg, name, "name"));
         Rendered::fresh(segs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ansi::strip_ansi;
+    use crate::render::{Clock, render_plain_at};
+
+    /// `effort` alone on an unframed line at `high`, plain.
+    fn effort_row(extra: &str) -> String {
+        let payload = crate::payload::Payload::parse(
+            "{\"session_id\": \"s\", \"effort\": {\"level\": \"high\"}}",
+        )
+        .unwrap();
+        let text = format!(
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"effort\"]\n[modules.effort]\n{extra}"
+        );
+        let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+        assert!(errs.is_empty(), "{errs:?}");
+        strip_ansi(&render_plain_at(&payload, &config, Some(80), &Clock::fixed()))
+            .trim_end()
+            .to_owned()
+    }
+
+    /// The word under `style = "both"` is spaced from the scale, not from
+    /// nothing: a blank `scale` left `⚙  high`, and ` high` without the icon.
+    #[test]
+    fn the_effort_word_is_spaced_once() {
+        assert_eq!(effort_row("style = \"both\"\n"), "⚙ ▁▃▅▇█ high");
+        assert_eq!(effort_row("style = \"word\"\n"), "⚙ high");
+        let blank = "style = \"both\"\n[modules.effort.icons]\nscale = \"\"\n";
+        assert_eq!(effort_row(blank), "⚙ high");
+        let bare = "style = \"both\"\nshow_icon = false\n[modules.effort.icons]\nscale = \"\"\n";
+        assert_eq!(effort_row(bare), "high");
     }
 }

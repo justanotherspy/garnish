@@ -6,7 +6,7 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 
 **Sources:** `wall clock`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,19 +33,19 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `format` | `24h` \| `12h` | `"24h"` | `"24h"` | `"24h"` | Hour format. |
 | `seconds` | bool | `false` | `true` | `true` | Show seconds. |
 | `spinner` | bool | `false` | `true` | `true` | Show the spinner. |
 | `date` | bool | `false` | `false` | `true` | Show the date. |
 | `utc_offset` | bool | `false` | `false` | `true` | Show the UTC offset. |
-| `tz` | string | `""` | `""` | `""` | IANA time zone; empty means the system zone. |
+| `tz` | string | `""` | `""` | `""` | Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone. One this machine cannot resolve is reported and the system zone stands in. |
 
 ## Icons
 
@@ -53,7 +53,7 @@ The local time (system zone, or `tz`), preceded by a spinner whose frame is deri
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `spinner` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛` | `|/-\` | Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width. |
+| `spinner` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛` | `\|/-\` | Spinner frames, one character each, cycled one per tick; `spinner_frames = [...]` is the general form (SPEC § 4.2) and takes strings of any one width. |
 
 Also try (`spinner`: `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` `|/-\` `▁▃▅▇█▇▅▃` `⣾⣽⣻⢿⡿⣟⣯⣷` `⠁⠂⠄⡀⢀⠠⠐⠈`).
 

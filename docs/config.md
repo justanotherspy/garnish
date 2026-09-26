@@ -1,6 +1,6 @@
 # Configuration reference
 
-garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.
+garnish reads `--config`, else `$GARNISH_CONFIG`, else `$XDG_CONFIG_HOME/garnish/garnish.toml` (`~/.config/garnish/garnish.toml`), else `~/.garnish.toml`. Without a file the built-in `default` preset is used. `garnish config init`, `garnish setup` and `garnish install` write the file found this way, and the XDG one only when there is none. When the `statusLine.command` Claude Code runs passes its own `--config` (and neither `--config` nor `$GARNISH_CONFIG` names another), that file is the one every command but the status line itself uses: `config path`, `config check`, `config show`, `config init`, `preview`, `doctor`, `setup` and `install`. `garnish config init` writes an annotated file; `garnish config check` validates it; `garnish config show` prints the fully resolved result.
 
 A bad key never blanks the status line: every valid key stays in effect, the built-in default stands in for the bad one, and a dim `⚠ config: <file> <path>: <message>` line is appended; only a file that does not parse as TOML falls back to the defaults wholesale, with the line of the syntax error.
 
@@ -11,15 +11,15 @@ A bad key never blanks the status line: every valid key stays in effect, the bui
 | `preset` | `default` \| `minimal` \| `full` \| `compact` | `default` | Which rows exist and which module preset they imply, when `[[row]]` is absent. |
 | `icons` | `nerd` \| `unicode` \| `emoji` \| `ascii` | `nerd` | Glyph set. `nerd` needs a Nerd Font. |
 | `theme` | `garnish` \| `catppuccin-mocha` \| `nord` \| `dracula` \| `tokyonight` \| `mono` | `garnish` | Color palette (see below). |
-| `color` | `auto` \| `always` \| `never` \| `256` \| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set. |
-| `truncate` | bool | `true` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is never cut. |
+| `color` | `auto` \| `always` \| `never` \| `256` \| `truecolor` | `auto` | Escape-code output. `auto` is truecolor unless `NO_COLOR` is set and not empty. |
+| `truncate` | bool | `true` | Truncate the left group when a line overflows the width (`$COLUMNS − 4 − padding`); the right group is cut only when it alone is wider than its column. |
 | `stale_style` | `dim` \| `hide` \| `plain` | `dim` | How overdue cached values are shown. |
 | `stale_after` | integer ≥ 1 | `5` | TTL periods a cached value may be overdue before it is styled stale; until then the last value shows unchanged while a worker refreshes it. |
 | `padding` | integer | `0` | Extra cells subtracted from the width, on top of the 4 Claude Code's box always takes; set `2 × statusLine.padding` when that setting is non-zero. |
 | `align` | bool | `false` | Pad each module column to the widest module in it across lines, so the separators stack vertically (see [Aligned columns](#aligned-columns)). |
 | `right_justify` | `end` \| `start` | `end` | Where a padded right-group module's text sits: `end` pads on the left so the text hugs the cap, `start` pads on the right so the text follows the separator. Only matters with `align = true` and a filled rule. |
 | `hide_empty_rows` | bool | `true` | Drop a row whose modules all rendered nothing or were hidden by `hide_when_empty` or a `hide` list (outside a repository, a row of `branch sync pr` is empty); the frame's caps follow the surviving rows. A row configured as `modules = []` with no `right` is an intentional spacer and is always kept. With `stale_style = "hide"` a row of only cached modules can disappear while its values are overdue and return after the refresh; `hide_when_empty = false` on one module pins the row. `hide_empty_lines` is the permanent alias of this key. |
-| `overflow` | `truncate` \| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled or cut. With animations off the line is cut with `…` like `truncate`. |
+| `overflow` | `truncate` \| `ticker` | `truncate` | A left group wider than its budget is cut with `…` (`truncate`) or scrolled (`ticker`): a window onto the group advances `ticker_step` cells per tick and wraps around with `ticker_gap` between the end and the start. The offset comes from the tick's clock, so it needs no state and `GARNISH_NOW` freezes it; it moves as often as Claude Code ticks (`refreshInterval`, at least 1 s). The right group is never scrolled, and is cut only when it alone is wider than its column. With animations off the line is cut with `…` like `truncate`. |
 | `ticker_step` | number | `1` | Cells the ticker advances per tick (0.001–1000; `0.5` = every second tick). |
 | `ticker_gap` | string | `"   "` | Text between the end of a scrolled group and its wrapped-around start. |
 | `animate` | bool | `true` | Master switch for every animation (the clock spinner, scrolling text modules, the ticker, and the animated frame parts of § 4.2): `false` freezes them all at frame 0 and cuts a ticker line with `…`. Unset, garnish follows Claude Code's `prefersReducedMotion` setting (the settings chain of the project directory and the home, the first file that sets it winning), so the two stay in step; an explicit value wins over the setting, and `GARNISH_ANIMATE=0` freezes one session whatever either says. `config show` prints the value in effect. Recommended off for screen readers and recordings. |
@@ -79,6 +79,7 @@ Every module color defaults to a role; override a role here to restyle every mod
 | `right_first` `right_middle` `right_last` `right_single` | style-dependent | Right caps. |
 | `fill_char` | style-dependent | The rule character (must be one cell wide). |
 | `pad` | style-dependent | Text between prefix/content and content/rule. |
+| `top_left` `top_right` `bottom_left` `bottom_right` `side` | style-dependent (none for `none` and `powerline`) | A box's corners and side (`[box.<name>]` below), one cell each; a box without a `style` of its own draws with these. |
 | `fill_pattern` | `""` | One-cell glyphs repeated across the rule instead of `fill_char`; each tick the pattern shifts `fill_step` cells in `fill_direction`, so dots appear to travel along the rule. The rule's width never changes, only which glyph lands in each cell. Empty keeps the static rule. |
 | `fill_step` | `1` | Cells the pattern shifts per tick (0.001–1000; 0.5 = every second tick). |
 | `fill_direction` | `right` | `left` \| `right`: which way the pattern travels. |
@@ -313,20 +314,22 @@ At 90 columns, unicode icons:
 
 ## `[modules.<id>]`
 
-Every module accepts `enabled`, `preset`, `refresh`, `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → module preset → top-level preset → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).
+Every module accepts `enabled`, `preset`, `refresh` (the seconds a cached module's value lives before its worker refreshes it; a module that renders from the payload every tick takes only `0`), `hide` (a list of the states in which it leaves its row: `empty`, and `zero` or `below:N` / `above:N` where the module's page lists them; `hide_when_empty` is the older spelling of `empty`, and the two combine), `label`, `prefix`, `suffix`, `hide_when_empty`, `max_width` (cells the whole module is cut to with `…`, before alignment; 0 = unlimited), an `icons` table and a `colors` table, plus its own options. Resolution order: built-in default → icon set → the module preset the top-level `preset` implies → the module's own `preset` → explicit key. See the per-module pages in [modules/](modules/). `[modules.text.<name>]` defines a text box of your own, placed as `text.<name>`; see [text](modules/text.md).
 
 ## Environment
 
 | variable | effect |
 |---|---|
 | `COLUMNS` | Terminal width (set by Claude Code). `GARNISH_COLUMNS` is the fallback; 120 when neither is set. The lines are rendered 4 cells narrower, plus `padding`: the width of Claude Code's status line box. |
-| `NO_COLOR` | Disables escape codes under `color = "auto"`. |
-| `GARNISH_CONFIG` | Config file path. |
+| `NO_COLOR` | Disables escape codes under `color = "auto"` when set and not empty (no-color.org). |
+| `GARNISH_CONFIG` | Config file path, absolute; a relative one is ignored. |
 | `GARNISH_CACHE_DIR` | Cache root (default `$XDG_RUNTIME_DIR/garnish`, `$XDG_CACHE_HOME/garnish`, `~/.cache/garnish`). |
 | `GARNISH_NOW` | Freeze the clock (epoch seconds or RFC 3339) for reproducible renders. |
 | `GARNISH_NO_SPAWN` | Log intended background refreshes to `<cache>/spawns.log` instead of spawning them (tests). |
-| `GARNISH_ANIMATE` | `0` freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |
+| `GARNISH_ANIMATE` | `0` (or `false`, `no`, `off`) freezes every animation (spinner, scrolling text, rule pattern, separator and icon frames) at frame 0 for the session and cuts a ticker line with `…`; for screen readers and recordings. |
 | `GARNISH_DEBUG` | `1` appends a line per tick to `<cache>/debug.log`, rotated at 1 MiB; `garnish doctor` shows the tail. Nothing is written otherwise. |
-| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's; empty means there is none. |
+| `GARNISH_MANAGED_SETTINGS` | The organisation settings file read first in Claude Code's chain, instead of the platform's and its `managed-settings.d` drop-ins; empty means there is none, and a relative path is ignored. |
+| `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish`, which prints a pointer at `garnish setup` instead of waiting on a terminal (tests). |
+| `GARNISH_TEST_PANIC` | Debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row is testable (tests). |
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT` | Read to place the `context` compaction marker exactly where Claude Code will compact; the last two turn compaction off, so the marker goes with it. |
 | `CLAUDE_CONFIG_DIR` | Where the `account` worker reads `.claude.json` when it is set and non-empty, instead of the home directory (Claude Code keeps every `~/.claude` file there); the settings chain does not follow it yet. |

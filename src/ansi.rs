@@ -1,9 +1,14 @@
-//! ANSI styling, OSC 8 hyperlinks, display width and width-aware truncation.
+//! ANSI styling, OSC 8 hyperlinks, plain-text sanitising, display width,
+//! terminal clusters, and the width-aware cut and scroller.
 //!
-//! Rendering produces [`Segment`]s (text + style). Styles are resolved to
-//! escape sequences only at the very end, by [`Painter`], so tests can assert
-//! on plain text and the color mode can be switched without touching modules.
+//! Rendering produces [`Segment`]s (text + style), whose text is reduced to
+//! plain text on the way in ([`plain_text`]). Styles are resolved to escape
+//! sequences only at the very end, by [`Painter`], so tests can assert on
+//! plain text and the color mode can be switched without touching modules.
+//! [`truncate`] and [`scroll`] work in terminal clusters, never splitting a
+//! glyph, and [`scroll_period`] is the one period their callers count with.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -93,21 +98,19 @@ impl Color {
         }
     }
 
-    /// SGR parameters for this color as a foreground.
-    fn fg_params(self, mode: ColorMode) -> Option<String> {
-        match (self, mode) {
-            (Self::Default, _) | (_, ColorMode::Never) => None,
-            (Self::Ansi(n), _) => Some(if n < 8 {
-                format!("{}", 30_u8.saturating_add(n))
-            } else {
-                format!("{}", 90_u8.saturating_add(n.saturating_sub(8)))
-            }),
-            (Self::Indexed(n), _) => Some(format!("38;5;{n}")),
-            (Self::Rgb(r, g, b), ColorMode::TrueColor) => Some(format!("38;2;{r};{g};{b}")),
+    /// Write the SGR parameters for this color as a foreground onto `out`
+    /// (nothing for the default colour or under [`ColorMode::Never`]).
+    fn write_fg(self, mode: ColorMode, out: &mut String) {
+        let _ = match (self, mode) {
+            (Self::Default, _) | (_, ColorMode::Never) => Ok(()),
+            (Self::Ansi(n), _) if n < 8 => write!(out, "{}", 30_u8.saturating_add(n)),
+            (Self::Ansi(n), _) => write!(out, "{}", 90_u8.saturating_add(n.saturating_sub(8))),
+            (Self::Indexed(n), _) => write!(out, "38;5;{n}"),
+            (Self::Rgb(r, g, b), ColorMode::TrueColor) => write!(out, "38;2;{r};{g};{b}"),
             (Self::Rgb(r, g, b), ColorMode::Ansi256) => {
-                Some(format!("38;5;{}", rgb_to_256(r, g, b)))
+                write!(out, "38;5;{}", rgb_to_256(r, g, b))
             }
-        }
+        };
     }
 }
 
@@ -120,20 +123,46 @@ impl Color {
 /// as `rgb(135,135,175)`, a light blue-grey, instead of `rgb(95,95,135)`.
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
-/// Approximate an RGB color with the 6×6×6 cube of the 256-color palette.
+/// Approximate an RGB color with the 256-color palette: the nearest level of
+/// the 6×6×6 cube per channel, and where that answer is a gray, the nearer
+/// of it and the 24-step grayscale ramp (232..=255, `8 + 10 i`).
+///
+/// The ramp is only a candidate where the cube has nothing but a gray to
+/// offer: a colour the cube keeps a hue for (`#6c7086` → 60) stays in the
+/// cube, while a dark near-gray (every built-in `frame` role) is no longer
+/// lightened to the cube's 95.
 fn rgb_to_256(r: u8, g: u8, b: u8) -> u8 {
-    let q = |c: u8| -> u8 {
+    let level_of = |channel: u8| -> u8 {
         let nearest = CUBE_LEVELS
             .iter()
             .enumerate()
-            .min_by_key(|(_, level)| u16::from(c).abs_diff(u16::from(**level)))
-            .map_or(0, |(i, _)| i);
+            .min_by_key(|(_, level)| u16::from(channel).abs_diff(u16::from(**level)))
+            .map_or(0, |(index, _)| index);
         u8::try_from(nearest).unwrap_or(5)
     };
-    16_u8
-        .saturating_add(q(r).saturating_mul(36))
-        .saturating_add(q(g).saturating_mul(6))
-        .saturating_add(q(b))
+    let (red, green, blue) = (level_of(r), level_of(g), level_of(b));
+    let cube = 16_u8
+        .saturating_add(red.saturating_mul(36))
+        .saturating_add(green.saturating_mul(6))
+        .saturating_add(blue);
+    if red != green || green != blue {
+        return cube;
+    }
+    let gray = CUBE_LEVELS.get(usize::from(red)).copied().unwrap_or(0);
+    let ramp = (0..24_u8)
+        .map(|step| (distance([r, g, b], 8_u8.saturating_add(step.saturating_mul(10))), step))
+        .min();
+    match ramp {
+        Some((nearest, step)) if nearest < distance([r, g, b], gray) => 232_u8.saturating_add(step),
+        _ => cube,
+    }
+}
+
+/// Squared distance from a colour to the gray of one level.
+fn distance(rgb: [u8; 3], level: u8) -> u32 {
+    rgb.into_iter()
+        .map(|c| u32::from(c.abs_diff(level)))
+        .fold(0, |sum, d| sum.saturating_add(d.saturating_mul(d)))
 }
 
 /// How colors are emitted.
@@ -149,8 +178,6 @@ pub enum ColorMode {
 }
 
 /// Text attributes.
-// Four independent flags; a bitset would only obscure the config mapping.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Style {
     /// Foreground color.
@@ -159,16 +186,13 @@ pub struct Style {
     pub bold: bool,
     /// Dim / faint.
     pub dim: bool,
-    /// Italic.
-    pub italic: bool,
     /// Underline.
     pub underline: bool,
 }
 
 impl Style {
     /// Plain text.
-    pub const PLAIN: Self =
-        Self { fg: Color::Default, bold: false, dim: false, italic: false, underline: false };
+    pub const PLAIN: Self = Self { fg: Color::Default, bold: false, dim: false, underline: false };
 
     /// Style with only a foreground color.
     #[must_use]
@@ -194,27 +218,32 @@ impl Style {
         Self { underline: on, ..self }
     }
 
-    fn sgr(self, mode: ColorMode) -> String {
+    /// Write this style's SGR sequence onto `out`, and say whether there was
+    /// one (so the painter knows to reset after the text). Written in
+    /// place: every painted segment of every tick comes through here.
+    fn write_sgr(self, mode: ColorMode, out: &mut String) -> bool {
         if mode == ColorMode::Never {
-            return String::new();
+            return false;
         }
-        let mut params: Vec<String> = Vec::new();
-        if self.bold {
-            params.push("1".into());
+        let mut open = false;
+        let mut param = |out: &mut String| {
+            out.push_str(if open { ";" } else { "\x1b[" });
+            open = true;
+        };
+        for (on, code) in [(self.bold, "1"), (self.dim, "2"), (self.underline, "4")] {
+            if on {
+                param(out);
+                out.push_str(code);
+            }
         }
-        if self.dim {
-            params.push("2".into());
+        if self.fg != Color::Default {
+            param(out);
+            self.fg.write_fg(mode, out);
         }
-        if self.italic {
-            params.push("3".into());
+        if open {
+            out.push('m');
         }
-        if self.underline {
-            params.push("4".into());
-        }
-        if let Some(fg) = self.fg.fg_params(mode) {
-            params.push(fg);
-        }
-        if params.is_empty() { String::new() } else { format!("\x1b[{}m", params.join(";")) }
+        open
     }
 }
 
@@ -274,11 +303,7 @@ impl Segment {
     /// Append text, sanitised like [`Segment::plain`] (no allocation when
     /// it is already plain: the bar builder appends a glyph per cell).
     pub fn push_str(&mut self, text: &str) {
-        if text.chars().any(|c| c.is_control() || is_format_char(c)) {
-            self.text.push_str(&plain_text(text));
-        } else {
-            self.text.push_str(text);
-        }
+        self.text.push_str(&plain_cow(text));
     }
 
     /// Display width of the text.
@@ -314,21 +339,34 @@ pub fn char_width(c: char) -> usize {
 /// half a flag is a lone letter and a dropped skin tone is a different
 /// person, so `truncate` and the fish path's initial both work in these
 /// units, not in `char`s.
-pub(crate) fn clusters(s: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut joined = false;
-    for c in s.chars() {
-        let attach = joined
-            || (char_width(c) == 0 && !out.is_empty())
-            || is_emoji_modifier(c)
-            || out.last().is_some_and(|last| is_lone_regional_indicator(last) && is_regional(c));
-        match out.last_mut() {
-            Some(last) if attach => last.push(c),
-            _ => out.push(c.to_string()),
+///
+/// The clusters are slices of `s`, produced as they are asked for, so a cut
+/// that keeps the first few clusters of a long string reads no further.
+pub(crate) fn clusters(s: &str) -> impl Iterator<Item = &str> {
+    let mut rest = s;
+    std::iter::from_fn(move || {
+        let mut chars = rest.char_indices();
+        let (_, first) = chars.next()?;
+        let mut end = first.len_utf8();
+        let mut joined = first == '\u{200d}';
+        // A lone regional indicator waits for the one that completes its flag.
+        let mut lone_regional = is_regional(first);
+        for (i, c) in chars {
+            if !(joined
+                || char_width(c) == 0
+                || is_emoji_modifier(c)
+                || (lone_regional && is_regional(c)))
+            {
+                break;
+            }
+            end = i.saturating_add(c.len_utf8());
+            joined = c == '\u{200d}';
+            lone_regional = false;
         }
-        joined = c == '\u{200d}';
-    }
-    out
+        let (cluster, tail) = rest.split_at_checked(end)?;
+        rest = tail;
+        Some(cluster)
+    })
 }
 
 /// A skin-tone modifier, which belongs to the emoji before it.
@@ -341,17 +379,43 @@ const fn is_regional(c: char) -> bool {
     matches!(c, '\u{1f1e6}'..='\u{1f1ff}')
 }
 
-/// Whether a cluster so far is a single regional indicator, so the next one
-/// completes its flag rather than starting another.
-fn is_lone_regional_indicator(cluster: &str) -> bool {
-    let mut chars = cluster.chars();
-    chars.next().is_some_and(is_regional) && chars.next().is_none()
-}
-
 /// Sum of segment widths.
 #[must_use]
 pub fn segments_width(segments: &[Segment]) -> usize {
     segments.iter().map(Segment::width).sum()
+}
+
+/// Sum of segment widths counted terminal cluster by cluster, the unit
+/// [`truncate`] and [`scroll`] advance in.
+///
+/// It exceeds [`segments_width`] by a cell for each ligature pair
+/// `unicode-width` measures as one cell (Arabic `لا`), which the cut and the
+/// scroller split in two; whoever places an offset or a cut against them
+/// counts this way too.
+#[must_use]
+pub fn cluster_width(segments: &[Segment]) -> usize {
+    segments.iter().flat_map(|seg| clusters(&seg.text)).map(display_width).sum()
+}
+
+/// The cells after which a [`scroll`] of `segments` repeats.
+///
+/// The text's [`cluster_width`], plus the gap's with `wrap`. A caller
+/// reduces its clock to an offset modulo this (`time::frame`), so the
+/// offset, the window and anything mapped onto the window share one period.
+#[must_use]
+pub fn scroll_period(segments: &[Segment], gap: &str, wrap: bool) -> usize {
+    let text = cluster_width(segments);
+    if wrap {
+        text.saturating_add(clusters(&plain_cow(gap)).map(display_width).sum())
+    } else {
+        text
+    }
+}
+
+/// The cells of text [`truncate`] keeps when it cuts to `max_width`: what
+/// the ellipsis, itself cut to fit, leaves.
+fn kept_width(max_width: usize, ellipsis: &str) -> usize {
+    max_width.saturating_sub(display_width(fit(ellipsis, max_width)))
 }
 
 /// Truncate segments to at most `max_width` cells, appending `ellipsis` when
@@ -361,17 +425,16 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
     if segments_width(segments) <= max_width {
         return segments.to_vec();
     }
+    let budget = kept_width(max_width, ellipsis);
     // A box narrower than the ellipsis still gets a mark: as much of the
     // ellipsis as fits (`..` becomes `.` in a one-cell ascii box).
     let ellipsis = fit(ellipsis, max_width);
-    let ell_width = display_width(ellipsis);
-    let budget = max_width.saturating_sub(ell_width);
     let mut out: Vec<Segment> = Vec::new();
     let mut used = 0_usize;
     'outer: for seg in segments {
         let mut kept = String::new();
         for cluster in clusters(&seg.text) {
-            let w = display_width(&cluster);
+            let w = display_width(cluster);
             if used.saturating_add(w) > budget {
                 if !kept.is_empty() {
                     out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
@@ -379,11 +442,11 @@ pub fn truncate(segments: &[Segment], max_width: usize, ellipsis: &str) -> Vec<S
                 break 'outer;
             }
             used = used.saturating_add(w);
-            kept.push_str(&cluster);
+            kept.push_str(cluster);
         }
         out.push(Segment { text: kept, style: seg.style, link: seg.link.clone() });
     }
-    if ell_width > 0 && max_width >= ell_width {
+    if display_width(ellipsis) > 0 {
         // The style of whatever survived the cut, or of the text that would
         // have been there: with a budget narrower than the first cluster
         // nothing survives, and an unstyled `…` would make a module flip to
@@ -410,7 +473,7 @@ pub(crate) fn fit(s: &str, width: usize) -> &str {
 
 /// One terminal cluster of a segment, with the style it came from.
 struct Cell<'a> {
-    text: String,
+    text: &'a str,
     width: usize,
     style: Style,
     link: Option<&'a str>,
@@ -420,8 +483,8 @@ fn cells(segments: &[Segment]) -> Vec<Cell<'_>> {
     segments
         .iter()
         .flat_map(|seg| {
-            clusters(&seg.text).into_iter().map(move |text| Cell {
-                width: display_width(&text),
+            clusters(&seg.text).map(move |text| Cell {
+                width: display_width(text),
                 text,
                 style: seg.style,
                 link: seg.link.as_deref(),
@@ -441,11 +504,8 @@ fn cells(segments: &[Segment]) -> Vec<Cell<'_>> {
 /// Text no wider than the window is returned as is, padded on the right.
 /// The result is always exactly `width` cells: a wide cluster cut by either
 /// edge becomes spaces for its visible part. Styles and links follow their
-/// clusters; the gap and padding are plain. The period is the sum of the
-/// cluster widths, which for ligature scripts (Arabic `لا`, Lisu tone pairs)
-/// can exceed [`display_width`] of the whole string by a cell; callers that
-/// compute the period with `display_width` then see the window jump a cell
-/// at the wrap, the same limitation [`truncate`] has.
+/// clusters; the gap and padding are plain. The period is
+/// [`scroll_period`], which a caller computes its offset with.
 #[must_use]
 pub fn scroll(
     segments: &[Segment],
@@ -486,11 +546,10 @@ pub fn scroll(
         _ => out.push(Segment { text: text.to_owned(), style, link: link.map(str::to_owned) }),
     };
     let mut start = 0_usize;
-    let mut rounds = 0_usize;
     let mut emitted = 0_usize;
-    // At most two passes over the sequence are ever needed: the window is
-    // narrower than one period plus itself.
-    'outer: while rounds < 2 || (wrap && start < end) {
+    // Without wrap one pass; with it, as many as the window spans (each
+    // advances a whole period, which is not zero).
+    'outer: loop {
         for cell in &sequence {
             let stop = start.saturating_add(cell.width);
             if start >= end {
@@ -500,7 +559,7 @@ pub fn scroll(
                 let visible_from = start.max(offset);
                 let visible_to = stop.min(end);
                 if visible_from == start && visible_to == stop {
-                    push(&cell.text, cell.style, cell.link);
+                    push(cell.text, cell.style, cell.link);
                     emitted = emitted.saturating_add(cell.width);
                 } else {
                     let cut = visible_to.saturating_sub(visible_from);
@@ -510,7 +569,6 @@ pub fn scroll(
             }
             start = stop;
         }
-        rounds = rounds.saturating_add(1);
         if !wrap {
             break;
         }
@@ -572,15 +630,13 @@ impl Painter {
             if seg.text.is_empty() {
                 continue;
             }
-            let style = self.painted_style(seg.style);
-            let sgr = style.sgr(self.mode);
             let link = seg.link.as_deref().filter(|u| self.links_to(u));
             if let Some(url) = link {
                 let _ = write!(out, "\x1b]8;;{url}\x1b\\");
             }
-            out.push_str(&sgr);
+            let styled = self.painted_style(seg.style).write_sgr(self.mode, &mut out);
             out.push_str(&seg.text);
-            if !sgr.is_empty() {
+            if styled {
                 out.push_str("\x1b[0m");
             }
             if link.is_some() {
@@ -612,17 +668,28 @@ pub fn safe_link(url: &str) -> bool {
 /// they are part of how glyphs are spelled.
 #[must_use]
 pub fn plain_text(s: &str) -> String {
-    clean(s.to_owned())
+    plain_cow(s).into_owned()
 }
 
-/// [`plain_text`] without an allocation when the text is already plain,
-/// which on a warm tick is every string.
+/// [`plain_text`], borrowing `s` when it is already plain, which on a warm
+/// tick is every string. Whatever measures or cuts text from outside (a
+/// payload string, a ref name) before it becomes a [`Segment`] measures
+/// this, the text the row will show, never the raw string.
+pub(crate) fn plain_cow(s: &str) -> Cow<'_, str> {
+    if is_plain(s) { Cow::Borrowed(s) } else { Cow::Owned(strip(s)) }
+}
+
+/// [`plain_text`] without an allocation when the text is already plain.
 fn clean(s: String) -> String {
-    if s.chars().any(|c| c.is_control() || is_format_char(c)) {
-        strip_ansi(&s).chars().filter(|&c| !c.is_control() && !is_format_char(c)).collect()
-    } else {
-        s
-    }
+    if is_plain(&s) { s } else { strip(&s) }
+}
+
+fn is_plain(s: &str) -> bool {
+    !s.chars().any(|c| c.is_control() || is_format_char(c))
+}
+
+fn strip(s: &str) -> String {
+    strip_ansi(s).chars().filter(|&c| !c.is_control() && !is_format_char(c)).collect()
 }
 
 /// Unicode `Cf` characters that change layout or reading order without
@@ -638,7 +705,13 @@ pub(crate) const fn is_format_char(c: char) -> bool {
     )
 }
 
-/// Remove ANSI CSI and OSC sequences from a string (used by docs and tests).
+/// Remove every escape sequence from a string: CSI, OSC, the string
+/// sequences DCS/SOS/PM/APC with their payloads, nF sequences (`ESC ( B`)
+/// with their final byte, and any other `ESC x` pair.
+///
+/// The first half of [`plain_text`], so it runs on the tick for every
+/// string that is not already plain; control characters are the second
+/// half's business.
 #[must_use]
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -676,6 +749,15 @@ pub fn strip_ansi(s: &str) -> String {
                         break;
                     }
                     prev_esc = n == '\x1b';
+                }
+            }
+            Some(' '..='/') => {
+                // nF (a charset designation, as `tput sgr0` emits): more
+                // intermediate bytes, then one final byte.
+                for n in chars.by_ref() {
+                    if !(' '..='/').contains(&n) {
+                        break;
+                    }
                 }
             }
             _ => {}
@@ -811,11 +893,35 @@ mod tests {
         assert_eq!(out[1].style, Style::PLAIN, "gap is plain: {out:?}");
     }
 
+    /// The period a caller reduces its clock by is the one the scroller
+    /// repeats on, ligatures included: `لا` is one cell to `unicode-width`
+    /// and two clusters here, and every window of the cycle is distinct.
+    #[test]
+    fn scroll_period_is_what_the_scroller_repeats_on() {
+        let segs = [Segment::plain("abلاcd")];
+        assert_eq!((segments_width(&segs), cluster_width(&segs)), (5, 6));
+        let period = scroll_period(&segs, "  ", true);
+        assert_eq!(period, 8);
+        assert_eq!(scroll_period(&segs, "  ", false), 6);
+        let window = |k: usize| plain(&scroll(&segs, 3, k, "  ", true));
+        let cycle: Vec<String> = (0..period).map(window).collect();
+        for (k, w) in cycle.iter().enumerate() {
+            assert!(!cycle[..k].contains(w), "offset {k} repeats early: {cycle:?}");
+            assert_eq!(window(k + period), *w);
+        }
+        assert_eq!(kept_width(5, "…"), 4);
+        assert_eq!(kept_width(1, ".."), 0);
+        assert_eq!(kept_width(3, ".."), 1);
+        assert_eq!(kept_width(0, "…"), 0);
+    }
+
     /// A cut inside a flag or a skin tone changes the glyph rather than
     /// shortening it, so those are clusters like a combining mark is.
     #[test]
     fn clusters_keep_flags_skin_tones_marks_and_zwj_sequences_whole() {
-        let c = |s: &str| clusters(s);
+        fn c(s: &str) -> Vec<&str> {
+            clusters(s).collect()
+        }
         assert_eq!(c("ab"), ["a", "b"]);
         assert_eq!(c("e\u{301}x"), ["e\u{301}", "x"]);
         assert_eq!(c("👨\u{200d}💻x"), ["👨\u{200d}💻", "x"]);
@@ -827,10 +933,54 @@ mod tests {
         assert_eq!(c("🇺x"), ["🇺", "x"]);
         // A skin tone belongs to the emoji before it.
         assert_eq!(c("👍🏽ab"), ["👍🏽", "a", "b"]);
+        // A leading zero-width character stands alone; one after a ZWJ is
+        // joined; three regional indicators are a flag and a lone letter.
+        assert_eq!(c("\u{301}ab"), ["\u{301}", "a", "b"]);
+        assert_eq!(c("\u{200d}ab"), ["\u{200d}a", "b"]);
+        assert_eq!(c("🇺🇸🇬"), ["🇺🇸", "🇬"]);
+        assert_eq!(c("🇺\u{301}🇸"), ["🇺\u{301}", "🇸"]);
+        assert_eq!(c(""), Vec::<&str>::new());
         // Cutting therefore keeps the glyph or drops it whole.
         let seg = |s: &str| vec![Segment::plain(s)];
         assert_eq!(Painter::PLAIN.paint(&truncate(&seg("🇺🇸ab"), 3, "…")), "🇺🇸…");
         assert_eq!(Painter::PLAIN.paint(&truncate(&seg("👍🏽ab"), 3, "…")), "👍🏽…");
+    }
+
+    /// The lazy slices are the clusters the eager splitter used to build as
+    /// one `String` each: every string of up to three pieces from an
+    /// alphabet of the joining cases splits the same way under both.
+    #[test]
+    fn lazy_clusters_equal_the_eager_splitter() {
+        fn eager(s: &str) -> Vec<String> {
+            let mut out: Vec<String> = Vec::new();
+            let mut joined = false;
+            for c in s.chars() {
+                let lone_ri = out.last().is_some_and(|last| {
+                    let mut chars = last.chars();
+                    chars.next().is_some_and(is_regional) && chars.next().is_none()
+                });
+                let attach = joined
+                    || (char_width(c) == 0 && !out.is_empty())
+                    || is_emoji_modifier(c)
+                    || (lone_ri && is_regional(c));
+                match out.last_mut() {
+                    Some(last) if attach => last.push(c),
+                    _ => out.push(c.to_string()),
+                }
+                joined = c == '\u{200d}';
+            }
+            out
+        }
+        let pieces =
+            ["a", "🇺", "🇸", "\u{200d}", "\u{301}", "\u{fe0f}", "🏽", "👍", "日", "\u{1b}", "😀"];
+        for a in pieces {
+            for b in pieces {
+                for c in pieces {
+                    let s = format!("{a}{b}{c}");
+                    assert_eq!(clusters(&s).collect::<Vec<_>>(), eager(&s), "{s:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -844,6 +994,12 @@ mod tests {
         // or kitty graphics blob is not text, and only ST ends them.
         assert_eq!(plain_text("a\x1bPq#0;2;0;0;0~~\x07still\x1b\\b"), "ab");
         assert_eq!(plain_text("a\x1b_Gf=100;AAAA\x1b\\b\x1bXsos\x1b\\c\x1b^pm\x1b\\d"), "abcd");
+        // An nF sequence keeps nothing of itself: `tput sgr0` on xterm is
+        // `ESC ( B ESC [ m`, which used to leave its `B` behind.
+        assert_eq!(plain_text("bold\x1b(B\x1b[m text"), "bold text");
+        assert_eq!(plain_text("a\x1b#8b\x1b % Gc"), "abc");
+        // Two-byte sequences (`ESC 7`, `ESC =`) lose both bytes, as before.
+        assert_eq!(plain_text("a\x1b7b\x1b=c"), "abc");
         assert_eq!(
             plain_text("🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}"),
             "🌿 e\u{301} 👨\u{200d}💻 ☁\u{fe0f}",
@@ -879,6 +1035,60 @@ mod tests {
         let p256 = Painter { mode: ColorMode::Ansi256, links: false, dim: false };
         assert_eq!(p256.paint(&[seg]), "\x1b[1;38;5;16mPR\x1b[0m");
         assert_eq!(Painter::PLAIN.paint(&[Segment::styled("x", Style::PLAIN.dimmed())]), "x");
+    }
+
+    /// The SGR bytes written straight into the row are the ones the
+    /// parameter list used to be joined into, for every attribute and colour
+    /// combination under every mode.
+    #[test]
+    fn sgr_is_written_in_place_byte_for_byte() {
+        fn joined(style: Style, mode: ColorMode) -> String {
+            if mode == ColorMode::Never {
+                return String::new();
+            }
+            let mut params: Vec<String> = Vec::new();
+            for (on, code) in [(style.bold, "1"), (style.dim, "2"), (style.underline, "4")] {
+                if on {
+                    params.push(code.into());
+                }
+            }
+            match (style.fg, mode) {
+                (Color::Default, _) => {}
+                (Color::Ansi(n), _) if n < 8 => params.push(format!("{}", 30 + n)),
+                (Color::Ansi(n), _) => params.push(format!("{}", 90 + n - 8)),
+                (Color::Indexed(n), _) => params.push(format!("38;5;{n}")),
+                (Color::Rgb(r, g, b), ColorMode::TrueColor) => {
+                    params.push(format!("38;2;{r};{g};{b}"));
+                }
+                (Color::Rgb(r, g, b), _) => params.push(format!("38;5;{}", rgb_to_256(r, g, b))),
+            }
+            if params.is_empty() { String::new() } else { format!("\x1b[{}m", params.join(";")) }
+        }
+        let colors = [
+            Color::Default,
+            Color::Ansi(1),
+            Color::Ansi(12),
+            Color::Indexed(208),
+            Color::Rgb(1, 2, 3),
+            Color::Rgb(0x44, 0x47, 0x5a),
+        ];
+        for mode in [ColorMode::Never, ColorMode::Ansi256, ColorMode::TrueColor] {
+            for fg in colors {
+                for bits in 0..8_u8 {
+                    let style = Style {
+                        fg,
+                        bold: bits & 1 != 0,
+                        dim: bits & 2 != 0,
+                        underline: bits & 4 != 0,
+                    };
+                    let mut out = String::from("x");
+                    let styled = style.write_sgr(mode, &mut out);
+                    let want = joined(style, mode);
+                    assert_eq!(out, format!("x{want}"), "{style:?} {mode:?}");
+                    assert_eq!(styled, !want.is_empty());
+                }
+            }
+        }
     }
 
     /// SPEC § 2.1: `preview` paints every segment faint, plain runs
@@ -957,10 +1167,20 @@ mod tests {
             let index = u8::try_from(16 + i * 36 + i * 6 + i).unwrap();
             assert_eq!(rgb_to_256(level, level, level), index, "level {level}");
         }
-        // The `garnish` palette's muted and frame roles, which an even
-        // split sent to 103 and 102 (both `rgb(135,135,…)`).
+        // The `garnish` palette's muted role, which an even split sent to
+        // 103 (`rgb(135,135,175)`): the cube keeps its blue.
         assert_eq!(rgb_to_256(0x6c, 0x70, 0x86), 60);
-        assert_eq!(rgb_to_256(0x58, 0x5b, 0x70), 59);
+        // A colour the cube can only answer with a gray takes the nearer of
+        // that gray and the 24-step ramp: every built-in `frame` role is a
+        // dark near-gray the cube lightened to 95 (59), where the ramp has
+        // 78 (239) or, for the `garnish` frame, 98 (241).
+        assert_eq!(rgb_to_256(0x58, 0x5b, 0x70), 241);
+        assert_eq!(rgb_to_256(0x44, 0x47, 0x5a), 239, "dracula");
+        assert_eq!(rgb_to_256(0x3b, 0x42, 0x61), 239, "tokyonight");
+        assert_eq!(rgb_to_256(0x45, 0x47, 0x5a), 239, "catppuccin");
+        assert_eq!(rgb_to_256(0x80, 0x80, 0x80), 244);
+        assert_eq!(rgb_to_256(3, 3, 3), 16, "black is nearer than the ramp's 8");
+        assert_eq!(rgb_to_256(250, 250, 250), 231, "white is nearer than the ramp's 238");
         // 115 is the midpoint of 95 and 135; 116 rounds up.
         assert_eq!(rgb_to_256(115, 0, 0), 16 + 36);
         assert_eq!(rgb_to_256(116, 0, 0), 16 + 2 * 36);

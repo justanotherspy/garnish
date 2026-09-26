@@ -6,6 +6,9 @@ cd "$(dirname "$0")/.."
 # name  mean_ms_max  p99_ms_max (0 = not gated)
 BUDGETS="warm-default 3 8
 warm-full 3 8
+warm-all 3 8
+warm-tz 3 8
+warm-bigconfig 3 8
 cold 30 0
 refresh-sync 50 0"
 

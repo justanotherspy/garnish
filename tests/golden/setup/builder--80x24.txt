@@ -1,5 +1,5 @@
 preview  80 cols, box 76  ·  2 lines  ·  subscription-full: a Pro/Max session wi
-▶ ╭─ ❒ ~/projects/garnish ────────────────────────────────────── ⠋ 16:00:00 ─╮
+> ╭─ ❒ ~/projects/garnish ────────────────────────────────────── ⠋ 16:00:00 ─╮
   ╰─ ❖ Opus │ ⊞ ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────────╯
 rows  ~/garnish.toml
 row 1     path  branch  sync   │ clock

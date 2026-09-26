@@ -23,7 +23,9 @@ the resolved form.
 
 ## 2. Ask
 
-- **Name**: kebab-case, unique among `garnish presets` (check).
+- **Name**: kebab-case, unique among `garnish presets` (check), and not one
+  of the four built-in preset names `default`, `minimal`, `full`,
+  `compact`, which `garnish presets` does not list but the gallery refuses.
 - **Summary**: one line, what the layout is for.
 - **Columns**: the terminal width it was designed for (`echo $COLUMNS` in
   their own terminal); the sample is rendered there and must fit uncut.

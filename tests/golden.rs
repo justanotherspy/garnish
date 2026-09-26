@@ -31,6 +31,9 @@ fn render(fixture: &Path, preset: &str, icons: &str) -> String {
         ])
         .env("GARNISH_NOW", "1738425600")
         .env("GARNISH_CONFIG", root().join("tests/fixtures/configs/empty.toml"))
+        // Inside a Claude Code session `preview` would refuse a
+        // GARNISH_CONFIG no settings file sets (SPEC § 4).
+        .env_remove("CLAUDECODE")
         .env("GARNISH_CACHE_DIR", std::env::temp_dir().join("garnish-golden-cache"))
         .env("GARNISH_NO_SPAWN", "1")
         .env("HOME", "/home/dev")
@@ -38,6 +41,7 @@ fn render(fixture: &Path, preset: &str, icons: &str) -> String {
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
         .env_remove("DISABLE_AUTO_COMPACT")
         .env_remove("DISABLE_COMPACT")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("GARNISH_ANIMATE")
         .env("GARNISH_MANAGED_SETTINGS", "")
         .env("TZ", "UTC")
@@ -86,6 +90,16 @@ fn golden_renders_match() {
             if plain.lines().any(|l| l.starts_with("⚠ garnish: ") || l.starts_with("! garnish: "))
             {
                 return Some(format!("{}: renders an internal error:\n{actual}", golden.display()));
+            }
+            // Claude Code trims every row's raw bytes (SPEC § 2.1): a row
+            // that starts with whitespace would be drawn shifted left.
+            if let Some(row) =
+                actual.lines().find(|row| !row.trim().is_empty() && row.trim_start() != *row)
+            {
+                return Some(format!(
+                    "{}: the harness would trim this row's leading cells: {row:?}",
+                    golden.display()
+                ));
             }
             if update {
                 std::fs::write(&golden, &actual).unwrap();

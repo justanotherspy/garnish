@@ -1,0 +1,19 @@
+# fixture: subscription-full
+# columns: 60
+# icons: unicode
+# Claude Code trims every row, its leading whitespace included (SPEC
+# § 2.1). Under `style = "none"` with colour off, a row whose content does
+# not start at its left edge begins with plain spaces, so its first cell is
+# the braille blank: the clock stays against the right edge and the model
+# in the middle, where `preview` shows them.
+
+[frame]
+style = "none"
+
+[[row]]
+right = ["clock"]
+
+[[row]]
+[[row.col]]
+justify = "center"
+modules = ["model"]

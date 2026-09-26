@@ -1,5 +1,5 @@
 # garnish configuration — see docs/config.md for every key.
-# Top-level preset: default | minimal | full | compact
+# Top-level preset (default | minimal | full | compact): picks each module's preset; the rows and frame below were written from it and no longer follow it.
 preset = "default"
 # Icon set: nerd | unicode | emoji | ascii
 icons = "nerd"
@@ -70,7 +70,7 @@ fill = true
 # separator = " │ "
 # Every separator's colour: muted | inherit (the colour of the module before it) | a role or literal
 separator_color = "muted"
-# For style = "custom": first middle last single fill_char right_first right_middle right_last right_single pad, and the box glyphs top_left top_right bottom_left bottom_right side
+# For style = "custom": pad fill_char first middle last single right_first right_middle right_last right_single top_left top_right bottom_left bottom_right side
 # Animation (see docs/config.md): a one-cell-glyph pattern travelling along the rule,
 # and separator frames cycled one per tick (all the same width). Empty = static.
 fill_pattern = ""
@@ -109,7 +109,7 @@ right = ["clock"]
 
 # path — Working directory, based on the repository root.
 [modules.path]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -121,7 +121,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -153,7 +153,7 @@ added = "muted"
 
 # branch — Checked-out branch (or detached HEAD).
 [modules.branch]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: seconds a cached value lives before a worker refreshes it (at least 1)
 enabled = true
 # preset = "default"
 refresh = 5
@@ -165,7 +165,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -173,7 +173,7 @@ max_width = 0
 # show_icon = true
 # show_sha (bool) — Append the short commit SHA. [minimal=false default=false full=true]
 # show_sha = false
-# dirty (bool) — Show a marker when the tree has changes. [minimal=false default=false full=true]
+# dirty (bool) — Show a marker when tracked files have staged or unstaged changes (untracked files do not count; a file touched without changing counts until git next refreshes its index, since garnish never reads file contents). [minimal=false default=false full=true]
 # dirty = false
 # max_length (integer) — Cut the name itself to this many characters with `…` (`..` in the ascii set; 0 = no limit); the common `max_width` caps the whole module in cells instead. [minimal=40 default=40 full=40]
 # max_length = 40
@@ -199,7 +199,7 @@ dirty = "warn"
 
 # sync — Commits ahead/behind the upstream branch.
 [modules.sync]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: seconds a cached value lives before a worker refreshes it (at least 1)
 enabled = true
 # preset = "default"
 refresh = 5
@@ -211,7 +211,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -249,7 +249,7 @@ stale = "muted"
 
 # worktree — Git worktree name.
 [modules.worktree]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -261,7 +261,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -285,7 +285,7 @@ original = "muted"
 
 # pr — Open pull/merge request with review state, linked.
 [modules.pr]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -297,7 +297,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -339,7 +339,7 @@ draft = "muted"
 
 # model — Model name, with fast-mode and thinking indicators.
 [modules.model]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -351,7 +351,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -385,7 +385,7 @@ thinking = "accent2"
 
 # effort — Reasoning effort level as a five-step scale and/or word.
 [modules.effort]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -397,7 +397,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -423,7 +423,7 @@ word = "text"
 
 # context — Context window usage bar with color bands and the auto-compaction marker.
 [modules.context]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -435,7 +435,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -473,9 +473,9 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # context — Context icon.
 context = ""
-# fill — Filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Empty cell.
+# empty — Empty bar cell.
 empty = "░"
 # marker — Compaction marker.
 marker = "▏"
@@ -488,7 +488,7 @@ warn = ""
 [modules.context.colors]
 # icon — Icon.
 icon = "accent"
-# percent — Percentage text.
+# percent — Percentage text (the band colour is the bar's).
 percent = "text"
 # empty — Empty part of the bar.
 empty = "muted"
@@ -503,7 +503,7 @@ warn = "danger"
 
 # style — Output style name.
 [modules.style]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -515,7 +515,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -535,7 +535,7 @@ name = "text"
 
 # limit5h — Five-hour rate limit usage and time until reset.
 [modules.limit5h]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -547,7 +547,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -561,13 +561,13 @@ max_width = 0
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
-# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # durations = "inherit"
 # percent (`inherit` | `whole` | `precise`) — How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # percent = "inherit"
-# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 # pace (bool) — Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. [minimal=false default=false full=false]
 # pace = false
@@ -581,11 +581,11 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
-# reset — Countdown glyph.
+# reset — The reset's glyph, in every `reset` form.
 reset = ""
-# fill — Bar filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Bar empty cell.
+# empty — Empty bar cell.
 empty = "░"
 # ahead — Ahead-of-pace glyph.
 ahead = "⇡"
@@ -598,9 +598,9 @@ marker = "▏"
 [modules.limit5h.colors]
 # icon — Icon.
 icon = "accent2"
-# reset — Countdown.
+# reset — The reset, in every `reset` form.
 reset = "muted"
-# empty — Bar empty part.
+# empty — Empty part of the bar.
 empty = "muted"
 # ahead — Pace delta, ahead.
 ahead = "hot"
@@ -619,7 +619,7 @@ pace_critical = "danger"
 
 # limit7d — Seven-day rate limit usage and time until reset.
 [modules.limit7d]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -631,7 +631,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -645,13 +645,13 @@ max_width = 0
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
-# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # durations = "inherit"
 # percent (`inherit` | `whole` | `precise`) — How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # percent = "inherit"
-# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 # pace (bool) — Print the difference between the share used and the share of the window elapsed: `⇡14%` ahead of pace in `colors.ahead`, `⇣32%` behind in `colors.behind`, a zero difference bare. [minimal=false default=false full=false]
 # pace = false
@@ -665,11 +665,11 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
-# reset — Countdown glyph.
+# reset — The reset's glyph, in every `reset` form.
 reset = ""
-# fill — Bar filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Bar empty cell.
+# empty — Empty bar cell.
 empty = "░"
 # ahead — Ahead-of-pace glyph.
 ahead = "⇡"
@@ -682,9 +682,9 @@ marker = "▏"
 [modules.limit7d.colors]
 # icon — Icon.
 icon = "accent2"
-# reset — Countdown.
+# reset — The reset, in every `reset` form.
 reset = "muted"
-# empty — Bar empty part.
+# empty — Empty part of the bar.
 empty = "muted"
 # ahead — Pace delta, ahead.
 ahead = "hot"
@@ -703,7 +703,7 @@ pace_critical = "danger"
 
 # spend — Spend-limit usage behind a Claude apps gateway.
 [modules.spend]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -715,7 +715,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -729,35 +729,35 @@ max_width = 0
 # bar_width = 0
 # bar (`blocks` | `line`) — Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win. [minimal="blocks" default="blocks" full="blocks"]
 # bar = "blocks"
-# thresholds (list of numbers) — Ascending percentages where the color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
+# thresholds (list of numbers) — Ascending percentages where the band color changes. [minimal=[50, 75, 90] default=[50, 75, 90] full=[50, 75, 90]]
 # thresholds = [50, 75, 90]
 # durations (`inherit` | `compact` | `fixed`) — How this module's timers and countdowns print: `inherit` follows the top-level `durations`; `compact` or `fixed` pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # durations = "inherit"
 # percent (`inherit` | `whole` | `precise`) — How this module's percentages print: `inherit` follows `[format] percent`; `whole` (42%) or `precise` (42.3%) pins this module. [minimal="inherit" default="inherit" full="inherit"]
 # percent = "inherit"
-# band_colors (list of colors) — One color per band. [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
+# band_colors (list of colors) — One color per band (roles or literal colors). [minimal=["band1", "band2", "band3", "band4"] default=["band1", "band2", "band3", "band4"] full=["band1", "band2", "band3", "band4"]]
 # band_colors = ["band1", "band2", "band3", "band4"]
 [modules.spend.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # window — Window icon.
 window = ""
-# reset — Countdown glyph.
+# reset — The reset's glyph, in every `reset` form.
 reset = ""
-# fill — Bar filled cell.
+# fill — Filled bar cell.
 fill = "█"
-# empty — Bar empty cell.
+# empty — Empty bar cell.
 empty = "░"
 [modules.spend.colors]
 # icon — Icon.
 icon = "accent2"
-# reset — Countdown.
+# reset — The reset, in every `reset` form.
 reset = "muted"
-# empty — Bar empty part.
+# empty — Empty part of the bar.
 empty = "muted"
 
 # cost — Estimated session cost in USD.
 [modules.cost]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -769,7 +769,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -777,7 +777,7 @@ max_width = 0
 # show_icon = true
 # decimals (integer ≤ 8) — Decimal places. [minimal=2 default=2 full=2]
 # decimals = 2
-# only_without_rate_limits (bool) — Hide when the harness reports subscription rate limits. [minimal=true default=true full=true]
+# only_without_rate_limits (bool) — Hide when the payload carries `rate_limits` (a subscription's windows, or a gateway's spend limit alone). [minimal=true default=true full=true]
 # only_without_rate_limits = true
 # show_lines (bool) — Append lines added/removed. [minimal=false default=false full=true]
 # show_lines = false
@@ -803,7 +803,7 @@ removed = "danger"
 
 # session — Session duration.
 [modules.session]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -815,7 +815,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -839,7 +839,7 @@ start = "muted"
 
 # api — Time spent waiting for API responses.
 [modules.api]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -851,7 +851,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -877,7 +877,7 @@ share = "muted"
 
 # cache — Prompt cache hit ratio, TTL and warmth.
 [modules.cache]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -889,7 +889,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -933,7 +933,7 @@ detail = "muted"
 
 # clock — Local wall-clock time with a spinner.
 [modules.clock]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -945,7 +945,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -959,7 +959,7 @@ max_width = 0
 # date = false
 # utc_offset (bool) — Show the UTC offset. [minimal=false default=false full=true]
 # utc_offset = false
-# tz (string) — IANA time zone; empty means the system zone. [minimal="" default="" full=""]
+# tz (string) — Time zone, read as `TZ` is: an IANA name (`Europe/Berlin`), a POSIX rule (`JST-9`) or a TZif path; empty means the system zone. One this machine cannot resolve is reported and the system zone stands in. [minimal="" default="" full=""]
 # tz = ""
 [modules.clock.icons]
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
@@ -975,7 +975,7 @@ date = "muted"
 
 # session_name — Session name.
 [modules.session_name]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -987,7 +987,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1011,7 +1011,7 @@ id = "muted"
 
 # vim — Vim mode badge.
 [modules.vim]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1023,7 +1023,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1047,7 +1047,7 @@ visual = "warn"
 
 # agent — Agent name.
 [modules.agent]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1059,7 +1059,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1083,7 +1083,7 @@ thinking = "accent2"
 
 # lines — Lines added and removed this session.
 [modules.lines]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1095,7 +1095,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1109,23 +1109,23 @@ max_width = 0
 # Any key also accepts <key>_frames = [...]: equal-width glyphs cycled one per tick.
 # lines — Diff icon.
 lines = ""
-# added — Added glyph.
+# added — Lines-added glyph.
 added = "+"
-# removed — Removed glyph.
+# removed — Lines-removed glyph.
 removed = "−"
 [modules.lines.colors]
 # icon — Icon.
 icon = "accent2"
-# added — Added count.
+# added — Lines added.
 added = "ok"
-# removed — Removed count.
+# removed — Lines removed.
 removed = "danger"
 # net — Net delta.
 net = "muted"
 
 # version — The Claude Code version.
 [modules.version]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1137,7 +1137,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1155,7 +1155,7 @@ version = "muted"
 
 # sandbox — A badge while Bash sandboxing is on.
 [modules.sandbox]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1167,7 +1167,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1187,7 +1187,7 @@ word = "text"
 
 # voice — A badge while voice dictation is on.
 [modules.voice]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: 0, this module renders every tick
 enabled = true
 # preset = "default"
 refresh = 0
@@ -1199,7 +1199,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0
@@ -1219,7 +1219,7 @@ word = "text"
 
 # account — The claude.ai account the session is signed in with.
 [modules.account]
-# preset: minimal | default | full; refresh: seconds between refreshes (0 = every tick)
+# preset: minimal | default | full; refresh: seconds a cached value lives before a worker refreshes it (at least 1)
 enabled = true
 # preset = "default"
 refresh = 600
@@ -1231,7 +1231,7 @@ label = ""
 prefix = ""
 # suffix (string ≤ 4096 chars) — Text after the module.
 suffix = ""
-# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`).
+# hide_when_empty (bool) — Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).
 hide_when_empty = true
 # max_width (integer ≤ 1024) — Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited.
 max_width = 0

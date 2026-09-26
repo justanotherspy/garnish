@@ -79,13 +79,20 @@ pub fn toml_string(s: &str) -> String {
     out
 }
 
+/// A number as TOML that reads back as the same number: a whole one below
+/// 1e15 as the integer it is (`50`, as the docs print it), any other whole
+/// one in float form (`-10.0`, `1e20`: a digit string past 2^63 is no TOML
+/// integer, and a negative whole number must stay a float to keep its
+/// sign through a lossless path), anything else as its shortest decimal.
 fn format_float(f: f64) -> String {
     if f.is_nan() {
         "nan".into()
     } else if f.is_infinite() {
         if f > 0.0 { "inf".into() } else { "-inf".into() }
-    } else if f.fract() == 0.0 && f.abs() < 1e15 {
+    } else if f.fract() == 0.0 && (0.0..1e15).contains(&f) {
         format!("{f:.0}")
+    } else if f.fract() == 0.0 {
+        format!("{f:?}")
     } else {
         f.to_string()
     }
@@ -131,6 +138,23 @@ impl Kind {
     }
 }
 
+/// A rule an option's value must meet beyond its [`Kind`], checked when the
+/// config is read, so a value that would parse and then misrender is
+/// reported under its path and the default stands in (SPEC § 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Rule {
+    /// Nothing beyond the kind.
+    #[default]
+    None,
+    /// Numbers in ascending order (band thresholds: a band is the number of
+    /// them a percentage has reached).
+    Ascending,
+    /// A time zone as `TZ` names one (`time::zone`), or empty for
+    /// the tick's own; resolved once, when the config is read
+    /// ([`ModuleCfg::zone`]).
+    TimeZone,
+}
+
 /// One module option.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptSpec {
@@ -153,19 +177,28 @@ pub struct OptSpec {
     /// counts, row text, decimal places), so the cap is part of the
     /// reference docs rather than a rule buried in the parser.
     pub max: Option<usize>,
+    /// What the value must meet beyond its kind.
+    pub rule: Rule,
 }
 
 impl OptSpec {
     /// Option with the same value in every preset.
     #[must_use]
     pub const fn new(key: &'static str, kind: Kind, doc: &'static str, default: Value) -> Self {
-        Self { key, kind, doc, default, minimal: None, full: None, max: None }
+        Self { key, kind, doc, default, minimal: None, full: None, max: None, rule: Rule::None }
     }
 
     /// Bound the option (see [`OptSpec::max`]).
     #[must_use]
     pub const fn max(mut self, max: usize) -> Self {
         self.max = Some(max);
+        self
+    }
+
+    /// Hold the value to a [`Rule`].
+    #[must_use]
+    pub const fn rule(mut self, rule: Rule) -> Self {
+        self.rule = rule;
         self
     }
 
@@ -423,6 +456,19 @@ impl ModuleSchema {
         self.colors.iter().find(|c| c.key == key)
     }
 
+    /// What `refresh` does for this module (SPEC § 3), as the reference and
+    /// the `setup` form say it: a cached module's worker runs every
+    /// `refresh` seconds; a payload-only module has no worker, and the
+    /// parser reports any value but `0`.
+    #[must_use]
+    pub const fn refresh_doc(&self) -> &'static str {
+        if self.refresh > 0 {
+            "Seconds a cached value lives before a background worker refreshes it."
+        } else {
+            "This module renders from the payload every tick; any value but 0 is reported."
+        }
+    }
+
     /// The `hide` states this module accepts (SPEC § 3), from its measure:
     /// what the parser checks a list against, what the reference and the
     /// `setup` form print.
@@ -468,7 +514,7 @@ pub static COMMON_OPTS: [OptSpec; 5] = [
     OptSpec::new(
         "hide_when_empty",
         Kind::Bool,
-        "Hide the module when it has nothing to show (else a dim `–`).",
+        "Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set).",
         Value::Bool(true),
     ),
     OptSpec::new(
@@ -512,7 +558,7 @@ pub struct ModuleCfg {
     /// absent keys keep their static glyph.
     icon_frames: BTreeMap<&'static str, Vec<String>>,
     colors: BTreeMap<&'static str, Color>,
-    schema: ModuleSchema,
+    zone: Option<jiff::tz::TimeZone>,
 }
 
 impl ModuleCfg {
@@ -597,14 +643,35 @@ impl ModuleCfg {
                 .filter_map(|i| overrides.icon_frames.get(i.key).map(|f| (i.key, f.clone())))
                 .collect(),
             colors,
-            schema: schema.clone(),
+            zone: overrides.zone.clone(),
         }
+    }
+
+    /// The zone a [`Rule::TimeZone`] option names (`clock.tz`), resolved
+    /// once when the config was read; `None` for the tick's own zone.
+    #[must_use]
+    pub const fn zone(&self) -> Option<&jiff::tz::TimeZone> {
+        self.zone.as_ref()
     }
 
     /// The animation frames of an icon (`<key>_frames`); empty when static.
     #[must_use]
     pub fn icon_frames(&self, key: &str) -> &[String] {
+        #[cfg(test)]
+        self.declared(self.icons.contains_key(key), "icon", key);
         self.icon_frames.get(key).map_or(&[], Vec::as_slice)
+    }
+
+    /// In a test build, a read of a key the schema does not declare fails.
+    ///
+    /// The typed readers answer an unknown key with a default (an empty
+    /// icon, the default colour, `false`), so a typo renders silently. The
+    /// key scan in `modules` catches a key spelled at the call site; this
+    /// catches every read a unit test reaches, a key picked at run time or
+    /// read through a helper included (the schema matrix reaches them all).
+    #[cfg(test)]
+    fn declared(&self, known: bool, what: &str, key: &str) {
+        assert!(known, "{}: {what} {key:?} is not in the schema", self.id);
     }
 
     /// Every icon that has animation frames, for `config show` and docs.
@@ -630,12 +697,6 @@ impl ModuleCfg {
             }
         }
         std::borrow::Cow::Owned(view)
-    }
-
-    /// The schema this config was resolved from.
-    #[must_use]
-    pub const fn schema(&self) -> &ModuleSchema {
-        &self.schema
     }
 
     /// The resolved value of a [`COMMON_OPTS`] key or of `hide`, for
@@ -669,12 +730,16 @@ impl ModuleCfg {
     /// Boolean option (false when missing or of another kind).
     #[must_use]
     pub fn bool(&self, key: &str) -> bool {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         matches!(self.opts.get(key), Some(Value::Bool(true)))
     }
 
     /// Integer option as `u64` (0 when missing/negative).
     #[must_use]
     pub fn int(&self, key: &str) -> u64 {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::Int(i)) => u64::try_from(*i).unwrap_or(0),
             Some(Value::Float(f)) => crate::num::round_to_u64(*f),
@@ -691,6 +756,8 @@ impl ModuleCfg {
     /// Float option (0.0 when missing).
     #[must_use]
     pub fn float(&self, key: &str) -> f64 {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::Float(f)) => *f,
             Some(Value::Int(i)) => crate::num::u64_to_f64(u64::try_from(*i).unwrap_or(0)),
@@ -701,12 +768,16 @@ impl ModuleCfg {
     /// String option ("" when missing).
     #[must_use]
     pub fn str(&self, key: &str) -> &str {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         self.opts.get(key).and_then(Value::as_str).unwrap_or("")
     }
 
     /// Number-list option.
     #[must_use]
     pub fn nums(&self, key: &str) -> Vec<f64> {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::NumList(v)) => v.clone(),
             _ => Vec::new(),
@@ -716,6 +787,8 @@ impl ModuleCfg {
     /// String-list option.
     #[must_use]
     pub fn strs(&self, key: &str) -> Vec<String> {
+        #[cfg(test)]
+        self.declared(self.opts.contains_key(key), "option", key);
         match self.opts.get(key) {
             Some(Value::StrList(v)) => v.clone(),
             _ => Vec::new(),
@@ -731,31 +804,17 @@ impl ModuleCfg {
     /// Icon glyph ("" when unknown).
     #[must_use]
     pub fn icon(&self, key: &str) -> &str {
+        #[cfg(test)]
+        self.declared(self.icons.contains_key(key), "icon", key);
         self.icons.get(key).map_or("", String::as_str)
     }
 
     /// Color (default color when unknown).
     #[must_use]
     pub fn color(&self, key: &str) -> Color {
+        #[cfg(test)]
+        self.declared(self.colors.contains_key(key), "colour", key);
         self.colors.get(key).copied().unwrap_or_default()
-    }
-
-    /// Every resolved option, for `config show` and docs.
-    #[must_use]
-    pub const fn opts(&self) -> &BTreeMap<&'static str, Value> {
-        &self.opts
-    }
-
-    /// Every resolved icon.
-    #[must_use]
-    pub const fn icons(&self) -> &BTreeMap<&'static str, String> {
-        &self.icons
-    }
-
-    /// Every resolved color.
-    #[must_use]
-    pub const fn colors(&self) -> &BTreeMap<&'static str, Color> {
-        &self.colors
     }
 }
 
@@ -788,6 +847,8 @@ pub struct Overrides {
     pub colors: BTreeMap<String, String>,
     /// `<key>_frames`: animation frames for an icon key (SPEC § 4.2).
     pub icon_frames: BTreeMap<String, Vec<String>>,
+    /// The zone a [`Rule::TimeZone`] option named, resolved by the parser.
+    pub zone: Option<jiff::tz::TimeZone>,
 }
 
 #[cfg(test)]
@@ -847,15 +908,54 @@ mod tests {
         o.icon_frames.insert("ghost".into(), vec!["x".into()]);
         let cfg = ModuleCfg::resolve(&s, Preset::Full, IconSet::Nerd, &theme, &o);
         assert_eq!(cfg.icon_frames("leaf"), ["a", "b", "c"]);
-        assert!(cfg.icon_frames("ghost").is_empty(), "unknown keys are dropped");
+        assert!(!cfg.all_icon_frames().contains_key("ghost"), "unknown keys are dropped");
         assert_eq!(cfg.animated(|n| 2 % n).icon("leaf"), "c");
         assert_eq!(cfg.animated(|_| 0).icon("leaf"), "a");
         assert_eq!(cfg.icon("leaf"), "🌿", "the static glyph is untouched");
         assert_eq!(cfg.color("main"), Color::Rgb(1, 2, 3));
         assert_eq!(cfg.color_list("bands", &theme).len(), 2);
         assert_eq!(cfg.size("width"), 7);
-        assert_eq!(cfg.str("missing"), "");
+        assert_eq!(cfg.str("width"), "", "a string read of another kind is empty");
         assert_eq!(cfg.float("width"), 7.0);
+    }
+
+    /// mod-05: a test build refuses a read of a key the schema does not
+    /// declare, which a release build answers with a default, so a typo in
+    /// a module fails the unit tests that render it instead of drawing an
+    /// empty icon or the default colour.
+    #[test]
+    fn a_read_of_an_undeclared_key_fails_under_test() {
+        type Read = fn(&ModuleCfg);
+        let cfg = ModuleCfg::resolve(
+            &schema(),
+            Preset::Default,
+            IconSet::Nerd,
+            &Theme::default(),
+            &Overrides::default(),
+        );
+        let reads: [(&str, Read); 5] = [
+            ("option \"show_it\"", |c| {
+                let _ = c.bool("show_it");
+            }),
+            ("option \"widht\"", |c| {
+                let _ = c.size("widht");
+            }),
+            ("icon \"lef\"", |c| {
+                let _ = c.icon("lef");
+            }),
+            ("colour \"mian\"", |c| {
+                let _ = c.color("mian");
+            }),
+            ("option \"band\"", |c| {
+                let _ = c.color_list("band", &Theme::default());
+            }),
+        ];
+        for (what, read) in reads {
+            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read(&cfg)));
+            let message = refused.expect_err(what);
+            let text = message.downcast_ref::<String>().cloned().unwrap_or_default();
+            assert!(text.contains(what) && text.contains("not in the schema"), "{text}");
+        }
     }
 
     /// SPEC § 3: a hide state parses from and prints as its config spelling,
@@ -910,8 +1010,12 @@ mod tests {
         let cfg = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &o);
         assert!(cfg.hides_empty());
         assert_eq!(cfg.common("hide"), Some(Value::StrList(vec!["empty".into(), "zero".into()])));
-        let none = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &o);
-        assert_eq!(none.hide, vec![HideRule::Empty, HideRule::Zero]);
+        assert_eq!(cfg.hide, vec![HideRule::Empty, HideRule::Zero]);
+        // Unset, the list is empty and `empty` comes from the flag alone.
+        let unset = Overrides::default();
+        let none = ModuleCfg::resolve(&s, Preset::Default, IconSet::Ascii, &theme, &unset);
+        assert!(none.hide.is_empty() && none.hides_empty(), "{:?}", none.hide);
+        assert_eq!(none.common("hide"), Some(Value::StrList(Vec::new())));
     }
 
     #[test]
@@ -929,5 +1033,22 @@ mod tests {
         assert_eq!(Value::NumList(vec![50.0, 75.5]).to_toml(), "[50, 75.5]");
         assert_eq!(Preset::parse("full"), Some(Preset::Full));
         assert!(Kind::Enum(&["a", "b"]).doc_name().contains("`a`"));
+    }
+
+    /// sch-06, cfg-04: every finite number is written as TOML that reads
+    /// back as that number: a whole one of 1e15 and up was a digit string
+    /// past TOML's integers (a syntax error that sank the whole file), and
+    /// a negative whole one read back through the integer path.
+    #[test]
+    fn every_finite_number_is_written_as_toml_it_reads_back() {
+        for f in [1e19, 1e20, 1e300, -5.0, -10.0, 0.1, 50.0, 1e15, 1e16, 0.001, 2.5, -0.5] {
+            let text = format!("x = {}", Value::Float(f).to_toml());
+            let table: toml::Table =
+                toml::from_str(&text).unwrap_or_else(|e| panic!("{text}: {e}"));
+            let x = table.get("x").unwrap();
+            let back = x.as_float().or_else(|| x.as_integer().map(crate::num::i64_to_f64));
+            assert_eq!(back, Some(f), "{text}");
+        }
+        assert_eq!(Value::Float(50.0).to_toml(), "50", "a plain whole number stays one");
     }
 }

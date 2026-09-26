@@ -1,5 +1,5 @@
 preview  140 cols, box 136  ·  2 lines  ·  subscription-full: a Pro/Max session with every field set
-▶ ╭─ ❒ ~/projects/garnish ────────────────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
+> ╭─ ❒ ~/projects/garnish ────────────────────────────────────────────────────────────────────────────────────────────────── ⠋ 16:00:00 ─╮
   ╰─ ❖ Opus │ ⊞ ████████▍░░░░░░░░░░▏ 42% ────────────────────────────────────────────────────────────────────────────────────────────────╯
 rows  ~/garnish.toml
 row 1     path  branch  sync   │ clock
@@ -7,7 +7,6 @@ row 2     model  context   │ cost
                                ┌ [modules.path] ────────────────────────────────────────────────────────────┐
                                │  enabled         true                        (true)                        │
                                │  preset          default                     (default)                     │
-                               │  refresh         0                           (0)                           │
                                │  hide            []                          ([])                          │
                                │  label                                       ("")                          │
                                │  prefix                                      ("")                          │
@@ -21,10 +20,10 @@ row 2     model  context   │ cost
                                │  show_added      false                       (false)                       │
                                │  icons.folder    ❒                           (❒)                           │
                                │  icons.added     +                           (+)                           │
-                               │  colors.icon     #7dd3a0                     (accent)                      │
-                               │  colors.base     #cdd6f4                     (text)                        │
-                               │  colors.subpath  #6c7086                     (muted)                       │
-                               │  colors.added    #6c7086                     (muted)                       │
+                               │  colors.icon     accent                      (accent)                      │
+                               │  colors.base     text                        (text)                        │
+                               │  colors.subpath  muted                       (muted)                       │
+                               │  colors.added    muted                       (muted)                       │
                                │                                                                            │
                                │                                                                            │
                                │Render this module at all.                                                  │
@@ -32,6 +31,7 @@ row 2     model  context   │ cost
                                │                                                                            │
                                │↑↓ field  enter edit  ←→ step  d unset  esc back                            │
                                └────────────────────────────────────────────────────────────────────────────┘
+
 
 
 

@@ -7,7 +7,9 @@ what Phase 19 found in the harness (§ 2.1). The Phase 20 keys (§ 3)
 shipped on 2026-09-13, the layout model on 2026-09-17 and the setup on
 2026-09-19; revised the same day with the Phase 23 keys (`hide` in § 3,
 pace in § 3.3, the four modules of § 3.8, `[format]` and
-`separator_color` in § 4), which `PLAN.md` Phase 23 is building. Owner:
+`separator_color` in § 4), which shipped on 2026-09-20 with the setup
+refinements; revised 2026-09-25 with the decisions of the whole-codebase
+review (each section names them). Owner:
 Daniel Schwartz. Builder: Claude. This document is the target design of
 the whole system; when the design changes, it changes here first, with
 the reason (`CLAUDE.md` § Phase protocol). Everything in it is
@@ -82,15 +84,32 @@ is cut with `…` on the right. garnish renders to exactly that width: the
 `2 × statusLine.padding` when that setting is non-zero (verified in the
 2.1.261 binary: footer `paddingX: 2`, status box `paddingX: padding`).
 
-**Whitespace-only rows are dropped.** The harness trims the script's stdout
-and removes every row that is empty after trimming (2.1.261:
-`stdout.trim().split("\n").flatMap(l => l.trim() || [])`). The trim runs on
-the raw bytes, escape sequences included, so a row is lost only when it is
-whitespace *after painting*: an unframed spacer with colour off
-(`color = "never"`, `NO_COLOR`) vanishes, while with colour on the rule's
-colour codes around the spaces keep it (verified in the 2.1.263 binary:
-no ANSI strip before the trim). `preview --color never` shows the row the
-screen drops; § 4.1 `blank = true` keeps it in both cases.
+**Every row is trimmed, and a whitespace-only row is dropped.** The
+harness trims the script's stdout, then trims every row and keeps the
+rows that are not empty after it (2.1.261:
+`stdout.trim().split("\n").flatMap(l => l.trim() || [])`), so what it
+draws is each row's *trimmed* text. The trim runs on the raw bytes,
+escape sequences included (verified in the 2.1.263 binary: no ANSI strip
+before the trim), so a row is lost only when it is whitespace *after
+painting*: an unframed spacer with colour off (`color = "never"`,
+`NO_COLOR`) vanishes, while with colour on the rule's colour codes around
+the spaces keep it. `preview --color never` shows the row the screen
+drops; § 4.1 `blank = true` keeps it in both cases.
+
+A row that *starts* with whitespace would lose those cells and be drawn
+shifted left: a column's padding line (§ 4.3), a `style = "none"` box's
+pad, the spaces that place a module under a frame with no caps, and with
+colour off the unstyled rule of `style = "none"`. A plain segment carries
+no escape sequence even with colour on, so colour does not save such a
+row. The tick holds those cells (decided with Daniel 2026-09-25, when the
+per-row trim was read for what it keeps rather than what it drops): with
+colour on, a painted row whose first byte would be whitespace starts with
+an empty SGR (`ESC[0m`), which the trim keeps and the harness's escape
+parser drops, so nothing shows; with colour off, its first leading space
+becomes the braille blank U+2800 of § 4.1, the trade-off `blank` makes.
+It is done once, on the painted row, never in the layout; a row that is
+whitespace throughout is left to the spacer rule above, and trailing
+whitespace moves nothing.
 
 **Every row is drawn dim by the harness, and nothing in the output can
 undo it** (read in the 2.1.261 and 2.1.270 binaries on 2026-09-12, PLAN
@@ -111,7 +130,8 @@ the tick never adds the dim itself: the harness does, and the bytes of a
 tick are what the goldens pin. FUTURE-SPEC § 7.1's A1 (a leading
 `ESC[0m` on every row) assumed the raw bytes reached the terminal inside
 SGR 2 and was dropped when Phase 19 read the component: the prefix would
-be parsed away in every supported version. What remains is the fact, in
+be parsed away in every supported version (which is exactly why it can
+hold a row's leading cells against the trim, above). What remains is the fact, in
 `CLAUDE.md` with how to re-verify it and in the guide's troubleshooting.
 The harness's trim keeps every row that carries a non-whitespace
 byte, so with colour on the painter's escape sequences keep a filled
@@ -224,8 +244,21 @@ says which (§ 7).
 | `pr.{number,url,review_state?,kind?}` | object? | open PR/MR; `review_state` approved/pending/changes_requested/draft; `kind = "mr"` for GitLab |
 | `worktree.{name,path,branch?,original_cwd,original_branch?}` | object? | Claude worktree session |
 
-Auth-mode rule: `rate_limits` present ⇒ subscription (show limits); absent ⇒
-API key/gateway (show `cost`).
+Auth-mode rule: `rate_limits` present, with any window in it (a gateway's
+`spend_limit` alone included) ⇒ treated as a subscription (the limit
+modules show, `cost` hides under its default `only_without_rate_limits =
+true`); absent ⇒ an API key, or a gateway that reports no spend limit
+(show `cost`). (Stated 2026-09-25: this section filed "gateway" under
+*absent* while the field row above says a gateway's spend limit arrives in
+`rate_limits`; `Payload::is_subscription` has always been
+`rate_limits.is_some()`. Whether a spend-only gateway session should show
+`cost` as well is open in PLAN's backlog.)
+
+garnish does not model `prompt_id`, `transcript_path` or
+`context_window.remaining_percentage` (no module will read a prompt id or
+the transcript, and the remainder is `100 − used_percentage`); the other
+fields no module reads yet are parsed and say so in `payload.rs`. An empty
+`cwd` or `workspace.current_dir` is no directory: the other one is used.
 
 ### 2.3 Autocompact threshold (approximation)
 
@@ -237,7 +270,9 @@ override): `threshold = effective_window − 13_000`, or
 min(context_window_size, configured)` where `configured` comes from
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (env) > `autoCompactWindow` in settings
 (managed > `.claude/settings.local.json` > `.claude/settings.json` >
-`~/.claude/settings.json`) > model default (= window). `autoCompactEnabled =
+`~/.claude/settings.json`, which `CLAUDE_CONFIG_DIR` moves to
+`$CLAUDE_CONFIG_DIR/settings.json` as it moves every `~/.claude` path;
+empty is unset, § 5) > model default (= window). `autoCompactEnabled =
 false`, `DISABLE_AUTO_COMPACT=1` or `DISABLE_COMPACT=1` (which turns off
 compaction altogether) disables the marker. The buffer constant is
 configurable (`modules.context.compact_buffer_tokens`).
@@ -245,11 +280,18 @@ configurable (`modules.context.compact_buffer_tokens`).
 ## 3. Modules
 
 Every module has: `enabled` (bool), `preset` (`minimal|default|full`),
-`refresh` (seconds; `0` = payload-only, rendered every tick; `> 0` = cached with
-that TTL and refreshed by a worker), `icons.<key>`, `colors.<key>`, `label`,
+`refresh` (seconds a cached module's value lives before a worker
+refreshes it, at least 1; a payload-only module, rendered every tick,
+takes only `0`, and any other value is reported as having no effect,
+decided with Daniel 2026-09-25: the reference had documented it as
+switching such a module to a cached one, which nothing did),
+`icons.<key>`, `colors.<key>`, `label`,
 `prefix`, `suffix`, `hide_when_empty`, `hide` (a list of states, below),
 `max_width`. Option resolution: built-in default →
-icon-set default → module preset → top-level preset → explicit key.
+icon-set default → the module preset the top-level `preset` implies →
+the module's own `preset` → explicit key (2026-09-25 review: this read
+as the top-level preset overriding the module's, the reverse of what the
+resolver does).
 
 `max_width` (PLAN Phase 20; from FUTURE-SPEC § 6.3, A5) caps one module's
 rendered width: `0` (default) is unlimited, otherwise the decorated module
@@ -301,6 +343,21 @@ from the schema's measure.
 
 GitLab merge requests render as `!7` (GitLab's own notation) with the `mr`
 icon; GitHub pull requests as `#42`.
+
+`sync` treats a **gone** upstream as no upstream (decided 2026-09-25 with
+Daniel): when the config names one but its remote-tracking ref no longer
+exists (the branch merged and deleted on the forge, then pruned), the
+worker records an `ok` entry marked `gone` without counting, and the row
+shows the `no_upstream` glyph, no `✗` and no new icon. (It used to run
+`rev-list` against the missing ref, fail, and show `✗` for good, with a
+failing worker every TTL, in the most ordinary state after a pull request.)
+The fetch-age hint counts from the last fetch that *worked*: a
+`FETCH_HEAD` with something in it, or the worker's own record of its last
+good fetch (`fetch_ok_at`), whichever is newer, across the worktree's and
+the common git dir's `FETCH_HEAD` (the tracking refs are shared). git
+truncates `FETCH_HEAD` before it contacts the remote, so a failing fetch
+used to read as one that had just happened and the hint never appeared; a
+stamp from the future counts as no age at all.
 
 Two payload-only additions (PLAN Phase 20; from FUTURE-SPEC § 7.5, A7 and
 A8):
@@ -379,12 +436,21 @@ Context bar: filled cells `█` with partial blocks for sub-cell precision,
 empty `░`; the **filled part** takes the color of the current band
 (`thresholds = [50, 75, 90]`, `band_colors = ["band1", "band2", "band3",
 "band4"]`: the theme's four band roles, overridable with any role or literal
-colour, as in the § 4 example); a `▏` marker at the autocompact position;
+colour, as in the § 4 example), and the band colour stays on the bar: the
+percentage is drawn in `colors.percent` (`text` by default; decided with
+Daniel 2026-09-25, when the key was found declared, documented and set by
+the `dracula-256` gallery preset while the percentage took the band
+colour and nothing read it); a `▏` marker at the autocompact position;
 `exceeds_200k = true` shows the `icons.exceeds` glyph (`‼`) in
 `colors.exceeds` (`danger`) when the payload says so (one flag plus the
 module's ordinary icon and colour tables, not a nested table: every module's
 glyphs and colours live in `icons`/`colors`); `warn_at` adds an extra badge
-threshold. No token counter. `used_percentage` null → empty bar and `–`.
+threshold. No token counter. `used_percentage` null → empty bar and the
+placeholder (§ 3.6).
+The band is the number of thresholds the percentage has reached; a
+`thresholds` list out of ascending order (here and on the usage modules)
+is reported and the default stands in (2026-09-25: `[90, 50, 75]` at 80 %
+drew the lowest band with `config check` saying ok).
 
 `scale = "window" | "usable"` (PLAN Phase 20; from FUTURE-SPEC § 8.3,
 A11): with `usable` the bar and the percentage are measured against the
@@ -483,8 +549,27 @@ passed prints none of them.
 | `clock` | local time + spinner | `HH:MM` | spinner + `HH:MM:SS` | + date, UTC offset | 0 |
 
 `cache` hit % = `prompt_cache.hit_ratio`; fallback to the last request's
-cache-read share from `current_usage`; `prompt_cache` absent → `–`.
+cache-read share from `current_usage`; `prompt_cache` absent → the
+placeholder (§ 3.6).
 Spinner frame = `now_secs mod frames.len()` (stateless).
+
+The tick's local zone (the `clock`'s, and the absolute reset times' of
+§ 3.3) is `TZ` when it names a zone, else `/etc/localtime`, else UTC. `TZ`,
+and the `clock`'s own `tz`, are read the way the C library reads `TZ`: a
+POSIX rule (`JST-9`, `EST5EDT,M3.2.0,M11.1.0`) is that rule; anything else,
+or anything after a leading `:`, is an absolute path to a TZif file or a
+zone name, whose file is read from `TZDIR`, `/usr/share/zoneinfo`,
+`/usr/share/lib/zoneinfo` or `/etc/zoneinfo`. A name holding a `..`
+component or naming no file matches nothing, and a relative one is never
+read against the working directory. Only a name no directory has a file for
+goes to jiff's database, whose first use walks the whole zoneinfo tree; a
+`TZ` that names nothing is reported once on stderr. (Decided 2026-09-25: a
+POSIX rule fell through to `/etc/localtime`, UTC in most containers,
+without a word, and a zone name paid that walk on every tick.) The
+`clock`'s `tz` is resolved once, when the config is read, and one that
+names nothing on this machine is reported by `config check` under
+`modules.clock.tz` while the tick's zone stands in (2026-09-25: it fell
+back in silence, and no test could tell a working `tz` from a broken one).
 
 ### 3.5 Session-identity group
 
@@ -507,6 +592,22 @@ renders dimmed with `✗` and the error is kept in the cache file for
 `garnish doctor`. A missing entry renders the module's placeholder.
 (Changed 2026-09-04: with a 5 s TTL and a 1 s tick the old rule dimmed the
 value on every fifth tick, which read as flicker.)
+
+The placeholder, what stands in for a value that is not there (a module
+with nothing to show under `hide_when_empty = false`, a failed one before
+its `✗`, `context` before the first response, `cache` without a ratio), is
+`–`, and `-` in the ascii set, whose marks are all 7-bit like its
+ellipsis (`..`) and its overdue and failed marks (`~`, `x`); decided
+2026-09-25, when the `ascii-only` gallery preset was found printing U+2013
+on the first tick of every session. One character in an ascii row is not
+7-bit, and it is not a mark: the braille blank U+2800, which with colour
+off holds a row's leading cells through the harness's trim (§ 2.1: a
+row that would start with whitespace, such as a right group alone under
+`style = "none"`), and which `blank = true` puts in a spacer in either
+colour mode (§ 4.1). The
+only 7-bit character that takes a cell and shows nothing is the space,
+which the trim removes, so the alternative is a row drawn shifted left or
+dropped.
 
 ### 3.7 Text modules (PLAN Phase 15, shipped in v0.2.0)
 
@@ -553,7 +654,12 @@ color = "muted"
   then itself, so it flows continuously. Both are stateless: the offset is
   `floor(now_secs × step) mod period`, where the period is the text width
   for `scroll` and text plus gap for `scroll-wrap`, so a frozen clock
-  freezes the scroll and a cancelled tick loses nothing. Text modules have
+  freezes the scroll and a cancelled tick loses nothing. The width is
+  counted cluster by cluster, as the scroller advances (`ansi::scroll_period`):
+  a ligature `unicode-width` measures as one cell (Arabic `لا`) is two
+  clusters, and a period counted in display cells wrapped a cell early
+  (2026-09-25; the line ticker and the setup preview's placement map count
+  the same way). Text modules have
   no `preset` and no `refresh`; `config check` rejects both.
 - **Shared primitive.** The same scroller implements line-level
   `overflow = "ticker"` (§ 4.1); one function in `ansi.rs`, tested once.
@@ -569,8 +675,8 @@ color = "muted"
   screen.
 - **Docs.** `garnish modules` lists `text.<name>` as a family; the generated
   reference gets one page for it; `config check` validates `justify`,
-  `overflow`, `step` (> 0) and that every `text.<name>` on a line has a
-  table.
+  `overflow`, `step` (0.001–1000, like every `*_step`, § 5) and that every
+  `text.<name>` on a line has a table.
 
 ### 3.8 Harness identity and settings badges (PLAN Phase 23)
 
@@ -606,11 +712,17 @@ document decides the count for these four alone).
   the tick. An absent file is an `ok` entry with no email (an API-key
   user has no account: nothing to show, never `✗`); an unreadable,
   unparsable or oversized one is a failed entry (`✗`, retried once per
-  TTL). The field name is what the community documents for the file
+  TTL). A file that does not parse is read once more, 100 ms later,
+  before it counts as failed (2026-09-25: Claude Code 2.1.282 writes the
+  file through a temporary file and a rename, but truncates and rewrites
+  it in place when the rename fails, as it does for a bind-mounted file,
+  so a worker can meet it half written and hold `✗` for the whole TTL).
+  The field name is what the community documents for the file
   (FUTURE-SPEC grades it C), so a file without it shows nothing rather
   than guessing. `style = "email" | "user"` picks the whole address or
-  the part before `@`. The settings chain of § 2.3 keeps ignoring
-  `CLAUDE_CONFIG_DIR` (PLAN's backlog).
+  the part before `@`. The settings chain of § 2.3 honours the same
+  variable for its user file (2026-09-25 review: `install` and the
+  skills wrote to `~/.claude` while Claude Code read the moved directory).
 - None of the four is in a built-in preset's rows: they are added by
   hand or through the `session-badges` gallery preset (§ 12). The
   generated pages show `sandbox` and `voice` on, from keys the pinned
@@ -621,14 +733,116 @@ document decides the count for these four alone).
 
 Location: `--config` > `$GARNISH_CONFIG` > `$XDG_CONFIG_HOME/garnish/garnish.toml`
 (default `~/.config/garnish/garnish.toml`) > `~/.garnish.toml` > built-in
-defaults. Config is re-read every tick (it is tiny); no daemon.
+defaults. Config is re-read every tick (it is tiny); no daemon. A command
+that writes a config (`config init`, `setup`, `install`'s default file)
+writes the file this order finds and the XDG path only when there is
+none, so a new file never hides an existing `~/.garnish.toml` (2026-09-25
+review: `install` wrote the XDG default and the user's config silently
+stopped applying). `GARNISH_CONFIG` counts only as an absolute path: a
+relative one would name a file in whatever directory the tick runs in,
+the session's repository (Claude Code passes a settings `env` value
+unexpanded, so `"~/g.toml"` is relative), so the tick ignores it and a
+command run by hand refuses it. A relative `--config` on the tick is
+ignored the same way (`sh` leaves the `~` of `--config=~/g.toml` alone),
+with a `⚠ config:` row saying so; `preview` and the other commands run by
+hand take it in their own directory (verification of 2026-09-26: the
+tick read a `~/g.toml` the session's repository shipped). Without
+`--config` and `GARNISH_CONFIG`, a garnish
+`statusLine.command` that passes its own `--config` (or, without one, a
+`GARNISH_CONFIG=` assignment before the program, else the
+`GARNISH_CONFIG` a settings file's `env` block gives it, the first the
+chain sets) names the file instead, since that is the one its ticks
+read. The chain's managed layer is the managed file and, when that is
+the platform's, the `managed-settings.d/*.json` drop-ins beside it,
+which Claude Code applies above it (the last by name first; only a file
+or a link, and a hidden `.name.json` is switched off, as Claude Code
+skips it; the hook's file of § 9 stands in for the managed file alone,
+since a hook file in a shared directory would take drop-ins anyone put
+beside it, and guarding that directory refused a group-writable
+platform one Claude Code reads);
+`doctor` lists them as `drop-in`, and says that the keys a tick reads
+(§ 2.3) come from none of them (PLAN backlog). An `env` value of any
+JSON type counts, as the string JavaScript's `String()` makes of it and
+Claude Code puts in the environment (`["/p"]` is `/p`, `5` and `5.0`
+are `5`, `null` is `null`; a number exactly halfway between two
+shortest forms, and one serde_json reads a bit off, can differ in the
+last digit, and a file serde_json refuses, such as one holding
+`1e999`, is skipped: PLAN backlog), and an empty one names no file, as
+for the tick. The command is the one
+Claude Code runs from the current directory, the first file of the
+settings chain (§ 2.3) that sets one, as `doctor` shows it, for every
+command run by hand: `config path` prints the file, `config check`,
+`config show`, `preview` and `doctor` read it, and `config init` and
+`setup` write it. When that command runs another program, the person's
+own garnish command (the managed or user file's) still names their
+config, with the `env` value of their own files alone, since no tick of
+it runs here. A settings file is the person's own when it is the managed file
+or sits in their settings directory (`CLAUDE_CONFIG_DIR`, else
+`~/.claude`, also `~/.claude` itself, by its path or the one it links
+to); any other local or project file is a checkout's, a repository
+nobody here may have built. When a checkout's file names the config,
+by the command's `--config` or `GARNISH_CONFIG=` prefix, garnish follows
+it for none of them, reading or writing: they refuse as for a value that
+names no one file (below), and `doctor` says so and shows what the
+lookup finds, never the refused file (verification of 2026-09-26:
+`config init`, `setup` and the `garnish-statusline` skill wrote wherever
+a cloned repository named, `~/.profile` included); a command there that
+passes no config leaves the file to the lookup. Inside a Claude Code
+session (`CLAUDECODE` is set, even to nothing) the environment carries
+the `env` blocks of every settings file Claude Code read, a checkout's
+included, in whatever directory the command runs and whatever JSON the
+value was: so there a `GARNISH_CONFIG` counts only when the person's own
+settings (the user file, the platform's managed file or a
+`managed-settings.d/*.json` drop-in beside it) set that value, and a
+`GARNISH_MANAGED_SETTINGS` likewise, else the platform's managed file
+stands, in `doctor`'s chain too; outside one, a `GARNISH_CONFIG` the
+current directory's checkout files set is refused too. For `install` the command is the one in the file it
+rewrites (`--settings`, else the user file), and its `env` value the
+managed layer's, read as the chain reads it (so a managed layer a
+checkout pointed the hook at names nothing, whether the checkout is the
+current directory or the file `install` rewrites, with the other file
+of its `.claude` pair, found as written and once resolved), else that
+file's own;
+`install` keeps it, writing
+the default config there when it is missing and checking its `padding`
+against that file, but writes no config a `--settings` file that is not
+the person's own names (it says why). `setup --install` says so when the
+command it keeps reads another file than the one it wrote. A command run
+by hand reads a settings file whole, as Claude Code does (within 64
+MiB), not under the tick's 1 MiB cap. The tick and its workers never
+read the settings file for this: the harness passes the tick the
+command's `--config`, and the tick passes it on. The value is read as
+`sh` would pass it: words part at a space, a tab or a newline (not at
+any other Unicode blank), an unquoted `~` at its start, and one `$HOME`
+or `${HOME}` wherever it stands, is the home directory, with the rest of
+the word glued on as the shell glues it (`$HOME.x` is a file beside the
+home directory's name, not in it); a program word the shell would split
+runs no garnish. One that names no one file (a relative path, which the
+harness resolves in whatever directory it runs the command from, a
+second `$HOME`, an unquoted `$HOME` when the home directory holds a
+blank or a glob character, which the shell would split or expand, a `~`
+in a `GARNISH_CONFIG=` value, arguments clap refuses (a second
+`--config`, one with no value, anything after `--`), or any other
+expansion) is never guessed at: `install` writes no default config and
+says why, `doctor` says so and shows what the lookup finds, and the
+others refuse with a one-line note asking for `--config`, the value cut
+to 200 characters (2026-09-25 review:
+`install` and `setup --preset P --install` kept the command's `--config
+X` but wrote a default file it never read, and then `config path` named
+a file `config check` did not check; its final review found the readers
+following the user file's command where a project's won, and `$HOME.x`
+or `--config=$HOME/x` read wrongly). An empty variable is unset (§ 5), and a relative
+`XDG_CONFIG_HOME` (like a relative `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR`
+for the cache root, § 6, a relative `CLAUDE_CONFIG_DIR` and a relative
+`GARNISH_MANAGED_SETTINGS`) is ignored, as the XDG Base Directory spec
+says: it would name a file in the session's repository.
 
 ```toml
 preset = "default"        # default | minimal | full | compact
 icons  = "nerd"           # nerd | unicode | emoji | ascii
 theme  = "garnish"        # garnish | catppuccin-mocha | nord | dracula | tokyonight | mono
 color  = "auto"           # auto | always | never | 256 | truecolor
-truncate = true           # cut the left group when a line overflows; the right group is never cut
+truncate = true           # cut the left group when a line overflows; the right group only when it alone is wider than its column
 stale_style = "dim"       # dim | hide | plain: how overdue cached values are shown
 stale_after = 5           # TTL periods a value may be overdue before it is styled stale (≥ 1)
 padding = 0               # extra cells subtracted from the width, on top of the harness's 4; set 2 × statusLine.padding
@@ -703,7 +917,10 @@ then apply inside each column, and `[[row.col]]` and `[box.<name>]` are
 listed there. A "column" in the aligned-columns paragraph is a module's
 position within its group, not a layout column. `hide_empty_lines`
 likewise becomes `hide_empty_rows` with the old name as an alias.) Overflow: drop the fill, then truncate the **left** group
-(ANSI-aware, `…`); never the right group. `preview --width` and
+(ANSI-aware, `…`); the right group is cut only when it alone is wider
+than its column, after the left group is gone (Phase 21: a right group
+wider than its column pushed the columns beside it off their shares).
+`preview --width` and
 `GARNISH_COLUMNS` stand in for `$COLUMNS` and get the same subtraction, so
 `preview` shows what Claude Code would show at that terminal width.
 
@@ -798,9 +1015,16 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   `hide_empty_lines = false` restores today's behaviour for the accidental
   case too. A `[[line]]` with no keys is a spacer as well; a `modules` that
   is not a list (`modules = "clock"`) is reported and the row is an
-  ordinary empty line, dropped like any other, never a spacer. An unknown
+  ordinary empty line, dropped like any other, never a spacer, and so is a
+  row whose `col`, or a column whose `row`, is a table where the array of
+  tables belongs (`[row.col]` with one bracket; the row keeps its own
+  `modules`: 2026-09-25, it had become a permanent blank rule). An unknown
   id on a line is reported and removed, so `config show` writes only ids
-  that render. With `stale_style = "hide"` a line of only cached modules can
+  that render, and leaves out a row (or a stack's row) that its removal
+  emptied wherever `hide_empty_rows` drops it, since `modules = []` would
+  make it a spacer that is always drawn; a `[box.<name>]` that none of the
+  rows and columns it writes names is left out too, or the file would read
+  back with a box nothing joins (2026-09-25 review). With `stale_style = "hide"` a line of only cached modules can
   come and go as its values fall overdue and refresh; `hide_when_empty =
   false` on one of them pins the row.
 - **Ticker.** With `overflow = "ticker"` a left group wider than its budget is
@@ -811,7 +1035,8 @@ blank = false             # true keeps an unframed spacer on screen with one inv
   + gap width)`, so it is stateless, deterministic under `GARNISH_NOW`, and
   survives the harness cancelling a tick. `ticker_gap` is plain text
   (escapes and control characters stripped at config time). The right group
-  is never scrolled or cut. `truncate` (default) keeps the `…` behaviour;
+  is never scrolled, and is cut only when it alone is wider than its
+  column. `truncate` (default) keeps the `…` behaviour;
   `truncate = false` hands the whole row over, ticker or not. With
   animations off (`animate = false`, `GARNISH_ANIMATE=0`) a ticker line is
   cut with `…` like `truncate`, not frozen at offset 0 (decided 2026-09-06:
@@ -881,7 +1106,7 @@ separator_step   = 1
 spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]  # already a spinner; same rule
 
 [modules.branch.icons]
-branch_frames = ["", ""]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
+branch_frames = ["⎇", "⑂"]  # any icon key accepts <key>_frames (one width); frame 0 when animations are off
 ```
 
 - **Animated rule.** `fill_pattern` is a string of one-cell glyphs repeated
@@ -1007,10 +1232,28 @@ color = "accent"               # role or literal for the box's glyphs; default t
 - **Columns and width.** The row's width is the box of § 2.1 minus
   `gap` cells per boundary. A column with `width = 24` takes 24 cells and
   `"auto"` takes its content's width (its modules joined by the
-  separator; `max_width` applies); what is left is the free width, shared
+  separator; `max_width` applies; a box around it adds its two sides and
+  two pads, 2026-09-25: they were left out and the content was cut); a
+  column that takes no cells (`width = 0`, or an `auto` column with
+  nothing to show) takes no gap either, since a gap only ever sits
+  between two columns that are drawn (2026-09-25: its gap was reserved,
+  never drawn, and turned up as a stray rule cell after the last column;
+  the `width = 0` case was fixed after the `auto` one); what is left is
+  the free width, shared
   by the `fr` columns as `floor(free × n ÷ Σ fr)` each, the leftover
   cells going one each to the first of them, so shares differ by at most
-  one cell and always add up. Defaults: `"1fr"`, so three bare columns
+  one cell and always add up. An `fr` column whose share comes to nothing
+  (a weight far below its neighbours', or fixed columns that leave no
+  free width) takes no cells either: the last such column is dropped with
+  its gap and the row shared again, until every `fr` column left has
+  cells, so the gap cells it freed go to the `fr` columns that remain,
+  and with none left they are free width after the last column
+  (2026-09-26: its gap was still reserved, the same stray rule cell). A last column that takes no cells
+  draws nothing, so the column before it ends the row and keeps its own
+  pad: the row does not end in content, and the cap takes no pad of its
+  own (2026-09-26: a `width = 0` last column's modules counted as its
+  content, and the cap kept a pad beside the rule, a hole before it).
+  Defaults: `"1fr"`, so three bare columns
   are thirds and six are sixths. Content wider than its column is cut
   with `…` (`overflow = "truncate"`) or scrolled inside the column
   (`overflow = "ticker"`) and never spills into a neighbour, which is
@@ -1027,7 +1270,14 @@ color = "accent"               # role or literal for the box's glyphs; default t
   branch names; an `auto` flex column joins its two groups with the
   separator and draws no rule between them, and an `auto` stack is as
   wide as its widest inner row. With no `fr` column at all, the free
-  width is a rule after the last column. When the width runs out, the
+  width is a rule after the last column, running into the right cap (the
+  last column keeps a pad of its own before it, so the cap takes none;
+  2026-09-25: it did, and left a hole in the rule). A row whose content
+  does reach the cap keeps the cap's pad against that content, and any
+  cells left over go to the rule behind it: content, pad, rule, cap, so
+  the rule never touches that text (2026-09-26: the cells went between
+  the text and the pad; a column too narrow for its own pads is the one
+  exception, under Pads). When the width runs out, the
   row is laid out left to right, gap then column: a fixed or `auto`
   column takes at most what remains, and a column whose gap plus one
   cell does not fit renders nothing, as does everything to its right
@@ -1051,14 +1301,22 @@ color = "accent"               # role or literal for the box's glyphs; default t
   rows with different column counts never align with each other, and
   inner rows of a stack align only with inner rows at the same column
   position), so separators stack; *k* counts from the left in a left- or
-  centre-justified column and from the right end in a right-justified
-  column or a `right` group, as § 4 does today; `right_justify` picks the
-  pad side for those.
+  centre-justified column and in the left group of any column with a
+  `right` group (the flex form anchors it left, whatever `justify` says),
+  and from the right end in a right-justified column with no `right`
+  group or in a `right` group, as § 4 does today; `right_justify` picks
+  the pad side for those. (2026-09-25: a last column is right-justified
+  by default, and the left group of one with a `right` group counted from
+  the right, so its bars did not stack.)
 - **Stacks and height.** `[[row.col.row]]` entries make the column a
   stack of rows, each laid out to the column's width with the rules above
-  (an inner row's `justify` overrides the column's). A row's height in
+  (an inner row takes no `justify` of its own, and the parser reports one
+  as an unknown key: its modules sit where the column's `justify` says;
+  2026-09-26: this said an inner row's `justify` overrode the column's,
+  which no config could write). A row's height in
   lines is its content's: a bare row is one line, a boxed row its lines
-  plus two; a column's height is the sum of its rows'; the outer row is
+  plus two (a box too narrow to draw at its width adds none; see Boxes);
+  a column's height is the sum of its rows'; the outer row is
   as tall as its tallest column. A shorter stack is padded with empty
   lines placed by `valign` (which has no effect when every column is one
   line tall). Inner rows take no `[[row.col]]` and no `gap`; a column
@@ -1071,7 +1329,24 @@ color = "accent"               # role or literal for the box's glyphs; default t
   line carries the box's corners and sides at its ends instead, as the
   samples show. (Decided while building Phase 21: an earlier wording made
   a multi-line row one block for this, which would have repeated `╭─` on
-  every line of a tall row.) On a one-line row, `fill` draws the rule glyph (or the
+  every line of a tall row.) A `custom` frame's caps need not be one
+  width: a tall row is laid out to the room its widest pair leaves, and
+  a narrower or empty cap's spare cells go to the rule, so every line
+  fills the box (2026-09-25: an empty cap's went nowhere, and its line
+  came out short). On a row that ends in content they go behind the
+  cap's pad, as the free width does (above); a line with an empty cap
+  keeps the pad when it has the cells for it (2026-09-26: they went
+  between the text and the pad, and a line with no cap had no pad, so
+  the rule touched the text: `⏱ 1h12m--`). A row's height is measured
+  on the room it is laid out to, the caps of the lines it lands on,
+  which depend on the heights before it, so the rows are measured again
+  until none moves (2026-09-26: a row was measured on the narrowest pair
+  of the whole frame and laid out on its own, so a box that fitted only
+  on its own lines was drawn at full height and cut, losing its bottom
+  edge and the rows after it). A frame whose heights never settle (a
+  row whose box fits under the narrow `single` caps, but not under the
+  `first` and `last` its three lines would take) is measured and laid
+  out on the narrowest pair. On a one-line row, `fill` draws the rule glyph (or the
   animated `fill_pattern`) in every empty cell inside the caps, gaps
   included, so a centred module floats on one continuous rule:
   `╭─ path ─── ⏱ 2h13m ─── 12:00:00 ─╮`; the pattern's phase is
@@ -1086,7 +1361,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   only (§ 2.1); `blank` on the outer `[[row]]` of a multi-line row keeps
   every one of its lines (the braille cell on any line that would be
   whitespace only, padding lines included), while on an inner row it
-  follows the § 4.1 rule.
+  follows the § 4.1 rule, judged on the finished line (2026-09-25: the
+  inner row marked its lines before the outer row had drawn its caps, a
+  box's sides or its other columns, so a framed line got the cell too).
 - **Titles.** `title` is plain text (reduced like every config string,
   § 5) set into the row's rule in the frame colour with `title_pad`
   spaces on each side; `title_color` picks another role or literal.
@@ -1096,12 +1373,17 @@ color = "accent"               # role or literal for the box's glyphs; default t
   the widest of them, a left one in the first run wide enough to hold it
   and a right one in the last, and either falls back to the widest run
   when no run at its end can hold it (the alternative is a title cut to
-  its ellipsis in a one-cell gap). A title needs no rule: with `fill = false` or `style = "none"`
+  its ellipsis in a one-cell gap). The cells around a title stay what the
+  run was: rule, or the spaces of a gap or a padding line on a multi-line
+  row (2026-09-25: they were always drawn as rule). A title needs no rule: with `fill = false` or `style = "none"`
   it is the same text at the same place with `title_pad` spaces around
   it. On a multi-line row the title goes into the first line. On a
   `box = true` row the `title*` keys title that anonymous box (the one
   way to title a one-row box); a row inside a named box gets no title
-  of its own (the box has one) and the key is reported and ignored. A
+  of its own (the box has one) and the key is reported and ignored. The
+  other three keys decorate a title, so without `title` each is reported
+  as having no effect (2026-09-25: they were dropped in silence, and
+  `setup` lists them once a title is set). A
   title wider than its space is cut with `…` and never widens
   the line. A `[[row]]` with only a `title` is a titled spacer
   (`├─ Repository ────┤`), always kept (§ 4.1).
@@ -1125,7 +1407,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
   on a row boxes that row alone with no title, so three adjacent
   `box = true` rows are three boxes. Boxes never nest: a row inside a
   boxed column may not carry `box`, and a column may not carry `box` on
-  a row that has one; both are reported and the inner box ignored. The
+  a row that has one, nor may a row of that column's stack (2026-09-25:
+  that one drew a box inside a box with `config check` saying ok); each
+  is reported and the inner box ignored. The
   three ways read the same wherever the rows are: adjacent rows of a
   stack naming one box form one box in that column, as adjacent
   `[[row]]`s do. A name reused for a non-adjacent run is reported and
@@ -1140,7 +1424,20 @@ color = "accent"               # role or literal for the box's glyphs; default t
   drawn rounded. A `custom` frame adds `top_left`, `top_right`,
   `bottom_left`, `bottom_right` and `side`, one cell each (reported
   otherwise, the style's glyph stays); every glyph passes the § 4.1
-  width guard.
+  width guard. Any of the five may be left unset, and is then empty (an
+  explicit empty string is refused as not one cell wide); the corners are drawn
+  whatever the side is, so a box too narrow for its corners renders
+  nothing, as one too narrow for its sides does (2026-09-25: with corners
+  and no side, a one-cell box drew `++`, overflowed the line and had it
+  recut to `…`). Nothing means nothing: its cells are empty cells (rule on
+  a one-line row, spaces on a taller one), it adds no lines to its row,
+  and a last column whose box does not fit does not end the row in
+  content, so the cap takes no pad (2026-09-26: it kept its two edge
+  lines, so its row came out two lines taller, empty framed lines under a
+  frame with caps, and a one-line row's gaps turned to spaces). A box
+  with no glyphs (`style = "none"`) fits any one cell, and a `width = 0`
+  column has none to give it, so it too adds no lines (2026-09-26: it
+  fitted the column's no cells and made its row three lines tall).
 - **Hiding.** A module hidden by `stale_style = "hide"` or
   `hide_when_empty` leaves its row (§ 3.6, § 4.1; under the default
   `stale_style = "dim"` a stale value stays, dimmed); under
@@ -1175,21 +1472,41 @@ color = "accent"               # role or literal for the box's glyphs; default t
   reaches (a flex column's two groups, a left- or right-justified lone
   group, and both ends of an `auto` column, whose declared width is its
   content plus those cells), and none where the rule already surrounds the
-  group or where the frame's cap or the box's side has padded it. A box's
+  group or where the frame's cap or the box's side has padded it. The one
+  exception is a column narrower than its text and its pads together: it
+  keeps what fits of the text, a one-cell column its `…`, and none of the
+  pads, so there alone the text can meet the rule beside it (found
+  2026-09-26 in a one-cell column before the free width, `├─ … …──┤`;
+  the rule is everywhere else kept off the text). A
+  stack's column pads belong to the inner rows that reach its edges, as
+  they would to the same modules unstacked. A box's
   interior pad is the frame's `pad`, or one cell when the frame has none,
   so a box never has its content against its side and a `style = "none"`
-  box indents by it. A title right after a cap drops its own leading pad
+  box indents by it. Every one of these pads is the `pad` string itself,
+  unstyled, as the frame drew it before columns existed (2026-09-25:
+  Phase 21 drew its width in spaces, so `pad = "·"` showed as a space);
+  the one-cell pad of a box under a frame with none is a space. Inside a
+  box, a lone group keeps no fill cell and no pad on a side that faces the
+  box's own side, whose pad already keeps it off the side (2026-09-25: a
+  module up to two cells narrower than the interior was cut). Between two
+  columns in a box without a rule it keeps both only at `gap = 0`, where
+  nothing else separates them; with a gap, the gap's spaces do (decided
+  with Daniel 2026-09-25: the reservation cut a centred module at
+  `gap = 2`). Under a rule, inside a box or out, both stay: the column's
+  own rule would otherwise run into its text. A title right after a cap drops its own leading pad
   for the same reason (`├─ Repository ──┤`, not `├─  Repository`), and the
   cell goes back to the rule. A box's own top and bottom rules are static:
   `fill_pattern` belongs to the frame, and a travelling box edge would
   read as an error.
 - **Validation.** `config check` reports: `justify`/`valign` outside
   their words; a `width` that is not `"<n>fr"` (1–64), `"auto"` or a cell
-  count (≤ 1024); `gap` above 16; more than 16 columns on a row or 16
-  inner rows in a column; `title_pad` above 64; `box` naming no
+  count (≤ 1024); a `gap` or `title_pad` that is not an integer from 0 to
+  its cap (16, 64), named with that range; more than 16 columns on a row
+  or 16 inner rows in a column; `box` naming no
   `[box.<name>]`; a row with both `modules` and `[[row.col]]` (the
   columns win); nesting in either direction; a non-adjacent reuse; a
-  title on a row inside a named box; `[[line]]` and `[[row]]` both
+  title on a row inside a named box; `title_justify`, `title_pad` or
+  `title_color` without a `title`; `[[line]]` and `[[row]]` both
   present in one file (the arrays cannot be ordered against each other;
   the file must use one name). `config show` writes a one-column row in
   the plain `[[row]]` form, writes `[[row.col]]`, `[[row.col.row]]` and
@@ -1204,7 +1521,9 @@ color = "accent"               # role or literal for the box's glyphs; default t
 - **Cost.** Layout is arithmetic over the segment lists the modules
   already render; nothing new is read or spawned. Presets `grid-three`,
   `grid-six`, `boxed-panels` and `dashboard-panels` pin the shares, the
-  titles and the stacks at two widths each.
+  titles and the stacks at two widths each (`tests/presets.rs`: their
+  declared width and 40 columns wider, uncut, with the same lines, and
+  every line that fills the box filling the wider one).
 
 Two samples, each drawn at its box width (§ 2.1: a 40-cell box is a
 44-column terminal). A titled box around two rows, in a 40-cell box; four
@@ -1285,7 +1604,13 @@ without an error report.
 
 ## 5. Failure behaviour
 
-`garnish` (render) always exits 0 and always prints something:
+`garnish` (render) always exits 0, and prints every row that is not
+hidden. A render whose rows all hid (`hide_empty_rows`, § 4.1: a row of
+`pr` with no pull request open) prints one empty line, which Claude Code
+trims to nothing and so clears the status line until a module has
+something to show (§ 2.1; 2026-09-25: this used to be described as
+"always prints something", which the empty line does not change on
+screen). Otherwise:
 
 - invalid config → keep every valid key and substitute the built-in default
   for each invalid one (the resolver already does this per key), append dim
@@ -1295,8 +1620,35 @@ without an error report.
   look like a different program. Implemented in PLAN Phase 14: the file is
   read as a plain TOML table and each key is converted on its own; value
   errors carry the TOML path, syntax errors the line.)
-- malformed stdin → `⚠ garnish: bad payload`;
-- internal error → `⚠ garnish: <msg>`.
+- malformed stdin, or JSON that is not an object → `⚠ garnish: bad payload`,
+  with the parser's message (its line, column and what it expected) on
+  stderr and in the `GARNISH_DEBUG` log (2026-09-25: it was dropped, so
+  nothing said where the JSON went wrong);
+  any JSON object renders. A known field of the wrong type is absent, alone,
+  an array where an object belongs included (serde read such an array field
+  by field by position, so `"rate_limits": []` hid the cost, 2026-09-25
+  review), and so is a list entry that is not a string and a numeric string that is
+  not finite (`inf`, `NaN`). (Decided 2026-09-25: a type change on one
+  field, which only one badge might read, used to blank every row.) A
+  number too large to print sensibly is printed at a bound instead: a
+  percentage past 100 (`spend`) and a cost stop at 99 999
+  (`num::MAX_SHOWN`), and the bands compare the bounded number;
+- a command line clap refuses on the render path (no subcommand word but
+  `render`, which is the render path spelled out, and stdin not a
+  terminal: a typo in `statusLine.command`, or a flag an upgrade removed)
+  → `⚠ garnish: <the error's first line>`, the whole error on stderr; a
+  subcommand's bad flag, or one typed at a terminal, keeps clap's usage
+  error and exit code (2026-09-25 review: `garnish render --bogus` exited
+  2 and cleared the status line);
+- internal error (a panic) → `⚠ garnish: internal error`: a panic hook
+  installed on the render path prints it and exits 0, and it runs before
+  the release build's `panic = "abort"`; a stack overflow or a signal is
+  beyond it. (2026-09-25 review: nothing produced this line, and both a
+  typo and a panic cleared the status line with no word.) The hook writes
+  the row before its note on stderr, and no write to stderr on the render
+  path can fail the tick (`debug::stderr_line`): with a stderr nobody
+  reads, `eprintln!` panicked, inside the hook too, and the tick aborted
+  with nothing on stdout (2026-09-25 review).
 - **A file that fails to parse is never rewritten by any command** (PLAN
   Phase 19 for `install` and `config init --force`, Phase 22 for `setup`;
   from FUTURE-SPEC § 12.1 and § 13.4). `install`, `config init --force`
@@ -1310,8 +1662,9 @@ without an error report.
   it that is never overwritten, via a temp file in the same directory and
   a `rename`; `config init` names the backup it kept.
 - **Nothing but text reaches a row.** Every string that becomes part of a
-  row is reduced to plain text: escape sequences (CSI, OSC, and the string
-  sequences DCS/SOS/PM/APC with their payloads), control characters and the
+  row is reduced to plain text: escape sequences (CSI, OSC, the string
+  sequences DCS/SOS/PM/APC with their payloads, and nF sequences such as the
+  `ESC ( B` of `tput sgr0` with their final byte), control characters and the
   bidi and zero-width format characters (bidi marks, embeddings and
   isolates, zero-width space and non-joiner, word joiner, the BOM; ZWJ and
   the emoji variation selector stay) are removed.
@@ -1320,7 +1673,12 @@ without an error report.
   row and box `title`) are reduced at
   config time, so width arithmetic sees the real cells; everything else (the
   payload's names and paths, git output, cache entries, the `⚠` line) is
-  reduced by the `Segment` constructors, the one way onto a row. Colour and
+  reduced by the `Segment` constructors, the one way onto a row. A module
+  that measures or cuts such a string first (`max_length`, the fish path's
+  initials, a short sha or session id) reduces it before, so it counts the
+  cells the row shows and never cuts inside a sequence (2026-09-25: a bold
+  session name lost two cells to the escape's bytes, and a cut inside one
+  swallowed the ellipsis). Colour and
   OSC 8 links are added by the painter alone, and a link is emitted only for
   an `http(s)://` URL of printable ASCII. (Whole-stack review, 2026-09-06:
   a `\n` in a session name added a row, an escape passed `--color never`,
@@ -1357,46 +1715,184 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 ## 6. Cache & workers
 
 - Root: `$GARNISH_CACHE_DIR` > `$XDG_RUNTIME_DIR/garnish` > `$XDG_CACHE_HOME/garnish`
-  > `~/.cache/garnish` (macOS `~/Library/Caches/garnish`).
+  > `~/.cache/garnish` (macOS `~/Library/Caches/garnish`) > the temp
+  directory's `garnish-<uid>`, created `0700` and **refused** (no cache: no
+  entry read or written, no lock, no worker, and `doctor` says why) unless
+  it is a real directory this user owns that nobody else can write to
+  (review 2026-09-25, decided with Daniel: the old `/tmp/garnish` was shared
+  by every user, so another could read and plant entries or aim the sweep
+  and the temp-file writes through a link; the uid comes from a file the
+  process creates, there being no `libc`). Directories garnish creates are
+  `0700` and its files `0600`: an entry may carry the account's email.
 - `<root>/sessions/<session_id>/<module>.cache`; git data in
-  `<root>/repos/<hash(git-common-dir + worktree path)>/<module>.cache` so
-  sessions in one worktree share it. Never keyed on `transcript_path`.
+  `<root>/repos/<hash(git common dir + per-worktree git dir)>/<module>.cache`
+  so sessions in one worktree share it. Never keyed on `transcript_path`.
 - Entry: line 1 `v1 <computed_at_ms> <ttl_ms> ok|err`; then `key=value` lines
-  or the error text. Malformed = miss. Written as `.<module>.tmp.<pid>` in
-  the entry's directory + rename. `account` (§ 3.8) keeps
+  or the error text. Malformed = miss, and so is anything that is not a
+  regular file of at most 64 KiB (a FIFO would block the tick in `open`;
+  locks are read the same way). The error text, and `fetch_error`, are
+  plain text of at most 500 characters: control characters and escape
+  sequences are dropped, since `doctor` prints them to a terminal. A
+  refresh whose entry would not read back as itself (a value holding a line
+  break, a file past 64 KiB) is stored as a failed entry naming the value
+  (review 2026-09-25: such an entry never matched what the tick asked for,
+  and every tick spawned a worker); the repository readers already refuse
+  a branch name, `remote` or `merge` value holding a control character or
+  longer than 4096 characters, which git cannot have written. Written
+  as `.<module>.tmp.<pid>` in the entry's directory + rename; every
+  temporary name is unlinked first and created exclusively, so a link
+  planted at one is never followed. `ttl_ms` is informational: freshness is
+  always the reader's TTL. `account` (§ 3.8) keeps
   `<root>/sessions/<session_id>/account.cache` with an `email` line; an
   absent `.claude.json` is an `ok` entry without the line.
 - Tick: fresh → render; past TTL → spawn worker unless `<module>.lock` is
   live, rendering the last value unchanged; older than `stale_after` TTLs
   (or computed for another head/upstream) → dim `⟳`; `err` → dim `✗`. A failed entry is fresh for its TTL like any
   other (a broken git is retried once per TTL, never once per tick). Entries
-  record what they were computed for (`head`, `upstream`); a render whose
-  situation differs treats the entry as stale.
+  record what they were computed for (`branch`'s `head`, `sync`'s `branch`
+  and `upstream`: branches that share an upstream must not share counts);
+  a render whose situation differs treats the entry as stale.
 - Lock = file `pid epoch_ms`, created by `hard_link` from a pre-written temp
   file and re-stamped by `rename` (never truncated in place). Live when
   younger than 2 s (hand-over window), else while the pid exists (Linux,
-  `/proc`) and it is younger than 60 s (15 s where pids cannot be checked).
-  Stale locks are reclaimed by an atomic rename so racing ticks cannot both
-  win. A guard only unlinks a lock that still carries its own pid.
-  (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid reuse; the
-  60 s / 15 s age limit above already bounds a lock's life whatever its
-  pid, so nothing was added.)
-- Worker: `garnish refresh --module M --session S --cwd D`, null stdio,
-  `process_group(0)`, spawned without wait. On Linux the tick takes the lock
-  and passes `--lock-held`; elsewhere the worker takes it itself.
-  `GARNISH_NO_SPAWN=1` logs intended spawns to `<root>/spawns.log` instead.
-- `refresh` must be ≥ 1 for cached modules (`config check` rejects 0).
-- GC: bounded sweep when a session dir is first created (session and repo
-  dirs idle > 24 h by wall-clock mtime, ≤ 50 per sweep; temp/stale/adopt
-  files older than 1 h); `garnish gc` for manual runs.
+  `/proc`) and it is younger than 60 s (30 s where pids cannot be checked:
+  longer than a `sync` worker's 20 s fetch plus 2 s count, which a
+  compile-time assertion keeps true, or the next tick reclaimed a lock
+  mid-fetch and a second fetch started). A stale lock is reclaimed by an
+  atomic rename, and the moved file is read back: one that is not the lock
+  judged dead was another process's fresh lock and is linked back, so at
+  most one process wins each reclaim. A guard only unlinks a lock that
+  still carries its own pid. A root where no lock can be taken (a
+  filesystem without hard links) is logged by the tick (`GARNISH_DEBUG`),
+  recorded by the worker as a failed entry (a rename still works, so the
+  row shows `✗` and the TTL spaces the retries), and named by `doctor`'s
+  probe. (FUTURE-SPEC § 15 item 2 proposed a 24 h horizon against pid
+  reuse; the 60 s / 30 s age limit above already bounds a lock's life
+  whatever its pid, so nothing was added.)
+- Worker: `garnish [--config C] refresh --module M --session S --cwd D`,
+  null stdio, `process_group(0)`, spawned without wait. `--config` names the
+  file the tick loaded (absolute, and as bytes: a path that is not UTF-8
+  reaches the worker intact, where a lossy one named no file and the
+  worker read the defaults), when it loaded one, so the worker reads
+  the same options: a `--config` on the status line command is not in the
+  environment the worker inherits, and it used to re-resolve the config
+  and take `sync.fetch_interval` from another file (review 2026-09-25).
+  On Linux the tick takes the lock and passes `--lock-held`; elsewhere the
+  worker takes it itself. `GARNISH_NO_SPAWN=1` logs intended spawns to
+  `<root>/spawns.log` instead.
+- `refresh` must be ≥ 1 for cached modules (`config check` rejects 0) and
+  0 for payload-only ones (§ 3). `refresh --module` on a payload-only
+  module is refused with one stderr line and exit 1, and writes no cache
+  entry (it used to write a failed one).
+- GC: bounded sweep when a worker writes a module's first entry in a scope,
+  session or repo (session and repo dirs idle > 24 h by wall-clock mtime,
+  ≤ 50 per sweep; temp/stale/adopt files older than 1 h), never on the
+  tick; `garnish gc` for manual runs. (Corrected 2026-09-25: it used to
+  wait for a new session *directory*, which the lock always created first,
+  so the automatic sweep never ran for anyone.) It touches only what
+  garnish would have made, since the root may be shared
+  (`GARNISH_CACHE_DIR=~/.cache`): `sessions` and `repos` and each directory
+  in them only as real directories (never through a link), a repo
+  directory only when its name is a 16-digit hash and a session one only
+  when it is a sanitised id, and either only when every file in it has one
+  of garnish's own names.
 - **No child process on a warm tick.** Branch/upstream/HEAD are read from
   `.git` files (loose refs, `packed-refs` scanned as bytes with early exit,
-  worktree `gitdir`, symref chains capped at 5); reftable repos report no
-  head and fall back to the worker. Ahead/behind, dirty, and fetch run in the
-  worker only through `git::run_program` (pipes drained on threads, kill on
-  timeout: 2 s for local commands, 20 s for `fetch`, `GIT_TERMINAL_PROMPT=0`).
+  worktree `gitdir`, symref chains capped at 5). Every such read is a
+  bounded read of a regular file (a FIFO or a link to `/dev/zero` is
+  refused, not opened: an archive can carry either and the tick repeats
+  the read every second; whoever can write the directory can swap one in
+  after the check, so the open is `O_NONBLOCK`, which never waits, and the
+  handle is checked again and refused, review 2026-09-25), contained in the git directory, and a symbolic
+  ref may only point under `refs/` or at a capitalised pseudo-ref, as git's
+  own `refname_is_safe` has it; a `.git` file's `gitdir:` and a `commondir`
+  count only when they name a git directory by git's test (a `HEAD`, an
+  `objects/` and a `refs/`), since the containment is relative to them
+  (review 2026-09-25: `commondir: ~/.ssh` rendered a key's first line as
+  the SHA). The upstream comes from `.git/config`, read up to 1 MiB (a
+  byte that is not UTF-8 costs only what it touches) and parsed as git
+  parses it: quoted values, the escapes, `;`/`#` comments, a `\` that
+  joins a line to the next, section and key names in any case, git's four
+  blanks, CRLF line breaks, a leading byte-order mark, the first `merge`
+  and the last `remote` (git quotes a value holding `#`, so `fix/#12` used
+  to read as a tracking ref with quotes in it and `sync` showed `✗`); a
+  malformed line (which makes git refuse the file) costs only itself. The
+  tick reads it on every render, so it is read 64 KiB at a time, and a
+  section other than the branch's is jumped over by a byte search for the
+  next header, parsed only where a `\` may join lines (review 2026-09-25:
+  parsing every entry of a 500 KB config added 3 ms to the tick; now
+  about 0.2 ms). Reftable repos (whose refs are not
+  files) report no head to the tick and fall back to the workers (review
+  2026-09-25, decided with Daniel: this sentence used to be all there was,
+  and both modules rendered nothing): `branch`'s worker asks git
+  (`symbolic-ref -q HEAD` less `refs/heads/`, not `--short`, which spells
+  a branch sharing its name with a tag `heads/<name>`; else `rev-parse
+  --verify HEAD` for a
+  detached one, plus the commit for `show_sha`) and records `branch` and
+  `detached`; `sync`'s resolves the branch the same way, reads the upstream
+  from the config and checks its ref with `show-ref --verify`, recording
+  `no_upstream` or `detached` as values the tick shows rather than
+  failures. Both entries carry `tables`, the mtimes of the worktree's and
+  the common `reftable/tables.list` (taken before git is asked), and the
+  tick treats an entry whose `tables` differs from what it stats as for
+  another state of the refs; a failed entry, which keeps no values, is
+  fresh for its TTL whatever the stamp (a failing git used to get a worker
+  spawned on every tick). A `HEAD` the tick refuses in a files
+  repository (a link out of the git directory) leaves `branch`'s entry
+  without a `head` key, which any render accepts (an empty one matched
+  nothing, so every tick spawned a worker). Ahead/behind, dirty, and fetch run in the
+  worker only through `git::run_program` (pipes drained on threads with 1 MiB
+  of stdout and 64 KiB of stderr kept and the rest discarded, kill on
+  timeout: 2 s for local commands, 20 s for `fetch`). `git` is the first
+  executable on an *absolute* `PATH` entry, looked up once (an empty or
+  relative entry would find a `git` the checkout ships, since the child
+  resolves the name after its `chdir`); every call clears `core.fsmonitor`,
+  sets `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0` and
+  `GIT_NO_LAZY_FETCH=1` (no lazy fetch in a partial clone, which would run
+  the repository's own `uploadpack`; honoured since the May 2024 security
+  releases), and removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
+  the other variables that point git elsewhere, so git finds the
+  repository from the directory as the tick did. Every call but `fetch`
+  also sets `GIT_ALLOW_PROTOCOL` empty, refusing every transport on any
+  git, since none of them needs one and an older git ignores
+  `GIT_NO_LAZY_FETCH` (review 2026-09-25); `fetch` keeps the user's.
+- **The dirty check never reads a worktree file** (decided 2026-09-25 with
+  Daniel): `git status` hashes every file whose stat data no longer
+  matches the index, through the `clean`/`process` filter driver the
+  repository's own `.git/config` defines, so in an unpacked archive it ran
+  that command on every refresh. `dirty` is `git diff-index --cached --quiet
+  HEAD` (anything in the index before the first commit) plus `git -c
+  core.checkStat=default diff-files --quiet --ignore-submodules=dirty`,
+  which compare stat data and stop at the first difference; the stat rule
+  is pinned so a repository cannot relax it until its files look "racily
+  clean" and get hashed, and a submodule's own dirtiness (a `git status`
+  inside it) is not asked. `core.trustctime` stays the repository's:
+  pinned to `true`, it showed a tree git calls clean as dirty for good
+  wherever it is `false` (git's advice where a backup tool or a crawler
+  touches ctime; no refresh rewrites the index's ctime), while with it
+  `false` a crafted index still has to match the file's inode, which an
+  archive cannot arrange (final review of 2026-09-25). The accepted cost: a
+  file touched without changing reads as dirty until the user's own git
+  refreshes the index.
+  `status.showStash` no longer matters (porcelain printed `# stash N`).
+- **Fetch** (opt-in, `fetch_interval`) passes `--no-auto-maintenance`,
+  `--recurse-submodules=no`, `--upload-pack git-upload-pack` and the remote
+  after `--` (a name starting with `-` is refused), and sets
+  `SSH_ASKPASS_REQUIRE=force` with `SSH_ASKPASS` a program that fails
+  (`false`, found as `git` is): the worker keeps Claude Code's controlling
+  terminal, and ssh would otherwise draw a host-key or passphrase prompt on
+  it (OpenSSH 8.4 and later honour it; nothing else in git's environment
+  stops ssh reading `/dev/tty`). `core.sshCommand`, `core.gitProxy`, an
+  `ext::` URL, hooks and credential helpers stay a backlog decision (PLAN).
   A failed fetch is recorded in the entry (`fetch_error`, `fetch_attempt`)
-  without hiding the local counts and is not retried within `fetch_interval`.
+  without hiding the local counts and is not retried within `fetch_interval`;
+  a fetch that works records `fetch_ok_at`. Between attempts all three are
+  carried from the previous entry, so the error lasts until a fetch works
+  (it used to vanish at the next refresh), and `doctor` lists every entry
+  carrying one as `FETCH FAILED`. A fetch is due when both the entry's
+  `fetch_attempt` and `FETCH_HEAD`'s mtime (the newest of the two
+  worktree files) are at least `fetch_interval` old, a stamp from the
+  future counting as due.
 
 ## 7. CLI
 
@@ -1406,14 +1902,14 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
 | command | purpose |
 |---|---|
 | `garnish` (or `garnish render`) | render from stdin (the default; the explicit form is for a settings file that wants a subcommand). The bare `garnish` with a terminal on stdin prints a two-line pointer at `garnish setup` and exits 0 instead of waiting (§ 14; `GARNISH_STDIN_TTY` pins the check, § 9); the explicit `garnish render` always reads stdin |
-| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help` |
-| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json through symlinks, keeping permissions, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent, seeded with `padding = 2N` when `--padding N` is given (N ≤ 32767; when a config already exists, a stderr note names the value to set); warn on stderr if not on PATH. `--absolute` writes `current_exe()` (a symlinked launcher resolves to its target). |
-| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, local, project, user: whether each file is there and parses) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5) |
+| `garnish refresh --module M --session S --cwd D [--all] [--lock-held]` | worker entry point; hidden from `--help`; the tick passes its own `--config` ahead of it (§ 6) |
+| `garnish install [--settings P] [--refresh-interval 1] [--padding N] [--absolute] [--no-config] [--no-skills] [--dry-run]` | merge `statusLine` into settings.json (`--settings`, else the user file of § 2.3, which `CLAUDE_CONFIG_DIR` moves) through symlinks, keeping permissions and every key's place, with a never-clobbered backup; write the bundled skills (§ 13) next to it unless `--no-skills`; write default config if absent (§ 4's write target), seeded with `padding = 2N` from `--padding N` or else the `statusLine.padding` the file already has (N ≤ 32767; when a config already exists with another `padding`, a stderr note names the value to set); warn on stderr if not on PATH. The command is `garnish`, or with `--absolute` the path this binary is found by: the first `garnish` on PATH, else the path it was run by, that is this very file, else `current_exe()` (a package manager's launcher, not the versioned file it links to, which the next upgrade deletes); a path is shell-quoted where it needs to be. With an explicit config (`--config`, else `GARNISH_CONFIG`) the command is `<program> --config <absolute path>`, so the tick reads that file; otherwise a command that already runs garnish keeps its arguments and only its program word is replaced (2026-09-25 review: a reinstall dropped a hand-written `--config`, and `--config X install` wrote a command that never read X). The program word is found as `sh` splits the command, past any `NAME=value` words and a leading `env` with the assignments after it, and that prefix is kept too (2026-09-25 review: `GARNISH_ANIMATE=0 garnish --config X` read as not running garnish and lost its `--config`). `--refresh-interval` is at least 1, and `--dry-run` says a settings file already up to date is left alone. |
+| `garnish doctor` | diagnostics; the glyph test is a grid with one row per icon set and module (plus `config` rows for the icons the loaded config resolves to, overrides included): every single-character icon is padded to two cells and followed by `\|` and the cell count garnish uses, so a glyph the terminal draws wider or narrower pushes its `\|` out of the column; multi-character icons (spinner frames, the effort scale, ASCII words) are left out. It also lists Claude Code's settings chain for the current directory (managed, with the platform file's `managed-settings.d` drop-ins above it, local, project, user: whether each file is there and parses, each read whole as Claude Code reads it; a file past the 1 MiB a tick reads says so, and the keys the tick reads (`prefersReducedMotion`, `sandbox.enabled`, `voice.enabled` and the auto-compaction keys) skip it) and the keys that change what the line can show, each resolved as Claude Code resolves it (the first file that sets a key wins) with the file named: `statusLine.command`, `statusLine.refreshInterval` (suggesting `1` when the config shows a clock, an elapsed time, a countdown (a limit's reset in any form but `absolute`, or its `eta`) or an animation), `statusLine.hideVimModeIndicator` (suggesting `true` when the `vim` module is on, so the mode is not shown twice), `statusLine.padding` (suggesting the config's `padding = 2N` when it has another value, the most common cause of rows cut with `…`, 2026-09-25 review), `disableAllHooks` (which stops the status line command), `prefersReducedMotion` (with how the config's `animate` interacts), `sandbox.enabled` and `voice.enabled` (which the `sandbox` and `voice` modules show, § 3.8) and `tui` (which renderer the settings ask for and what it does with a tall status line, § 2.1; a value that is neither name is named as one Claude Code drops from the managed file or rejects any other file for, and the next file that sets the key is shown; such a rejected file's own row says so instead of `ok`, and neither `doctor` nor the tick takes any key from it, 2026-09-25 review) (PLAN Phase 19; from FUTURE-SPEC § 13.4, N5). The project's own files are named relative to it, every other path with the home as `~`; a config that cannot be read is named as such, not as one with a bad key. |
 | `garnish setup [--preset P] [--install]` | the interactive setup (§ 14): a full-screen picker and builder with a live preview at the real box width; `--preset` never opens the screen and writes that preset with the § 5 backup (as `config init --preset P --force` then does) plus `install` when `--install` is given, for scripts and the skill; without `--preset` and without a terminal on stdout it exits 1 with one line |
 | `garnish config init [--preset P] [--force] \| check \| path \| show` | config management; `init` refuses to overwrite without `--force` and accepts gallery preset names (§ 12) as well as the four built-ins; `--force` keeps the previous file under `install`'s backup rule and refuses one that does not parse (§ 5); `check` lists problems and exits 1 quietly; `show` prints the fully resolved config, the animation switch as the file or the current directory's settings decide it (§ 4.2) |
-| `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (or `D`); `install` runs this too unless `--no-skills` |
-| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain); a preview is not a tick, so it never reads the cache or spawns a worker (§ 14) |
-| `garnish docs [--out DIR]` | regenerate docs from schemas |
+| `garnish skills install [--dir D] \| list` | copy the bundled skills (§ 13) into `~/.claude/skills/` (`$CLAUDE_CONFIG_DIR/skills/` when that is set, § 2.3; or `D`); `install` runs this too unless `--no-skills` |
+| `garnish preview <file\|dir> [--preset P] [--icons S] [--theme T] [--color M] [--width N]` | render one fixture or every `*.json` in a directory, each under a dim `── <name>` heading; the rows are drawn faint, as Claude Code draws every status line row (§ 2.1), so the preview shows the intensity the screen will have (`--color never` is plain); a preview is not a tick, so it never reads the cache or spawns a worker (§ 14); `--preset` replaces the file's rows, so their problems (under either array name) and whether a `[box.<name>]` is joined are not reported (2026-09-25: a valid file ended in `box.x: no row or column joins this box`) |
+| `garnish docs --out DIR` | regenerate docs from schemas; a maintainer's tool, hidden from `--help` and with no default directory, since the pages replace same-named files there (2026-09-25 review: run in a project of one's own it replaced that project's `docs/README.md`); `make docs` goes through the docs-sync test |
 | `garnish modules` | list module ids + summaries |
 | `garnish presets` | list the gallery presets (§ 12): name, summary, declared width, requirement |
 | `garnish gc` | sweep stale cache dirs |
@@ -1426,7 +1922,10 @@ Measured with hyperfine (`bench/run.sh`, release build, `-N`, warmup 20,
 | scenario | mean | p99 |
 |---|---|---|
 | warm tick, default preset | < 3 ms | < 8 ms |
-| warm tick, full preset, all modules | < 3 ms | < 8 ms |
+| warm tick, full preset (the default rows, every option) | < 3 ms | < 8 ms |
+| warm tick, one row of every module id (settings badges, `account`) | < 3 ms | < 8 ms |
+| warm tick, default preset, `TZ` naming a zone | < 3 ms | < 8 ms |
+| warm tick, default preset, a `.git/config` of 5000 branch sections | < 3 ms | < 8 ms |
 | cold tick (empty cache, git repo) | < 30 ms | — |
 | `refresh --module sync` worker (rev-list, no fetch) | < 50 ms | — |
 
@@ -1435,7 +1934,10 @@ per-module render cost.
 
 ## 9. Testing strategy
 
-- **Unit**: each module × preset × icon set × theme with a frozen clock;
+- **Unit**: each module × preset × icon set × `max_width`, and each
+  switch of its options, with a frozen clock (the default theme; a theme
+  is a palette over the same roles, painted by the `theme-nord` config
+  golden);
   absent/null fields; band edges; duration/countdown formatting; threshold
   math; ANSI width/truncation; frame assembly; preset resolution order;
   schema completeness (a scan of `src/modules/*.rs` checks that every
@@ -1469,7 +1971,10 @@ per-module render cost.
   otherwise: `colour-on` pins the painter's escape sequences (with the
   faint `preview` folds into every segment, § 2.1) and the OSC 8 link
   (Phase 20's link goldens and Phase 22's snapshots use the same mode),
-  and the row-start guards of both suites look past escape sequences. A
+  and the row-start guards of both suites look past escape sequences;
+  both also fail on a row whose raw bytes start with whitespace that is
+  not whitespace throughout, which the harness would draw shifted left
+  (§ 2.1). A
   `# env:` value may name the repository root as `$ROOT`, which is how
   `reduced-motion` points `HOME` at a settings fixture. Every test that
   runs the binary sets `GARNISH_MANAGED_SETTINGS` to nothing, so a
@@ -1483,7 +1988,11 @@ per-module render cost.
   empty state in the docs and the in-process matrices without a cache
   directory (`tests/docs_sync.rs` asserts none appears), and the
   settings badges render on from keys the clock seeds in-process rather
-  than from any file.
+  than from any file. `render::render` is the only render that builds
+  its clock from the environment; every other entry point takes a
+  `Clock` (2026-09-25: a test helper that rendered on the environment's
+  clock took a lock in the developer's real cache and forked the test
+  binary as `account`'s worker on every run).
 - **Module matrix from the schema** (PLAN Phase 20; from FUTURE-SPEC § 15
   item 11): an in-crate rayon test generated from `ModuleSchema` renders
   every module × every preset × every icon set × `max_width ∈ {0, 1, 4,
@@ -1507,11 +2016,17 @@ per-module render cost.
   byte-identically before and after the model (a plain line is one
   column) and under either name (`[[line]]`, `[[row]]`); and the
   lines-per-row output tiles each line exactly (the placement map of
-  § 14 reads it). `tests/presets.rs` renders every preset without `…` at
-  its declared width at three instants (a preset that promises motion
-  must differ between two of them, and a line ticker must slide exactly
-  `ticker_step` cells, so a scrolled row carries nothing that counts
-  seconds).
+  § 14 reads it). `tests/presets.rs` renders every preset uncut at its
+  declared width at three instants: no `…`, no layout cut, and the same
+  modules and titles as 200 columns wider (a cut found by structure, since
+  the ascii set's `..` is also one of its glyphs). Each promise of motion
+  is checked on its own from the parsed config: a rule pattern, separator
+  frames, a module's icon frames and a scrolling text module must each
+  move, a line ticker must slide exactly `ticker_step` cells (so a
+  scrolled row carries nothing that counts seconds), and `animate =
+  false` must render the same at two ticks of one minute (2026-09-25
+  review: a whole-row diff let the travelling rule hide `animated-dots`'
+  blank model frames).
 - **Setup snapshots** (PLAN Phase 22): the `setup` screens are rendered
   into ratatui's `TestBackend` (80 × 24, 100 × 30 and 140 × 40) and
   compared with goldens under `tests/golden/setup/` (`UPDATE_GOLDEN=1`
@@ -1533,13 +2048,22 @@ per-module render cost.
 |---|---|
 | `GARNISH_NOW` | freeze `time::now()` (epoch seconds or RFC 3339) |
 | `GARNISH_CACHE_DIR` | cache root override |
-| `GARNISH_CONFIG` | config path override |
+| `GARNISH_CONFIG` | config path override, absolute only (§ 4) |
 | `GARNISH_NO_SPAWN` | record intended worker spawns instead of spawning |
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
-| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets |
+| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`), without the platform's `managed-settings.d` drop-ins and without any beside it (§ 4); empty means no managed file, which is what every test that runs the binary sets, and a relative path is ignored (§ 4) |
 | `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish` (§ 7, § 14), so the pointer path is testable without a pty |
+| `GARNISH_TEST_PANIC` | debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row of § 5 is testable through the binary |
+
+The boolean hooks (`GARNISH_NO_SPAWN`, `GARNISH_DEBUG`, `GARNISH_ANIMATE`,
+`GARNISH_STDIN_TTY`, `GARNISH_TEST_PANIC`) read one rule, Claude Code's:
+`1`, `true`, `yes`, `on` are on and `0`, `false`, `no`, `off` off, trimmed
+and in any case; anything else, empty included, is unset (so
+`GARNISH_ANIMATE=false` freezes as `0` does, 2026-09-25 review: four hooks
+had three rules). `NO_COLOR` follows no-color.org instead: any value but
+the empty one turns colour off.
 
 ## 10. Documentation
 
@@ -1566,7 +2090,8 @@ per-module render cost.
   field is absent or zero.
 - The 13k compaction buffer mirrors Claude Code 2.1.260 internals and may
   drift; it is configurable and the marker can be disabled.
-- Cache TTL display uses `prompt_cache` only; when absent the module shows `–`.
+- Cache TTL display uses `prompt_cache` only; when absent the module shows
+  the placeholder (§ 3.6).
 - Session duration is `cost.total_duration_ms` and resets on `/clear`.
 - No GitHub network access; PR presence/state is whatever the harness reports.
 - Four default lines cost four terminal rows; `compact`/`minimal` exist for
@@ -1590,8 +2115,11 @@ binary. Everything else is a **gallery preset**: a complete config file under
   and the `subscription-full` payload at its declared width into
   `docs/presets.md`: name, summary, requirements, the sample, and the file's
   contents in a collapsed block. `tests/docs_sync.rs` keeps it in sync;
-  `tests/presets.rs` checks that every file validates, renders without `…`
-  at its declared width, and has a unique name matching its filename.
+  `tests/presets.rs` checks that every file validates, renders uncut at
+  its declared width, moves where it promises to (§ 9), and has a name
+  matching its filename; a unit test holds `# needs:` to what the icon set
+  calls for (`nerd-font` for `nerd`, `emoji` for `emoji`, nothing
+  otherwise) and every icon frame list to two distinct, drawn frames.
 - **Choosing one.** `garnish config init --preset <gallery name>` writes the
   file (with the header stripped of tooling lines); `garnish presets`
   lists names and summaries. The four built-in names keep working (and a
@@ -1617,7 +2145,10 @@ binary. Everything else is a **gallery preset**: a complete config file under
 
 Three Claude Code skills ship with garnish, live under `skills/<name>/SKILL.md`
 in the repository, are embedded in the binary (`include_str!`) so a
-`cargo install` has them, and are written to `~/.claude/skills/<name>/` by
+`cargo install` has them, and are written to `~/.claude/skills/<name>/`
+(`$CLAUDE_CONFIG_DIR/skills/<name>/` when that is set, § 2.3; a
+`SKILL.md` with other text is replaced behind the § 5 backup, so a
+person's edits survive, 2026-09-25 review) by
 `garnish install` (or `garnish skills install`). Each skill is plain
 Markdown with frontmatter (`name`, `description`) and instructions; none of
 them needs network access from garnish itself, they drive `gh` and the
@@ -1652,8 +2183,11 @@ them needs network access from garnish itself, they drive `gh` and the
 - **Both reporting skills post to a public repository**, so each one first
   replaces the home directory in every path with `~` (`doctor` already
   collapses it and `config show` prints no path at all, so this catches
-  what the person pasted by hand), keeps only `GARNISH_*` lines of the
-  doctor's environment section, prints the whole issue body, and asks the
+  what the person pasted by hand), keeps only the `GARNISH_*` lines of the
+  doctor's environment section and the Claude Code renderer and compaction
+  switches it lists (they explain height and compaction reports and are
+  not private; `COLUMNS`, `LINES` and `TZ` are the Bash tool's, not the
+  status line's, so they go), prints the whole issue body, and asks the
   person explicitly before `gh issue create`. Nothing leaves the machine on
   an unanswered or negative question.
 
@@ -1682,20 +2216,32 @@ same information in less screen. The glyph suggestions are one table in
 `icons.rs` keyed by module and icon key rather than a field on each
 `IconSpec`, with the same guard test and the same *also try* list on the
 module pages, and the glyph picker prints each candidate's cell count
-(`|1`, `|2`) rather than the doctor's two-cell grid. The placement map is
+(`|1`, `|2`) rather than the doctor's two-cell grid. The marks of the
+screen's own chrome are ASCII (a chip's and a set key's `*`, the
+preview's `>` row marker) rather than the geometric dot and arrow first
+drawn, which some terminals draw two cells wide. The placement map is
 `layout::Line::modules()` over `render::render_tree_at`, which returns
 each row's lines as typed pieces. A click selects a module and a second
 click, or `Enter`, edits it; a click on a cap or the rule opens the frame
 form. A separator, a cap or the rule is reached by a click alone; keys
-reach modules, rows and columns, and `2` opens the frame form (the
-keyboard twin is in PLAN's backlog). The placement map names the outer
-row of a line, so a click on a title or a box edge inside a row of
-columns selects that row and names the list as the way to the column or
-inner row it may belong to (the same backlog item). `Esc` closes the innermost layer
+reach modules, rows and columns, `2` opens the frame form (the
+keyboard twin is in PLAN's backlog), and `e` opens the `[box.<name>]`
+form of the box the selected line is in (its own, or for an inner row
+its column's, then its row's), so a box needs no mouse either (added in
+the 2026-09-25 review: only a click on a box edge reached one). A click
+on a title or a box edge opens the form of what carries it: the named
+box's, else the row's (the 2026-09-25 review found the row's arm could
+never run). The placement map names the outer row of a line, so a click
+on a title or a box edge inside a row the file wrote columns for selects
+that row and names the list as the way to the column or inner row it
+may belong to (the same backlog item). `Esc` closes the innermost layer
 and, at the base of the builder or the picker, leaves it as `q` does. A
 module's editor is generated from `ModuleSchema`; the top-level, frame,
 row, column and box forms list their keys by hand, since those are not
-schema options, and the unit test walks both. The snapshot tests pin the
+schema options, and the unit tests walk both: the hand-listed forms
+against the key list the parser names for an unknown key, and every
+entry of every picker through the parser (both since the 2026-09-25
+review). The snapshot tests pin the
 clock in-process (`Clock::fixed()`) and need no `GARNISH_NOW` or `TZ`.
 The terminal minimum is 60 × 12. A `setup` cargo feature was not added:
 the release binary grew from 2.8 MB to 3.4 MB and the end-to-end cold
@@ -1714,18 +2260,34 @@ its key, which is how undo has a button. *Editing*: a picker opens on
 the value in effect and its `custom…` line starts from it, so a label is
 edited rather than retyped, and the input line has a cursor (`←`/`→`,
 `Home`/`End`, `Delete`); a string keeps its spaces (a picked `  `
-separator had arrived as `""`); the `[colors]` form offers literals only
+separator had arrived as `""`), and so does a frame of
+`separator_frames`, which is typed as the TOML array it is written as
+(`[" │ ", " ┃ "]`; the comma form had trimmed every frame, 2026-09-25
+review), while `hide` and the lists of colours and numbers stay
+comma-separated; the `[colors]` form offers literals only
 (the theme's own, each noted with its role, then the named colours),
 since a role there has no ground, while a module's `colors.*`, a title
 and a box still take roles; a row's form lists only the keys the parser
 would take for it (`blank` on a spacer or a row of columns, the title
 keys outside a named box) plus any key the file already sets, so `d` can
-unset one the parser reports; a value the parser takes but that leaves
+unset one the parser reports, and every form does the same (2026-09-25
+review: only the row's did, so an unknown or misplaced key the status
+bar said `d` could unset had no row anywhere): a key of the table no row
+covers is listed after the form's own, showing its value, taking a TOML
+literal on `Enter` and gone on `d`, except that an icon's `<key>_frames`
+(typed as its array) and a text module's `color` shorthand get proper
+rows; a value the parser takes but that leaves
 another key reported (`fill = false` under a `fill_pattern`) is set and
-the status names that key; a `box` unset or changed, from the form or
-with `d`, drops a `[box.<name>]` nothing joins any more, as the
-builder's `b` does; a module's `label` picker starts with the module's
-own name, bare and capitalised; changing the top-level `preset` swaps
+the status names that key; a `box` unset or changed, from the form, with
+`d` or with the builder's `b`, drops a `[box.<name>]` nothing joins any
+more (`b` reads a typed value as the form does: `none`, `false` and
+nothing unbox, `true` is a box of its own; 2026-09-25 review: `b` had
+refused to move a box's last member elsewhere); `d` on the last key of
+a `[box.<name>]` or a `[modules.text.<name>]` leaves the table, empty,
+since its being there is what defines the box or the module (an emptied
+module table is pruned, an emptied box or text table is not); a module's `label` picker starts with the module's
+own name, bare and capitalised; changing the top-level `preset` (or
+unsetting it with `d`, which makes it the default one) swaps
 the rows for the new preset's when they were still exactly the old
 preset's (the builder writes a preset's rows into the file so they can
 be edited, which would otherwise pin them) and says which happened.
@@ -1760,13 +2322,20 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   have lines of their own under the facts they qualify, never the end of
   a line that a narrow terminal cuts (found by the Phase 22 review).
   `Enter` applies it: the file is written with the previous one kept by
-  `install`'s backup rule (§ 5), and the install screen follows if the
+  `install`'s backup rule (§ 5), a gallery preset as its file, comments
+  included, as `setup --preset` writes it, a built-in one as `preset =
+  "<name>"` with its rows written out, the lean table the builder edits
+  (where the non-interactive twin writes `config init`'s annotated
+  defaults; 2026-09-25 review: the picker had dropped a gallery file's
+  comments), and the install screen follows if the
   settings file has no `statusLine` yet. `e` opens the highlighted preset
   in the builder instead of applying it.
 - **Builder.** The preview pane stays at the top of every builder screen
   and re-renders on every change. Below it, the `[[row]]` list: each row
   shows its columns as chips (§ 4.3; a plain row is one column) and its
-  height in lines; keys add, insert, delete, clone and move rows, add a
+  height in lines; keys add, insert, delete (all but the last row, since
+  a file without `[[row]]` takes the preset's, which the list cannot
+  show), clone and move rows, add a
   column and set its `width` and `justify`, turn a column into a stack,
   move a module within a column or into the next one (a new one past the
   edge), mark a row as a spacer, give it a title, box a row, box it
@@ -1779,14 +2348,20 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   `garnish modules`; the new-text entry asks for a name checked by the
   § 3.7 rule, creates the table with the schema defaults and opens its
   editor, and removing a text module's last placement asks whether to
-  drop the table. `Enter` on a module
-  opens its **editor**: one row per schema option (`preset`, `refresh`,
-  `hide`, `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
+  drop the table (by its chip, by the line holding it, or by `space`
+  making its row a spacer, one question for every module so left;
+  2026-09-25 review: only the chip had asked). `Enter` on a module
+  opens its **editor**: one row per schema option (`preset`, `refresh`
+  for a cached module or one whose file sets it, `hide`,
+  `label`/`prefix`/`suffix`, `hide_when_empty`, `max_width`, then
   the module's own options, then `icons.*` for the active icon set and
   `colors.*`), showing the default, the current value and the doc string;
-  enums cycle, booleans toggle, integers edit with their `max` shown,
-  colours offer the theme's roles and accept a literal, icons accept any
-  string and show the cell count `doctor` would. A text module's editor is
+  enums cycle, booleans toggle, integers edit with their `max` shown (in
+  the input's title, `max_width (0–1024)`, since 2026-09-25: the bound
+  had shown only in the refusal of a value over it), colours offer the
+  theme's roles and accept a literal, icons accept any string and show
+  the cell count `doctor` would (in the glyph picker, see the differences
+  above). A text module's editor is
   the same screen over the text schema. Separate screens set the top-level
   keys (`preset`, `icons`, `theme`, `color`, `frame`
   style/fill/separator/`separator_color`, `align`, `durations`, the
@@ -1811,13 +2386,22 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the row list instead. A click (crossterm mouse capture, on while
   `setup` runs and off when it exits, on `Ctrl+C` and on a panic, through
   a hook chained ahead of color-eyre's so the report prints on a restored
-  terminal; the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
+  terminal, and which acts only while the screen holds the terminal; a
+  signal (`kill`, a supervisor's SIGTERM) runs neither, since std has no
+  signal hook and no crate was added for one, so a killed `setup` can
+  leave the terminal raw, on the alternate screen and reporting the
+  mouse until `reset` is typed (2026-09-25 review; the README's
+  troubleshooting says so); the wheel scrolls lists) or `Tab`/`Shift-Tab`/the
   arrows move the selection; `Enter` or a second click on the selected
   item opens its editor as an **overlay panel** over the screen; clicking
   the rule or a cap opens the frame form, a separator the same form on
-  its `separator` key. Everything the mouse does has a key, since tmux
+  its `separator` key, or the row's own form on its `separator` when the
+  row sets one, since that is the key drawing it (2026-09-25 review; the
+  placement map names the outer row, so an inner row's own separator
+  still opens the frame's). Everything the mouse does has a key, since tmux
   and some SSH sessions swallow mouse events (a separator, a cap and the
-  rule are reached through `2`, the frame form, see above).
+  rule are reached through `2`, the frame form, and a box through `e`,
+  see above).
 - **Editing by ticking.** The overlay lists every option of the selected
   module as a form: booleans as checkboxes (`[x] hide_when_empty`),
   `preset` and every enum as a radio list, integers as a stepper showing
@@ -1826,9 +2410,9 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   and icons as the pickers below. Every change re-renders the preview at
   once; `Esc` closes the innermost layer (a picker over a panel over the
   builder) and, with none open, leaves the builder or the preset picker
-  as `q` does, and the module's chip shows a dot while it carries
-  overrides. The form is generated from `ModuleSchema`, so a new option
-  is a new row.
+  as `q` does, and the module's chip shows a `*` while it carries
+  overrides (a form marks a key the file sets the same way). The form is
+  generated from `ModuleSchema`, so a new option is a new row.
 - **Freeform values come with suggestions.** A string option (`label`,
   `prefix`, `suffix`, `text`, `gap`, a line's `separator`, `ticker_gap`,
   the frame's `fill_char` and caps) opens a picker whose first entries are
@@ -1875,19 +2459,36 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   does (§ 2.1: the `DIM` modifier on every span, the twin of
   `Painter.dim`), so it also shows the intensity the screen will have.
 - **Saving.** Edits live in memory as the file's own table (see the
-  differences above), and `s` writes it back (with the § 5 backup), so a
+  differences above), and `s` writes it back (with the § 5 backup; a
+  draft the file already holds is not written again, since that would
+  only drop the file's comments and leave one more backup, 2026-09-25
+  review), so a
   hand-written file's ordering survives a save and its comments do not;
-  the status bar says so with the first save that keeps a backup, and the
-  backup keeps the original. Because the tick re-reads the config every second, a saved
+  the status bar says so on opening a file that has comments (a `#`
+  outside every string) and again, ahead of the backup's path, with the
+  save that drops them, and the backup keeps the original (2026-09-25
+  review: the one warning had come after two paths, past the right edge
+  of an 80-column screen). Because the tick re-reads the config every second, a saved
   change shows in a running Claude Code within a second, so there is no
   apply step. `q` on an unsaved draft asks once. A file that does not
   parse is never overwritten (§ 5): `setup` opens on the built-in defaults,
-  says so in the status bar, and `s` refuses until the file is moved.
+  says so in the status bar, and `s` refuses until the file is moved; the
+  check is made again at the moment of writing, so a file that stopped
+  parsing while `setup` was open is refused too, whatever the change
+  check was answered, and the picker's `Enter` asks before replacing a
+  file that appeared or changed since `setup` opened (2026-09-25 review).
 - **Install.** The install screen mirrors `install --dry-run`: it lists
   the settings path, the exact `statusLine` object it will merge, the
   backup rule, whether the skills will be written and the PATH warning if
   any, and asks once. It runs the same code as `garnish install`; nothing
-  in `setup` writes to `settings.json` by another route.
+  in `setup` writes to `settings.json` by another route. Its plan has no
+  config step, since the draft is the config (a default file written under
+  an unsaved draft read as a change on disk at the next save, whose
+  default answer reloaded it over the edits), and it is made again when
+  applied, so a key another program wrote meanwhile (`/voice` writes
+  `voice.enabled`) is kept and the file found then is the one backed up
+  (2026-09-25 review). `setup --preset P --install` plans before it writes
+  the preset, so a settings file it refuses leaves the config untouched.
 - **Non-interactive twin.** `garnish setup --preset <name> [--install]`
   never opens the screen: it writes that preset and, with `--install`,
   hooks it up, for scripts and for the `garnish-statusline` skill (§ 13),
@@ -1899,27 +2500,39 @@ ordinary `garnish.toml` of § 4, written the way `config show` writes it
   the explicit `garnish render` always reads stdin, and the harness
   always pipes, so rendering is unchanged (§ 7).
 - **Traps, decided.** `setup` honours the global `--config` flag and
-  `GARNISH_CONFIG` like every command, so it edits the file the tick
-  reads; without a home directory and without either it refuses with the
+  `GARNISH_CONFIG` like every command, and without either the `--config`
+  the installed `statusLine.command` passes (§ 4), so it edits the file
+  the tick reads; without a home directory and without any of them, or
+  with a command's `--config` that names no one file, it refuses with the
   § 5 one-liner. The preview fixtures are embedded in the binary
   (`include_str!` of the named files under `tests/fixtures/payloads/`, as
   the presets and skills are), so `setup` works from a `cargo install`
   with no repository at hand. The preview honours the config's `color`
   and `NO_COLOR` for the rendered rows while the screen's own chrome
   uses the terminal's default colours, so a `color = "never"` config
-  previews plain; in that case the preview's header says "colours off:
+  previews plain (no bold, italic or underline either, since the tick
+  prints no escape at all then; only the harness's faint stays); in that case the preview's header says "colours off:
   edits are saved, not previewed". A terminal smaller than 60 × 12 gets
-  one line asking for more room instead of a broken layout, and a resize
+  one line asking for more room instead of a broken layout, and while it
+  is up takes no click and no key but `q`, `Esc` and `Ctrl+C` (2026-09-25
+  review: a click on the old place of `s save` saved), and a resize
   redraws everything at the new width (the preview's box width follows
   it). A config that parses with problems opens on the per-key fallbacks
   (§ 5) with the first problem in the status bar and a count of the
   rest; saving writes the file's keys as they are, the bad values
   included (the tick keeps reporting them until they are fixed, and `d`
-  in a form unsets one), and the status bar says so on opening. If the
+  in a form unsets one), and the status bar says so on opening. A builder
+  edit is refused only for a problem it adds: problems are compared by
+  message and by path with the indices taken out, count for count, so a
+  row inserted above a bad one, which renumbers the old problem, is kept,
+  and a bad row cloned, which doubles it, is not (2026-09-25 review). If the
   file on disk changes while `setup` is open (another
   session, the skill, an editor), `s` notices (a best-effort compare of
   mtime and length; a file absent at open and present at save counts as
-  changed) and asks whether to overwrite or reload; it never merges. A
+  changed) and asks whether to overwrite (`y`) or reload (`n`, which `u`
+  takes back); `Esc`, and `Enter` on the answer the question opens on, do
+  neither, since both answers drop something (2026-09-25 review: `Esc`
+  had reloaded); it never merges. A
   save or an install that fails (a read-only directory, an unwritable
   `settings.json`; a symlinked settings file is written through the link
   as `install` does) shows the OS error (a failed save in the status bar,

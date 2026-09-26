@@ -6,7 +6,7 @@ The base directory is the git top level when inside a repository, otherwise `wor
 
 **Sources:** `workspace.project_dir`, `workspace.current_dir`, `workspace.added_dirs`, `git top level`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,12 +33,12 @@ The base directory is the git top level when inside a repository, otherwise `wor
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the folder icon. |
 | `depth` | integer | `1` | `2` | `0` | Path components of the base to keep (0 = all). |
@@ -52,7 +52,7 @@ The base directory is the git top level when inside a repository, otherwise `wor
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `folder` | `U+F07B` | `❒` | `📁` | `` | Folder icon. |
+| `folder` | `U+F07B` | `❒` | `📁` | — | Folder icon. |
 | `added` | `U+F067` | `+` | `➕` | `+` | Added-directories glyph. |
 
 Also try (`folder`: `U+F07C` `U+F413` `U+F015` `❒` `❏`).

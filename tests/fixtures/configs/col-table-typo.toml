@@ -1,0 +1,17 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# expect: config-warning
+# `[row.col]` with one bracket is a table, not the array of tables a row's
+# columns are: it is reported, and the row keeps its own modules rather than
+# turning into a blank spacer that is drawn on every tick (cfg-01).
+
+[[row]]
+modules = ["model", "context"]
+right   = ["clock"]
+[row.col]
+modules = ["cost"]
+
+[[row]]
+modules = ["limit5h", "limit7d"]

@@ -38,6 +38,24 @@ pub fn window(cursor: usize, len: usize, height: usize, start: usize) -> usize {
     start.min(max_start)
 }
 
+/// Where a list's cursor goes on `key` among `len` entries: `↑`/`↓` wrap,
+/// the page keys go ten at a time and stop at the ends, `Home`/`End` jump;
+/// `None` for any other key.
+#[must_use]
+pub fn move_cursor(cursor: usize, len: usize, key: crate::setup::Key) -> Option<usize> {
+    use crate::setup::Key;
+    let last = len.saturating_sub(1);
+    Some(match key {
+        Key::Up => cursor.checked_sub(1).unwrap_or(last),
+        Key::Down => cursor.saturating_add(1).checked_rem(len.max(1)).unwrap_or(0),
+        Key::PageUp => cursor.saturating_sub(10),
+        Key::PageDown => cursor.saturating_add(10).min(last),
+        Key::Home => 0,
+        Key::End => last,
+        _ => return None,
+    })
+}
+
 /// The chrome's styles: the screen's own text, never the config's colours.
 pub struct Chrome;
 
@@ -128,6 +146,41 @@ pub fn clip(text: &str, width: usize) -> String {
     crate::ansi::Painter::PLAIN.paint(&crate::ansi::truncate(&segs, width, "…"))
 }
 
+/// Spans cut to `width` cells with an ellipsis as [`clip`] cuts their
+/// text, each keeping its style (a selected chip past the cut still shows
+/// selected); spans that fit come back as they are.
+#[must_use]
+pub fn clip_spans(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    if crate::ansi::display_width(&text) <= width {
+        return spans;
+    }
+    let clipped = clip(&text, width);
+    let mut kept = clipped.chars().peekable();
+    let mut out: Vec<Span<'static>> = Vec::new();
+    'spans: for span in spans {
+        let mut part = String::new();
+        for c in span.content.chars() {
+            if kept.peek() != Some(&c) {
+                if !part.is_empty() {
+                    out.push(Span::styled(part, span.style));
+                }
+                break 'spans;
+            }
+            part.push(c);
+            kept.next();
+        }
+        out.push(Span::styled(part, span.style));
+    }
+    // What the cut put in place of the rest: the ellipsis, and a pad for a
+    // wide glyph it could not fit.
+    let rest: String = kept.collect();
+    if !rest.is_empty() {
+        out.push(Span::raw(rest));
+    }
+    out
+}
+
 /// Warnings as lines of their own, never clipped away.
 ///
 /// On one line when they all fit in `width`, else one per line (each cut
@@ -168,5 +221,18 @@ mod tests {
         let pairs = [("enter", "edit"), ("u", "undo")];
         assert_eq!(hint_cells(&pairs), vec![("enter", 0, 10), ("u", 12, 18)]);
         assert_eq!(hints(&pairs).width(), 18);
+    }
+
+    #[test]
+    fn a_list_cursor_wraps_pages_and_jumps() {
+        use crate::setup::Key;
+        assert_eq!(move_cursor(0, 5, Key::Up), Some(4), "wraps");
+        assert_eq!(move_cursor(4, 5, Key::Down), Some(0));
+        assert_eq!(move_cursor(3, 25, Key::PageDown), Some(13));
+        assert_eq!(move_cursor(20, 25, Key::PageDown), Some(24), "stops at the end");
+        assert_eq!(move_cursor(3, 25, Key::PageUp), Some(0));
+        assert_eq!((move_cursor(3, 5, Key::Home), move_cursor(3, 5, Key::End)), (Some(0), Some(4)));
+        assert_eq!(move_cursor(0, 0, Key::Down), Some(0));
+        assert_eq!(move_cursor(1, 5, Key::Enter), None);
     }
 }

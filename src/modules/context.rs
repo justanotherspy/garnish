@@ -8,8 +8,8 @@ use crate::config::schema::{
 use crate::icons::glyph;
 use crate::num::percent_of;
 
-use super::util::{BAR_STYLES, bar};
-use super::{Ctx, Module, Rendered, badge, lead, seg};
+use super::util::{band_colors_opt, bar, bar_empty_color, bar_icons, bar_opt, thresholds_opt};
+use super::{Ctx, IconShown, Module, Rendered, badge, close_up, lead, seg, show_icon_opt};
 
 /// The `scale` choices (SPEC § 3.2): what 100 % of the bar and the
 /// percentage means.
@@ -25,6 +25,7 @@ pub struct ContextModule;
 
 impl Module for ContextModule {
     fn schema(&self) -> ModuleSchema {
+        let [fill, empty] = bar_icons();
         ModuleSchema {
             id: "context",
             measure: Some(MeasureKind::Percent),
@@ -46,12 +47,8 @@ impl Module for ContextModule {
                     doc: "Context icon.",
                     glyph: glyph("\u{f2db}", "⊞", "🧠", "ctx:"),
                 },
-                IconSpec {
-                    key: "fill", doc: "Filled cell.", glyph: glyph("█", "█", "█", "#")
-                },
-                IconSpec {
-                    key: "empty", doc: "Empty cell.", glyph: glyph("░", "░", "░", "-")
-                },
+                fill,
+                empty,
                 IconSpec {
                     key: "marker",
                     doc: "Compaction marker.",
@@ -75,8 +72,12 @@ impl Module for ContextModule {
             ],
             colors: vec![
                 ColorSpec { key: "icon", doc: "Icon.", default: "accent" },
-                ColorSpec { key: "percent", doc: "Percentage text.", default: "text" },
-                ColorSpec { key: "empty", doc: "Empty part of the bar.", default: "muted" },
+                ColorSpec {
+                    key: "percent",
+                    doc: "Percentage text (the band colour is the bar's).",
+                    default: "text",
+                },
+                bar_empty_color(),
                 ColorSpec { key: "marker", doc: "Compaction marker.", default: "warn" },
                 ColorSpec { key: "exceeds", doc: "Exceeds-200k indicator.", default: "danger" },
                 ColorSpec { key: "window", doc: "Window size tag.", default: "muted" },
@@ -89,6 +90,7 @@ impl Module for ContextModule {
         let window = ctx.payload.context_window_size();
         let used = ctx.payload.context_window.as_ref().and_then(|c| c.used_percentage);
         let mut segs: Vec<Segment> = lead(cfg, "context");
+        let first = segs.len();
         let thresholds = cfg.nums("thresholds");
         let bands = cfg.color_list("band_colors", ctx.theme);
         // SPEC § 3.2 `scale = "usable"`: 100 % is the compaction point, so
@@ -109,8 +111,10 @@ impl Module for ContextModule {
         let pct = used
             .map(crate::num::clamp_percent)
             .map(|u| usable.map_or(u, |scale| crate::num::clamp_percent(u * 100.0 / scale)));
-        let fill_color =
-            ctx.theme.band(ctx.percent_shown(cfg, pct.unwrap_or(0.0)), &thresholds, &bands);
+        // The number the row prints: what the band, `warn_at` and the
+        // `hide` measure compare (SPEC § 3.2, § 4).
+        let shown = pct.map(|p| ctx.percent_shown(cfg, p));
+        let fill_color = ctx.theme.band(shown.unwrap_or(0.0), &thresholds, &bands);
 
         let marker =
             if usable.is_some() || !cfg.bool("compaction_marker") { None } else { threshold };
@@ -128,9 +132,12 @@ impl Module for ContextModule {
             ));
         }
         if cfg.bool("show_percent") {
-            let text = pct.map_or_else(|| "–".to_owned(), |p| ctx.percent(cfg, p));
-            let sp = if segs.is_empty() { "" } else { " " };
-            segs.push(Segment::styled(format!("{sp}{text}"), Style::fg(fill_color).bolded()));
+            let text =
+                pct.map_or_else(|| ctx.icons.placeholder().to_owned(), |p| ctx.percent(cfg, p));
+            segs.push(Segment::styled(
+                format!(" {text}"),
+                Style::fg(cfg.color("percent")).bolded(),
+            ));
         }
         // The label follows the threshold, not the marker: the two are
         // separate switches, and only the `usable` scale hides both (the
@@ -152,11 +159,11 @@ impl Module for ContextModule {
             segs.extend(badge(cfg, "exceeds", "exceeds"));
         }
         let warn_at = cfg.float("warn_at");
-        if warn_at > 0.0 && pct.is_some_and(|p| p >= warn_at) {
+        if warn_at > 0.0 && shown.is_some_and(|s| s >= warn_at) {
             segs.extend(badge(cfg, "warn", "warn"));
         }
-        Rendered::fresh(segs)
-            .measured(pct.map(|p| super::Measure::Percent(ctx.percent_shown(cfg, p))))
+        close_up(&mut segs, first);
+        Rendered::fresh(segs).measured(shown.map(super::Measure::Percent))
     }
 }
 
@@ -166,32 +173,16 @@ fn opts() -> Vec<OptSpec> {
             .minimal(Value::Int(0))
             .full(Value::Int(30))
             .max(crate::config::MAX_CELLS),
-        OptSpec::new(
-            "bar",
-            Kind::Enum(BAR_STYLES),
-            "Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
-            Value::Str("blocks".into()),
-        ),
-        OptSpec::new("show_icon", Kind::Bool, "Show the context icon.", Value::Bool(true))
-            .minimal(Value::Bool(false)),
+        bar_opt(),
+        show_icon_opt("Show the context icon.", IconShown::ExceptMinimal),
         OptSpec::new(
             "show_percent",
             Kind::Bool,
             "Show the percentage after the bar.",
             Value::Bool(true),
         ),
-        OptSpec::new(
-            "thresholds",
-            Kind::NumList,
-            "Ascending percentages where the band color changes.",
-            Value::NumList(vec![50.0, 75.0, 90.0]),
-        ),
-        OptSpec::new(
-            "band_colors",
-            Kind::ColorList,
-            "One color per band (roles or literal colors).",
-            Value::StrList(vec!["band1".into(), "band2".into(), "band3".into(), "band4".into()]),
-        ),
+        thresholds_opt(),
+        band_colors_opt(),
         OptSpec::new(
             "scale",
             Kind::Enum(SCALES),
@@ -257,19 +248,55 @@ mod tests {
     use crate::render::{Clock, render_plain_at};
 
     /// The context module alone, plain, with `used_percentage` on a 1M
-    /// window and the given auto-compaction environment.
+    /// window and the given auto-compaction environment, its bar 10 cells.
     fn render(used: f64, extra: &str, env: crate::claude_settings::Env) -> String {
+        render_table(used, &format!("width = 10\n{extra}"), env)
+    }
+
+    /// [`render`] with the whole `[modules.context]` table given.
+    fn render_table(used: f64, table: &str, env: crate::claude_settings::Env) -> String {
         let payload = crate::payload::Payload::parse(&format!(
             "{{\"session_id\": \"s\", \"context_window\": {{\"context_window_size\": 1000000, \"used_percentage\": {used}}}}}"
         ))
         .unwrap();
         let text = format!(
-            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nwidth = 10\n{extra}"
+            "icons = \"unicode\"\n[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\n{table}"
         );
         let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
         assert!(errs.is_empty(), "{errs:?}");
         let clock = Clock { settings_env: env, ..Clock::fixed() };
         strip_ansi(&render_plain_at(&payload, &config, Some(80), &clock)).trim_end().to_owned()
+    }
+
+    /// SPEC § 3.2: the filled part of the bar takes the band's colour and
+    /// the percentage its own, `colors.percent` (`text` by default). The key
+    /// was declared, documented and set by the `dracula-256` gallery preset,
+    /// and nothing read it: the percentage took the band colour too.
+    #[test]
+    fn the_percentage_takes_its_own_colour_and_the_bar_the_band() {
+        use crate::theme::Role;
+        let row = |colors: &str| {
+            let payload = crate::fixtures::payload("ctx-1m-80");
+            let text = format!(
+                "[frame]\nstyle = \"none\"\nfill = false\n[[line]]\nmodules = [\"context\"]\n[modules.context]\nwidth = 10\n{colors}"
+            );
+            let (config, errs) = crate::config::parse(&text, &crate::modules::SCHEMAS);
+            assert!(errs.is_empty(), "{errs:?}");
+            let lines =
+                crate::render::render_lines_at(&payload, &config, Some(80), &Clock::fixed());
+            (lines[0].clone(), config.theme)
+        };
+        let (segs, theme) = row("");
+        let percent = segs.iter().find(|s| s.text().ends_with('%')).unwrap();
+        assert_eq!((percent.style.fg, percent.style.bold), (theme.role(Role::Text), true));
+        // 80 % has passed 50 and 75: the third band.
+        let filled = segs.iter().find(|s| s.text().contains('█')).unwrap();
+        assert_eq!(filled.style.fg, theme.role(Role::Band3));
+        let (segs, theme) = row("[modules.context.colors]\npercent = \"#f8f8f2\"\n");
+        let percent = segs.iter().find(|s| s.text().ends_with('%')).unwrap();
+        assert_eq!(Some(percent.style.fg), theme.resolve("#f8f8f2"));
+        let filled = segs.iter().find(|s| s.text().contains('█')).unwrap();
+        assert_eq!(filled.style.fg, theme.role(Role::Band3));
     }
 
     /// SPEC § 3.2 `scale = "usable"`: the percentage and the bar are
@@ -328,6 +355,38 @@ mod tests {
         let warn = "scale = \"usable\"\nwarn_at = 90\n";
         assert_eq!(render(89.0, warn, env.clone()), "⊞ █████████░ 90% ⚠");
         assert_eq!(render(88.0, warn, env), "⊞ ████████▉░ 89%");
+    }
+
+    /// Each part carries its space only when something precedes it, and the
+    /// lead's own space is that space. With the bar off the percentage used
+    /// to add a second one (`⊞  50%`), and with the icon off too a later
+    /// part opened the module with one (` 1.0M`).
+    #[test]
+    fn parts_are_spaced_once_whatever_is_switched_off() {
+        let env = crate::claude_settings::Env::default();
+        assert_eq!(render_table(50.0, "width = 0\n", env.clone()), "⊞ 50%");
+        assert_eq!(render_table(50.0, "width = 0\nshow_icon = false\n", env.clone()), "50%");
+        let window_only =
+            "width = 0\nshow_icon = false\nshow_percent = false\nshow_window = true\n";
+        assert_eq!(render_table(50.0, window_only, env.clone()), "1.0M");
+        let badge_only = "width = 0\nshow_percent = false\nwarn_at = 10\n";
+        assert_eq!(render_table(50.0, badge_only, env.clone()), "⊞ ⚠");
+        // With something before them the parts keep their space.
+        assert_eq!(render(50.0, "show_window = true\n", env), "⊞ █████░░░░▏ 50% 1.0M");
+    }
+
+    /// SPEC § 3.2: `warn_at` follows the percentage on display, as the band
+    /// and the `hide` measure do. It compared the unrounded number, so 89.6
+    /// printed `90%` in the top band with no badge under `warn_at = 90`.
+    #[test]
+    fn warn_at_compares_the_printed_percentage() {
+        let env = crate::claude_settings::Env::default();
+        let warn = "warn_at = 90\n";
+        assert!(render(89.6, warn, env.clone()).ends_with(" 90% ⚠"));
+        assert!(render(89.4, warn, env.clone()).ends_with(" 89%"));
+        let precise = "warn_at = 90\npercent = \"precise\"\n";
+        assert!(render(89.96, precise, env.clone()).ends_with(" 90.0% ⚠"));
+        assert!(render(89.94, precise, env).ends_with(" 89.9%"));
     }
 
     /// SPEC § 3.2: `compaction_marker` draws the marker and

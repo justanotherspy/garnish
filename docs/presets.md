@@ -5,7 +5,7 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | name | summary | columns | needs |
 |---|---|---|---|
 | [`animated-dots`](#animated-dots) | dots travelling along the rule, a pulsing separator and a cycling model icon | 100 | nerd-font |
-| [`ascii-only`](#ascii-only) | 7-bit ASCII throughout: ascii icons, a custom +-| frame, no colour codes at all | 100 | — |
+| [`ascii-only`](#ascii-only) | 7-bit ASCII throughout: ascii icons, a custom +-\| frame, no colour codes at all | 100 | — |
 | [`bars-and-limits`](#bars-and-limits) | 40-cell line-style context bar with window tag, mini bars on the limits | 130 | nerd-font |
 | [`boxed-panels`](#boxed-panels) | two titled boxes, one around the repo rows and one around usage | 120 | nerd-font |
 | [`compact-aligned`](#compact-aligned) | two rounded lines with stacked bars, Catppuccin Mocha | 110 | nerd-font |
@@ -45,7 +45,7 @@ At 100 columns, needs nerd-font:
 
 ```text
 ╭─  ~/projects/garnish │  #42  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·   ⠋ 16:00:00 ─╮
-╰─ Opus │  ▁▃▅▇█ │  ████████▍░░░░░░░░░░▏ 42% │  24%  2h13m ·  ·  ·  ·  ·    91% 1h  47m ─╯
+╰─ ◐ Opus │  ▁▃▅▇█ │  ████████▍░░░░░░░░░░▏ 42% │  24%  2h13m ·  ·  ·  ·  ·  91% 1h  47m ─╯
 ```
 
 <details><summary><code>presets/animated-dots.toml</code></summary>
@@ -58,9 +58,9 @@ At 100 columns, needs nerd-font:
 
 # Everything that moves here is a pure function of the clock (SPEC § 4.2):
 # the `·  ` pattern drifts toward the right cap one cell per second, the
-# separator pulses through three weights, and the model icon cycles through
-# four moon phases. Set `animate = false` (or `GARNISH_ANIMATE=0`) to freeze
-# it all at frame 0.
+# separator pulses through three weights, and the model icon turns a
+# half-filled circle through its four quarters (◐ ◓ ◑ ◒). Set
+# `animate = false` (or `GARNISH_ANIMATE=0`) to freeze it all at frame 0.
 
 preset = "compact"
 icons  = "nerd"
@@ -79,8 +79,9 @@ right   = ["clock"]
 modules = ["model", "effort", "context", "limit5h", "cost"]
 right   = ["cache"]
 
+# Escapes rather than the glyphs themselves, so no editor can drop them.
 [modules.model.icons]
-model_frames = ["", "", "", ""]
+model_frames = ["\U000025D0", "\U000025D3", "\U000025D1", "\U000025D2"]
 ```
 
 </details>

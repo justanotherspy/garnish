@@ -7,7 +7,8 @@
 # (title), OSC 52 (clipboard), CSI (clear screen, colour), DCS, BEL, a
 # newline, U+202E. All of them are reduced to plain text at config time
 # (whole-stack review), so the render is the same as with the plain strings
-# and nothing but the painter's own colour can reach the terminal.
+# and nothing but the painter's own colour can reach the terminal. The row
+# and box titles and the box glyphs are among them (cfg-11).
 
 preset = "compact"
 ticker_gap = " \U0000001B[31m~\U0000001B[0m "
@@ -25,14 +26,25 @@ right_last   = "─╯"
 right_single = "──"
 pad       = "\U0000001B[1m \U0000001B[0m"
 separator = " \U0000001B[2m│\U0000001B[0m "
+top_left     = "\U0000001B[31m╭\U0000001B[0m"
+top_right    = "╮\U00000007"
+bottom_left  = "\U0000001B]0;pwned\U00000007╰"
+bottom_right = "╯\U0000202E"
+side         = "\U0000001B[1m│\U0000001B[0m"
+
+[box.b]
+title       = "\U0000001B]0;pwned\U00000007Box\U0000202E"
+title_color = "accent"
 
 [[line]]
 modules   = ["model", "text.note", "context"]
 right     = ["clock"]
 separator = " \U0000001B]52;c;aGk=\U00000007· "
+title     = "\U0000001B[2JTitle\U0000200E"
 
 [[line]]
 modules = ["path", "limit5h"]
+box     = "b"
 
 [modules.model]
 label  = "\U0000001B[31mmodel\U0000001B[0m"

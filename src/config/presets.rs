@@ -4,8 +4,7 @@ use super::RowCfg;
 use super::schema::Preset;
 
 /// Top-level presets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TopPreset {
     /// Four lines, module `default` presets.
     #[default]
@@ -37,6 +36,17 @@ impl TopPreset {
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.name() == s)
+    }
+
+    /// What the preset draws, in a few words (the `setup` preset picker).
+    #[must_use]
+    pub const fn summary(self) -> &'static str {
+        match self {
+            Self::Default => "four lines, every module at its default",
+            Self::Minimal => "one unframed line, the bare values",
+            Self::Full => "four lines, everything each module knows",
+            Self::Compact => "two lines",
+        }
     }
 
     /// The module preset this top-level preset implies.

@@ -79,9 +79,9 @@ impl Preview {
         Self { payloads, fixture: 0, columns: None, clock, pinned }
     }
 
-    /// The live pane: the process clock, no git discovery, no settings, no
-    /// cache and no workers, exactly as `garnish preview` renders a fixture
-    /// (SPEC § 14).
+    /// The live pane: the process clock and no cache or workers, like
+    /// `garnish preview`, but also no git discovery and no settings, since
+    /// the bundled fixtures name no real directory (SPEC § 14).
     #[must_use]
     pub fn live() -> Self {
         let clock = Clock {
@@ -123,7 +123,9 @@ impl Preview {
         };
     }
 
-    /// Show the fixture called `name`, when there is one.
+    /// Show the fixture called `name`, when there is one (tests; the screen
+    /// steps with `f` and `F`).
+    #[cfg(test)]
     pub fn show(&mut self, name: &str) {
         if let Some(i) = FIXTURES.iter().position(|f| f.name == name) {
             self.fixture = i;
@@ -156,6 +158,18 @@ impl Preview {
 mod tests {
     use super::*;
     use crate::modules::SCHEMAS;
+
+    /// frm-11: the live pane's clock is the process's, and it reads no
+    /// git, no settings (nor the managed file) and spawns no worker; the
+    /// snapshot tests never build one, so this is its only pin.
+    #[test]
+    fn the_live_pane_touches_nothing_outside_the_fixture() {
+        let p = Preview::live();
+        assert!(!p.clock.git && !p.clock.settings && !p.clock.workers, "{:?}", p.clock);
+        assert!(p.clock.managed.is_none() && p.clock.settings_keys.is_none(), "{:?}", p.clock);
+        assert!(p.clock.cache.is_none(), "{:?}", p.clock);
+        assert!(!p.pinned, "the animations move");
+    }
 
     #[test]
     fn the_pane_renders_the_fixture_at_the_width_and_maps_cells_to_modules() {

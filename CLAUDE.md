@@ -147,6 +147,67 @@ documents *first*, with the reason, then start coding.
   doctests, `cargo bench` for criterion, `./bench/run.sh` for hyperfine
   end-to-end. Without `cargo-nextest`, `cargo test` runs the same suites but
   without the serial grouping the cache/worker tests need.
+- **`make check` is not all of CI.** Rustdoc with `-D warnings` runs only
+  in `scripts/ci.sh`, so a public doc linking a `pub(crate)` item passes
+  `make check` and fails CI: run `RUSTDOCFLAGS="-D warnings" cargo doc
+  --no-deps` before pushing. And never gate a commit on a pipe:
+  `make check | grep … | head && git commit` commits on red, because the
+  pipe's status is `head`'s; write the check to a log and test its status.
+- **Testing tricks.** A test that measures an age reads the clock *after*
+  the event it measures (a stamp newer than a `now` taken earlier is from
+  the future, which has no age by design; one such test failed one run in
+  six). A test that runs a logged spawn by hand passes `--lock-held` on
+  Linux, or the worker sees the tick's lock inside its grace window and
+  quietly does nothing. A git without `--ref-format=reftable` ignores an
+  empty `.git/reftable/tables.list`, which is how the reftable fallback is
+  simulated there; CI's git runs the real format. A before/after benchmark
+  is a temporary commit, `git checkout HEAD~1 -- <files>`, the bench, then
+  the files restored and `git reset --soft HEAD~1`. `std::io::pipe()`
+  with the reader dropped gives a child a stderr nobody reads
+  (`tests/cli.rs::piped_with`). A layout fuzz must include `custom`
+  frames (the review's first fuzz filtered them out by accident, and
+  they are where uneven caps and corners broke), and "a line is exactly
+  the box" holds only with `fill = true` or on a boxed line; otherwise a
+  line is at most the box. Never edit a source while a background `make
+  check` runs: nextest and the doctests compile after clippy, so the run
+  no longer checks the tree being committed. On a noisy host
+  `valgrind --tool=callgrind` instruction counts are a stable
+  before/after measure where hyperfine's σ is a millisecond, and a
+  `make bench` with agents building beside it is over budget in every
+  scenario: gate on a quiet machine. A PATH-shim `git` that appends
+  `CALL $*` and the variables asked about to a log is how a test sees the
+  child's arguments and environment (`recorded_git_calls`); print only
+  the variables asked about, since a whole environment lands in a CI log.
+  No test that runs the binary can reach the platform's managed settings
+  file (`/etc/claude-code/…`, root's), so logic that depends on it takes
+  the paths as parameters and is unit-tested pure (`demote_hooked`,
+  `layer_of`, `own_settings_files_in`); two mutations of it survived the
+  whole suite until then. The decisions over the chain are pure
+  functions over `ChainFile`s (`chain_target`, `managed_env`), so a
+  drop-in is tested without the platform's directory. Letting the hook's
+  file bring drop-ins to reach them from a CLI test was tried and
+  undone: a hook file in `/tmp` took anyone's drop-ins, and guarding the
+  directory refused a group-writable platform one Claude Code reads.
+  Each case of such a test must set up the input its guard exists for:
+  the first platform-guard case named another file, so it passed with
+  the guard deleted. A macOS temporary path is about 60 characters where
+  Linux's is 15, so a test that bounds a message or asserts on a row
+  that names a file passes here and fails there (twice on 2026-09-26):
+  run the suite once with `TMPDIR` set to a directory with a path over
+  100 characters long before pushing such a test. A scratch export of
+  the crate (`git archive` into a directory) built with the same
+  `CARGO_TARGET_DIR` clobbers the checkout's artifacts, since cargo's
+  metadata hash leaves the path out: give the export
+  another `version` in its own `Cargo.toml` (the dependencies stay
+  shared). And `benches/tick.rs` points its payload at
+  `CARGO_MANIFEST_DIR`, so a git checkout pays for git reads an export
+  skips: compare builds made the same way.
+- **The payload is read field by field.** A scalar field takes
+  `#[serde(deserialize_with = "or_none")]`, a struct-typed one
+  `object_or_none` (serde reads a struct from a JSON array by position,
+  so `"rate_limits": []` used to mean a subscription). A new payload field
+  also goes into `FULL` in `payload.rs`, which the sweep test gives every
+  wrong JSON type.
 
 ## Commands
 
@@ -410,6 +471,9 @@ path (`unwrap_used`, `expect_used`, `indexing_slicing`, `arithmetic_side_effects
   For float→int use the saturating helpers in `num.rs`.
 - Arithmetic must be `checked_*`, `saturating_*`, or `wrapping_*` when the
   operands are not compile-time constants. Prefer `saturating_sub` for durations.
+- `clamp` panics when its lower bound exceeds its upper one, and the lints
+  do not see it; with a bound computed at run time (a terminal's size) use
+  `.max(lo).min(hi)`.
 - `main` returns `color_eyre::Result<ExitCode>`: an unexpected error gets a
   color-eyre report, a `cli::Quiet` error (the problem was already printed,
   as `config check` and `config init` do) exits 1 with no report. `render`
@@ -419,7 +483,12 @@ path (`unwrap_used`, `expect_used`, `indexing_slicing`, `arithmetic_side_effects
   Integration tests under `tests/` are not `#[cfg(test)]` modules, so they
   carry a crate-level `#![allow(clippy::unwrap_used, …)]` with that comment.
 - Prefer combinator pipelines over `if let` towers. Data in → data out.
-- Prototype freely inside unit tests; clippy ignores unwraps there.
+- Prototype freely inside unit tests; clippy ignores unwraps there. It
+  does not ignore `arithmetic_side_effects` in a helper function inside a
+  test module that is not itself a `#[test]`: use `saturating_*` there.
+  `unsafe_code` is forbidden, so a unit test cannot set an environment
+  variable; to keep a render from spawning, hold a live lock instead of
+  setting `GARNISH_NO_SPAWN`.
 - Shell scripts (`scripts/`, `bench/`, `.claude/hooks/`) pass `shellcheck`
   and stay portable across GNU and BSD userlands (the macOS runner has no
   GNU sed/awk extensions).
@@ -435,6 +504,12 @@ path (`unwrap_used`, `expect_used`, `indexing_slicing`, `arithmetic_side_effects
   narrate what the code plainly does, do not leave "changed X" notes, and do
   not comment out code. When in doubt, leave the comment out.
 - Reviewing a file's comments is part of finishing a phase: delete fluff.
+- `lib.rs` makes a module `pub` only when `main.rs`, `tests/` or
+  `benches/` use it; the rest are `pub(crate)`, so rustc reports an item
+  that only tests call as dead instead of the public surface keeping it
+  alive. A public doc names an item in a `pub(crate)` module as a code
+  span (`` `time::frame` ``), not an intra-doc link, which rustdoc
+  refuses (`private_intra_doc_links`).
 
 ## Crate map (the chosen crate for each job; never add an alternative)
 
@@ -454,7 +529,7 @@ screen). Adding any new dependency needs the user's OK first.
 | jiff | all date/time: now, zones, formatting, durations, countdowns; `GARNISH_NOW` freezes it | `time.rs`, `session.rs` |
 | itertools | iterator helpers (interspersing, joining, grouping); the chosen crate for the job, but not a dependency since 2026-09-19, when its last use (interspersing separators) was replaced by a loop that colours each one; add it back when a job needs it | rendering |
 | std::process + `git::run_program` | every external command (status, rev-list, fetch, `--version`): kill-on-timeout, pipes drained on threads | `git.rs` |
-| rayon | data parallelism: `refresh --all`, `preview --all`, docs generation, the render matrices in tests; **never on the tick path** | `cli.rs`, `docs.rs`, tests |
+| rayon | data parallelism: `refresh --all`, the render matrices in tests, the golden suites, `tests/presets.rs` and the `config show` round trip (a macOS runner spawns slowly: a loop over binary runs is parallel or it times out); **never on the tick path** | `cli.rs`, tests |
 | unicode-width | terminal cell width of text | `ansi.rs` |
 | ratatui (crossterm backend, `default-features = false`) | the `setup` screen: widgets, the terminal, raw mode and mouse capture through the re-exported `ratatui::crossterm`; `TestBackend` for the snapshot tests; **never on the tick path** | `setup/` |
 | criterion (dev) | micro-benchmarks | `benches/` |
@@ -504,17 +579,90 @@ for the contract and `docs/` for user docs.
   `enabled`, `preset`, `refresh` and `hide` are the **hand-parsed** module
   keys (their validation needs the schema: `refresh` its `refresh`, `hide`
   its `measure`); a fifth means `HAND_PARSED` in `common_keys()`, an arm
-  in `parse_overrides`, an arm in `ModuleCfg::common` (so `config show`
-  writes it back), `docs::write_modules` and `module_reference`, and the
-  module form's row in `setup::form::module_fields`.
+  in `parse_overrides`, `config show` writing it back
+  (`docs::write_modules`, through `ModuleCfg::common` when the value is
+  not a plain field, as `hide` is), `docs::write_modules` and
+  `module_reference`, and the module form's row in
+  `setup::form::module_fields`. An option rule that needs more than the
+  kind (thresholds that must ascend, a zone name) goes on `OptSpec.rule`
+  (`Rule::Ascending`, `Rule::TimeZone`), never into the module's render.
+- **Every word list has one source.** A config enum lists its words through
+  `config::Vocab`: the type gets an `ALL` array and a `name`, and joins the
+  `vocab!` list, whose tripwire in `config/vocab.rs` checks that the
+  parser, its error message, the generated reference and the setup
+  pickers all agree. Table key lists are the `*_KEYS` arrays (`ROW_KEYS`,
+  `INNER_ROW_KEYS`, `COL_KEYS`, `BOX_KEYS`, `FRAME_KEYS`), which
+  `every_key_list_is_the_keys_its_table_takes` walks. `config/` is split
+  by concern: `load` (locating and reading), `rows`, `frame`,
+  `overrides`, `read` (the value readers) and `vocab`.
+- **One helper per rule, and new code uses it.** `config::write_target`
+  (the file a writing command writes: the explicit one, else the
+  `--config` the garnish `statusLine.command` passes, else the one
+  `locate` finds, else the default; the command is `CommandFrom::Chain`,
+  the one Claude Code runs here, except for `install`, which passes the
+  one it read from the file it rewrites as `CommandFrom::Given`; a config
+  a settings file that is not the person's own names (`load::users`: the
+  managed file or one in their settings directory, by path or link) is a
+  `config::Checkout`, refused like `Unresolved`, never followed; callers
+  resolve `GARNISH_CONFIG` through `config::hand_explicit`
+  (`cli::explicit_or_quiet`): inside a Claude Code session (`CLAUDECODE`
+  present) the environment carries every settings file's `env` block, a
+  checkout's included, so the variable counts only when the person's own
+  settings set that value, and the managed-settings hook likewise
+  (`hand_managed`); guessing which checkout file set it failed three ways
+  (a subdirectory, a non-string value, a file serde refuses); the tick's
+  `explicit` takes an absolute variable as it comes and ignores a
+  relative one (Claude Code passes `"~/g.toml"` unexpanded); a settings
+  `env` block's `GARNISH_CONFIG` is part of what the ticks read when the
+  command passes no `--config`, so `command_target` follows it
+  (`env_target`) for a terminal that never sees the block; every reader
+  of the managed layer that decides a config goes through `chain_files`
+  (`install` through `chain_files_rewriting`, so the file it rewrites
+  counts too), which demotes a managed layer a checkout named, and
+  `install` reading it on its own wrote where such a file said; `doctor`
+  lists the chain from `config::managed_layer`; `doctor` loads a refused
+  config's stand-in through `config::load_exactly`, never `load`, which
+  would locate the refused file again) and its twin
+  `config::read_target` (the same order without
+  the default, for the commands a person runs to look at their config:
+  `config check`, `config show`, `preview`, `doctor`, so they read the
+  file `config path` prints and refuse where it refuses; a command run by
+  hand reads a settings file whole through
+  `claude_settings::read_file_up_to`, where the tick's `read_file` stops
+  at 1 MiB; the tick and its workers use `locate` alone and never read the
+  settings file for this; one reader and one writer following different
+  commands was tried and made `config path` wrong for one of them, and
+  the `garnish-statusline` skill writes through `config path`),
+  `install::shell_words` (the one splitter for a `statusLine.command`, as
+  `sh` splits it, at space, tab and newline only, past `NAME=value` words
+  and a leading `env`; a word records where its one home directory goes,
+  and `Word::expanded` splices it in, never `Path::join`, which turned
+  `$HOME.x` into a file inside it, and refuses an unquoted one the shell
+  would split or glob),
+  `debug::stderr_line` (the render path's only stderr writer: it ignores a
+  failed write, since `eprintln!` panics on a stderr nobody reads; a
+  source scan allows the macros only in `cli.rs` and `setup/`),
+  `claude_settings::user_dir` (the user
+  settings directory, `CLAUDE_CONFIG_DIR` first), `claude_settings::env_flag`
+  (the one truthiness rule for boolean hooks: `true`/`false`/`yes`/`no`/
+  `on`/`off`), `config::no_color_env` (`NO_COLOR` counts only when not
+  empty), `cli::refusal` (a refusal is one stderr line and `Quiet`),
+  `claude_settings::read_regular` (every file garnish reads on a timer:
+  regular files only, capped), `render::context` (the one place a module
+  context is built; the bench uses it too).
   The schema matrix test in `render.rs` renders every module × preset ×
   icon set × `max_width` against every fixture, so a new module or option
   gets the shared invariants checked for free; a behaviour of its own
   still wants a test of its own. A unit test scans `src/modules/*.rs` for
   every key read by name (`cfg.icon("…")`, `seg(cfg, …, "…")`, `lead(cfg,
   "…")`, `badge(cfg, "…", "…")`, …) and fails on one that no schema in that
-  file declares; a new helper that takes a key by name has to be added to
-  that scan's pattern list.
+  file declares. Its lists are consts in `modules/mod.rs`: `KEY_CALLS`
+  (the calls that take a key by name; a new such helper joins it),
+  `IMPLIED` (the keys a helper reads on its caller's behalf) and
+  `DEFINED` (which modules each file defines; a new module file joins
+  it, and every module is claimed exactly once). Behind the scan, a test
+  build panics on any `ModuleCfg` read of a key the module does not
+  declare, so the render matrix catches what the scan cannot parse.
 - **The setup screen is generated from the same schema.** Every `OptSpec`
   kind and every top-level key has a form row (a unit test walks them),
   the module picker lists `modules::SCHEMAS`, and the glyph picker's
@@ -536,6 +684,11 @@ for the contract and `docs/` for user docs.
   is undoable by construction; only the undo keys themselves and the
   picker's preset adoption bypass it. `Draft::is_dirty` compares the
   table with the file's, never a flag, so an edit undone is not an edit.
+  `setup::app` is `app.rs` plus `app/*.rs`, one file per screen and
+  concern; the children see `App`'s private fields, and a method one of
+  them shares with another needs `pub(super)`. `toml::Map::remove` is a
+  shift-remove under `preserve_order` (a test pins it), so unsetting a key
+  keeps the others in the file's order.
   Snapshot goldens live under
   `tests/golden/setup/` and `tests/setup.rs` lists every one it writes;
   `setup::for_test` pins the clock, aims install at a temporary home and
@@ -547,8 +700,19 @@ for the contract and `docs/` for user docs.
   findings become tests).
 - **`frame.rs` owns the characters, `layout.rs` owns where they go.** A
   row is columns (SPEC § 4.3), so there is one composer for every shape:
-  `Layout::lines` → blocks → `row_body` → `wrap_frame` or the box's
-  edges. A plain row is one `1fr` column and goes through the same path,
+  `Layout::lines` → blocks → `row_columns` (a row of the frame through
+  `frame_plan` and `frame_row`, a row in a column or a box under
+  `row_body`) → `wrap_frame` or `box_lines` (the one place a box is
+  drawn; `fit_title` places every title). A row's height is measured at
+  the width it is laid out to, never another: measured on the frame's
+  narrowest caps and laid out on its own, a box was drawn and then cut
+  (2026-09-26). A
+  column's `Fit` says which of its ends sit against a box side
+  (`Fit::sides`), and `Draft::Blank` marks a line that may need
+  `frame::BLANK_CELL` once the whole line is known. The cheapest proof
+  that every column fills exactly its share is `compose_group` swept over
+  a grid of widths, fills, pads and justifications. A plain row is one
+  `1fr` column and goes through the same path,
   which is why the whole golden suite is the regression test for a change
   in there: if a layout change is meant to be invisible, *every* golden
   must come out byte-identical, and if it is not, exactly the goldens of
@@ -567,7 +731,11 @@ for the contract and `docs/` for user docs.
   as the settings badges are), a trailing one `modules::badge`, a glyph built into a
   longer string `modules::glyph_prefix`, a name cut `util::cut_name`, the
   mark a cut ends in `IconSet::ellipsis`, the overdue and failed marks
-  `IconSet::stale_glyphs`. Each was written out per module once and
+  `IconSet::stale_glyphs`, the no-value mark `IconSet::placeholder`, the
+  spacing after a switched-off part `modules::close_up`, the `show_icon`
+  option `modules::show_icon_opt`, the bar, band and threshold options
+  `util::bar_opt` and its siblings, an added/removed pair
+  `util::added_removed`. Each was written out per module once and
   drifted. **Fix the shape, not the example**: the first pass at the badge
   guard converted the sites that looked like badges and left `cache`'s
   countdown, which interpolates the same glyph.
@@ -589,8 +757,19 @@ for the contract and `docs/` for user docs.
   matching the file, a summary, a width at which it renders uncut at three
   instants, motion where it promises motion, and, for a line ticker, a
   slide of exactly `ticker_step` cells, so a scrolled row carries nothing
-  that counts seconds. Register a new file in `gallery::FILES`
-  (alphabetical; the count is the array length) and run `make docs`.
+  that counts seconds. A cut is found by structure (a `Group` piece, or
+  modules and titles that differ from a render 200 columns wider), never
+  by looking for `…`, which the ascii set also prints for other things;
+  each motion promise is checked on its own from the parsed config, and
+  `each_motion_check_sees_its_promise_die` freezes a preset per promise
+  to prove the check can fail. A new check runs in-process; the binary
+  runs per preset are the slow part. Register a new file in
+  `gallery::FILES` (alphabetical; the count is the array length) and run
+  `make docs`. A frame list in a preset is written as TOML escapes
+  (`"\U000025D0"`): an editor once dropped raw glyphs and shipped four
+  empty frames, and the Edit and Write tools decode a `\uXXXX` in their
+  input into the glyph itself, so check the bytes with `od -c` after
+  writing one (Rust's `\u{…}` is unaffected).
 - `Segment.text` is private: `Segment::plain`/`styled`/`with_text`/`push_str`
   reduce text to plain text on the way in and `text()` reads it, so nothing
   can put an escape sequence on a row by assigning a field.
@@ -616,7 +795,10 @@ for the contract and `docs/` for user docs.
 - **An environment variable holding a path is unset when it is empty.**
   `config::env_path` is that rule and `claude_settings::home_dir` is its
   `HOME` twin. `GARNISH_MANAGED_SETTINGS` is the one exception, and says so:
-  empty means "no managed file", unset means the platform's.
+  empty means "no managed file", unset means the platform's. An `XDG_*`
+  variable must also be absolute (the XDG spec ignores a relative one, and
+  a relative one would make the checkout's own file the config):
+  `config::xdg_path` is that rule.
 - Fixtures: `tests/fixtures/payloads/*.json` (embedded once in
   `fixtures.rs` for the docs, the bench and the setup preview; a unit test
   keeps the table equal to the directory), `tests/fixtures/configs/*.toml`;
@@ -706,11 +888,19 @@ for the contract and `docs/` for user docs.
   variables for the session's Bash commands, and their plain-text stdout is
   added to Claude's context (this is how `SESSION_HOST` and `SPRITE.md` are
   loaded).
-- The harness trims the status line script's stdout and drops every row
-  that is whitespace after trimming (2.1.261: `v.stdout.trim().split("\n")
-  .flatMap(N => N.trim() || []).join("\n")`, found by grepping the binary
-  for `status_line_command");let D=`; 2.1.270: the same rule after
-  `b("status_line_command");let O=`). A non-zero exit, a spawn failure,
+- The harness trims the status line script's stdout, then trims **every
+  row** and draws each row's trimmed text, dropping the rows left empty
+  (2.1.261: `v.stdout.trim().split("\n").flatMap(N => N.trim() || [])
+  .join("\n")`, found by grepping the binary for
+  `status_line_command");let D=`; 2.1.270: the same rule after
+  `b("status_line_command");let O=`). So a row whose raw bytes start with
+  whitespace is drawn shifted left. `render_loaded` holds those cells once,
+  on the painted row, never in the layout: with colour on an empty SGR
+  (`ESC[0m`) goes in front (the trim keeps it, the harness's escape parser
+  drops it); with colour off the first leading space becomes
+  `frame::BLANK_CELL` (U+2800). Both golden suites fail on a row starting
+  with whitespace; `preview` folds SGR 2 into every segment, so the tick's
+  `ESC[0m` is tested in-process. A non-zero exit, a spawn failure,
   the 600 s hook timeout or empty stdout clears the status line rather
   than keeping the last one (2.1.270), which is why `render` never exits
   non-zero; a new trigger aborts the run in flight and keeps the previous
@@ -741,17 +931,46 @@ is that garnish does it on a *timer*, so the rules are:
   ref name, but the file is what matters: an archive carries symlinks, so
   `HEAD`, a ref, or the `refs/heads` directory itself can be a link to
   anywhere. `git::read_ref_file` resolves the path and requires it to stay
-  inside the git directory; every ref read goes through it.
-- **Every git call clears the config's command hooks.** `run_git` prepends
-  `NO_COMMAND_HOOKS` (`-c core.fsmonitor=`) and `fetch` passes
-  `--upload-pack git-upload-pack`, because `.git/config` sets both and git
-  runs them. `-c` on the command line beats the file. `core.sshCommand`,
-  `core.gitProxy` and an `ext::` URL are *not* cleared: each is a setting a
-  user may want honoured, all three need an opted-in `fetch_interval`, and
-  the decision sits in PLAN's backlog.
-- **A cached string from outside is bounded.** `cache::MAX_ERROR_CHARS`
-  applies to a failed entry's message *and* to `fetch_error`, which rides in
-  a successful one, because the tick parses that file on every render.
+  inside the git directory; every ref read goes through it. Every file
+  under `.git` is read through `claude_settings::read_regular` (regular
+  files only, capped: a FIFO hung every tick; the path is checked, then
+  opened `O_NONBLOCK`, a per-platform constant with no libc, and the
+  handle checked again, since a FIFO swapped in after the check hung the
+  open). `.git/config` is streamed 64 KiB at a time through
+  `claude_settings::open_regular`, and a section other than the branch's
+  is jumped over unparsed (5000 sections cost 5 ms a tick before;
+  `bench/run.sh`'s `warm-bigconfig` now gates it). A `gitdir:` or
+  `commondir` counts only when it is a git directory by git's own test,
+  since the containment check is only as good as the directory it
+  contains to. A symbolic ref may point only under `refs/` or at a
+  capitalised pseudo-ref.
+- **Every git call clears what it can, and the rest is never reached
+  unasked.** `run_git` prepends `NO_COMMAND_HOOKS` (`-c core.fsmonitor=`),
+  runs the `git` found on an absolute `PATH` entry (never a `git` the
+  checkout ships), removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
+  kin, sets `GIT_NO_LAZY_FETCH=1` (honoured since the May 2024 security
+  releases, 2.39.4 onward) and, on every call but `fetch`,
+  `GIT_ALLOW_PROTOCOL` empty (`git_call`; `fetch` goes through `git_with`
+  and keeps the user's own), which any git honours, so a lazy fetch in a
+  partial clone can never run the repository's `uploadpack`. Filter drivers
+  (`filter.<d>.clean`/`process`) are not cleared; instead nothing on the
+  worker path may run a git command that hashes worktree content
+  (`status`, porcelain `diff`, `add`): `is_dirty` is `diff-index --cached`
+  plus `diff-files` with `core.checkStat=default` pinned. `core.trustctime`
+  is deliberately *not* pinned: pinned to `true` it showed a tree git calls
+  clean as dirty for good wherever the user set it `false`. `fetch` passes
+  `--upload-pack git-upload-pack`, `--no-auto-maintenance`,
+  `--recurse-submodules=no`, the remote after `--`, and
+  `SSH_ASKPASS_REQUIRE=force` with a failing `SSH_ASKPASS`.
+  `core.sshCommand`, `core.gitProxy`, an `ext::` URL, hooks
+  (`core.hooksPath`, `.git/hooks`), `credential.helper`, `core.askPass` and
+  `core.alternateRefsCommand` are *not* cleared: all need an opted-in
+  `fetch_interval`, and the decision sits in PLAN's backlog.
+- **A cached string from outside is bounded and plain.**
+  `cache::bounded_text` (capped at `cache::MAX_ERROR_CHARS`, reduced to
+  plain text) applies to a failed entry's message *and* to `fetch_error`,
+  which rides in a successful one, because the tick parses that file on
+  every render and `doctor` prints it.
 - **Every stored stamp can be in the future** (a resumed VM, NTP correcting
   a bad RTC) and a future stamp means the clock moved, never "very recent".
   `Entry::is_fresh`, `lock_is_live` and `sync`'s `fetch_attempt` all treat
@@ -770,9 +989,33 @@ is that garnish does it on a *timer*, so the rules are:
   "not fresh": that spawns a worker on every tick while git is broken.
 - Entries carry the situation they were computed for (`head`, `upstream`);
   renders pass a validator to `Ctx::cached` so a branch switch is a miss.
-- `refresh = 0` is only legal for payload-only modules; config validation
-  rejects it for cached ones.
-- GC compares file mtimes with the wall clock, not `GARNISH_NOW`.
+  A validator must accept a failed entry, which carries no values: the
+  reftable one compared `tables` alone and respawned on every tick.
+- `Cache::write` stores a failed entry naming the value when the text
+  would not read back as the same entry, or is over 64 KiB: a value the
+  entry cannot carry (a line break in an upstream, a 64 KiB branch name)
+  was a miss on every tick, and so a worker on every tick.
+- `refresh = 0` is only legal for payload-only modules, and they take only
+  0: config validation rejects 0 for a cached module and anything else for
+  a payload-only one (it would do nothing).
+- GC compares file mtimes with the wall clock, not `GARNISH_NOW`. The
+  sweep runs when a worker writes a scope's first entry (never on the
+  tick), and it removes only what garnish made: a repo directory named
+  like a key hash, a session directory named like a sanitised id, every
+  file inside with a garnish name, never through a link.
+- Every temporary file is unlinked first, then created with `create_new`,
+  so a planted link at a predictable name is never followed (`doctor`'s
+  write probe too, through `cache::create_fresh` and
+  `cache::create_private_dir`). The
+  last-resort root under the temp directory is `garnish-<uid>`, created
+  0700, and refused (no cache, no workers, `doctor` says why) when it is a
+  link, writable by others, or someone else's.
+- `render::render` is the only render that builds its clock from the
+  environment; every in-process helper takes a `Clock`, and render.rs's
+  test-only `render_plain` is pinned. In the bench a seeded entry is
+  judged by the reader's TTL (the module's `refresh`), not the TTL it was
+  written with: a new cached module needs seeding in `benches/tick.rs`
+  and a long `refresh` in its `warm()`.
 - Docs and in-process tests render with `Clock::fixed()`: no git
   discovery, no settings env, no settings files (`Clock.settings = false`,
   `Clock.managed = None`), no cache. On the render path the settings chain
@@ -781,7 +1024,12 @@ is that garnish does it on a *timer*, so the rules are:
   current directory on their own. Tests that run the binary must set
   `GARNISH_CACHE_DIR`, `GARNISH_NO_SPAWN` and `GARNISH_MANAGED_SETTINGS=`
   (empty: no managed settings file) and clear
-  `CLAUDE_*`/`DISABLE_*`/`GARNISH_ANIMATE`, and `tests/cli.rs` runs the
+  `CLAUDE_*` (`CLAUDE_CONFIG_DIR` included)/`DISABLE_*`/`GARNISH_ANIMATE`
+  and `CLAUDECODE` (a suite run inside a Claude Code session inherits it,
+  and a hand command then refuses a `GARNISH_CONFIG` no settings file
+  sets);
+  one that writes a payload to the child's stdin ignores `EPIPE`, since
+  the child may exit before reading; and `tests/cli.rs` runs the
   binary in the test's own directory so the checkout's `.claude/` never
   leaks into a test.
 - Every file a command rewrites goes through `install::replace_file` (a

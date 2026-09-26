@@ -47,8 +47,14 @@ Labels: `feedback`, plus `alignment` for widths, glyphs or the right edge.
 
 The issue is public. Replace the home directory in every path with `~`
 (`doctor` already does; `config show` prints no path), keep only the
-`GARNISH_*` lines of the doctor's environment section, print the **whole
-body**, and ask (AskUserQuestion when available):
+`GARNISH_*` lines of the doctor's environment section plus the Claude Code
+switches it lists (`CLAUDE_CODE_NO_FLICKER`, `CLAUDE_CODE_DECSTBM`,
+`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`,
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT`,
+`DISABLE_COMPACT`), which explain height and compaction reports, and drop
+`COLUMNS`, `LINES` and `TZ` (the Bash tool's values, not the status line's
+terminal), print the **whole body**, and ask (AskUserQuestion when
+available):
 "post this to justanotherspy/garnish as a public issue?". Only a yes runs:
 
 ```sh

@@ -123,7 +123,23 @@ edit the config in place.
 Without the screen, `garnish setup --preset compact --install` writes a
 preset and hooks it up, and `garnish install` alone does the settings
 (`--dry-run` shows the change; `--absolute` if `~/.cargo/bin` is not on the
-PATH Claude Code sees). The equivalent by hand:
+PATH Claude Code sees; `garnish --config FILE install` writes a command that
+reads FILE, and a later `install` keeps the arguments and any
+`NAME=value` prefix a garnish command already has; a `--config FILE` kept
+that way is the file every other command then uses: `config path`,
+`config check`, `config show`, `preview`, `doctor`, `config init`, `setup`
+and `install`; inside a project whose own `.claude/` settings name
+another config, by the command's `--config` or by `GARNISH_CONFIG` in
+their `env` block, garnish follows that file for none of them, since a
+cloned repository must not choose a file garnish reads or writes: each
+refuses on one line, and `garnish --config FILE …` says which you mean;
+inside a Claude Code session a `GARNISH_CONFIG` counts only when your own
+settings set it (`~/.claude/settings.json`, or your organisation's
+managed settings and their drop-ins), and anywhere only as an absolute path,
+since Claude Code does not expand `~` in a settings value; the status
+line ignores a relative `--config` too, and says so on a `⚠ config:`
+row).
+The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }
@@ -205,7 +221,7 @@ corners and sides:
 ```
 
 The `grid-three`, `grid-six`, `boxed-panels` and `dashboard-panels` presets
-are working examples; [docs/config.md](docs/config.md#row-col) has the keys.
+are working examples; [docs/config.md](docs/config.md#rowcol) has the keys.
 
 | group | modules |
 |---|---|
@@ -224,15 +240,25 @@ module definitions in the code, so they always match the binary you built.
 ## Try it without a session
 
 ```sh
-garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
 garnish config init && garnish config check && garnish config show
 garnish doctor          # versions, settings, config, cache, failed refreshes, glyph test
+garnish setup           # pick, build and preview a layout full-screen
+```
+
+`garnish setup` previews every change live on the bundled sample payloads.
+From a checkout of this repository, `preview` renders those payloads
+directly (`tests/fixtures/payloads` is not installed with the binary):
+
+```sh
+garnish preview tests/fixtures/payloads --preset compact --icons unicode --theme nord
 ```
 
 ## Skills
 
 Three Claude Code skills ship with garnish under `skills/` and are written to
-`~/.claude/skills/` by `garnish install` (or `garnish skills install`):
+`~/.claude/skills/` by `garnish install` (or `garnish skills install`); with
+`CLAUDE_CONFIG_DIR` set, the skills and the settings file go under it, where
+Claude Code reads them:
 
 - **garnish-statusline** offers `garnish setup` first, or builds the
   config from a conversation (terminal, font, width, what matters, rows or
@@ -285,6 +311,10 @@ None of them needs network access from garnish itself; they drive the
   the terminal's rows and cuts a taller status line from the bottom; keep
   the line count at most `LINES / 2 − 5`, rounding down (7 rows on a
   24-line terminal), or use the classic renderer.
+- **The terminal is garbled after `garnish setup` was killed**: `setup`
+  puts the terminal back when it exits, on `Ctrl+C` and on a crash, but a
+  `kill` gives it no chance to; typing `reset` (even unseen) and Enter
+  restores echo, the main screen and the mouse.
 
 More in the guide's [troubleshooting section](docs/guide.md#7-troubleshooting).
 

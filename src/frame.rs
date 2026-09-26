@@ -5,11 +5,17 @@
 //! ticker's window and the rule's pattern). Putting them on a line is
 //! [`crate::layout`].
 
-use serde::Deserialize;
+/// The one cell that keeps a row on screen that Claude Code would trim
+/// away: a `blank = true` spacer (SPEC § 4.1), and the first leading space
+/// of a row painted without colour (SPEC § 2.1).
+///
+/// A braille blank: JavaScript's `trim` does not count it as whitespace,
+/// and a font with the clock spinner's braille should draw it empty.
+pub const BLANK_CELL: char = '\u{2800}';
 
-/// Named frame styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// Named frame styles, read from a config through
+/// [`crate::config::Vocab`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FrameStyle {
     /// No frame characters at all.
     None,
@@ -53,12 +59,20 @@ impl FrameStyle {
             Self::Custom => "custom",
         }
     }
+}
 
-    /// Parse a config name.
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|f| f.name() == s)
-    }
+/// One glyph of a frame under the `[frame]` key that sets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NamedGlyph<'a> {
+    /// The `[frame]` key.
+    pub key: &'static str,
+    /// The glyph in effect.
+    pub value: &'a str,
+    /// What it draws, as the `setup` form says it.
+    pub doc: &'static str,
+    /// The config refuses anything but one cell here, so an empty value is
+    /// a style without the glyph, never one a file could write.
+    pub one_cell: bool,
 }
 
 /// The characters of a frame.
@@ -198,6 +212,39 @@ impl FrameChars {
         }
     }
 
+    /// Every glyph under its `[frame]` key, in the order the `setup` form
+    /// lists them: the one table the form, its suggestions and
+    /// `config show` read.
+    #[must_use]
+    pub fn named(&self) -> [NamedGlyph<'_>; 16] {
+        const fn g<'a>(
+            key: &'static str,
+            value: &'a str,
+            doc: &'static str,
+            one_cell: bool,
+        ) -> NamedGlyph<'a> {
+            NamedGlyph { key, value, doc, one_cell }
+        }
+        [
+            g("separator", &self.separator, "Default separator between modules.", false),
+            g("pad", &self.pad, "Text between a cap and the content.", false),
+            g("fill_char", &self.fill, "The rule glyph, one cell.", true),
+            g("first", &self.first, "Left cap of the first line (custom style).", false),
+            g("middle", &self.middle, "Left cap of middle lines.", false),
+            g("last", &self.last, "Left cap of the last line.", false),
+            g("single", &self.single, "Left cap of a lone line.", false),
+            g("right_first", &self.right_first, "Right cap of the first line.", false),
+            g("right_middle", &self.right_middle, "Right cap of middle lines.", false),
+            g("right_last", &self.right_last, "Right cap of the last line.", false),
+            g("right_single", &self.right_single, "Right cap of a lone line.", false),
+            g("top_left", &self.top_left, "A box's top-left corner, one cell.", true),
+            g("top_right", &self.top_right, "A box's top-right corner.", true),
+            g("bottom_left", &self.bottom_left, "A box's bottom-left corner.", true),
+            g("bottom_right", &self.bottom_right, "A box's bottom-right corner.", true),
+            g("side", &self.side, "A box's side glyph.", true),
+        ]
+    }
+
     /// Prefix and right cap for line `index` of `count`.
     #[must_use]
     pub fn ends(&self, index: usize, count: usize) -> (&str, &str) {
@@ -240,12 +287,6 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// The rule text for `width` cells.
-    #[must_use]
-    pub fn paint(&self, width: usize) -> String {
-        self.paint_at(0, width)
-    }
-
     /// The rule text for `width` cells starting `start` cells into the
     /// line's rule.
     ///
@@ -287,13 +328,6 @@ mod tests {
                     assert!(glyph.is_empty(), "{}: {glyph:?}", style.name());
                 }
             }
-        }
-    }
-
-    #[test]
-    fn style_names_roundtrip() {
-        for s in FrameStyle::ALL {
-            assert_eq!(FrameStyle::parse(s.name()), Some(s));
         }
     }
 }

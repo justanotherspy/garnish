@@ -898,3 +898,320 @@ was built, what the reviews found and what was decided, not how.
   a newer major. `anthropics/claude-code-action` 1.0.231 → 1.0.233 (no
   input changes); every other action pin is the latest release. `make
   check` and `scripts/ci.sh` green on the 2026-09-22 nightly.
+- **2026-09-25** — A whole-codebase review at Daniel's request, then its
+  fixes. The review was read-only: 12 area reviewers, each followed by
+  an adversarial verifier. 287 findings; 17 refuted or duplicates, 250
+  confirmed, 8 plausible, and 12 found by the verifiers themselves (2
+  high, 34 medium, 158 low, 76 nit).
+  - *What it found, by theme:*
+    - **git.** The tick read `.git` with no regular-file check or bound, so
+      a FIFO `HEAD` hung every tick (git-01, high). `git status` ran a
+      repository's filter drivers and a partial clone lazy-fetched.
+      `commondir`/`gitdir:` could name any directory, so ref containment
+      contained nothing. `git` was looked up on `PATH` after the chdir.
+      Quoted `.git/config` values broke `sync`, and a pruned upstream
+      showed `✗` for good.
+    - **Never implemented.** The GC sweep never ran, `fetch_error` was
+      never shown, the reftable fallback SPEC § 6 promised was missing,
+      and so were `refresh` on payload-only modules, `colors.percent` and
+      SPEC § 5's internal-error line.
+    - **Wrong file written.** The worker never got `--config`. install,
+      init and setup wrote the XDG file over a `~/.garnish.toml` in use,
+      and ignored `CLAUDE_CONFIG_DIR`.
+    - **Blanked status line.** One wrong-typed payload field blanked
+      every row.
+    - **Layout.** The harness trims every row, not only the blank ones, so
+      rows starting with plain spaces slid left. Flex columns overflowed
+      their share, and `auto` columns in boxes were cut.
+    - **setup.** Edits were refused when a problem's row index shifted, `d`
+      deleted box and text tables, and Esc on "changed on disk" dropped
+      the edits.
+    - **The review workflow.** It planted a `contents: write` App token
+      in reach of the model's Bash, prompted with any commenter's text,
+      and any user's `@claude` cancelled a paid run. The release build
+      restored a cache a default-branch job could seed, and ran an
+      unpinned nextest.
+    - **Tests.** render.rs unit tests used the real clock, cache and
+      workers. The criterion bench spawned itself as a worker.
+  - *Decided with Daniel:*
+    - The dirty check is plumbing (`diff-index --cached` + `diff-files`,
+      `checkStat` pinned), accepting a touched-but-unchanged file as
+      dirty until the user's git refreshes its index.
+    - Rows starting with whitespace are held against the trim (an empty
+      SGR with colour on, U+2800 with colour off).
+    - `context.colors.percent` paints the percentage.
+    - A non-zero `refresh` on a payload-only module is a config problem.
+    - Reftable repositories fall back to the worker.
+    - A `[frame] pad` string is drawn as its text.
+    - An all-hidden render still clears the line (documented).
+    - A middle column in a box drops its fill-cell reservation when
+      `gap` ≥ 1.
+    - The workflow fixes go in their own PR (#85), so the code PR (#86)
+      can be reviewed by the unchanged workflow.
+    - The three rules the final review showed a file old garnish wrote
+      can trip (`refresh` ≥ 1 on a payload-only module, which the old
+      module form offered; `title_*` left without a title by the old
+      title removal; `thresholds` out of order) stay problems on the
+      tick, knowingly against CLAUDE.md's tightening rule; CHANGELOG
+      carries an upgrade note, and setup now removes a title's keys
+      together.
+  - *How it was built:* one fix batch per concern, each a subagent in its
+    own worktree working test-first under `make check`, merged into #86
+    one batch at a time. `config/mod.rs` and `setup/app.rs` were split
+    behaviour-free before their fixes.
+  - *What the fixing found:*
+    - A new git test read the clock before the fetch it measured, and
+      failed one run in six. That became a testing rule in `CLAUDE.md`.
+    - With `RUST_BACKTRACE=1` set, a quiet refusal spends 0.7 s capturing
+      a backtrace it never prints (backlog).
+    - `make check` does not run rustdoc `-D warnings`, so one pushed
+      commit needed a follow-up; `CLAUDE.md` now says so.
+    - The `config show` round trip over every fixture and preset took
+      48 s on the macOS runner, then crossed nextest's 60 s limit once the
+      review added fixtures; it and `tests/presets.rs` now run their
+      binaries in parallel.
+    - The gallery test never noticed `animated-dots`' four blank frames
+      because it looked for motion anywhere in the row. Each promise is
+      now checked on its own, and a test freezes a preset per promise to
+      prove the check fails. The frames are written as TOML escapes: the
+      fixing agent's own Edit tool turned `\uXXXX` into the glyph.
+    - Inside a box, the gap ≥ 1 decision changed one golden: the
+      `box-columns` "Panel" row now shows `42%` where it showed `4…`.
+    - Panicking in test builds on a read of an undeclared key found one
+      live case the source scan had missed: `spend` read the pace
+      switches it does not declare. Three planted typos were caught by
+      both layers.
+    - mod-16 was checked against the 2.1.282 binary: Claude Code writes
+      `.claude.json` through a temp file and a rename, and when the
+      rename fails (a bind-mounted file) truncates it and writes in
+      place, so a half-written read is possible; the `account` worker
+      retries once after a parse failure.
+    - `context.colors.percent` changed four colour goldens, each checked
+      at the escape-code level to differ only in that colour.
+  - *Conflicts on merge:* the CLI batch renamed `settings_files` to
+    `settings_chain` under the render batch's new `render::context`, and
+    two batches both reworded the `truncate`/`overflow` reference rows.
+    Resolved by hand, and the generated docs regenerated.
+  - What is left is in PLAN's backlog under *Left open by the 2026-09-25
+    review*. 319 → 501 tests. `make bench` after the last batch, all
+    within budget: warm mean 2.5–2.6 ms (p99 3.0–4.7 ms) for `default`,
+    `full`, every module and the new `warm-tz`; cold 4.6 ms; a sync
+    refresh 14.3 ms.
+  - *The final adversarial review* (2026-09-25 evening, four reviewers
+    over both PRs, then fixed by one agent per area):
+    - #85: setting the review's environment scrub on its own made the CLI
+      refuse to start for want of bubblewrap (high); the action's
+      isolation is now switched on whole. The token still reached
+      `.git/config`, the report step ran git in the model's checkout, the
+      edit tools were only left off the allowlist, the release smoke test
+      missed `⚠ config:` rows, `verify` took any custom policy, and a
+      script test died before its summary.
+    - Area B: a failed reftable worker respawned on every tick (high); a
+      newline in a merge ref or a 64 KiB branch name did the same; the
+      config parser cost up to 5 ms a tick on a big `.git/config`; lazy
+      fetch on an older git ran the repository's `uploadpack`;
+      `--short` named a branch `heads/main`; doctor's probe followed a
+      planted link; a FIFO swapped in after the check hung the open.
+    - Area C: `config path`, `setup` and `install` ignored the `--config`
+      the status line command passes; `"rate_limits": []` counted as a
+      subscription; a stderr nobody reads blanked the line;
+      `render --bogus` exited 2; `config show` wrote boxes no row joined;
+      a reinstall dropped an environment prefix.
+    - Area D: removing a title in setup left its decorations (a `⚠
+      config:` row); a `width = 0` column, `align` over a flex column, a
+      side-less custom box and empty custom caps each drew wrong.
+    - Kept on purpose: the three tightened rules (Daniel), absurd
+      durations (C9), the per-row cap pad (D6), context-refused picker
+      entries (D8); all in PLAN's backlog.
+  - *Verifying the fixes* (a workflow: a verifier per area tried to break
+    each fix, and two skeptics had to reproduce every failure it
+    claimed; 18 claims confirmed, 3 refuted):
+    - C1 was incomplete: the readers and the writers followed the user
+      file's command where a project's wins, a settings file past 1 MiB
+      lost the command, and `$HOME.x` or `--config=$HOME/x` read wrongly.
+      Now `CommandFrom::Chain`, the command `install` already parsed, and
+      a home directory spliced where `$HOME` stands.
+    - B10 regressed: pinning `core.trustctime=true` showed a clean tree as
+      dirty for good under a user's `trustctime = false`. Reverted, with a
+      test that such a tree reads clean.
+    - B3's speed-up had no guard: `bench/run.sh` gained `warm-bigconfig`.
+    - D2 and D5 were partial, and D5's filler ran into right-hand text; a
+      box too narrow to draw still added two lines. All fixed, with four
+      new config goldens; SPEC § 4.3 said an inner row takes `justify`,
+      which the parser never allowed.
+    - #85: the report step's fallback turned every API failure green,
+      `Task` was only left off the allowlist and still ran, and the stated
+      reason for disallowing the edit tools was wrong. All fixed.
+    - The nit asking to print an unresolved `--config` in backticks was
+      refuted (`{:?}` is garnish's convention, is the settings file's own
+      JSON spelling, and lets no escape byte through), and reverted.
+    - The workflow's worktrees start at `main`, not the PR head; the
+      verifiers noticed and exported the head themselves. Their scratch
+      builds (2.7 GB each) filled the disk twice: delete them as each
+      agent finishes.
+    - 501 → 538 tests.
+
+- **2026-09-26** — A second verification pass over the fixes of the
+  first (one verifier per group, two skeptics per new claim), then its
+  fixes. `main` moved to 9145f22 (Renovate #87, claude-code-action
+  v1.0.235) and was merged into #85 and #86; the review workflow on #86 is
+  byte-identical to `main`'s again.
+  - *#85*: every earlier fix held (reproduced through the action's own
+    argument parser, the pinned Agent SDK and CLI, and a mock API). New:
+    `Skill` still forked a subagent and `Workflow`, `CronCreate` and
+    `ScheduleWakeup` were still offered, because leaving a tool off the
+    allowlist does not remove it; now disallowed. Nothing tested the
+    report step or the disallowed list, so `scripts/test-scripts.sh` now
+    runs the step's shell out of the YAML with a stand-in `gh` and checks
+    the list. The action drops a `#` line in `claude_args` (CLAUDE.md
+    said it passed one through), and the allowlist named `TodoWrite` and
+    `LS`, which the pinned CLI no longer has.
+  - *config location*: the writers had started following a checkout's
+    own `.claude/` settings, so a cloned repository chose where `config
+    init` and `setup` wrote. A first fix (writers follow the user's files,
+    readers the project's) was attacked by a third verifier: `config path`
+    then answered for one side only, and the `garnish-statusline` skill,
+    which writes through `config path`, still replaced `~/.profile` with
+    TOML when a checkout named it. Decided (the conservative side,
+    Daniel's to revisit, PLAN backlog): a `--config` from a checkout's own
+    files is followed by no command, reading or writing, and refused on
+    one line like an unresolvable one (`WriteTarget::Checkout`); every
+    command otherwise names the same file. A command run by hand reads a
+    settings file whole (64 MiB bound), so past the tick's 1 MiB cap
+    `config path`, `config init` and `doctor` agree with `install`;
+    `doctor` reads the chain as Claude Code does, and the keys the tick
+    reads skip a file past its cap. `shell_words` split at Unicode
+    whitespace (a pasted non-breaking space cut the path) and spliced an
+    unquoted `$HOME` that `sh` would split; both fixed, a second `$HOME`
+    is refused, a quoted `--config` is cut to 200 characters, a
+    `GARNISH_CONFIG=` prefix counts, a program word `sh` would split runs
+    no garnish, and a second `--config` or one after `--` (both clap
+    errors) names no file. `doctor` no longer points `config init` at a
+    file it would refuse. The skill's write step stops on a refusal.
+    Three mutations the tests missed are now caught (the badge rows'
+    skip, the note's cut, the cap's `>`). A fourth verifier got round the
+    rule three ways, all closed: `install --settings` on a checkout's
+    file wrote the config it named (now a note, no file); a checkout's
+    `env` block, which Claude Code copies into the session (read from the
+    2.1.283 binary), set `GARNISH_CONFIG` or pointed
+    `GARNISH_MANAGED_SETTINGS` at itself (`config::hand_explicit` now
+    refuses a variable a checkout set, a relative hook is ignored); a
+    relative `CLAUDE_CONFIG_DIR` made the checkout the user's own (now
+    ignored). And a project running another status line pointed every
+    command at a file no tick read; the person's own garnish command now
+    names it. `setup --install` notes a command that reads another file
+    than the one it wrote; a `~` in a `GARNISH_CONFIG=` value and
+    arguments clap refuses name no file; a linked home or a checkout
+    file linked to the person's own counts as theirs. A fifth verifier,
+    running Claude Code 2.1.283 end to end, confirmed a project's `env`
+    block reaches the Bash tool, and got past the env check three ways
+    (a session in a subdirectory, an array value, a file serde refuses but
+    `JSON.parse` reads): guessing which checkout file set the variable was
+    the wrong shape. Now inside a session (`CLAUDECODE` present) a
+    `GARNISH_CONFIG` or managed-settings hook counts only when the
+    person's own settings set it. `doctor` no longer loads the refused
+    file (`config::load_exactly`); the setup notes compare a relative
+    path absolutely, cover a command that passes no config, and show
+    `~/…` on the screen. A sixth verifier (Claude Code end to end again)
+    found no way left for a checkout to choose the file, and seven smaller
+    things, fixed: a `~/g.toml` from the person's own `env` block (Claude
+    Code expands nothing there) was read against the working directory, so
+    `config init` made a `~` directory and a checkout could plant the
+    tick's config; a relative `GARNISH_CONFIG` is now ignored by the tick
+    and refused by hand. From a terminal the commands never saw an `env`
+    block's `GARNISH_CONFIG`, which is what the ticks read; now they follow
+    it. The platform file standing in for an ignored hook was still
+    demoted as the checkout's, and `doctor` showed the hook's file;
+    `managed-settings.d` drop-ins now vouch; the screen tilded a home
+    inside a longer path; five untested mutations now have tests. A
+    seventh verifier (Claude Code 2.1.283 again, `/etc` scenarios in a
+    private mount namespace) also found no checkout choosing the file,
+    and nine smaller things, fixed: an `env` value of another JSON type
+    was skipped where Claude Code takes its `String()` (`["/p"]` is
+    `/p`), so a lower file's value was named (`js_string`); the
+    `managed-settings.d` drop-ins vouched in a session but were not in the
+    chain, so `config path` answered two ways (now the managed layer,
+    `layer_of`, all of them, sorted, no longer the first 64 the directory
+    lists); `install` and the `setup --install` note ignored a managed
+    `env` value (`installed_env_target`); a project running another
+    program still had its `env` decide the person's config elsewhere; an
+    `env` value was reported as `statusLine.command`'s (`Unresolved` has
+    a `key`); the screen tilded a path inside quotes, which pasted made a
+    `~` directory; and a relative `--config` in the person's own command
+    (`--config=~/g.toml`, which `sh` leaves alone) made the tick read the
+    repository's file: the tick now ignores it, as it ignores a relative
+    `GARNISH_CONFIG`, and says so first on its `⚠ config:` row (the first
+    push asserted that row at the default width, and macOS's long temp
+    path cut it). The two mutations only a platform managed file could
+    show (`demote_hooked`, the drop-ins) are unit tests now, beside an
+    empty value and `install` following the user's `env`. An eighth
+    verifier found one way back in, new in that round: `install` read
+    the managed layer on its own, past the demotion of a managed file a
+    checkout pointed the hook at, and wrote the default config where that
+    file said while every other command refused (now it reads the layer
+    through `chain_files`). And nine smaller: `install` read the file it
+    rewrites as strings only; a hidden drop-in (`.x.json`, which Claude
+    Code skips) counted; `doctor` listed no drop-in (now `drop-in` rows,
+    whose keys the tick-read rows skip, since the tick reads none: PLAN
+    backlog); `js_string` wrote `1.0` where JavaScript writes `1`
+    (`js_number`, checked against node); the install screen's command
+    line and quoted spans still took a `~`; the unresolved note named no
+    file; the ignored `--config` row led with the long path of the file
+    read, which cut its reason at 80 columns (the row now names no file);
+    and four mutations survived (the platform guard's test was vacuous),
+    each now killed. Two macOS runs failed on tests of that work that
+    asserted on text naming a temporary file (a macOS temp path is four
+    times Linux's); the suite now passes under a 136-character `TMPDIR`.
+    A ninth verifier found no way in from a session: `install --settings`
+    a checkout's file, run from elsewhere, still wrote where the managed
+    file that file pointed the hook at said (the rewritten file now
+    counts for the demotion, `chain_files_rewriting`); a directory named
+    `*.json` counted as a drop-in; `tilde_paths` ignored backslash escapes
+    (`shell_quote`'s `'\''`); and four mutations survived that only a
+    platform managed directory could show, so the hook's file now brings
+    its drop-ins too and a CLI test reaches them. Accepted as nits (PLAN):
+    a halfway number, serde_json's inexact floats and `1e999`, a config
+    key named `--config`, and `install` refusing where `config path`
+    passes over a demoted file. A tenth verifier found every round-9 fix
+    holding and no way in from a session; from a terminal with the hook
+    exported, the other file of the rewritten file's `.claude` pair
+    naming the hook still let `install --settings` write (both now
+    count), and the hook bringing drop-ins opened a new door: a hook file
+    in a shared directory took drop-ins anyone could create there, so a
+    drop-in directory now counts only when root or the managed file's
+    owner owns it and nobody else can write to it (`guarded_dir`). An
+    unobservable `truncate` is gone, a single-quote case pins the
+    backslash rule, and bash's `$'…'` (only what the install screen
+    shows) is left as a nit (PLAN). An eleventh verifier found no way in
+    from a session, and the guard wrong: it also refused a group-writable
+    platform directory (root 0775 or setgid 2775), which Claude Code
+    reads, so in a session an organisation's drop-in value was refused
+    while the ticks read it; it checked a chain of links at its two ends
+    only; and three of its checks had no test. The hook's file brings no
+    drop-ins again (the platform's alone, unguarded, as Claude Code reads
+    them), the chain's decisions became pure functions a unit test gives
+    a drop-in (`chain_target`, `managed_env`), and the rewritten file's
+    `.claude` pair is found once resolved as well (a link, `x/..`, a bare
+    `settings.json`). Rounds 9 to 11 found nothing reachable from a
+    session, and the last fix removes code, so the rounds stop there.
+    `make bench` at 9417c5d: every scenario within budget (warm 2.13 to
+    2.37 ms mean, p99 at most 3.65 ms; cold 3.53 ms).
+  - *layout*: four of the layout follow-up's fixes held (under fuzz of
+    20 000 seeds × 211 widths, custom frames included); a fifth was
+    partial and one had regressed. Under uneven `custom` caps a row was
+    measured on the frame's narrowest cap pair and laid out on its own,
+    so a box that fitted only on its own lines was drawn and then cut
+    (its bottom edge and later rows gone, 19 seeds). Now `frame_plan`
+    measures each row on the caps it lands on, re-measuring until no row
+    moves (8 rounds at most; a frame that never settles keeps the
+    narrowest pair), and a box is drawn only whole. A `style = "none"`
+    box on a `width = 0` column made its row three lines tall
+    (`box_interior` now needs one cell). SPEC § 4.3 names the one place
+    text can meet the rule (a column narrower than its pads), a test pins
+    where a dropped `fr` column's gap goes, and CLAUDE.md has the
+    composer's real path. The in-process tick got slightly faster (each
+    row's height measured once, not twice: dashboard 70 → 64 µs).
+  - `make bench` at 5e95caf, the machine otherwise idle: every scenario
+    within budget. Warm means 2.57–2.89 ms (p99 3.2–4.4 ms), the new
+    `warm-bigconfig` the slowest at 2.89 ms; cold 4.5 ms; refresh-sync
+    15.2 ms.

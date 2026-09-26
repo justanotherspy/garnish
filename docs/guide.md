@@ -50,7 +50,8 @@ the builder: the preview at the top, your rows below it, and single keys
 to add a module (`m`, with search), a row (`a`), a column (`C`, which
 leaves the cursor on the new column; `]` on a module past the last
 column makes one for it), a stack (`S`), a title (`t`) or a box (`b`;
-`B` boxes the row together with the row above), to edit the selected
+`B` boxes the row together with the row above, `e` edits the box the
+selected line is in), to edit the selected
 module or row (`Enter`; a click in the preview selects, a second click
 edits), and to open the top-level keys (`1`), the frame (`2`) and the
 colours (`3`). `u` undoes the last edit and `U` redoes it, `f` cycles
@@ -87,6 +88,11 @@ files Claude Code reads for the current directory, which one sets
 `hideVimModeIndicator = true` when your config calls for them.
 
 ## 3. Try it before you commit
+
+`garnish setup` previews every change live on the bundled sample payloads.
+The commands below read the payload files of a checkout of this repository
+(`tests/fixtures/payloads` is not installed with the binary); any payload
+you saved works the same way:
 
 ```sh
 garnish preview tests/fixtures/payloads/subscription-full.json
@@ -152,7 +158,16 @@ right   = ["limit5h", "limit7d", "cost"]
 | usage | `limit5h` `limit7d` `spend` `cost` |
 | session | `session` `api` `cache` `clock` |
 | identity | `session_name` `vim` `agent` `lines` |
+| harness | `version` `sandbox` `voice` `account` |
 | yours | `text.<name>`: a fixed string in a box, any number of them |
+
+The harness group reports on Claude Code itself: `version` prints the
+version from the payload, `sandbox` and `voice` are badges that show only
+while Bash sandboxing or voice dictation is on in your settings, and
+`account` shows the claude.ai account the session is signed in with (a
+cached module, refreshed in the background). Between modules,
+`[frame] separator_color` paints every separator in a theme role, a colour,
+or `inherit` (the colour of the module before it).
 
 A text module is the one thing you define yourself: plain text (escape
 sequences are stripped) in a box of fixed width, so it doubles as a
@@ -217,7 +232,11 @@ Claude Code drops whitespace-only rows from the script's output, so with
 `style = "none"` and colour off (`color = "never"`, `NO_COLOR`) a spacer
 shows in `preview` only; add `blank = true` to that row to keep it on
 screen whatever the colour setting (the row then carries one invisible
-cell).
+cell). Claude Code trims every row as well, so a row that starts with
+spaces (a column's padding line, a module placed right or centre under
+`style = "none"`) would slide left; garnish keeps those cells with an
+invisible lead: an empty colour code with colour on, the same braille
+blank with it off.
 With `stale_style = "hide"`, a row made only of cached modules can vanish
 while its values are overdue; `hide_when_empty = false` on one of them pins
 the row.
@@ -280,7 +299,7 @@ modules = ["path", "model"]
 right   = ["clock"]
 ```
 
-The keys are in [config.md § `[[row.col]]`](config.md#row-col) and
+The keys are in [config.md § `[[row.col]]`](config.md#rowcol) and
 § `[box.<name>]`; `grid-three`, `grid-six`, `boxed-panels` and
 `dashboard-panels` in the gallery are working examples to copy from.
 
@@ -347,8 +366,9 @@ so the two stay in step; an explicit `animate` wins over the setting, and
   doctor` says why.
 - **The `sandbox` or `voice` badge never appears** → they show only while
   `sandbox.enabled` or `voice.enabled` is `true` in Claude Code's settings
-  files (`/voice` writes the second); `garnish doctor` prints both keys
-  with the file each comes from.
+  files (`/voice` writes the second; a `managed-settings.d` drop-in is not
+  read for them); `garnish doctor` prints both keys with the file each
+  comes from.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
 - **The line looks faint** → Claude Code draws every status line row dim
   and folds that into every coloured piece of it; nothing a status line
@@ -385,6 +405,11 @@ so the two stay in step; an explicit `animate` wins over the setting, and
 - **Reproduce a render** → `GARNISH_NOW=1738425600 COLUMNS=100 garnish < payload.json`
   (the lines come out 96 cells wide: what fits in Claude Code's box at that
   terminal width).
+- **A garbled terminal after `garnish setup` was killed** → `setup` puts
+  the terminal back when it exits, on `Ctrl+C` and on a crash, but a
+  `kill` (or a supervisor's SIGTERM) gives it no chance to, and the shell
+  is left without echo, on the alternate screen, with mouse reporting on.
+  Type `reset` (even unseen) and Enter.
 
 ## 8. Under the hood
 

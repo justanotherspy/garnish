@@ -12,18 +12,20 @@ The `oauthAccount.emailAddress` of `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude
 
 | preset | render |
 |---|---|
-| `minimal` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
-| `default` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
-| `full` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
+| `minimal` | — |
+| `default` | — |
+| `full` | — |
 
 ## Icon sets (default preset)
 
 | icons | render |
 |---|---|
-| `nerd` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
-| `unicode` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
-| `emoji` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
-| `ascii` | `(shown once its worker has read ~/.claude.json, e.g. `@ dev@example.com`)` |
+| `nerd` | — |
+| `unicode` | — |
+| `emoji` | — |
+| `ascii` | — |
+
+Nothing to show above (—): the worker reads `~/.claude.json`, which a sample never touches. Once it has, the module prints the sign-in's email address, or with `style = "user"` (the `minimal` preset) the part before the `@`.
 
 ## Options
 
@@ -33,12 +35,12 @@ The `oauthAccount.emailAddress` of `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `600` | `600` | `600` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | integer ≥ 1 | `600` | `600` | `600` | Seconds a cached value lives before a background worker refreshes it. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `show_icon` | bool | `false` | `true` | `true` | Show the icon. |
 | `style` | `email` \| `user` | `"user"` | `"email"` | `"email"` | `email` shows the whole address; `user` the part before `@`. |
@@ -50,6 +52,8 @@ The `oauthAccount.emailAddress` of `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
 | `account` | `U+F007` | `@` | `👤` | `@` | Account icon. |
+
+Also try (`account`: `U+F007` `U+F2BD` `U+F2C0` `@` `&`).
 
 Any icon key also accepts `<key>_frames = ["…", "…"]`: glyphs of one width cycled one per tick (frame = `floor(now) mod n`); with `animate = false` frame 0 shows. See [Animation](../guide.md#animation).
 

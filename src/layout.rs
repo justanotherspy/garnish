@@ -9,9 +9,12 @@
 
 use std::ops::Range;
 
-use crate::ansi::{Color, Segment, Style, display_width, scroll, segments_width, truncate};
+use crate::ansi::{
+    Color, Segment, Style, cluster_width, display_width, scroll, scroll_period, segments_width,
+    truncate,
+};
 use crate::config::{BoxCfg, BoxRef, Justify, SeparatorColor, VAlign, Width};
-use crate::frame::{FrameChars, FrameStyle, Rule, Ticker};
+use crate::frame::{BLANK_CELL, FrameChars, FrameStyle, Rule, Ticker};
 use crate::theme::{Role, Theme};
 
 /// What one piece of a rendered line is.
@@ -39,7 +42,8 @@ pub enum Elem {
     /// still owns, counted from the run's first cell: a module may own two
     /// runs when it straddles the ticker's wrap, the module a cut lands in
     /// owns the ellipsis cells, and a module wholly outside the window owns
-    /// none (SPEC § 14). Empty when a whole line was recut.
+    /// none (SPEC § 14). Empty for a whole line recut to the width or given
+    /// the braille blank of a `blank` row: neither names a module.
     Group(Vec<(String, Range<usize>)>),
     /// A row's or a box's title.
     Title,
@@ -126,8 +130,8 @@ impl Line {
             .collect()
     }
 
-    /// Replace the line's segments, keeping one piece per original piece is
-    /// not possible after a cut, so the result is one piece.
+    /// The line cut to `width` cells as one piece: a cut can split any piece,
+    /// so the pieces, and the placement map with them, cannot be kept.
     fn recut(&self, width: usize, ellipsis: &str) -> Self {
         let segs = truncate(&self.segments(), width, ellipsis);
         Self { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs }] }
@@ -139,7 +143,8 @@ impl Line {
 pub struct Row<'a> {
     /// The row's columns, left to right; never empty.
     pub cols: Vec<Col<'a>>,
-    /// Empty cells between columns.
+    /// Cells between two drawn columns: the rule on a one-line row under a
+    /// rule, spaces otherwise.
     pub gap: usize,
     /// The separator between this row's modules.
     pub separator: &'a str,
@@ -240,17 +245,25 @@ enum Draft {
     /// cells a packed row would not draw at all are these, and only these
     /// are dropped from the end of such a row.
     Space(usize, Elem),
+    /// No cells: this line belongs to a `blank = true` inner row, so once
+    /// it is finished it keeps the braille cell if it is whitespace only
+    /// (SPEC § 4.1). Only the finished line can tell: the outer row's caps,
+    /// a box's sides or another column may already keep it on screen.
+    Blank,
 }
 
 impl Draft {
-    fn spaces(elem: Elem, n: usize) -> Self {
-        Self::Done(Piece { elem, segs: vec![Segment::plain(" ".repeat(n))] })
+    /// `n` spaces beside a title (`title_pad`): drawn as they are, never a
+    /// placement run another title could land in.
+    fn title_pad(n: usize) -> Self {
+        Self::Done(Piece { elem: Elem::Pad, segs: vec![Segment::plain(" ".repeat(n))] })
     }
 
     fn cells(&self) -> usize {
         match self {
             Self::Done(p) => segments_width(&p.segs),
             Self::Rule(n) | Self::Space(n, _) => *n,
+            Self::Blank => 0,
         }
     }
 }
@@ -269,15 +282,32 @@ impl Layout<'_> {
         let blocks = blocks(rows);
         // The frame's caps are decided over the lines that carry them: a
         // box draws its own ends, so its lines are not counted (SPEC § 4.3).
-        let framed: usize = blocks
+        let fill = self.frame_fill();
+        let framed: Vec<&Row<'_>> = blocks
             .iter()
             .filter(|b| b.boxed.is_none())
-            .map(|b| b.rows.iter().map(|(_, r)| self.row_height(r)).sum::<usize>())
-            .sum();
+            .flat_map(|b| b.rows.iter().map(|(_, r)| *r))
+            .collect();
+        let plan = self.frame_plan(&framed, fill);
+        let count: usize = plan.iter().map(|(_, height)| *height).sum();
+        let mut plan = plan.into_iter();
         let mut out: Vec<Vec<Line>> = vec![Vec::new(); rows.len()];
         let mut index = 0_usize;
         for block in blocks {
-            for (at, lines) in self.block_lines(&block, &mut index, framed) {
+            let tagged = block.boxed.map_or_else(
+                || {
+                    let mut tagged = Vec::with_capacity(block.rows.len());
+                    for (at, row) in &block.rows {
+                        let Some((room, height)) = plan.next() else { break };
+                        tagged.push((*at, self.frame_row(row, room, height, (index, count), fill)));
+                        index = index.saturating_add(height);
+                    }
+                    tagged
+                },
+                // A box replaces the frame's caps with its own edges.
+                |boxed| self.boxed_block(&block, boxed),
+            );
+            for (at, lines) in tagged {
                 if let Some(slot) = out.get_mut(at) {
                     slot.extend(lines);
                 }
@@ -286,82 +316,108 @@ impl Layout<'_> {
         out
     }
 
-    /// The lines of one block, each tagged with the configured row it
-    /// belongs to.
-    fn block_lines(
-        &self,
-        block: &Block<'_, '_>,
-        index: &mut usize,
-        framed: usize,
-    ) -> Vec<(usize, Vec<Line>)> {
-        block.boxed.map_or_else(
-            || {
-                block
-                    .rows
-                    .iter()
-                    .map(|(at, row)| {
-                        let height = self.row_height(row);
-                        let fill = if self.fill { Fill::Rule } else { Fill::Packed };
-                        // A tall row's lines take different caps (`first`
-                        // then `middle`), and a `custom` frame's need not
-                        // be the same width: the columns share the room the
-                        // *widest* pair leaves, so no line overflows and the
-                        // others fill the difference with rule cells.
-                        let inner = (0..height)
-                            .map(|i| self.inner_width(row, index.saturating_add(i), framed))
-                            .min()
-                            .unwrap_or_else(|| self.inner_width(row, *index, framed));
-                        let lines = self
-                            .row_body(row, inner, height, fill, Fit::default())
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, drafts)| {
-                                // A row's title goes into its first line
-                                // alone, however tall the row is.
-                                let title = row.title.filter(|_| i == 0);
-                                let line =
-                                    self.wrap_frame(drafts, *index, framed, row, fill, title);
-                                *index = index.saturating_add(1);
-                                line
-                            })
-                            .collect();
-                        (*at, lines)
-                    })
-                    .collect()
-            },
-            // A box replaces the frame's caps with its own edges.
-            |boxed| self.boxed_block(block, boxed),
-        )
+    /// Each row of the frame's room and height, in order: the cells its
+    /// columns share, and the lines it takes when laid out to them.
+    ///
+    /// A row's lines take the caps of where they land among the frame's
+    /// (`first`, `middle`, `last`), and a `custom` frame's need not be one
+    /// width: a row is laid out to the room the widest pair on its lines
+    /// leaves, so no line overflows and the others fill the difference with
+    /// rule cells. Where its lines land depends on the heights, and a
+    /// height on the room (a box adds its two lines only where it fits,
+    /// SPEC § 4.3), so every row starts on the fewest cells any pair of
+    /// caps leaves ([`Self::frame_room`]) and each round measures it again
+    /// on the caps its lines land on, until no row moves; under a style,
+    /// whose caps are one width, the first round moves none. A height
+    /// changes only where a box starts or stops fitting, so this settles
+    /// within a few rounds or never: a row whose box fits under the narrow
+    /// `single` caps but not under the `first` and `last` ones its three
+    /// lines would take has no height that holds, and a frame that does
+    /// not settle keeps the first measure, laid out to those cells.
+    fn frame_plan(&self, rows: &[&Row<'_>], fill: Fill) -> Vec<(usize, usize)> {
+        const ROUNDS: usize = 8;
+        let start = || -> Vec<(usize, usize)> {
+            rows.iter()
+                .map(|row| {
+                    let room = self.frame_room(row);
+                    (room, self.row_height(row, room, fill))
+                })
+                .collect()
+        };
+        let mut plan = start();
+        for _ in 0..ROUNDS {
+            let count: usize = plan.iter().map(|(_, height)| *height).sum();
+            let mut index = 0_usize;
+            let mut settled = true;
+            for (row, (room, height)) in rows.iter().zip(plan.iter_mut()) {
+                let lines = index..index.saturating_add(*height);
+                index = lines.end;
+                let fits = lines.map(|i| self.inner_width(row, i, count)).min().unwrap_or(*room);
+                if fits != *room {
+                    settled = false;
+                    *room = fits;
+                    *height = self.row_height(row, fits, fill);
+                }
+            }
+            if settled {
+                return plan;
+            }
+        }
+        start()
     }
 
-    /// The lines of a block drawn inside a box: its top rule with the title,
-    /// the rows between its sides, and its bottom rule.
+    /// One row of the frame laid out to `room` cells and `height` lines,
+    /// its first line being line `index` of the `count` that carry caps.
+    fn frame_row(
+        &self,
+        row: &Row<'_>,
+        room: usize,
+        height: usize,
+        (index, count): (usize, usize),
+        fill: Fill,
+    ) -> Vec<Line> {
+        let widths = self.share(row, room, fill);
+        let ends = self.ends_in_content(row, &widths);
+        self.row_columns(row, &widths, height, fill, Fit::default())
+            .into_iter()
+            .enumerate()
+            .map(|(i, drafts)| {
+                // A row's title goes into its first line alone, however tall
+                // the row is. A boxed row's belongs to its box, which draws
+                // it on its top edge; none reaches here.
+                let title = row.title.filter(|_| i == 0);
+                self.wrap_frame(drafts, (index.saturating_add(i), count), row, fill, title, ends)
+            })
+            .collect()
+    }
+
+    /// The lines of a block drawn inside a box, each tagged with the
+    /// configured row it belongs to: the top rule with the title goes with
+    /// the first row, the bottom rule with the last.
     fn boxed_block(&self, block: &Block<'_, '_>, boxed: &BoxRef) -> Vec<(usize, Vec<Line>)> {
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
         let (inner, pad) = self.box_interior(&chars, self.width).unwrap_or((0, 0));
-        // `box = true` on a row is the one way to title a one-row box, so
-        // the row's own title stands in when the box has none.
-        let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
-        let mut out: Vec<(usize, Vec<Line>)> = Vec::new();
+        let body = self.block_body(block, inner, &cfg, Fit::default());
+        let mut lines = self
+            .box_lines(&cfg, &chars, self.width, pad, box_title(&cfg, block), body)
+            .into_iter()
+            .map(|drafts| self.paint(drafts, false));
         let first = block.rows.first().map_or(0, |(at, _)| *at);
         let last = block.rows.last().map_or(0, |(at, _)| *at);
-        out.push((first, vec![self.edge_line(&chars, true, title, &cfg)]));
+        let mut out: Vec<(usize, Vec<Line>)> = vec![(first, lines.next().into_iter().collect())];
         for (at, row) in &block.rows {
-            let height = self.row_height(row);
-            let body = self.row_body(row, inner, height, Fill::from_box(&cfg), Fit::default());
-            let lines =
-                body.into_iter().map(|d| self.wrap_box(d, &chars, &cfg, pad, row.blank)).collect();
-            out.push((*at, lines));
+            let height = self.row_height(row, inner, Fill::from_box(&cfg));
+            out.push((*at, lines.by_ref().take(height).collect()));
         }
-        out.push((last, vec![self.edge_line(&chars, false, None, &cfg)]));
+        out.push((last, lines.collect()));
         out
     }
 
-    /// The cells a row's columns share, once the frame's caps of its first
-    /// line are taken off (the caps of a style are the same width on every
-    /// line; a `custom` frame whose caps differ has the difference filled
-    /// with rule cells before the cap).
+    /// The cells line `index` of the `count` that carry the frame's caps
+    /// leaves a row's columns, once its caps are taken off (the caps of a
+    /// style are the same width on every line; a `custom` frame whose caps
+    /// differ has the difference filled with rule cells before the cap).
     fn inner_width(&self, row: &Row<'_>, index: usize, count: usize) -> usize {
         let (prefix, cap) = self.chars.ends(index, count);
         let pad = display_width(&self.chars.pad);
@@ -380,6 +436,48 @@ impl Layout<'_> {
         }
         let pad = if row_ends_in_content(row) { display_width(&self.chars.pad) } else { 0 };
         display_width(cap).saturating_add(pad)
+    }
+
+    /// The cells a row of the frame can count on whichever of the frame's
+    /// lines it lands on: the fewest any pair of caps leaves, where
+    /// [`Self::frame_plan`] starts and what it falls back to. Under a style,
+    /// whose caps are all one width, they are exactly the cells the row is
+    /// laid out to.
+    fn frame_room(&self, row: &Row<'_>) -> usize {
+        [(0, 1), (0, 3), (1, 3), (2, 3)]
+            .into_iter()
+            .map(|(index, count)| self.inner_width(row, index, count))
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// How a row of the frame fills its empty cells.
+    const fn frame_fill(&self) -> Fill {
+        if self.fill { Fill::Rule } else { Fill::Packed }
+    }
+
+    /// [`row_ends_in_content`] for a row laid out to `widths`: a last column
+    /// that draws nothing at its share (it took no cells, being an `fr` one
+    /// whose share floored to nothing or one dropped from a row too narrow
+    /// for it, or its box does not fit them) leaves the column before it to
+    /// end the row, and that one keeps a pad of its own (SPEC § 4.3).
+    fn ends_in_content(&self, row: &Row<'_>, widths: &[usize]) -> bool {
+        let fits = |boxed: Option<&BoxRef>, width: usize| {
+            boxed.is_none_or(|b| {
+                self.box_interior(&self.box_chars(&self.box_cfg(b)), width).is_some()
+            })
+        };
+        let last_draws = row.cols.last().zip(widths.last()).is_some_and(|(col, w)| {
+            *w > 0
+                && fits(col.boxed, *w)
+                && match &col.content {
+                    Content::Groups { .. } => true,
+                    Content::Stack(rows) => {
+                        rows.iter().any(|r| fits(r.boxed, *w) && row_ends_in_content(r))
+                    }
+                }
+        });
+        last_draws && row_ends_in_content(row)
     }
 }
 
@@ -412,18 +510,46 @@ fn blocks<'a, 'b>(rows: &'b [Row<'a>]) -> Vec<Block<'a, 'b>> {
 }
 
 /// Whether the right edge of a row's last column carries content rather than
-/// fill, on any of its lines.
+/// fill, on any of its lines. With no `fr` column the free width is a rule
+/// after the last column, which keeps a pad of its own (SPEC § 4.3): the
+/// row then ends in that rule, never in content.
 fn row_ends_in_content(row: &Row<'_>) -> bool {
-    row.cols.last().is_some_and(col_ends_in_content)
+    has_fr(row) && row.cols.last().is_some_and(col_ends_in_content)
 }
 
-fn col_ends_in_content(col: &Col<'_>) -> bool {
-    match &col.content {
-        Content::Groups { left, right, .. } => {
-            !right.is_empty() || (col.justify == Justify::Right && !left.is_empty())
+/// Whether any column of the row shares the free width.
+fn has_fr(row: &Row<'_>) -> bool {
+    row.cols.iter().any(|c| matches!(c.width, Width::Fr(_)))
+}
+
+/// The cells the drawn columns of `widths` take, with a gap between each
+/// two of them.
+fn drawn_cells(widths: &[usize], gap: usize) -> usize {
+    let drawn = widths.iter().filter(|w| **w > 0).count();
+    widths.iter().sum::<usize>().saturating_add(gap.saturating_mul(drawn.saturating_sub(1)))
+}
+
+/// Whether a column's text can meet a rule beside it: not when a box's side
+/// stands between them on every line, as it does for a boxed column and a
+/// stack of boxed rows.
+fn meets_rule(col: &Col<'_>) -> bool {
+    col.boxed.is_none()
+        && match &col.content {
+            Content::Groups { .. } => true,
+            Content::Stack(rows) => rows.iter().any(|r| r.boxed.is_none()),
         }
-        Content::Stack(rows) => rows.iter().any(row_ends_in_content),
-    }
+}
+
+/// Whether a column's content reaches its right edge. A `width = 0` column
+/// takes no cells and draws nothing, so it never does.
+fn col_ends_in_content(col: &Col<'_>) -> bool {
+    col.width != Width::Cells(0)
+        && match &col.content {
+            Content::Groups { left, right, .. } => {
+                !right.is_empty() || (col.justify == Justify::Right && !left.is_empty())
+            }
+            Content::Stack(rows) => rows.iter().any(row_ends_in_content),
+        }
 }
 
 impl Fill {
@@ -440,30 +566,53 @@ impl Fill {
 }
 
 /// Heights: a bare row is one line, a boxed one its lines plus two, and a
-/// row is as tall as its tallest column (SPEC § 4.3).
+/// row is as tall as its tallest column (SPEC § 4.3). Each is measured at
+/// the width it is laid out to: a box too narrow to draw there renders
+/// nothing, so it adds no lines.
 impl Layout<'_> {
-    fn row_height(&self, row: &Row<'_>) -> usize {
-        row.cols.iter().map(|c| self.col_height(c)).max().unwrap_or(1).max(1)
+    fn row_height(&self, row: &Row<'_>, width: usize, fill: Fill) -> usize {
+        let (widths, _) = self.shares(row, width, fill);
+        row.cols.iter().zip(&widths).map(|(c, w)| self.col_height(c, *w, fill)).max().unwrap_or(1)
     }
 
-    fn col_height(&self, col: &Col<'_>) -> usize {
-        let content = match &col.content {
+    /// A boxed column is its content plus the two edge lines, so a boxed
+    /// one-line column is a three-line box.
+    fn col_height(&self, col: &Col<'_>, width: usize, fill: Fill) -> usize {
+        let Some(boxed) = col.boxed else {
+            return self.content_height(col, width, fill);
+        };
+        let cfg = self.box_cfg(boxed);
+        self.box_interior(&self.box_chars(&cfg), width).map_or_else(
+            || self.content_height(col, width, fill),
+            |(inner, _)| self.content_height(col, inner, Fill::from_box(&cfg)).saturating_add(2),
+        )
+    }
+
+    /// A column's own lines: one for its groups, its blocks' for a stack.
+    fn content_height(&self, col: &Col<'_>, width: usize, fill: Fill) -> usize {
+        match &col.content {
             Content::Groups { .. } => 1,
             Content::Stack(rows) => {
-                blocks(rows).iter().map(|b| self.block_height(b)).sum::<usize>().max(1)
+                blocks(rows).iter().map(|b| self.block_height(b, width, fill)).sum::<usize>().max(1)
             }
-        };
-        // A boxed column is its content plus the two edge lines, so a boxed
-        // one-line column is a three-line box.
-        if col.boxed.is_some() { content.saturating_add(2) } else { content }
+        }
     }
 
     /// One block of a stack: its rows, plus the two edge lines when they are
-    /// inside a box. A top-level row's box is drawn by `boxed_block`, which
-    /// adds the two lines there instead.
-    fn block_height(&self, block: &Block<'_, '_>) -> usize {
-        let rows: usize = block.rows.iter().map(|(_, r)| self.row_height(r)).sum();
-        if block.boxed.is_some() { rows.saturating_add(2) } else { rows }
+    /// inside a box that draws. A top-level row's box is drawn by
+    /// `boxed_block`, which adds the two lines there instead.
+    fn block_height(&self, block: &Block<'_, '_>, width: usize, fill: Fill) -> usize {
+        let rows = |width: usize, fill: Fill| -> usize {
+            block.rows.iter().map(|(_, r)| self.row_height(r, width, fill)).sum()
+        };
+        let Some(boxed) = block.boxed else {
+            return rows(width, fill);
+        };
+        let cfg = self.box_cfg(boxed);
+        self.box_interior(&self.box_chars(&cfg), width).map_or_else(
+            || rows(width, fill),
+            |(interior, _)| rows(interior, Fill::from_box(&cfg)).saturating_add(2),
+        )
     }
 
     /// The pad inside a box: the frame's, or one cell when the frame has
@@ -478,9 +627,10 @@ impl Layout<'_> {
 impl Layout<'_> {
     /// One row's lines as drafts, each `width` cells wide.
     ///
-    /// `exact` marks a row laid out to its own content (an inner row of an
-    /// `auto` column): it reserves no rule cell, so nothing is cut to make
-    /// room for a rule that is not drawn (SPEC § 4.3).
+    /// `inherit` is how the column holding this row is laid out, for an
+    /// inner row of a stack: an `auto` column's rows are exact, and the
+    /// column's own pads belong to the ends of the row that reach its edges
+    /// (SPEC § 4.3).
     fn row_body(
         &self,
         row: &Row<'_>,
@@ -490,18 +640,56 @@ impl Layout<'_> {
         inherit: Fit,
     ) -> Vec<Vec<Draft>> {
         let widths = self.share(row, width, fill);
+        let mut lines = self.row_columns(row, &widths, height, fill, inherit);
+        // The cells no column took: with no `fr` column to share them, the
+        // free width is filler after the last column.
+        let left = width.saturating_sub(drawn_cells(&widths, row.gap));
+        if left > 0 && fill.draws() {
+            for line in &mut lines {
+                line.push(Self::filler(left, fill));
+            }
+        }
+        lines
+    }
+
+    /// One row's columns laid out to `widths` and joined by their gaps, a
+    /// list of drafts per line, without the cells no column took: a row in
+    /// a column or a box has them filled by [`Self::row_body`], and a row of
+    /// the frame by [`Self::wrap_frame`], which puts them behind the pad
+    /// before its cap.
+    fn row_columns(
+        &self,
+        row: &Row<'_>,
+        widths: &[usize],
+        height: usize,
+        fill: Fill,
+        inherit: Fit,
+    ) -> Vec<Vec<Draft>> {
         let gap = row.gap;
+        // Inside a box the gap is spaces, and they alone keep two columns
+        // apart; only at `gap = 0` does a side facing a neighbour need a
+        // fill cell and a pad of its own (SPEC § 4.3).
+        let spaced = fill == Fill::Spaces && gap > 0;
         let last = row.cols.len().saturating_sub(1);
         let cols: Vec<Vec<Vec<Draft>>> = row
             .cols
             .iter()
-            .zip(&widths)
+            .zip(widths)
             .enumerate()
             .map(|(j, (col, w))| {
+                let (l, r) = self.edge_pads(row, j, fill);
+                let (outer_l, outer_r) = inherit.pads;
                 let fit = Fit {
                     exact: inherit.exact || col.width == Width::Auto,
-                    pads: self.edge_pads(row, j, fill),
+                    pads: (
+                        if j == 0 { l.max(outer_l) } else { l },
+                        if j == last { r.max(outer_r) } else { r },
+                    ),
                     trailing: inherit.trailing && j == last,
+                    sides: (
+                        if j == 0 { inherit.sides.0 } else { spaced },
+                        if j == last { inherit.sides.1 } else { spaced },
+                    ),
                 };
                 self.col_lines(col, *w, height, row, fill, fit)
             })
@@ -509,14 +697,14 @@ impl Layout<'_> {
         (0..height)
             .map(|i| {
                 let mut line: Vec<Draft> = Vec::new();
-                let mut used = 0_usize;
-                for (j, (col, w)) in cols.iter().zip(&widths).enumerate() {
+                let mut drawn = false;
+                for (col, w) in cols.iter().zip(widths) {
                     // A column clamped to nothing renders nothing, and so
                     // does its gap (SPEC § 4.3).
                     if *w == 0 {
                         continue;
                     }
-                    if j > 0 && used > 0 {
+                    if drawn {
                         // On a one-line row the rule runs through the gaps
                         // too, so a centred module floats on one rule; on a
                         // taller row a gap beside a box's side is spaces.
@@ -525,14 +713,9 @@ impl Layout<'_> {
                         } else {
                             Draft::Space(gap, Elem::Gap)
                         });
-                        used = used.saturating_add(gap);
                     }
                     line.extend(col.get(i).cloned().unwrap_or_default());
-                    used = used.saturating_add(*w);
-                }
-                let left = width.saturating_sub(used);
-                if left > 0 && fill.draws() {
-                    line.push(Self::filler(left, fill, Elem::Rule));
+                    drawn = true;
                 }
                 line
             })
@@ -544,17 +727,33 @@ impl Layout<'_> {
     /// right so a narrow terminal drops whole columns rather than spilling
     /// (SPEC § 4.3).
     fn share(&self, row: &Row<'_>, width: usize, fill: Fill) -> Vec<usize> {
-        let n = row.cols.len();
-        let gaps = row.gap.saturating_mul(n.saturating_sub(1));
-        let available = width.saturating_sub(gaps);
+        let (widths, dropped) = self.shares(row, width, fill);
+        // A dropped column is invisible on screen, so the one place it can
+        // be explained is the debug log (SPEC § 4.3).
+        if dropped > 0 {
+            crate::debug::log(&format!(
+                "layout: {dropped} of {} columns dropped, {width} cells is too narrow for them",
+                row.cols.len()
+            ));
+        }
+        widths
+    }
+
+    /// [`Self::share`] without the log, with the number of columns that
+    /// wanted cells and got none, which the log reports: a row's height is
+    /// measured on its shares before it is laid out, and the log would say
+    /// it all twice.
+    fn shares(&self, row: &Row<'_>, width: usize, fill: Fill) -> (Vec<usize>, usize) {
         let want: Vec<usize> = row
             .cols
             .iter()
             .enumerate()
             .map(|(j, col)| match col.width {
                 Width::Cells(c) => c,
-                Width::Auto => match Self::auto_width(col, row) {
+                Width::Auto => match self.auto_width(col, row) {
                     0 => 0,
+                    // A box's side stands between its text and the rule.
+                    content if !meets_rule(col) => content,
                     // Beside a rule, an `auto` column keeps the pad every
                     // other group has, so the rule never runs into its text.
                     content => {
@@ -565,72 +764,107 @@ impl Layout<'_> {
                 Width::Fr(_) => 0,
             })
             .collect();
-        let fixed: usize = want.iter().sum();
-        let free = available.saturating_sub(fixed);
-        let total_fr: u32 = row
+        // A gap sits between two columns that are drawn, and a column that
+        // takes no cells (`width = 0`, an `auto` one with nothing to show,
+        // an `fr` one whose share floors to nothing) draws nothing:
+        // `row_columns` skips it and its gap, so reserving that gap would leave
+        // its cells over. An `fr` column counts until its share is known;
+        // the last one that comes to nothing is dropped and the row shared
+        // again, so the gap cells it freed go to the `fr` columns that
+        // remain. Each round drops one, so this ends within the row's
+        // columns.
+        let mut live: Vec<bool> = row
             .cols
             .iter()
-            .filter_map(|c| match c.width {
-                Width::Fr(n) => Some(n),
-                _ => None,
-            })
-            .sum();
+            .zip(&want)
+            .map(|(col, w)| matches!(col.width, Width::Fr(_)) || *w > 0)
+            .collect();
+        let mut desired = loop {
+            let desired = Self::fr_shares(row, &want, &live, width);
+            let emptied = row.cols.iter().zip(&desired).zip(live.iter_mut()).rev().find(
+                |((col, take), drawn)| **drawn && **take == 0 && matches!(col.width, Width::Fr(_)),
+            );
+            match emptied {
+                Some((_, drawn)) => *drawn = false,
+                None => break desired,
+            }
+        };
+        // Left to right, gap then column: a column whose gap plus one cell
+        // does not fit renders nothing, and so does everything to its right.
+        // A column that takes no cells takes no gap either, as `row_columns`
+        // draws a gap only between two columns it draws; an `fr` one that
+        // came to nothing was dropped for want of room.
+        let mut left = width;
+        let mut dropped = 0_usize;
+        let mut after_one = false;
+        for (col, take) in row.cols.iter().zip(desired.iter_mut()) {
+            if *take == 0 {
+                if matches!(col.width, Width::Fr(_)) {
+                    dropped = dropped.saturating_add(1);
+                }
+                continue;
+            }
+            let cost = if after_one { row.gap } else { 0 };
+            if left < cost.saturating_add(1) {
+                *take = 0;
+                dropped = dropped.saturating_add(1);
+                continue;
+            }
+            *take = (*take).min(left.saturating_sub(cost));
+            left = left.saturating_sub(cost).saturating_sub(*take);
+            after_one = true;
+        }
+        (desired, dropped)
+    }
+
+    /// Every column's cells before the clamp: its `want`, or for a `live`
+    /// `fr` column its part of what the fixed columns and the gaps between
+    /// the live columns leave (a dropped `fr` column takes nothing).
+    fn fr_shares(row: &Row<'_>, want: &[usize], live: &[bool], width: usize) -> Vec<usize> {
+        let drawn = live.iter().filter(|l| **l).count();
+        let gaps = row.gap.saturating_mul(drawn.saturating_sub(1));
+        let available = width.saturating_sub(gaps);
+        let fixed: usize = want.iter().sum();
+        let free = available.saturating_sub(fixed);
+        let weight = |col: &Col<'_>, drawn: bool| match col.width {
+            Width::Fr(n) if drawn => usize::try_from(n).ok(),
+            _ => None,
+        };
+        let total_fr: usize = row.cols.iter().zip(live).filter_map(|(c, l)| weight(c, *l)).sum();
         // floor(free × n ÷ Σfr) each, and the cells that floor left over go
         // one each to the first of them, so the shares differ by at most one
         // and always add up. The leftover is what the shares did not take,
         // never `free % Σfr`: with a weight above 1 the two differ, and
         // handing out the larger one overshoots the row.
-        let fr = usize::try_from(total_fr).unwrap_or(1).max(1);
+        let fr = total_fr.max(1);
         let mut desired: Vec<usize> = row
             .cols
             .iter()
-            .zip(&want)
-            .map(|(col, w)| match col.width {
-                Width::Fr(n) => {
-                    let n = usize::try_from(n).unwrap_or(1);
-                    free.saturating_mul(n).checked_div(fr).unwrap_or(0)
-                }
+            .zip(want)
+            .zip(live)
+            .map(|((col, w), l)| match (col.width, weight(col, *l)) {
+                (_, Some(n)) => free.saturating_mul(n).checked_div(fr).unwrap_or(0),
+                (Width::Fr(_), None) => 0,
                 _ => *w,
             })
             .collect();
         let shared: usize = row
             .cols
             .iter()
+            .zip(live)
             .zip(&desired)
-            .filter(|(col, _)| matches!(col.width, Width::Fr(_)))
+            .filter(|((col, l), _)| weight(col, **l).is_some())
             .map(|(_, w)| *w)
             .sum();
         let mut leftover = free.saturating_sub(shared);
-        for (col, take) in row.cols.iter().zip(desired.iter_mut()) {
+        for ((col, l), take) in row.cols.iter().zip(live).zip(desired.iter_mut()) {
             if leftover == 0 {
                 break;
             }
-            if matches!(col.width, Width::Fr(_)) {
+            if weight(col, *l).is_some() {
                 *take = take.saturating_add(1);
                 leftover = leftover.saturating_sub(1);
             }
-        }
-        // Left to right, gap then column: a column whose gap plus one cell
-        // does not fit renders nothing, and so does everything to its right.
-        let mut left = width;
-        let mut dropped = 0_usize;
-        for (j, take) in desired.iter_mut().enumerate() {
-            let cost = if j > 0 { row.gap } else { 0 };
-            if left < cost.saturating_add(1) {
-                *take = 0;
-                dropped = dropped.saturating_add(1);
-                continue;
-            }
-            left = left.saturating_sub(cost);
-            *take = (*take).min(left);
-            left = left.saturating_sub(*take);
-        }
-        // A dropped column is invisible on screen, so the one place it can
-        // be explained is the debug log (SPEC § 4.3).
-        if dropped > 0 {
-            crate::debug::log(&format!(
-                "layout: {dropped} of {n} columns dropped, {width} cells is too narrow for them"
-            ));
         }
         desired
     }
@@ -647,18 +881,18 @@ impl Layout<'_> {
         let last = j.saturating_add(1) >= row.cols.len();
         // With no `fr` column the free width is a rule after the last one,
         // so even the last column has a rule to its right (SPEC § 4.3).
-        let trailing = row.cols.iter().all(|c| !matches!(c.width, Width::Fr(_)));
-        (if j > 0 { pad } else { 0 }, if last && !trailing { 0 } else { pad })
+        (if j > 0 { pad } else { 0 }, if last && has_fr(row) { 0 } else { pad })
     }
 
     /// An `auto` column is exactly its content: its groups joined by the
-    /// separator, or its widest inner row.
+    /// separator, or its widest inner row, with the sides and pads of any
+    /// box drawn around it.
     ///
     /// The width is re-measured every tick, so a column whose content
     /// changes width moves its neighbours: `auto` is for values that hold
     /// still (SPEC § 4.3).
-    fn auto_width(col: &Col<'_>, row: &Row<'_>) -> usize {
-        match &col.content {
+    fn auto_width(&self, col: &Col<'_>, row: &Row<'_>) -> usize {
+        let content = match &col.content {
             Content::Groups { left, right, .. } => {
                 let sep = display_width(row.separator);
                 let join = |g: &[Vec<Segment>]| {
@@ -671,13 +905,32 @@ impl Layout<'_> {
                 let joined = if l > 0 && r > 0 { sep } else { 0 };
                 l.saturating_add(joined).saturating_add(r)
             }
-            Content::Stack(rows) => rows
+            Content::Stack(rows) => blocks(rows)
                 .iter()
-                .map(|inner| {
-                    inner.cols.iter().map(|c| Self::auto_width(c, inner)).max().unwrap_or(0)
+                .map(|block| {
+                    let widest = block
+                        .rows
+                        .iter()
+                        .flat_map(|(_, inner)| inner.cols.iter().map(|c| self.auto_width(c, inner)))
+                        .max()
+                        .unwrap_or(0);
+                    self.boxed_width(block.boxed, widest)
                 })
                 .max()
                 .unwrap_or(0),
+        };
+        self.boxed_width(col.boxed, content)
+    }
+
+    /// `content` cells with the box around them, when there is one: its two
+    /// sides and a pad inside each. Nothing is drawn around no content.
+    fn boxed_width(&self, boxed: Option<&BoxRef>, content: usize) -> usize {
+        match boxed {
+            Some(b) if content > 0 => {
+                let side = display_width(&self.box_chars(&self.box_cfg(b)).side);
+                content.saturating_add(side.saturating_add(self.box_pad()).saturating_mul(2))
+            }
+            _ => content,
         }
     }
 
@@ -692,35 +945,53 @@ impl Layout<'_> {
         fit: Fit,
     ) -> Vec<Vec<Draft>> {
         let Some(boxed) = col.boxed else {
-            return self.col_body(col, width, height, row, fill, fit);
+            return Self::placed(col, self.col_content(col, width, row, fill, fit), width, height);
         };
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
-        let Some((inner, pad)) = self.box_interior(&chars, width) else {
-            // Too narrow to draw at all: the column keeps its share and
-            // renders nothing, as a clamped column does (SPEC § 4.3).
-            return (0..height.max(1)).map(|_| vec![Draft::Space(width, Elem::Pad)]).collect();
+        // Too narrow to draw at all: the column keeps its share and renders
+        // nothing, and `col_height` gave it no edge lines (SPEC § 4.3). Its
+        // cells are empty cells like any other: rule on a one-line row under
+        // a rule, spaces on a taller one.
+        let empty = || {
+            let empty =
+                if height > 1 { Draft::Space(width, Elem::Pad) } else { Self::filler(width, fill) };
+            (0..height.max(1)).map(|_| vec![empty.clone()]).collect()
         };
-        let interior = height.saturating_sub(2);
+        let Some((inner, pad)) = self.box_interior(&chars, width) else {
+            return empty();
+        };
         // Inside its own box a column is padded by the box, not by the row.
-        let inside = Fit { pads: (0, 0), ..fit };
-        let body = self.col_body(col, inner, interior, row, Fill::from_box(&cfg), inside);
-        let mut lines = vec![self.edge_drafts(&chars, width, true, cfg.title.as_ref(), &cfg)];
-        for drafts in body {
-            lines.push(self.side_drafts(drafts, &chars, &cfg, pad));
+        let content = self.col_content(col, inner, row, Fill::from_box(&cfg), fit.in_box());
+        // A row is measured at the width it is laid out to (`frame_plan`
+        // for a row of the frame), so its height holds every line of a box
+        // that fits there. Were it ever short, the box would be empty cells
+        // too, never a top edge alone or a box cut through its content.
+        let interior = height.saturating_sub(2);
+        if content.len().max(1) > interior {
+            return empty();
         }
-        lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
-        lines.truncate(height.max(1));
-        lines
+        let body = Self::placed(col, content, inner, interior);
+        self.box_lines(&cfg, &chars, width, pad, cfg.title.as_ref(), body)
     }
 
     /// The cells inside a box of `width`, and the pad each side of them.
     ///
     /// A box is its two sides, a pad each side of the content and the
     /// content: `None` when even the sides do not fit, and no pads when
-    /// they would leave nothing to draw in.
+    /// they would leave nothing to draw in. The corners are drawn whatever
+    /// the side is, so a `custom` box with corners and no side needs their
+    /// cells too, or its top and bottom lines would overflow. A box of no
+    /// glyphs (`style = "none"`) still needs one cell: a `width = 0` column
+    /// has none, and the box would add its two lines there and draw nothing.
     fn box_interior(&self, chars: &BoxChars, width: usize) -> Option<(usize, usize)> {
         let sides = display_width(&chars.side).saturating_mul(2);
+        let pair = |a: &str, b: &str| display_width(a).saturating_add(display_width(b));
+        let corners = pair(&chars.top_left, &chars.top_right)
+            .max(pair(&chars.bottom_left, &chars.bottom_right));
+        if width < corners.max(1) {
+            return None;
+        }
         let left = width.checked_sub(sides)?;
         let pad = self.box_pad();
         if left > pad.saturating_mul(2) {
@@ -730,17 +1001,16 @@ impl Layout<'_> {
         }
     }
 
-    /// A column's content lines, padded to `height` by `valign`.
-    fn col_body(
+    /// A column's content lines: its groups' one line, or its stack's.
+    fn col_content(
         &self,
         col: &Col<'_>,
         width: usize,
-        height: usize,
         row: &Row<'_>,
         fill: Fill,
         fit: Fit,
     ) -> Vec<Vec<Draft>> {
-        let content: Vec<Vec<Draft>> = match &col.content {
+        match &col.content {
             Content::Groups { left, right, left_ids, right_ids } => {
                 let group = Group {
                     left,
@@ -756,7 +1026,17 @@ impl Layout<'_> {
                 .iter()
                 .flat_map(|block| self.stack_block(block, width, fill, fit))
                 .collect(),
-        };
+        }
+    }
+
+    /// A column's `content` lines, `width` cells each, padded to `height`
+    /// by `valign`.
+    fn placed(
+        col: &Col<'_>,
+        content: Vec<Vec<Draft>>,
+        width: usize,
+        height: usize,
+    ) -> Vec<Vec<Draft>> {
         // A padding line is the column's cells as spaces, whatever the fill
         // mode: they place the columns to its right, and a packed row drops
         // them again at the end of the line, where nothing follows.
@@ -796,50 +1076,88 @@ impl Layout<'_> {
         };
         let cfg = self.box_cfg(boxed);
         let chars = self.box_chars(&cfg);
+        // Too narrow to draw: its rows' lines are empty, as an empty row's
+        // are, and the box adds none of its own (`block_height`).
         let Some((interior, pad)) = self.box_interior(&chars, width) else {
-            return (0..self.block_height(block))
-                .map(|_| vec![Draft::Space(width, Elem::Pad)])
+            return (0..self.block_height(block, width, fill))
+                .map(|_| vec![Self::filler(width, fill)])
                 .collect();
         };
-        // `box = true` on a row is the one way to title a one-row box, so a
-        // block's first row stands in when the box has no title of its own.
-        let title = cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title));
-        let mut lines = vec![self.edge_drafts(&chars, width, true, title, &cfg)];
-        for (_, inner) in &block.rows {
-            let body =
-                self.row_body(inner, interior, self.row_height(inner), Fill::from_box(&cfg), fit);
-            lines.extend(body.into_iter().map(|d| self.side_drafts(d, &chars, &cfg, pad)));
-        }
-        lines.push(self.edge_drafts(&chars, width, false, None, &cfg));
-        lines
+        let body = self.block_body(block, interior, &cfg, fit);
+        self.box_lines(&cfg, &chars, width, pad, box_title(&cfg, block), body)
     }
 
     /// One bare row of a stack: its line with its title set into it.
     fn stack_row(&self, inner: &Row<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Vec<Draft>> {
-        let mut lines = self.row_body(inner, width, self.row_height(inner), fill, fit);
+        let mut lines = self.row_body(inner, width, self.row_height(inner, width, fill), fill, fit);
         // An inner row's title goes into its own first line.
         if let (Some(title), Some(first)) = (inner.title, lines.first_mut()) {
             self.place_title(first, title, fill);
         }
-        // A blank inner row carries the cell that keeps its line on screen
-        // (SPEC § 4.1): the outer row cannot add it for one of its columns.
         if inner.blank {
-            for line in &mut lines {
-                mark_blank(line);
-            }
+            mark_blank(&mut lines);
         }
         lines
     }
+
+    /// The rows of a block laid out to a box's interior, their lines in
+    /// order, each `blank` row's marked (SPEC § 4.1).
+    fn block_body(
+        &self,
+        block: &Block<'_, '_>,
+        interior: usize,
+        cfg: &BoxCfg,
+        fit: Fit,
+    ) -> Vec<Vec<Draft>> {
+        let fill = Fill::from_box(cfg);
+        block
+            .rows
+            .iter()
+            .flat_map(|(_, row)| {
+                let height = self.row_height(row, interior, fill);
+                let mut lines = self.row_body(row, interior, height, fill, fit.in_box());
+                if row.blank {
+                    mark_blank(&mut lines);
+                }
+                lines
+            })
+            .collect()
+    }
+}
+
+/// Mark lines of a `blank = true` row: each keeps the braille cell once it
+/// is finished, if it is whitespace only then ([`Draft::Blank`]).
+fn mark_blank(lines: &mut [Vec<Draft>]) {
+    for line in lines {
+        line.insert(0, Draft::Blank);
+    }
+}
+
+/// A box's title: its own, or its first row's, since `box = true` on a row
+/// is the one way to title a one-row box.
+fn box_title<'t>(cfg: &'t BoxCfg, block: &Block<'t, '_>) -> Option<&'t crate::config::TitleCfg> {
+    cfg.title.as_ref().or_else(|| block.rows.first().and_then(|(_, r)| r.title))
 }
 
 /// Composing one column's line from its groups.
 impl Layout<'_> {
     /// `n` cells of whatever fills empty space in this mode.
-    fn filler(n: usize, fill: Fill, elem: Elem) -> Draft {
+    const fn filler(n: usize, fill: Fill) -> Draft {
         match fill {
             Fill::Rule => Draft::Rule(n),
-            Fill::Spaces | Fill::Packed => Draft::Space(n, elem),
+            Fill::Spaces | Fill::Packed => Draft::Space(n, Elem::Rule),
         }
+    }
+
+    /// `n` cells of the frame's `pad`: its own text, unstyled, wherever the
+    /// frame pads (after a cap, around a group, beside a column's text,
+    /// inside a box's sides). Spaces when `n` is not its width: a box pads
+    /// by one cell under a frame whose pad is empty, and a column narrower
+    /// than its pads keeps only what fits.
+    fn pad(&self, n: usize) -> Draft {
+        let pad = &self.chars.pad;
+        let text = if display_width(pad) == n { pad.clone() } else { " ".repeat(n) };
+        Draft::Done(Piece { elem: Elem::Pad, segs: vec![Segment::plain(text)] })
     }
 
     /// One cell of filler, in cells: the rule glyph may be wider than one.
@@ -900,11 +1218,12 @@ impl Layout<'_> {
             return pieces;
         }
         // Where each module sits in the uncut run, so the placement map can
-        // say which cells of the window it still owns (SPEC § 14).
+        // say which cells of the window it still owns (SPEC § 14), counted
+        // the way the cut and the scroller count.
         let mut owned: Vec<(String, Range<usize>)> = Vec::new();
         let mut at = 0_usize;
         for piece in &pieces {
-            let end = at.saturating_add(segments_width(&piece.segs));
+            let end = at.saturating_add(cluster_width(&piece.segs));
             if let Elem::Module(id) = &piece.elem {
                 owned.push((id.clone(), at..end));
             }
@@ -913,12 +1232,16 @@ impl Layout<'_> {
         let segs: Vec<Segment> = pieces.iter().flat_map(|p| p.segs.iter().cloned()).collect();
         let (segs, map) = self.ticker.as_ref().filter(|_| scrolls).map_or_else(
             || {
-                let ellipsis = display_width(crate::ansi::fit(self.ellipsis, budget));
-                let kept = budget.saturating_sub(ellipsis);
-                (truncate(&segs, budget, self.ellipsis), cut_map(&owned, kept, budget))
+                let cut = truncate(&segs, budget, self.ellipsis);
+                // The map follows the cut as made: a two-cell cluster at the
+                // cut leaves it a cell short of `budget`.
+                let end = segments_width(&cut);
+                let mark = display_width(crate::ansi::fit(self.ellipsis, budget));
+                let map = cut_map(&owned, end.saturating_sub(mark), end);
+                (cut, map)
             },
             |ticker| {
-                let period = segments_width(&segs).saturating_add(display_width(&ticker.gap));
+                let period = scroll_period(&segs, &ticker.gap, true);
                 let offset = crate::time::frame(ticker.now, ticker.step, period);
                 (
                     scroll(&segs, budget, offset, &ticker.gap, true),
@@ -932,7 +1255,7 @@ impl Layout<'_> {
     /// One column's line: the flex form when the column has a `right` group,
     /// a lone group placed by `justify` otherwise (SPEC § 4.3).
     ///
-    /// `exact` is a column laid out to its own content (`width = "auto"`):
+    /// `fit.exact` is a column laid out to its own content (`width = "auto"`):
     /// it draws no rule, so its two groups join with the separator and
     /// nothing is cut to leave room for cells that are never drawn.
     fn compose_group(&self, group: &Group<'_>, width: usize, fill: Fill, fit: Fit) -> Vec<Draft> {
@@ -941,16 +1264,17 @@ impl Layout<'_> {
         // the rule already surrounds needs none.
         let (touch_left, touch_right) = group.touches(fit.exact);
         let (before, after) = fit.pads;
-        let (before, after) =
-            (if touch_left { before } else { 0 }, if touch_right { after } else { 0 });
+        // A column narrower than its two pads keeps what fits of them.
+        let before = if touch_left { before.min(width) } else { 0 };
+        let after = if touch_right { after.min(width.saturating_sub(before)) } else { 0 };
         let inner = width.saturating_sub(before).saturating_sub(after);
         let mut drafts: Vec<Draft> = Vec::new();
         if before > 0 {
-            drafts.push(Draft::Space(before, Elem::Pad));
+            drafts.push(self.pad(before));
         }
         drafts.extend(self.compose_cells(group, inner, fill, fit));
         if after > 0 {
-            drafts.push(Draft::Space(after, Elem::Pad));
+            drafts.push(self.pad(after));
         }
         drafts
     }
@@ -965,14 +1289,17 @@ impl Layout<'_> {
         // neighbour and move the whole row (SPEC § 4.3).
         let cut = self.truncate || !fit.trailing;
         let exact = fit.exact;
+        let packed = fill == Fill::Packed || exact;
         // The right group is never *scrolled* (SPEC § 4.1), but it is cut
         // to its column like anything else: a group wider than the column
-        // used to push the columns beside it off their shares.
+        // used to push the columns beside it off their shares. Beside a
+        // rule it keeps the pad before it, so it gets the cells after that.
+        let right_room = if packed { width } else { width.saturating_sub(pad_w) };
         let right_pieces =
-            self.fit_group(self.group_pieces(right, right_ids, separator), width, cut, false);
+            self.fit_group(self.group_pieces(right, right_ids, separator), right_room, cut, false);
         let right_w: usize = right_pieces.iter().map(|p| segments_width(&p.segs)).sum();
 
-        if fill == Fill::Packed || exact {
+        if packed {
             // Left-packed: the right group follows the left one after a
             // separator, and nothing fills the rest (SPEC § 4.1).
             let sep_w = if right_w == 0 { 0 } else { display_width(separator) };
@@ -982,8 +1309,10 @@ impl Layout<'_> {
             // column that is meant to hold still (SPEC § 4.3).
             let pieces = self.group_pieces(left, left_ids, separator);
             let mut pieces = self.fit_group(pieces, budget, cut, !exact);
+            let left_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
             if right_w > 0 {
-                if !pieces.is_empty() && !separator.is_empty() {
+                // A left group cut to nothing is not there to be joined.
+                if left_w > 0 && !separator.is_empty() {
                     let before = left.last().map_or(&[][..], Vec::as_slice);
                     pieces.push(self.separator_piece(separator, before));
                 }
@@ -1014,40 +1343,52 @@ impl Layout<'_> {
             let budget = width.saturating_sub(right_block).saturating_sub(join);
             let left_pieces = self.fit_group(left_pieces, budget, cut, true);
             let left_w: usize = left_pieces.iter().map(|p| segments_width(&p.segs)).sum();
-            let left_pad = if left_pieces.is_empty() { 0 } else { pad_w };
+            let left_pad = if left_w == 0 { 0 } else { pad_w };
             let rule =
                 width.saturating_sub(left_w).saturating_sub(left_pad).saturating_sub(right_block);
             let mut drafts: Vec<Draft> = left_pieces.into_iter().map(Draft::Done).collect();
             if left_pad > 0 {
-                drafts.push(Draft::spaces(Elem::Pad, left_pad));
+                drafts.push(self.pad(left_pad));
             }
-            drafts.push(Self::filler(rule, fill, Elem::Rule));
-            drafts.push(Draft::spaces(Elem::Pad, pad_w));
+            drafts.push(Self::filler(rule, fill));
+            drafts.push(self.pad(pad_w));
             drafts.extend(right_pieces.into_iter().map(Draft::Done));
             return drafts;
         }
 
         // A lone group: the rule on one side, or both when it is centred.
-        let sides = if justify == Justify::Center { 2 } else { 1 };
+        // A side facing the rule or a neighbour keeps a cell of fill and a
+        // pad; inside a box, a side that already stands clear needs
+        // neither (`Fit::sides`).
+        let (fills_left, fills_right) = match justify {
+            Justify::Left => (false, true),
+            Justify::Right => (true, false),
+            Justify::Center => (true, true),
+        };
+        let keeps = |fills: bool, box_side: bool| fills && !(fill == Fill::Spaces && box_side);
+        let (keep_left, keep_right) =
+            (keeps(fills_left, fit.sides.0), keeps(fills_right, fit.sides.1));
+        let reserve = |keep: bool| if keep { cell.saturating_add(pad_w) } else { 0 };
+        let budget = width.saturating_sub(reserve(keep_left)).saturating_sub(reserve(keep_right));
         let pieces = self.group_pieces(left, left_ids, separator);
-        let budget = width.saturating_sub(cell.saturating_add(pad_w).saturating_mul(sides));
         let pieces = self.fit_group(pieces, budget, cut, true);
         let text_w: usize = pieces.iter().map(|p| segments_width(&p.segs)).sum();
-        let pad_w = if pieces.is_empty() { 0 } else { pad_w };
-        let space = width.saturating_sub(text_w).saturating_sub(pad_w.saturating_mul(sides));
+        let pad = |keep: bool| if keep && text_w > 0 { pad_w } else { 0 };
+        let (pad_left, pad_right) = (pad(keep_left), pad(keep_right));
+        let space = width.saturating_sub(text_w).saturating_sub(pad_left).saturating_sub(pad_right);
         let (before, after) = split(space, justify);
         let mut drafts: Vec<Draft> = Vec::new();
         if before > 0 || justify != Justify::Left {
-            drafts.push(Self::filler(before, fill, Elem::Rule));
+            drafts.push(Self::filler(before, fill));
         }
-        if pad_w > 0 && justify != Justify::Left {
-            drafts.push(Draft::spaces(Elem::Pad, pad_w));
+        if pad_left > 0 {
+            drafts.push(self.pad(pad_left));
         }
         drafts.extend(pieces.into_iter().map(Draft::Done));
-        if pad_w > 0 && justify != Justify::Right {
-            drafts.push(Draft::spaces(Elem::Pad, pad_w));
+        if pad_right > 0 {
+            drafts.push(self.pad(pad_right));
         }
-        drafts.push(Self::filler(after, fill, Elem::Rule));
+        drafts.push(Self::filler(after, fill));
         drafts
     }
 }
@@ -1145,19 +1486,33 @@ struct Fit {
     /// that are never drawn.
     exact: bool,
     /// Cells of pad to keep on each side, so a rule beside the column never
-    /// runs into its text. Only an `exact` column needs them: every other
-    /// column's own composition pads its groups already.
+    /// runs into its text ([`Layout::edge_pads`]): drawn only on a side the
+    /// column's content reaches ([`Group::touches`]), since the rule already
+    /// stands clear of a group it surrounds.
     pads: (usize, usize),
     /// Nothing of the row is to this column's right, so `truncate = false`
     /// lets its content run past the box. Every other column is cut to its
     /// share whatever `truncate` says, or it would spill into a neighbour
     /// (SPEC § 4.3).
     trailing: bool,
+    /// Whether each end of the column already stands clear of what is
+    /// beside it inside a box: the box's side, whose pad keeps the text off
+    /// it, or a gap of one space or more. A lone group there needs no fill
+    /// cell and no pad of its own.
+    sides: (bool, bool),
 }
 
 impl Default for Fit {
     fn default() -> Self {
-        Self { exact: false, pads: (0, 0), trailing: true }
+        Self { exact: false, pads: (0, 0), trailing: true, sides: (false, false) }
+    }
+}
+
+impl Fit {
+    /// The fit of what is drawn inside a box: its sides stand at both ends,
+    /// so no rule pad is kept there.
+    const fn in_box(self) -> Self {
+        Self { pads: (0, 0), sides: (true, true), ..self }
     }
 }
 
@@ -1189,10 +1544,7 @@ impl Layout<'_> {
     fn box_chars(&self, cfg: &BoxCfg) -> BoxChars {
         let inherited = cfg.style.is_none();
         let mut style = cfg.style.unwrap_or(self.style);
-        if inherited && matches!(style, FrameStyle::None | FrameStyle::Powerline) {
-            style = FrameStyle::Rounded;
-        }
-        if style == FrameStyle::Powerline {
+        if (inherited && style == FrameStyle::None) || style == FrameStyle::Powerline {
             style = FrameStyle::Rounded;
         }
         let base = if inherited && style == self.style {
@@ -1265,17 +1617,10 @@ impl Layout<'_> {
             };
             Draft::Done(Piece { elem: Elem::Rule, segs: vec![Segment::styled(text, style)] })
         };
-        let Some(title) = title.filter(|t| !t.text.is_empty()) else {
+        let fitted = title.filter(|t| !t.text.is_empty()).and_then(|t| self.fit_title(t, middle));
+        let (Some(title), Some((text, pad, spare))) = (title, fitted) else {
             return vec![rule(middle)];
         };
-        let pad = title.pad.min(middle.checked_div(2).unwrap_or(0));
-        let room = middle.saturating_sub(pad.saturating_mul(2));
-        if room == 0 {
-            return vec![rule(middle)];
-        }
-        let text_style = Style::fg(title.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
-        let text = truncate(&[Segment::styled(&title.text, text_style)], room, self.ellipsis);
-        let spare = room.saturating_sub(segments_width(&text));
         // One rule cell between the corner and the title, so it reads as a
         // label on the box's edge rather than a word stuck to its corner:
         // `╭─ Repository ───╮`, the shape of the frame's own two-cell caps.
@@ -1287,11 +1632,11 @@ impl Layout<'_> {
         };
         let mut out = vec![rule(before)];
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(Draft::title_pad(pad));
         }
         out.push(Draft::Done(Piece { elem: Elem::Title, segs: text }));
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(Draft::title_pad(pad));
         }
         out.push(rule(after));
         out
@@ -1317,11 +1662,11 @@ impl Layout<'_> {
             }));
         }
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(self.pad(pad));
         }
         out.extend(drafts);
         if pad > 0 {
-            out.push(Draft::spaces(Elem::Pad, pad));
+            out.push(self.pad(pad));
         }
         if !chars.side.is_empty() {
             out.push(Draft::Done(Piece {
@@ -1332,32 +1677,48 @@ impl Layout<'_> {
         out
     }
 
-    /// A box's interior line, its sides coloured by the box.
-    fn wrap_box(
+    /// A box `width` cells wide around `body`, whose lines are laid out to
+    /// its interior: the top edge with `title`, each body line between the
+    /// sides with `pad` inside them, the bottom edge. Every box is drawn
+    /// here, a row's, a column's and a stack's alike.
+    fn box_lines(
         &self,
-        drafts: Vec<Draft>,
-        chars: &BoxChars,
         cfg: &BoxCfg,
+        chars: &BoxChars,
+        width: usize,
         pad: usize,
-        blank: bool,
-    ) -> Line {
-        self.paint(self.side_drafts(drafts, chars, cfg, pad), blank)
-    }
-
-    /// A box's top or bottom line as a finished line.
-    fn edge_line(
-        &self,
-        chars: &BoxChars,
-        top: bool,
         title: Option<&crate::config::TitleCfg>,
-        cfg: &BoxCfg,
-    ) -> Line {
-        self.paint(self.edge_drafts(chars, self.width, top, title, cfg), false)
+        body: Vec<Vec<Draft>>,
+    ) -> Vec<Vec<Draft>> {
+        let mut lines = Vec::with_capacity(body.len().saturating_add(2));
+        lines.push(self.edge_drafts(chars, width, true, title, cfg));
+        lines.extend(body.into_iter().map(|drafts| self.side_drafts(drafts, chars, cfg, pad)));
+        lines.push(self.edge_drafts(chars, width, false, None, cfg));
+        lines
     }
 }
 
 /// Titles: plain text set into the rule of a row or a box (SPEC § 4.3).
 impl Layout<'_> {
+    /// `title` fitted to `cells`: its text in its colour, cut to what is
+    /// left once `title_pad` (at most half the cells) is taken on each side,
+    /// that pad, and the cells to spare. `None` when the pads leave no room.
+    fn fit_title(
+        &self,
+        title: &crate::config::TitleCfg,
+        cells: usize,
+    ) -> Option<(Vec<Segment>, usize, usize)> {
+        let pad = title.pad.min(cells.checked_div(2).unwrap_or(0));
+        let room = cells.saturating_sub(pad.saturating_mul(2));
+        if room == 0 {
+            return None;
+        }
+        let style = Style::fg(title.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
+        let text = truncate(&[Segment::styled(&title.text, style)], room, self.ellipsis);
+        let spare = room.saturating_sub(segments_width(&text));
+        Some((text, pad, spare))
+    }
+
     /// Put `title` into the widest run of rule cells the justification
     /// allows, cutting it rather than widening the line.
     fn place_title(&self, drafts: &mut Vec<Draft>, title: &crate::config::TitleCfg, fill: Fill) {
@@ -1382,42 +1743,45 @@ impl Layout<'_> {
             Justify::Right => runs.iter().rev().copied().find(|(_, n)| *n >= need).or_else(widest),
             Justify::Center => widest(),
         };
-        let Some((at, cells)) = target.filter(|(_, n)| *n > 0) else {
+        let Some((at, (text, pad, spare))) = target
+            .filter(|(_, n)| *n > 0)
+            .and_then(|(at, cells)| self.fit_title(title, cells).map(|fitted| (at, fitted)))
+        else {
             return;
         };
-        let pad = title.pad.min(cells.checked_div(2).unwrap_or(0));
-        let room = cells.saturating_sub(pad.saturating_mul(2));
-        if room == 0 {
-            return;
-        }
-        let style = Style::fg(title.color.unwrap_or_else(|| self.theme.role(Role::Frame)));
-        let text = truncate(&[Segment::styled(&title.text, style)], room, self.ellipsis);
-        let spare = room.saturating_sub(segments_width(&text));
         let (before, after) = split(spare, title.justify);
         // Right after the frame's cap there is already a pad, and doubling
         // it reads as a typo: `├─ Repository ──┤`, not `├─  Repository`.
         let capped = drafts.get(..at).is_some_and(|before| {
-            before.iter().all(|d| {
-                matches!(d, Draft::Done(p) if matches!(p.elem, Elem::Cap | Elem::Pad | Elem::BoxEdge))
+            before.iter().all(|d| match d {
+                Draft::Done(p) => matches!(p.elem, Elem::Cap | Elem::Pad | Elem::BoxEdge),
+                Draft::Blank => true,
+                Draft::Rule(_) | Draft::Space(_, _) => false,
             })
         });
         let pad_before = if capped && before == 0 { 0 } else { pad };
         // The cell that pad would have taken goes back to the rule, so the
         // title never changes the line's width.
         let after = after.saturating_add(pad.saturating_sub(pad_before));
+        // The cells around the title stay what the run was: a gap or a
+        // padding line is spaces on a multi-line row (SPEC § 4.3).
+        let around = |n: usize| match drafts.get(at) {
+            Some(Draft::Space(_, elem)) => Draft::Space(n, elem.clone()),
+            _ => Self::filler(n, fill),
+        };
         let mut replacement: Vec<Draft> = Vec::new();
         if before > 0 {
-            replacement.push(Self::filler(before, fill, Elem::Rule));
+            replacement.push(around(before));
         }
         if pad_before > 0 {
-            replacement.push(Draft::spaces(Elem::Pad, pad_before));
+            replacement.push(Draft::title_pad(pad_before));
         }
         replacement.push(Draft::Done(Piece { elem: Elem::Title, segs: text }));
         if pad > 0 {
-            replacement.push(Draft::spaces(Elem::Pad, pad));
+            replacement.push(Draft::title_pad(pad));
         }
         if after > 0 {
-            replacement.push(Self::filler(after, fill, Elem::Rule));
+            replacement.push(around(after));
         }
         // A title never widens the line: it only ever replaces rule cells
         // with the same number of cells. There is no assertion here on
@@ -1440,9 +1804,10 @@ impl Layout<'_> {
             .iter()
             .map(|d| match d {
                 Draft::Rule(n) => *n,
-                Draft::Done(_) | Draft::Space(_, _) => 0,
+                Draft::Done(_) | Draft::Space(_, _) | Draft::Blank => 0,
             })
             .sum();
+        let blank = blank || drafts.iter().any(|d| matches!(d, Draft::Blank));
         let style = Style::fg(self.theme.role(Role::Frame));
         let pattern = self.rule.as_ref().filter(|r| !r.cells.is_empty() && total >= r.cells.len());
         let fill_w = display_width(&self.chars.fill).max(1);
@@ -1462,7 +1827,7 @@ impl Layout<'_> {
                 Draft::Space(n, elem) if n > 0 => {
                     pieces.push(Piece { elem, segs: vec![Segment::plain(" ".repeat(n))] });
                 }
-                Draft::Space(_, _) | Draft::Rule(0) => {}
+                Draft::Space(_, _) | Draft::Rule(0) | Draft::Blank => {}
                 Draft::Rule(n) => {
                     let text = pattern.map_or_else(
                         || self.chars.fill.repeat(n.checked_div(fill_w).unwrap_or(0)),
@@ -1487,15 +1852,17 @@ impl Layout<'_> {
         if blank { blank_line(line) } else { line }
     }
 
-    /// One row line between the frame's caps.
+    /// One row line between the frame's caps: line `index` of the `count`
+    /// that carry them. `ends` is whether the row's content reaches the cap
+    /// ([`Self::ends_in_content`]).
     fn wrap_frame(
         &self,
         drafts: Vec<Draft>,
-        index: usize,
-        count: usize,
+        (index, count): (usize, usize),
         row: &Row<'_>,
         fill: Fill,
         title: Option<&crate::config::TitleCfg>,
+        ends: bool,
     ) -> Line {
         let (prefix, cap) = self.chars.ends(index, count);
         let style = Style::fg(self.theme.role(Role::Frame));
@@ -1507,34 +1874,41 @@ impl Layout<'_> {
                 segs: vec![Segment::styled(prefix, style)],
             }));
             if pad > 0 {
-                line.push(Draft::spaces(Elem::Pad, pad));
+                line.push(self.pad(pad));
             }
         }
         line.extend(drafts);
-        // A boxed row's title belongs to the box, which draws it on its top
-        // edge (SPEC § 4.3).
-        if let Some(title) = title.filter(|_| row.boxed.is_none()) {
-            self.place_title(&mut line, title, fill);
-        }
-        if fill.draws() && !cap.is_empty() {
+        if fill.draws() {
             // The cap is padded from the content only: with no right group
-            // the rule runs into it, as it always has. Any cell left over
-            // (a later line of a tall row whose cap is narrower than the
-            // first's) goes to the rule, so every line is the same width.
+            // the rule runs into it, as it always has. The pad stands
+            // against the content, and every cell left over goes to the rule
+            // after it: the free width no `fr` column took, and on a later
+            // line of a tall row what a cap narrower than the first's (or
+            // none) leaves. So the rule never touches the content, and every
+            // line is the same width. A line with no cap takes the pad only
+            // when it has the cells for it: nothing reserved them.
             let used: usize = line.iter().map(Draft::cells).sum();
-            let padded = row_ends_in_content(row) && pad > 0;
-            let cap_total = display_width(cap).saturating_add(if padded { pad } else { 0 });
-            let spare = self.width.saturating_sub(used).saturating_sub(cap_total);
-            if spare > 0 {
-                line.push(Self::filler(spare, fill, Elem::Rule));
-            }
+            let room = self.width.saturating_sub(used);
+            let padded = ends && pad > 0 && (!cap.is_empty() || room >= pad);
             if padded {
-                line.push(Draft::spaces(Elem::Pad, pad));
+                line.push(self.pad(pad));
             }
-            line.push(Draft::Done(Piece {
-                elem: Elem::Cap,
-                segs: vec![Segment::styled(cap, style)],
-            }));
+            let taken = display_width(cap).saturating_add(if padded { pad } else { 0 });
+            let spare = room.saturating_sub(taken);
+            if spare > 0 {
+                line.push(Self::filler(spare, fill));
+            }
+            if !cap.is_empty() {
+                line.push(Draft::Done(Piece {
+                    elem: Elem::Cap,
+                    segs: vec![Segment::styled(cap, style)],
+                }));
+            }
+        }
+        // The title goes in last, so the rule after the columns is a run it
+        // can take; a run is only ever rule or space cells, never a cap.
+        if let Some(title) = title {
+            self.place_title(&mut line, title, fill);
         }
         if !fill.draws() {
             // A packed row draws no filler at all, so the cells that only
@@ -1544,24 +1918,6 @@ impl Layout<'_> {
             }
         }
         self.paint(line, row.blank)
-    }
-}
-
-/// Turn the first one-cell space of a blank row into the braille cell that
-/// keeps the line on screen (SPEC § 4.1). The width never changes, and the
-/// config only lets a spacer ask for it, so there is nothing else on the
-/// row to hide behind.
-fn mark_blank(drafts: &mut [Draft]) {
-    let at = drafts.iter().position(|d| matches!(d, Draft::Space(n, _) if *n > 0));
-    let Some((at, Draft::Space(n, elem))) = at.and_then(|i| drafts.get(i).map(|d| (i, d.clone())))
-    else {
-        return;
-    };
-    let mut text = String::from(crate::render::BLANK_CELL);
-    text.push_str(&" ".repeat(n.saturating_sub(1)));
-    let piece = Draft::Done(Piece { elem, segs: vec![Segment::plain(text)] });
-    if let Some(slot) = drafts.get_mut(at) {
-        *slot = piece;
     }
 }
 
@@ -1577,17 +1933,49 @@ const fn split(spare: usize, justify: Justify) -> (usize, usize) {
     }
 }
 
-/// A `blank = true` row (SPEC § 4.1): when the line is whitespace only, its
-/// first one-cell whitespace character becomes the braille blank so Claude
-/// Code keeps the row; a line with a visible frame is left alone.
+/// A `blank = true` line (SPEC § 4.1), finished: [`keep_blank`] as one
+/// piece when it needs the cell, the line as it is otherwise.
 fn blank_line(line: Line) -> Line {
-    let segs = line.segments();
-    let kept = crate::render::keep_blank(segs.clone());
-    if kept == segs {
-        line
-    } else {
-        Line { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs: kept }] }
+    keep_blank(&line.segments())
+        .map_or(line, |segs| Line { pieces: vec![Piece { elem: Elem::Group(Vec::new()), segs }] })
+}
+
+/// The segments of a whitespace-only line with its first one-cell
+/// whitespace character turned into [`BLANK_CELL`], so the harness keeps
+/// the line; an empty line becomes that one cell. `None` when the line
+/// already shows something (a frame, a box's side, a module) or has no
+/// one-cell whitespace to spare: the width never changes.
+fn keep_blank(row: &[Segment]) -> Option<Vec<Segment>> {
+    // JavaScript's `trim` strips the Unicode White_Space set (and U+FEFF,
+    // which `plain_text` has already dropped): the same set as
+    // `char::is_whitespace`, so this is the harness's own test.
+    if row.iter().any(|s| s.text().chars().any(|c| !c.is_whitespace())) {
+        return None;
     }
+    let one_cell = |c: char| display_width(c.encode_utf8(&mut [0; 4])) == 1;
+    let empty = row.iter().all(|s| s.text().is_empty());
+    let mut row = row.to_vec();
+    match row.iter().position(|s| s.text().chars().any(one_cell)).and_then(|i| row.get_mut(i)) {
+        Some(seg) => {
+            let mut done = false;
+            let text: String = seg
+                .text()
+                .chars()
+                .map(|c| {
+                    if !done && one_cell(c) {
+                        done = true;
+                        BLANK_CELL
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            *seg = seg.clone().with_text(text);
+        }
+        None if empty => row.push(Segment::plain(BLANK_CELL)),
+        None => return None,
+    }
+    Some(row)
 }
 
 #[cfg(test)]
@@ -1686,9 +2074,11 @@ mod tests {
             let l = self.layout();
             let fill = if self.fill { Fill::Rule } else { Fill::Packed };
             let inner = l.inner_width(&row, index, count);
-            let mut body = l.row_body(&row, inner, 1, fill, Fit::default());
+            let widths = l.share(&row, inner, fill);
+            let mut body = l.row_columns(&row, &widths, 1, fill, Fit::default());
             let drafts = body.pop().unwrap_or_default();
-            let line = l.wrap_frame(drafts, index, count, &row, fill, None);
+            let ends = l.ends_in_content(&row, &widths);
+            let line = l.wrap_frame(drafts, (index, count), &row, fill, None, ends);
             Painter::PLAIN.paint(&line.segments())
         }
     }
@@ -1763,7 +2153,7 @@ mod tests {
             let inner = l.inner_width(&row, 0, 1);
             let mut body = l.row_body(&row, inner, 1, Fill::Packed, Fit::default());
             let drafts = body.pop().unwrap_or_default();
-            let line = l.wrap_frame(drafts, 0, 1, &row, Fill::Packed, None);
+            let line = l.wrap_frame(drafts, (0, 1), &row, Fill::Packed, None, false);
             line.pieces
                 .iter()
                 .filter(|p| matches!(p.elem, Elem::Separator))
@@ -1890,8 +2280,16 @@ mod tests {
         let short = [Segment::plain("ab")];
         let s = narrow.compose(0, 1, &short, &right, " │ ");
         assert_eq!(s, "── ab ─ R ──", "one rule cell, period three: static fill");
-        assert_eq!(Rule { cells: vec!["ab".into()], offset: 5 }.paint(3), "ababab", "offset wraps");
-        assert_eq!(Rule { cells: Vec::new(), offset: 0 }.paint(3), "", "no pattern, no rule text");
+        assert_eq!(
+            Rule { cells: vec!["ab".into()], offset: 5 }.paint_at(0, 3),
+            "ababab",
+            "offset wraps"
+        );
+        assert_eq!(
+            Rule { cells: Vec::new(), offset: 0 }.paint_at(0, 3),
+            "",
+            "no pattern, no rule text"
+        );
         // An empty pattern falls back to the fill character.
         f.rule = Some(Rule { cells: Vec::new(), offset: 0 });
         assert_eq!(f.compose(0, 1, &left, &right, " │ "), plain);
@@ -1937,24 +2335,374 @@ mod tests {
         Row { cols, gap, separator: " │ ", title: None, boxed: None, blank: false }
     }
 
+    /// A flex column: `left` anchored left, `right` anchored right, each a
+    /// single module (none when empty), leaked as [`col`] does.
+    fn flex(width: Width, left: &str, right: &str) -> Col<'static> {
+        let group = |text: &str| -> &'static [Vec<Segment>] {
+            if text.is_empty() {
+                &[]
+            } else {
+                Box::leak(Box::new(vec![vec![Segment::plain(text)]]))
+            }
+        };
+        Col {
+            content: Content::Groups {
+                left: group(left),
+                right: group(right),
+                left_ids: &[],
+                right_ids: &[],
+            },
+            ..col(width, "")
+        }
+    }
+
+    /// The text a line shows, for assertion messages.
+    fn show(line: &Line) -> String {
+        Painter::PLAIN.paint(&line.segments())
+    }
+
+    /// SPEC § 4.3: content never spills into a neighbour. A right group as
+    /// wide as its column was cut to the whole column with its pad on top,
+    /// and a left group cut to nothing still took its pad (and, packed, a
+    /// separator), so the column came out over its share; `paint` then recut
+    /// the whole line, which took its cap and its placement map with it.
+    #[test]
+    fn a_columns_drafts_fill_exactly_its_share() {
+        let f = Fixture::new(FrameStyle::Rounded, true, 80);
+        let l = f.layout();
+        let text = |n: usize| -> Vec<Vec<Segment>> {
+            if n == 0 { Vec::new() } else { vec![vec![Segment::plain("x".repeat(n))]] }
+        };
+        for fill in [Fill::Rule, Fill::Spaces, Fill::Packed] {
+            for exact in [false, true] {
+                for pads in [(0, 0), (0, 1), (1, 1)] {
+                    for justify in [Justify::Left, Justify::Center, Justify::Right] {
+                        for (left_w, right_w) in
+                            (0..=12).flat_map(|l| (0..=12).map(move |r| (l, r)))
+                        {
+                            let (left, right) = (text(left_w), text(right_w));
+                            let group = Group {
+                                left: &left,
+                                right: &right,
+                                left_ids: &[],
+                                right_ids: &[],
+                                justify,
+                                separator: " │ ",
+                            };
+                            for width in 0..=14_usize {
+                                let fit = Fit { exact, pads, ..Fit::default() };
+                                let drafts = l.compose_group(&group, width, fill, fit);
+                                let cells: usize = drafts.iter().map(Draft::cells).sum();
+                                assert_eq!(
+                                    cells, width,
+                                    "{fill:?} exact={exact} pads={pads:?} {justify:?} left={left_w} right={right_w} width={width}: {drafts:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The shape the review found: a 12-cell flex column whose right
+        // group leaves no room for the left one, beside a second column.
+        for width in [30_usize, 60, 96] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let r = row(
+                vec![flex(Width::Cells(12), "❖ Opus", "⠋ 16:00:00"), col(Width::Fr(1), "s")],
+                1,
+            );
+            let lines = l.lines(std::slice::from_ref(&r));
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            assert_eq!(line.width(), width, "{}", show(line));
+            assert!(show(line).ends_with("──"), "the cap survives: {}", show(line));
+            assert!(show(line).contains("⠋ 16:00:00"), "{}", show(line));
+            assert!(
+                !line.pieces.iter().any(|p| p.elem == Elem::Group(Vec::new())),
+                "the line was recut: {}",
+                show(line)
+            );
+        }
+    }
+
+    /// SPEC § 4.3: with no `fr` column the free width is a rule after the
+    /// last column, and that column keeps its own right pad, so the rule
+    /// runs into the cap. The cap used to take a pad of its own as well,
+    /// which left a hole in the rule: `⠋ 16:00:00 ──── ─┤`.
+    #[test]
+    fn a_row_with_no_fr_column_rules_into_its_cap() {
+        for width in [60_usize, 120] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let last = Col { justify: Justify::Right, ..col(Width::Auto, "⠋ 16:00:00") };
+            let r = row(vec![col(Width::Auto, "a"), col(Width::Cells(20), "b"), last], 2);
+            let lines = l.lines(std::slice::from_ref(&r));
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            assert_eq!(line.width(), width, "{}", show(line));
+            let text = show(line);
+            let tail = text.split_once("16:00:00 ").map_or("", |(_, t)| t);
+            assert!(tail.len() > 3 && tail.chars().all(|c| c == '─'), "a hole: {text}");
+        }
+    }
+
+    /// SPEC § 4.3 Pads: a rule never runs into a module's text, in a stack
+    /// as out of one. An inner row's column took its pads from the inner
+    /// row, where it is both first and last, so the outer column's pad was
+    /// lost and a flex inner row's right group ran into the gap's rule.
+    #[test]
+    fn a_stacked_row_keeps_its_columns_pads() {
+        for width in [40_usize, 80] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let stacked = Col {
+                content: Content::Stack(vec![Row {
+                    cols: vec![flex(Width::Fr(1), "❖ Opus", "⚙ high")],
+                    ..row(Vec::new(), 1)
+                }]),
+                ..col(Width::Fr(1), "")
+            };
+            let plain = flex(Width::Fr(1), "❖ Opus", "⚙ high");
+            let line = |first: Col<'static>| {
+                let r = row(vec![first, col(Width::Fr(1), "⠋ 16:00:00")], 1);
+                l.lines(std::slice::from_ref(&r))
+                    .into_iter()
+                    .flatten()
+                    .map(|l| show(&l))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(line(stacked), line(plain));
+            // An `auto` stack gets a pad on each side of its text, where
+            // `share` reserved them, never both on one side.
+            let auto = Col {
+                content: Content::Stack(vec![row(vec![col(Width::Fr(1), "mid")], 1)]),
+                ..col(Width::Auto, "")
+            };
+            let r = row(vec![col(Width::Fr(1), "a"), auto, col(Width::Fr(1), "z")], 1);
+            let lines = l.lines(std::slice::from_ref(&r));
+            let text = lines.first().and_then(|r| r.first()).map_or_default(show);
+            assert!(text.contains("─ mid ─"), "{text}");
+        }
+    }
+
+    /// SPEC § 4.3: an `auto` column always fits its content, a box around
+    /// it included. The width used to leave out the box's sides and pads,
+    /// so a boxed `auto` column, or an `auto` stack of boxed rows, cut its
+    /// content with `…` inside a box drawn two to four cells too narrow.
+    #[test]
+    fn an_auto_column_fits_its_content_inside_a_box() {
+        let ten = "0123456789";
+        let boxed_col = || Col { boxed: Some(&BoxRef::Anon), ..col(Width::Auto, ten) };
+        let boxed_stack = || Col {
+            content: Content::Stack(
+                (0..2)
+                    .map(|_| Row {
+                        boxed: Some(&BoxRef::Anon),
+                        ..row(vec![col(Width::Fr(1), ten)], 1)
+                    })
+                    .collect(),
+            ),
+            ..col(Width::Auto, "")
+        };
+        for width in [40_usize, 80] {
+            for fill in [true, false] {
+                let f = Fixture::new(FrameStyle::Rounded, fill, width);
+                let l = f.layout();
+                for stacked in [false, true] {
+                    for at in 0..3_usize {
+                        let mut cols: Vec<Col<'static>> =
+                            (0..2).map(|_| col(Width::Fr(1), "x")).collect();
+                        cols.insert(at, if stacked { boxed_stack() } else { boxed_col() });
+                        let r = row(cols, 1);
+                        let lines: Vec<Line> =
+                            l.lines(std::slice::from_ref(&r)).into_iter().flatten().collect();
+                        let text = lines.iter().map(show).collect::<Vec<_>>().join("\n");
+                        assert!(!text.contains('…'), "cut at {at}, fill={fill}:\n{text}");
+                        let top = lines.first().map_or_default(Line::spans);
+                        let edges: Vec<Range<usize>> = top
+                            .into_iter()
+                            .filter(|(e, _)| *e == Elem::BoxEdge)
+                            .map(|(_, r)| r)
+                            .collect();
+                        assert_eq!(edges.len(), 2, "{text}");
+                        assert_eq!(edges[1].end - edges[0].start, 14, "at {at}:\n{text}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// SPEC § 4.3: a box's corners are drawn whatever its side is, so a
+    /// `custom` box with corners and no side needs their two cells even
+    /// where its side would fit in none. The room used to count the side
+    /// alone: a one-cell boxed column drew `++`, the line overflowed, and
+    /// `paint` recut the whole of it to `…`, placement map and all.
+    #[test]
+    fn a_box_never_draws_corners_wider_than_its_room() {
+        let plus = || "+".to_owned();
+        for width in [12_usize, 40] {
+            for fill in [true, false] {
+                let mut f = Fixture::new(FrameStyle::Custom, fill, width);
+                f.chars.top_left = plus();
+                f.chars.top_right = plus();
+                f.chars.bottom_left = plus();
+                f.chars.bottom_right = plus();
+                f.chars.side = String::new();
+                let l = f.layout();
+                for cells in 0..=3_usize {
+                    let boxed = Col { boxed: Some(&BoxRef::Anon), ..col(Width::Cells(cells), "x") };
+                    let stack = Col {
+                        content: Content::Stack(vec![Row {
+                            boxed: Some(&BoxRef::Anon),
+                            ..row(vec![col(Width::Fr(1), "y")], 1)
+                        }]),
+                        ..col(Width::Cells(cells), "")
+                    };
+                    for last in [boxed, stack] {
+                        let r = row(vec![col(Width::Fr(1), "❖ Opus"), last], 1);
+                        for line in l.lines(std::slice::from_ref(&r)).into_iter().flatten() {
+                            let fits =
+                                if fill { line.width() == width } else { line.width() <= width };
+                            assert!(fits, "{cells}: {} cells: {}", line.width(), show(&line));
+                            assert!(
+                                !line.pieces.iter().any(|p| p.elem == Elem::Group(Vec::new())),
+                                "{cells}: the line was recut: {}",
+                                show(&line)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// SPEC § 4.3: a column that draws nothing (an `auto` column with
+    /// nothing to show, a `width = 0` one, an `fr` one whose share floors
+    /// to nothing) takes no cells and no gap, and a last one leaves the
+    /// column before it last. `share` used to reserve the gap, which
+    /// `row_body` never drew, so the cells turned up as a stray rule after
+    /// the last column and a right-justified module ended against it:
+    /// `⠋ 16:00:00─ ─╮`. A last column that drew nothing still counted as
+    /// ending in content, so the cap kept a pad beside the rule: `end ─── ──`.
+    #[test]
+    fn a_column_that_draws_nothing_takes_no_gap() {
+        let right = |c: Col<'static>| Col { justify: Justify::Right, ..c };
+        let nothing = [|| col(Width::Auto, ""), || col(Width::Cells(0), "⠋ 16:00:00")];
+        for (width, gap, empty) in [30_usize, 60, 101]
+            .into_iter()
+            .flat_map(|w| [1, 3].map(|g| (w, g)))
+            .flat_map(|(w, g)| nothing.map(|e| (w, g, e)))
+        {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let last = || right(col(Width::Fr(1), "end"));
+            for cols in [
+                vec![empty(), col(Width::Fr(1), "a"), last()],
+                vec![col(Width::Fr(1), "a"), empty(), last()],
+                // Last, right-justified as a last column is by default: the
+                // column before it keeps its own pad, so the cap takes none.
+                vec![col(Width::Fr(1), "a"), last(), right(empty())],
+            ] {
+                let r = row(cols, gap);
+                let widths = l.share(&r, l.inner_width(&r, 0, 1), Fill::Rule);
+                let gaps = widths.iter().filter(|w| **w > 0).count().saturating_sub(1);
+                assert_eq!(
+                    widths.iter().sum::<usize>() + gaps * gap,
+                    l.inner_width(&r, 0, 1),
+                    "the drawn columns and their gaps fill the row: {widths:?}"
+                );
+                let lines = l.lines(std::slice::from_ref(&r));
+                let line = lines.first().and_then(|r| r.first()).unwrap();
+                assert_eq!(line.width(), width, "{}", show(line));
+                assert!(show(line).ends_with(" end ──"), "{}", show(line));
+            }
+        }
+        // `fr` columns squeezed to nothing: by fixed columns (the review's
+        // `width = 20` beside two bare columns and an `auto` one), and by a
+        // weight so large the other's share floors to nothing. The gap cells
+        // no `fr` column is left to take are the rule after the last column,
+        // behind its pad, as in a row with no `fr` column at all.
+        let squeezed = |gap: usize| {
+            [
+                row(
+                    vec![
+                        col(Width::Cells(20), "a"),
+                        col(Width::Fr(1), "b"),
+                        col(Width::Fr(1), "c"),
+                        right(col(Width::Auto, "end")),
+                    ],
+                    gap,
+                ),
+                row(
+                    vec![
+                        col(Width::Fr(64), "a"),
+                        col(Width::Fr(1), "b"),
+                        right(col(Width::Auto, "end")),
+                    ],
+                    gap,
+                ),
+            ]
+        };
+        let rules_into_cap = |text: &str| {
+            text.rsplit_once(" end ").is_some_and(|(_, tail)| {
+                tail.chars().count() >= 2 && tail.chars().all(|c| c == '─')
+            })
+        };
+        for (width, gap) in (33_usize..=48).flat_map(|w| [1, 3].map(|g| (w, g))) {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            for r in squeezed(gap) {
+                let lines = l.lines(std::slice::from_ref(&r));
+                let line = lines.first().and_then(|r| r.first()).unwrap();
+                assert_eq!(line.width(), width, "{}", show(line));
+                assert!(rules_into_cap(&show(line)), "{width}, gap {gap}: {}", show(line));
+            }
+            // The `64fr` column is left when the `1fr` one is dropped, and
+            // the gap cells it freed are its own: the row ends in content,
+            // its pad and the cap, with no rule left over for after it.
+            let [_, r] = squeezed(gap);
+            let inner = l.inner_width(&r, 0, 1);
+            assert_eq!(l.share(&r, inner, Fill::Rule), [inner - 4 - gap, 0, 4], "{width}, {gap}");
+            let lines = l.lines(std::slice::from_ref(&r));
+            let text = lines.first().and_then(|r| r.first()).map(show).unwrap();
+            assert!(text.ends_with("─ end ──") && !text.ends_with(" end ───"), "{text}");
+        }
+        // A last `fr` column squeezed to nothing: the row ends in the rule,
+        // which runs into the cap with no pad before it.
+        for width in [30_usize, 40, 60] {
+            let f = Fixture::new(FrameStyle::Rounded, true, width);
+            let l = f.layout();
+            let r = row(vec![col(Width::Fr(64), "a"), right(col(Width::Fr(1), "end"))], 3);
+            let lines = l.lines(std::slice::from_ref(&r));
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            let text = show(line);
+            assert_eq!(line.width(), width, "{text}");
+            assert!(!text.contains("end"), "the column is squeezed out: {text}");
+            assert!(text.ends_with(&"─".repeat(6)), "a hole before the cap: {text}");
+        }
+    }
+
     /// SPEC § 4.3: the `fr` columns share the free width as
     /// `floor(free × n ÷ Σfr)` each, the leftover one cell each to the first
     /// of them, so the shares differ by at most one cell and always add up.
+    /// A share that floors to nothing drops its column, gap and all, and the
+    /// columns that remain share again: the gaps are counted between the
+    /// columns that are drawn, never `n − 1` of them.
     #[test]
     fn column_shares_add_up_and_differ_by_at_most_one_cell() {
         let f = Fixture::new(FrameStyle::Rounded, true, 80);
         let l = f.layout();
         for n in 1..=6_usize {
             let r = row((0..n).map(|_| col(Width::Fr(1), "x")).collect(), 1);
-            for width in 10..=400_usize {
+            for width in 1..=400_usize {
                 let widths = l.share(&r, width, Fill::Rule);
-                let gaps = n.saturating_sub(1);
+                let drawn: Vec<usize> = widths.iter().copied().filter(|w| *w > 0).collect();
+                let gaps = drawn.len().saturating_sub(1);
                 let total: usize = widths.iter().sum::<usize>() + gaps;
                 assert!(total <= width, "{n} columns at {width}: {widths:?}");
                 assert_eq!(total, width, "the shares fill the width: {widths:?}");
                 let (min, max) = (
-                    widths.iter().min().copied().unwrap_or(0),
-                    widths.iter().max().copied().unwrap_or(0),
+                    drawn.iter().min().copied().unwrap_or(0),
+                    drawn.iter().max().copied().unwrap_or(0),
                 );
                 assert!(max - min <= 1, "{n} columns at {width}: {widths:?}");
                 // The leftover goes to the *first* columns, so the shares
@@ -2042,7 +2790,7 @@ mod tests {
             let l = f.layout();
             let boxed = |text| Col { boxed: Some(&BoxRef::Anon), ..col(Width::Fr(1), text) };
             let r = row(vec![boxed("one"), boxed("two")], 2);
-            let inner = l.inner_width(&r, 0, l.row_height(&r));
+            let inner = l.inner_width(&r, 0, l.row_height(&r, l.frame_room(&r), Fill::Rule));
             let lines: Vec<Line> =
                 l.lines(std::slice::from_ref(&r)).into_iter().flatten().collect();
             let edges = |line: &Line| -> Vec<Range<usize>> {
@@ -2109,10 +2857,11 @@ mod tests {
                 (0..n).map(|i| row(vec![col(Width::Fr(1), &format!("r{i}"))], 1)).collect(),
             ),
         };
+        let height = |r: &Row<'_>| l.row_height(r, l.frame_room(r), Fill::Rule);
         let r = row(vec![stack(3, VAlign::Top, None), col(Width::Fr(1), "one")], 1);
-        assert_eq!(l.row_height(&r), 3);
+        assert_eq!(height(&r), 3);
         let r = row(vec![stack(2, VAlign::Top, Some(&BoxRef::Anon))], 1);
-        assert_eq!(l.row_height(&r), 4, "a boxed column is its content plus two edge lines");
+        assert_eq!(height(&r), 4, "a boxed column is its content plus two edge lines");
         // A stack is the *sum* of its rows' heights, not their count: three
         // boxed inner rows are three cells of content and six edge lines.
         let boxed_stack = Col {
@@ -2129,7 +2878,7 @@ mod tests {
                     .collect(),
             ),
         };
-        assert_eq!(l.row_height(&row(vec![boxed_stack], 1)), 9);
+        assert_eq!(height(&row(vec![boxed_stack], 1)), 9);
 
         // The short column's own line sits where `valign` says.
         let text = |rows: &[Row<'_>]| {
@@ -2144,6 +2893,88 @@ mod tests {
             let lines = text(&[row(vec![stack(3, VAlign::Top, None), short], 1)]);
             let found = lines.iter().position(|l| l.contains("short"));
             assert_eq!(found, Some(at), "{valign:?}: {lines:?}");
+        }
+    }
+
+    /// SPEC § 4.3: a box too narrow to draw (its corners or its sides do not
+    /// fit the column's share) renders nothing and adds no lines. It kept
+    /// its two edge lines, so its row came out two lines taller, empty ones
+    /// under a frame with caps, and a one-line row's gaps turned to spaces:
+    /// `╭─ ❖ Opus ───   ─── ⏱ 1h12m ─╮` over two empty framed lines. A box
+    /// with no glyphs at all (`style = "none"`) fits in any cell, but a
+    /// zero-width column has none to give it: it counted as drawn in no
+    /// cells, and its row came out three lines tall all the same.
+    #[test]
+    fn a_box_too_narrow_to_draw_adds_no_lines() {
+        let plus = || "+".to_owned();
+        let model = || col(Width::Fr(1), "❖ Opus");
+        let end = || col(Width::Fr(1), "end");
+        let invisible: &'static BoxRef = Box::leak(Box::new(BoxRef::Named("x".to_owned())));
+        let boxed =
+            |b: &'static BoxRef, width| Col { boxed: Some(b), ..col(width, "⠋ 16:00:00") };
+        let stacked = |b: &'static BoxRef, width| Col {
+            content: Content::Stack(vec![Row {
+                boxed: Some(b),
+                ..row(vec![col(Width::Fr(1), "⠋ 16:00:00")], 1)
+            }]),
+            ..col(width, "")
+        };
+        for (fill, width) in [true, false].into_iter().flat_map(|f| [40_usize, 60].map(|w| (f, w)))
+        {
+            // The rounded box needs two cells; a `custom` one with corners
+            // and no side needs two for its corners; a `none` one needs one.
+            for glyphs in ["rounded", "corners", "none"] {
+                let mut f = Fixture::new(FrameStyle::Rounded, fill, width);
+                if glyphs == "corners" {
+                    f.chars.top_left = plus();
+                    f.chars.top_right = plus();
+                    f.chars.bottom_left = plus();
+                    f.chars.bottom_right = plus();
+                    f.chars.side = String::new();
+                }
+                f.boxes.insert(
+                    "x".to_owned(),
+                    BoxCfg { style: Some(FrameStyle::None), ..BoxCfg::default() },
+                );
+                let (b, needs) = if glyphs == "none" { (invisible, 1) } else { (&BoxRef::Anon, 2) };
+                let boxed = |width| boxed(b, width);
+                let stacked = |width| stacked(b, width);
+                let l = f.layout();
+                let lines = |cols: Vec<Col<'static>>, gap: usize| -> Vec<String> {
+                    let r = row(cols, gap);
+                    l.lines(std::slice::from_ref(&r))
+                        .into_iter()
+                        .flatten()
+                        .map(|l| show(&l))
+                        .collect()
+                };
+                let narrow =
+                    (0..needs).flat_map(|w| [boxed(Width::Cells(w)), stacked(Width::Cells(w))]);
+                for narrow in narrow {
+                    let last = lines(vec![model(), narrow.clone()], 1);
+                    assert_eq!(last.len(), 1, "{glyphs}: {last:?}");
+                    // Its cells are empty ones, rule on a one-line row, and
+                    // as the last column it does not end the row in
+                    // content: the rule runs into the cap with no hole.
+                    let tail = last.first().and_then(|l| l.split_once("Opus ")).map(|(_, t)| t);
+                    assert!(
+                        !fill || tail.is_some_and(|t| t.chars().all(|c| c == '─')),
+                        "{glyphs}: {last:?}"
+                    );
+                    let between = lines(vec![model(), narrow, end()], 3);
+                    assert_eq!(between.len(), 1, "{glyphs}: {between:?}");
+                }
+                // A zero-width box takes no cells, no gap and no lines: the
+                // row is the row without it, its gap a rule again.
+                assert_eq!(
+                    lines(vec![model(), boxed(Width::Cells(0)), end()], 3),
+                    lines(vec![model(), end()], 3),
+                    "{glyphs}"
+                );
+                // The cells it needs hold it: it draws, three lines tall.
+                let two = lines(vec![model(), boxed(Width::Cells(needs))], 1);
+                assert_eq!(two.len(), 3, "{glyphs}: {two:?}");
+            }
         }
     }
 
@@ -2189,6 +3020,184 @@ mod tests {
         let right = Row { title: Some(&t), ..row(vec![col(Width::Fr(1), "x")], 1) };
         let out = line(&right);
         assert!(out.contains("Repo"), "{out}");
+    }
+
+    /// SPEC § 4.3: `blank` on an inner row follows the § 4.1 rule, a line
+    /// that would be whitespace only gets the braille cell and a line with
+    /// a visible frame or box needs none. The inner row used to mark every
+    /// one of its lines before the outer row had drawn its caps or sides.
+    #[test]
+    fn a_blank_inner_row_marks_only_a_line_that_is_whitespace() {
+        let stack = || Col {
+            content: Content::Stack(vec![
+                row(vec![col(Width::Fr(1), "model")], 1),
+                Row { blank: true, ..row(vec![col(Width::Fr(1), "")], 1) },
+                row(vec![col(Width::Fr(1), "clock")], 1),
+            ]),
+            ..col(Width::Fr(1), "")
+        };
+        let blank = BLANK_CELL;
+        let lines = |style: FrameStyle, boxed: Option<&'static BoxRef>| -> Vec<String> {
+            let f = Fixture::new(style, false, 40);
+            let l = f.layout();
+            let r = row(vec![Col { boxed, ..stack() }], 1);
+            l.lines(std::slice::from_ref(&r)).into_iter().flatten().map(|l| show(&l)).collect()
+        };
+        for (style, boxed) in [(FrameStyle::Rounded, None), (FrameStyle::None, Some(&BoxRef::Anon))]
+        {
+            let out = lines(style, boxed);
+            assert!(out.iter().all(|l| !l.contains(blank)), "{style:?}: {out:?}");
+        }
+        // No frame and nothing packed after it: the line is the cell alone,
+        // as a blank spacer row is.
+        let out = lines(FrameStyle::None, None);
+        assert_eq!(out.get(1).map(String::as_str), Some(blank.to_string().as_str()), "{out:?}");
+    }
+
+    /// `[frame] pad` is text (docs/config.md: "Text between prefix/content
+    /// and content/rule"), drawn wherever the frame pads: after the prefix,
+    /// around the groups, before the cap, beside a column's text and inside
+    /// a box's sides. Phase 21 drew its width in spaces instead, so `pad =
+    /// "·"` showed as a space.
+    #[test]
+    fn a_frame_pad_is_drawn_as_its_text() {
+        let mut f = Fixture::new(FrameStyle::Rounded, true, 30);
+        f.chars.pad = "·".to_owned();
+        let (left, right) = ([Segment::plain("left")], [Segment::plain("R")]);
+        let s = f.compose(0, 2, &left, &right, " │ ");
+        assert_eq!(s, format!("╭─·left·{}·R·─╮", "─".repeat(17)));
+        let l = f.layout();
+        let r = row(vec![col(Width::Fr(1), "a"), col(Width::Fr(1), "b")], 1);
+        let boxed = Row { boxed: Some(&BoxRef::Anon), ..row(vec![col(Width::Fr(1), "c")], 1) };
+        let lines: Vec<String> =
+            l.lines(&[r, boxed]).into_iter().flatten().map(|line| show(&line)).collect();
+        assert!(lines[0].starts_with("──·a·─"), "{lines:?}");
+        assert!(lines[2].starts_with("│·c "), "{lines:?}");
+        assert!(lines[2].ends_with(" ·│"), "{lines:?}");
+    }
+
+    /// SPEC § 14: the module a cut lands in owns the ellipsis and nothing
+    /// past it. When a two-cell glyph straddles the cut, the cut ends a cell
+    /// early, and the map used to hand that module the cell after the piece.
+    #[test]
+    fn a_cut_before_a_wide_glyph_maps_no_cell_past_the_piece() {
+        let f = Fixture::new(FrameStyle::None, false, 40);
+        let l = f.layout();
+        let group = vec![vec![Segment::plain("aaaaa")], vec![Segment::plain("漢bbb")]];
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        for budget in 6..=9_usize {
+            let pieces = l.fit_group(l.group_pieces(&group, &ids, " "), budget, true, false);
+            let piece = pieces.first().unwrap();
+            let Elem::Group(map) = &piece.elem else { panic!("not cut: {pieces:?}") };
+            let end = segments_width(&piece.segs);
+            assert_eq!(map.last().map(|(_, r)| r.end), Some(end), "budget {budget}: {map:?}");
+        }
+    }
+
+    /// SPEC § 4.3 Pads: inside a box a lone group needs no pad and no fill
+    /// cell on a side that faces the box's side, whose own pad already keeps
+    /// the text off it. Both were reserved, so a module up to two cells
+    /// narrower than the interior was cut: `│ ❖ O… │`. Between two columns
+    /// the reservation stays: with `gap = 0` it is what keeps them apart.
+    #[test]
+    fn a_lone_group_in_a_box_may_fill_its_interior() {
+        // 14 cells: two sides and two pads leave an interior of 10.
+        let f = Fixture::new(FrameStyle::Rounded, true, 14);
+        let l = f.layout();
+        for text in ["0123456789", "012345678", "01234567"] {
+            for justify in [Justify::Left, Justify::Center, Justify::Right] {
+                let r = Row {
+                    boxed: Some(&BoxRef::Anon),
+                    ..row(vec![Col { justify, ..col(Width::Fr(1), text) }], 1)
+                };
+                for line in l.lines(std::slice::from_ref(&r)).into_iter().flatten() {
+                    assert_eq!(line.width(), 14, "{}", show(&line));
+                    assert!(!show(&line).contains('…'), "{justify:?}: {}", show(&line));
+                }
+            }
+        }
+        let f = Fixture::new(FrameStyle::Rounded, true, 30);
+        let l = f.layout();
+        let long = "abcdefghijklmnopqrstuvwxyz";
+        let r = Row {
+            boxed: Some(&BoxRef::Anon),
+            ..row(vec![col(Width::Fr(1), long), col(Width::Fr(1), long)], 0)
+        };
+        let lines = l.lines(std::slice::from_ref(&r));
+        let body = lines.first().and_then(|r| r.get(1)).map_or_default(show);
+        assert!(!body.contains("…a"), "the columns touch: {body}");
+        assert!(body.ends_with("… │"), "the last column fills to the box's pad: {body}");
+    }
+
+    /// SPEC § 4.3 Pads (decided with Daniel 2026-09-25): inside a box the
+    /// gap's spaces keep two columns apart, so a side facing a neighbour
+    /// keeps a fill cell and a pad only at `gap = 0`. They were reserved at
+    /// every gap, and the `box-columns` golden cut `context` to `4…` at
+    /// `gap = 2`.
+    #[test]
+    fn inside_a_box_a_gap_is_what_keeps_two_columns_apart() {
+        // 34 cells: two sides and two pads leave an interior of 30.
+        let f = Fixture::new(FrameStyle::Rounded, true, 34);
+        let l = f.layout();
+        let body = |gap: usize, texts: [&str; 3]| -> String {
+            let cols = [Justify::Left, Justify::Center, Justify::Right]
+                .into_iter()
+                .zip(texts)
+                .map(|(justify, text)| Col { justify, ..col(Width::Fr(1), text) })
+                .collect();
+            let r = Row { boxed: Some(&BoxRef::Anon), ..row(cols, gap) };
+            let lines = l.lines(std::slice::from_ref(&r));
+            lines.first().and_then(|r| r.get(1)).map_or_default(show)
+        };
+        // Shares of 9, 9 and 8 at `gap = 2`, of 10, 9 and 9 at `gap = 1`:
+        // each text fills its column exactly and stands uncut.
+        assert_eq!(
+            body(2, ["aaaaaaaaa", "bbbbbbbbb", "cccccccc"]),
+            "│ aaaaaaaaa  bbbbbbbbb  cccccccc │"
+        );
+        assert_eq!(
+            body(1, ["aaaaaaaaaa", "bbbbbbbbb", "ccccccccc"]),
+            "│ aaaaaaaaaa bbbbbbbbb ccccccccc │"
+        );
+        // At `gap = 0` nothing else separates them: each keeps its cell and
+        // pad on the sides that face a neighbour, and is cut to make room.
+        let touching = body(0, ["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"]);
+        assert_eq!(display_width(&touching), 34, "{touching}");
+        for joined in ["ab", "bc", "…b", "…c"] {
+            assert!(!touching.contains(joined), "{joined}: {touching}");
+        }
+    }
+
+    /// SPEC § 4.3: on a multi-line row gap cells and padding lines are
+    /// spaces, and a title set into one keeps them spaces. The cells around
+    /// the title were always built as rule, so a centred title landing in a
+    /// short column's padding line drew a rule across it.
+    #[test]
+    fn a_title_in_a_run_of_spaces_keeps_them_spaces() {
+        let f = Fixture::new(FrameStyle::Rounded, true, 60);
+        let l = f.layout();
+        let t = crate::config::TitleCfg {
+            text: "Panel".to_owned(),
+            justify: Justify::Center,
+            pad: 1,
+            color: None,
+        };
+        let short = Col { valign: VAlign::Bottom, ..col(Width::Fr(1), "model") };
+        let stack = Col {
+            content: Content::Stack(vec![
+                row(vec![col(Width::Fr(1), "r0")], 1),
+                row(vec![col(Width::Fr(1), "r1")], 1),
+            ]),
+            ..col(Width::Fr(1), "")
+        };
+        let r = Row { title: Some(&t), ..row(vec![short, stack], 2) };
+        let lines = l.lines(std::slice::from_ref(&r));
+        let first = lines.first().and_then(|r| r.first()).map_or_default(show);
+        let (before, after) = first.split_once("Panel").unwrap_or_default();
+        let before = before.trim_start_matches(['╭', '─']);
+        let between = after.split_once("r0").map_or("", |(b, _)| b);
+        assert!(!before.contains('─') && !between.contains('─'), "{first}");
+        assert!(!between.is_empty(), "{first}");
     }
 
     /// SPEC § 4.3: a title is cut to the room it has and never widens the
@@ -2253,21 +3262,37 @@ mod tests {
     /// width. The row is laid out to the room the *widest* pair leaves;
     /// laying it out to the first line's, as it once was, left the taller
     /// caps hanging past the box and the row's own recut ate them into `…`.
+    /// A narrower cap's spare cells go to the rule, an empty cap's too: they
+    /// once went only before a cap, so a line whose right cap was empty
+    /// came out short of the box.
     #[test]
     fn a_tall_row_under_uneven_custom_caps_fits_every_line() {
-        for width in [24_usize, 40, 80] {
+        let uneven = FrameChars {
+            first: "<".to_owned(),
+            middle: "<<<".to_owned(),
+            last: "<<<<<".to_owned(),
+            single: "<".to_owned(),
+            right_first: ">".to_owned(),
+            right_middle: ">>>".to_owned(),
+            right_last: ">>>>>".to_owned(),
+            right_single: ">".to_owned(),
+            ..FrameChars::for_style(FrameStyle::Rounded)
+        };
+        let emptied = FrameChars {
+            right_first: "你".to_owned(),
+            right_middle: String::new(),
+            right_last: String::new(),
+            ..uneven.clone()
+        };
+        let cases = [
+            (uneven, [("<", ">"), ("<<<", ">>>"), ("<<<<<", ">>>>>")]),
+            (emptied, [("<", "你"), ("<<<", ""), ("<<<<<", "")]),
+        ];
+        for (width, (chars, ends)) in
+            [24_usize, 40, 80].into_iter().flat_map(|w| cases.clone().map(|c| (w, c)))
+        {
             let mut f = Fixture::new(FrameStyle::Custom, true, width);
-            f.chars = FrameChars {
-                first: "<".to_owned(),
-                middle: "<<<".to_owned(),
-                last: "<<<<<".to_owned(),
-                single: "<".to_owned(),
-                right_first: ">".to_owned(),
-                right_middle: ">>>".to_owned(),
-                right_last: ">>>>>".to_owned(),
-                right_single: ">".to_owned(),
-                ..FrameChars::for_style(FrameStyle::Rounded)
-            };
+            f.chars = chars;
             let l = f.layout();
             let stack = Col {
                 width: Width::Fr(1),
@@ -2281,11 +3306,138 @@ mod tests {
                 ]),
             };
             let rows = vec![Row { cols: vec![stack], ..row(Vec::new(), 1) }];
-            let ends = [("<", ">"), ("<<<", ">>>"), ("<<<<<", ">>>>>")];
             for (line, (prefix, cap)) in l.lines(&rows).into_iter().flatten().zip(ends) {
                 let text = Painter::PLAIN.paint(&line.segments());
                 assert_eq!(line.width(), width, "{text:?}");
                 assert!(text.starts_with(prefix) && text.ends_with(cap), "{text:?}");
+            }
+            // With a right group on every line the pad stands against it and
+            // the spare cells go to the rule behind it (content, pad, rule,
+            // cap). They went between the text and the pad, so a later line
+            // under a narrower or empty cap read `⏱ 1h12m──`; a line with no
+            // cap and no cells to spare ends in its text.
+            let flexed = |right: &'static str| row(vec![flex(Width::Fr(1), "l", right)], 1);
+            let stack = Col {
+                content: Content::Stack(vec![flexed("r0"), flexed("r1"), flexed("r2")]),
+                ..col(Width::Fr(1), "")
+            };
+            let rows = vec![Row { cols: vec![stack], ..row(Vec::new(), 1) }];
+            let lines = l.lines(&rows).into_iter().flatten().zip(ends).enumerate();
+            for (i, (line, (_, cap))) in lines {
+                let text = Painter::PLAIN.paint(&line.segments());
+                assert_eq!(line.width(), width, "{text:?}");
+                let after = text.strip_suffix(cap).and_then(|t| t.rsplit_once(&format!("r{i}")));
+                assert!(
+                    after.is_some_and(|(_, t)| t.is_empty()
+                        || (t.starts_with(' ') && t.chars().skip(1).all(|c| c == '─'))),
+                    "the rule touches the text: {text:?}"
+                );
+            }
+        }
+    }
+
+    /// SPEC § 4.3: under a `custom` frame whose caps differ, a row of the
+    /// frame is measured on the caps of the lines it lands on. It was
+    /// measured on the narrowest pair (here the wide `right_last`, which only
+    /// the last row carries) and laid out on its own, so a box that fitted
+    /// only there was drawn at full height and cut to the smaller measure:
+    /// its bottom edge and the rows after it were gone
+    /// (`| ⠋ 16:00… | ]` with no `+---+` under it), or its top edge stood
+    /// alone.
+    #[test]
+    fn a_row_is_measured_on_the_caps_its_lines_land_on() {
+        let wide = "]".repeat(12);
+        let chars = FrameChars {
+            first: "[".to_owned(),
+            middle: "|".to_owned(),
+            last: "[".to_owned(),
+            single: "[".to_owned(),
+            right_first: "]".to_owned(),
+            right_middle: "]".to_owned(),
+            right_last: wide.clone(),
+            right_single: "]".to_owned(),
+            fill: "-".to_owned(),
+            pad: " ".to_owned(),
+            top_left: "A".to_owned(),
+            top_right: "B".to_owned(),
+            bottom_left: "C".to_owned(),
+            bottom_right: "D".to_owned(),
+            side: "|".to_owned(),
+            ..FrameChars::for_style(FrameStyle::Rounded)
+        };
+        let bare = |text: &str| row(vec![col(Width::Fr(1), text)], 1);
+        let boxed = |text: &str| Row { boxed: Some(&BoxRef::Anon), ..bare(text) };
+        let shapes = [
+            // A stack with a boxed row, and a boxed column holding a stack.
+            Col {
+                content: Content::Stack(vec![bare("x"), boxed("y"), bare("z")]),
+                ..col(Width::Fr(1), "")
+            },
+            Col {
+                boxed: Some(&BoxRef::Anon),
+                content: Content::Stack(vec![bare("x"), bare("y"), bare("z")]),
+                ..col(Width::Fr(1), "")
+            },
+        ];
+        let lines_of = |l: &Layout<'_>, rows: &[Row<'_>]| -> Vec<Vec<String>> {
+            l.lines(rows).iter().map(|lines| lines.iter().map(show).collect()).collect()
+        };
+        for (width, shape) in (16_usize..=48).flat_map(|w| shapes.clone().map(|s| (w, s))) {
+            let mut f = Fixture::new(FrameStyle::Custom, true, width);
+            f.chars = chars.clone();
+            let l = f.layout();
+            let rows = [row(vec![col(Width::Cells(12), "m"), shape], 1), bare("p")];
+            let lines = lines_of(&l, &rows);
+            let text = lines.iter().flatten().cloned().collect::<Vec<_>>().join("\n");
+            for line in l.lines(&rows).iter().flatten() {
+                assert_eq!(line.width(), width, "{width}:\n{text}");
+            }
+            let top = lines.first().cloned().unwrap_or_default();
+            let count = |c: char| top.iter().filter(|line| line.contains(c)).count();
+            assert_eq!(
+                count('A'),
+                count('C'),
+                "a box is drawn whole or not at all, {width}:\n{text}"
+            );
+            assert_eq!(count('x'), count('z'), "no row of the stack is cut away, {width}:\n{text}");
+            // The first row carries `first` and `middle` caps, one cell
+            // each, and never the last line's: its stack column has what
+            // the pads, the caps, the fixed column and the gap leave, and
+            // its box, two sides wide, is drawn wherever that holds it.
+            let share = width.saturating_sub(2 + 1 + 12 + 1);
+            assert_eq!(count('A'), usize::from(share >= 2), "{width}:\n{text}");
+            assert!(lines.get(1).is_some_and(|p| p.iter().all(|l| l.ends_with(&wide))), "{text}");
+        }
+        // A row that never settles: one line under the narrow `single` caps
+        // holds its box, and the three lines the box needs carry `first`
+        // and `last` caps too wide for it. It keeps the first measure, on
+        // the fewest cells any pair of caps leaves, and is laid out there:
+        // one line, no box, the rest of the line rule before the cap.
+        let tall = FrameChars { right_first: wide.clone(), right_middle: wide, ..chars };
+        for width in 16_usize..=48 {
+            let mut f = Fixture::new(FrameStyle::Custom, true, width);
+            f.chars = tall.clone();
+            let l = f.layout();
+            let r = row(
+                vec![
+                    col(Width::Cells(12), "m"),
+                    Col { boxed: Some(&BoxRef::Anon), ..col(Width::Fr(1), "x") },
+                ],
+                1,
+            );
+            let lines = lines_of(&l, std::slice::from_ref(&r)).concat();
+            let text = lines.join("\n");
+            let fits_single = width.saturating_sub(2 + 1 + 12 + 1) >= 2;
+            let fits_tall = width.saturating_sub(2 + 12 + 12 + 1) >= 2;
+            let want = if fits_tall { 3 } else { 1 };
+            assert_eq!(lines.len(), want, "{width} (single caps fit: {fits_single}):\n{text}");
+            assert_eq!(
+                lines.iter().filter(|l| l.contains('A')).count(),
+                lines.iter().filter(|l| l.contains('C')).count(),
+                "{width}:\n{text}"
+            );
+            for line in l.lines(std::slice::from_ref(&r)).iter().flatten() {
+                assert_eq!(line.width(), width, "{width}:\n{text}");
             }
         }
     }
@@ -2345,6 +3497,56 @@ mod tests {
             assert!(kinds.contains(&want), "{want:?} never drawn: {kinds:?}");
         }
         assert!(kinds.iter().any(|k| matches!(k, Elem::Module(_))), "no module: {kinds:?}");
+    }
+
+    /// SPEC § 4.1, § 14: the ticker's offset, its window and the placement
+    /// map count cells the same way, cluster by cluster. `لا` is one cell to
+    /// `unicode-width` but two clusters to the scroller: the offset used to
+    /// wrap a cell early and the map to place the wrapped module a cell off.
+    #[test]
+    fn a_ticker_over_a_ligature_keeps_its_period_and_its_map() {
+        let left: Vec<Vec<Segment>> = vec![vec![Segment::plain("xلاy")], vec![Segment::plain("pq")]];
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        let line_at = |secs: i64| {
+            let mut f = Fixture::new(FrameStyle::None, false, 5);
+            f.ticker = Some(Ticker {
+                step: 1.0,
+                gap: "   ".to_owned(),
+                now: jiff::Timestamp::from_second(secs).unwrap(),
+            });
+            let l = f.layout();
+            let rows = vec![Row {
+                cols: vec![Col {
+                    width: Width::Fr(1),
+                    justify: Justify::Left,
+                    valign: VAlign::Top,
+                    boxed: None,
+                    content: Content::Groups {
+                        left: &left,
+                        right: &[],
+                        left_ids: &ids,
+                        right_ids: &[],
+                    },
+                }],
+                gap: 1,
+                separator: " ",
+                title: None,
+                boxed: None,
+                blank: false,
+            }];
+            let lines = l.lines(&rows);
+            let line = lines.first().and_then(|r| r.first()).unwrap();
+            (Painter::PLAIN.paint(&line.segments()), line.modules())
+        };
+        // `xلاy pq` is seven clusters, and the gap three: a period of ten.
+        let (text, map) = line_at(8);
+        assert_eq!(text, "  xلا");
+        assert_eq!(map, vec![("a".to_owned(), 2..5)]);
+        let (text, map) = line_at(9);
+        assert_eq!(text, " xلاy");
+        assert_eq!(map, vec![("a".to_owned(), 1..5)]);
+        assert_eq!(line_at(18), line_at(8));
+        assert_ne!(line_at(17), line_at(8));
     }
 
     /// SPEC § 14: the placement map names the module behind every cell it

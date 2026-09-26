@@ -1,7 +1,10 @@
-//! Shared rendering helpers: smooth bars, percent formatting.
+//! Shared rendering helpers: smooth bars and the specs of the keys that
+//! draw them, the lines-changed pair, name cuts, short hashes, token and
+//! dollar formatting. Percentages print through `config::format`.
 
 use crate::ansi::{Color, Segment, Style};
-use crate::icons::IconSet;
+use crate::config::schema::{ColorSpec, IconSpec, Kind, ModuleCfg, OptSpec, Rule, Value};
+use crate::icons::{IconSet, glyph};
 use crate::num::{floor_to_u64, u64_to_usize, usize_to_f64};
 
 /// Eighth-block characters for sub-cell precision, from 1/8 to 7/8.
@@ -87,24 +90,100 @@ pub fn bar(
 /// explicit override still wins.
 pub const BAR_STYLES: &[&str] = &["blocks", "line"];
 
-/// Format a percentage with no decimals, e.g. `42%`.
+/// The `bar` option of every module that draws a [`bar`] (`context` and the
+/// limit modules), so its long doc is written once (the shape of
+/// [`super::durations_opt`]).
 #[must_use]
-pub fn percent(p: f64) -> String {
-    format!("{}%", crate::num::round_to_u64(crate::num::clamp_percent(p)))
+pub fn bar_opt() -> OptSpec {
+    OptSpec::new(
+        "bar",
+        Kind::Enum(BAR_STYLES),
+        "Bar glyphs: `blocks` (the icon set's `█`/`░`, fractional cells) or `line` (`━`/`─`, `=`/`-` in the ascii set; whole cells, so no hairline gaps where the font draws `█` narrow). Explicit `icons.fill`/`icons.empty` win.",
+        Value::Str("blocks".into()),
+    )
 }
 
-/// Format a percentage allowing values above 100 (spend limits).
+/// The `thresholds` option of a module whose percentage is banded: a band
+/// is the number of thresholds reached, so the list must ascend.
 #[must_use]
-pub fn percent_unclamped(p: f64) -> String {
-    if p.is_nan() || p < 0.0 { "0%".into() } else { format!("{}%", crate::num::round_to_u64(p)) }
+pub fn thresholds_opt() -> OptSpec {
+    OptSpec::new(
+        "thresholds",
+        Kind::NumList,
+        "Ascending percentages where the band color changes.",
+        Value::NumList(vec![50.0, 75.0, 90.0]),
+    )
+    .rule(Rule::Ascending)
 }
 
-/// Format dollars: `$0.42`, `$12.35`, `$1.2k`.
+/// The `band_colors` option beside [`thresholds_opt`]: one colour per
+/// band, the theme's four band roles by default.
+#[must_use]
+pub fn band_colors_opt() -> OptSpec {
+    OptSpec::new(
+        "band_colors",
+        Kind::ColorList,
+        "One color per band (roles or literal colors).",
+        Value::StrList(vec!["band1".into(), "band2".into(), "band3".into(), "band4".into()]),
+    )
+}
+
+/// The `fill` and `empty` glyphs a [`bar`] repeats cell by cell. Their
+/// defaults are what `bar` smooths (`█`) and what the `bar = "line"`
+/// shorthand replaces, so every bar module declares the same two.
+#[must_use]
+pub const fn bar_icons() -> [IconSpec; 2] {
+    [
+        IconSpec { key: "fill", doc: "Filled bar cell.", glyph: glyph("█", "█", "█", "#") },
+        IconSpec { key: "empty", doc: "Empty bar cell.", glyph: glyph("░", "░", "░", "-") },
+    ]
+}
+
+/// The colour of a [`bar`]'s empty part (the filled part takes the band's).
+#[must_use]
+pub const fn bar_empty_color() -> ColorSpec {
+    ColorSpec { key: "empty", doc: "Empty part of the bar.", default: "muted" }
+}
+
+/// The `added` and `removed` glyphs of a module that prints lines changed
+/// ([`added_removed`]): `lines`, and `cost` under `show_lines`.
+#[must_use]
+pub const fn added_removed_icons() -> [IconSpec; 2] {
+    [
+        IconSpec { key: "added", doc: "Lines-added glyph.", glyph: glyph("+", "+", "+", "+") },
+        IconSpec {
+            key: "removed", doc: "Lines-removed glyph.", glyph: glyph("−", "−", "−", "-")
+        },
+    ]
+}
+
+/// The colours of [`added_removed_icons`]' two counts.
+#[must_use]
+pub const fn added_removed_colors() -> [ColorSpec; 2] {
+    [
+        ColorSpec { key: "added", doc: "Lines added.", default: "ok" },
+        ColorSpec { key: "removed", doc: "Lines removed.", default: "danger" },
+    ]
+}
+
+/// Lines added and removed, `+156 −23`, each count in its own colour.
+///
+/// The keys are those of [`added_removed_icons`] and
+/// [`added_removed_colors`]. `before` opens the first segment (the space
+/// after a value, or nothing after a leading icon).
+#[must_use]
+pub fn added_removed(cfg: &ModuleCfg, before: &str, added: u64, removed: u64) -> Vec<Segment> {
+    vec![
+        super::seg(cfg, format!("{before}{}{added}", cfg.icon("added")), "added"),
+        super::seg(cfg, format!(" {}{removed}", cfg.icon("removed")), "removed"),
+    ]
+}
+
+/// Format dollars: `$0.42`, `$12.35`, `$1.2k`; the amount is bounded like
+/// every printed one ([`crate::num::shown_amount`]).
 #[must_use]
 pub fn dollars(usd: f64, decimals: usize) -> String {
-    // NaN and anything at or below zero are nothing (a negative zero would
-    // print its sign).
-    let usd = if usd.is_nan() || usd <= 0.0 { 0.0 } else { usd };
+    let usd = crate::num::shown_amount(usd);
     if usd >= 1000.0 {
         return format!("${:.1}k", usd / 1000.0);
     }
@@ -122,36 +201,35 @@ pub fn dollars(usd: f64, decimals: usize) -> String {
 /// cuts in, so a flag, a skin tone or a combining mark is never split in
 /// half. The ellipsis is counted into the budget and is itself cut when
 /// `max` is smaller than it, so the result is never wider than asked.
+///
+/// The name is reduced to plain text first ([`crate::ansi::plain_text`]):
+/// a payload or ref string may carry escape sequences, and the cut must
+/// count, and land in, the text the row shows (SPEC § 5).
 #[must_use]
 pub fn cut_name(name: &str, max: usize, icons: IconSet) -> String {
-    if max == 0 {
-        return name.to_owned();
-    }
-    // A cluster is at least one char, so a name with no more chars than the
-    // budget cannot need cutting and never reaches `clusters`, which
-    // allocates a `String` per grapheme. That only covers the short names;
-    // the long ones are bounded at the source instead (`git::MAX_REF_BYTES`
-    // caps what `.git/HEAD` can make a branch name in a checkout garnish did
-    // not create), because there is no cheap way to count clusters without
-    // building them.
-    if name.chars().take(max.saturating_add(1)).count() <= max {
-        return name.to_owned();
-    }
-    let clusters = crate::ansi::clusters(name);
-    if clusters.len() <= max {
-        return name.to_owned();
+    let name = crate::ansi::plain_cow(name);
+    if max == 0 || crate::ansi::clusters(&name).nth(max).is_none() {
+        return name.into_owned();
     }
     let ellipsis: String = icons.ellipsis().chars().take(max).collect();
     let mut out: String =
-        clusters.into_iter().take(max.saturating_sub(ellipsis.chars().count())).collect();
+        crate::ansi::clusters(&name).take(max.saturating_sub(ellipsis.chars().count())).collect();
     out.push_str(&ellipsis);
     out
+}
+
+/// The first `n` characters of `text` as the row shows it: reduced to
+/// plain text first, like [`cut_name`], so an escape sequence's bytes are
+/// never what is kept.
+#[must_use]
+pub fn first_chars(text: &str, n: usize) -> String {
+    crate::ansi::plain_cow(text).chars().take(n).collect()
 }
 
 /// The first seven characters of a commit hash, as git abbreviates one.
 #[must_use]
 pub fn short_sha(sha: &str) -> String {
-    sha.chars().take(7).collect()
+    first_chars(sha, 7)
 }
 
 /// Format a token count compactly: `12k`, `1.0M`, `200k`.
@@ -199,7 +277,7 @@ mod tests {
             for max in 1..8_usize {
                 let cut = cut_name("🇺🇸abcdef", max, icons);
                 assert!(
-                    crate::ansi::clusters(&cut).len() <= max,
+                    crate::ansi::clusters(&cut).count() <= max,
                     "{} max={max}: {cut:?}",
                     icons.name()
                 );
@@ -207,11 +285,30 @@ mod tests {
         }
     }
 
+    /// SPEC § 5: a cut measures the text the row will show. An escape
+    /// sequence's printable bytes used to count against `max_length`, and a
+    /// cut inside one left it open, so the row's plain-text pass swallowed
+    /// the ellipsis with it (or, for an OSC, the whole name).
+    #[test]
+    fn a_cut_measures_the_plain_text() {
+        use IconSet::{Ascii, Unicode};
+        assert_eq!(cut_name("ab\x1b[31mcdefgh", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("abc\x1b[31mdefghijklmnop", 5, Unicode), "abcd…");
+        assert_eq!(cut_name("\x1b]0;title\x07abcdef", 5, Ascii), "abc..");
+        let bold = format!("\x1b[1m{}\x1b[0m", "a".repeat(30));
+        assert_eq!(cut_name(&bold, 32, Unicode), "a".repeat(30), "fits once plain");
+        assert_eq!(cut_name("a\u{202e}b\u{200b}c", 3, Unicode), "abc");
+        assert_eq!(cut_name("a\nb", 0, Unicode), "ab", "plain even when uncut");
+        let segs = [Segment::plain(cut_name("ab\x1b[31mcdefgh", 5, Unicode))];
+        assert_eq!(text(&segs), "abcd…");
+    }
+
     #[test]
     fn short_sha_abbreviates_like_git() {
         assert_eq!(short_sha("0123456789abcdef"), "0123456");
         assert_eq!(short_sha("abc"), "abc");
         assert_eq!(short_sha(""), "");
+        assert_eq!(short_sha("\x1b[31m0123456789"), "0123456", "plain text first");
     }
 
     #[test]
@@ -326,11 +423,53 @@ mod tests {
         (cfg.icon("fill"), cfg.icon("empty"))
     }
 
+    /// A shared key is declared by its one spec wherever it appears: every
+    /// module with a bar has the whole bar vocabulary, docs included, and
+    /// every module with lines changed has the pair. Written out per module
+    /// the docs had drifted apart ("where the color changes" against
+    /// "where the band color changes").
+    #[test]
+    fn shared_keys_are_declared_by_their_one_spec() {
+        use crate::modules::{IconShown, SCHEMAS, show_icon_opt};
+        let mut bars = 0_usize;
+        let mut pairs = 0_usize;
+        for schema in SCHEMAS.iter() {
+            if schema.opt("bar").is_some() {
+                bars += 1;
+                assert_eq!(schema.opt("bar"), Some(&bar_opt()), "{}", schema.id);
+                assert_eq!(schema.opt("thresholds"), Some(&thresholds_opt()), "{}", schema.id);
+                assert_eq!(schema.opt("band_colors"), Some(&band_colors_opt()), "{}", schema.id);
+                let [fill, empty] = bar_icons();
+                assert_eq!(schema.icon("fill"), Some(&fill), "{}", schema.id);
+                assert_eq!(schema.icon("empty"), Some(&empty), "{}", schema.id);
+                assert_eq!(schema.color("empty"), Some(&bar_empty_color()), "{}", schema.id);
+            }
+            // `path`'s own `added` counts added directories; `removed` is
+            // the lines pair alone.
+            if schema.icon("removed").is_some() {
+                pairs += 1;
+                let [added, removed] = added_removed_icons();
+                let [added_color, removed_color] = added_removed_colors();
+                assert_eq!(schema.icon("added"), Some(&added), "{}", schema.id);
+                assert_eq!(schema.icon("removed"), Some(&removed), "{}", schema.id);
+                assert_eq!(schema.color("added"), Some(&added_color), "{}", schema.id);
+                assert_eq!(schema.color("removed"), Some(&removed_color), "{}", schema.id);
+            }
+            // `show_icon` keeps each module's doc; its shape is one of three.
+            if let Some(spec) = schema.opt("show_icon") {
+                let shapes = [IconShown::ExceptMinimal, IconShown::OnlyFull, IconShown::Always];
+                assert!(
+                    shapes.iter().any(|shown| *spec == show_icon_opt(spec.doc, *shown)),
+                    "{}: {spec:?}",
+                    schema.id
+                );
+            }
+        }
+        assert_eq!((bars, pairs), (4, 2), "context and the three limits; cost and lines");
+    }
+
     #[test]
     fn formatting_helpers() {
-        assert_eq!(percent(41.6), "42%");
-        assert_eq!(percent(140.0), "100%");
-        assert_eq!(percent_unclamped(112.4), "112%");
         assert_eq!(dollars(1.2345, 2), "$1.23");
         assert_eq!(dollars(0.0, 2), "$0.00");
         assert_eq!(dollars(-0.0, 2), "$0.00");

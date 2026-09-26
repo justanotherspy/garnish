@@ -1,0 +1,22 @@
+# fixture: subscription-full
+# columns: 100
+# now: 1738425600
+# icons: unicode
+# expect: config-warning
+# A stack whose first inner row names only an unknown id: the id is reported
+# and removed, and the emptied row is dropped under the default
+# `hide_empty_rows`, so the stack draws its second row alone. `config show`
+# (tests/cli.rs) must leave that row out, not write it back as a spacer that
+# would add a blank line to the stack (cfg-03).
+
+[[row]]
+[[row.col]]
+[[row.col.row]]
+modules = ["nope"]
+[[row.col.row]]
+modules = ["model", "effort"]
+[[row.col]]
+modules = ["clock"]
+
+[[row]]
+modules = ["limit5h"]

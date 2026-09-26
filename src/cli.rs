@@ -8,6 +8,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 
 use crate::config::{self, ColorChoice, Overlay, presets::TopPreset};
 use crate::icons::IconSet;
+use crate::install::Refusal;
 use crate::modules::SCHEMAS;
 use crate::render::{self, Request};
 
@@ -39,7 +40,8 @@ pub struct RenderArgs {
     /// Color mode override.
     #[arg(long, value_name = "auto|always|never|256|truecolor")]
     pub color: Option<String>,
-    /// Terminal width to lay out for (defaults to `COLUMNS`, then 120); the
+    /// Terminal width to lay out for (defaults to `COLUMNS`, then
+    /// `GARNISH_COLUMNS`, then 120); the
     /// lines come out 4 cells narrower, the width of Claude Code's box.
     #[arg(long, value_name = "N")]
     pub width: Option<usize>,
@@ -47,41 +49,60 @@ pub struct RenderArgs {
 
 impl RenderArgs {
     /// The overrides as a config overlay. A typo is a one-line note on
-    /// stderr and a [`Quiet`] failure, not an error report (bug 7).
+    /// stderr and a [`Quiet`] failure, not an error report, and each of the
+    /// four flags is checked here: a theme left to the config's resolver
+    /// was reported under every fixture as a problem of the config file.
     fn overlay(&self) -> Result<Overlay> {
         let typo = |what: &str, value: &str, expected: &str| {
             eprintln!("unknown {what} {value:?}; expected {expected}");
             color_eyre::Report::from(Quiet)
         };
+        // `a, b or c`.
+        let either = |names: Vec<&str>| match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => names.join(""),
+        };
         let preset = self
             .preset
             .as_deref()
             .map(|p| {
-                TopPreset::parse(p)
-                    .ok_or_else(|| typo("preset", p, "default, minimal, full or compact"))
+                TopPreset::parse(p).ok_or_else(|| {
+                    typo("preset", p, &either(TopPreset::ALL.map(TopPreset::name).to_vec()))
+                })
             })
             .transpose()?;
         let icons = self
             .icons
             .as_deref()
             .map(|i| {
-                IconSet::parse(i)
-                    .ok_or_else(|| typo("icon set", i, "nerd, unicode, emoji or ascii"))
+                IconSet::parse(i).ok_or_else(|| {
+                    typo("icon set", i, &either(IconSet::ALL.map(IconSet::name).to_vec()))
+                })
             })
             .transpose()?;
         let color = self
             .color
             .as_deref()
-            .map(|c| match c {
-                "auto" => Ok(ColorChoice::Auto),
-                "always" => Ok(ColorChoice::Always),
-                "never" => Ok(ColorChoice::Never),
-                "256" => Ok(ColorChoice::Ansi256),
-                "truecolor" => Ok(ColorChoice::TrueColor),
-                other => Err(typo("color mode", other, "auto, always, never, 256 or truecolor")),
+            .map(|c| {
+                ColorChoice::parse(c).ok_or_else(|| {
+                    typo("color mode", c, &either(ColorChoice::ALL.map(ColorChoice::name).to_vec()))
+                })
             })
             .transpose()?;
-        Ok(Overlay { preset, icons, theme: self.theme.clone(), color })
+        let theme = self
+            .theme
+            .as_deref()
+            .map(|t| {
+                crate::theme::palette(t).map(|_| t.to_owned()).ok_or_else(|| {
+                    typo(
+                        "theme",
+                        t,
+                        &either(crate::theme::PALETTES.iter().map(|p| p.name).collect()),
+                    )
+                })
+            })
+            .transpose()?;
+        Ok(Overlay { preset, icons, theme, color })
     }
 }
 
@@ -120,33 +141,43 @@ pub enum Command {
         /// The caller already holds the module lock; release it when done.
         ///
         /// Only ever passed with `--module`, by the tick that took that one
-        /// lock ([`crate::spawn::Job::args`]). With `--all` it would adopt a
+        /// lock (`spawn::Job::args`). With `--all` it would adopt a
         /// lock per module — inventing one where there was none and taking
         /// over one a live worker still holds — so the two are exclusive.
         #[arg(long, conflicts_with = "all")]
         lock_held: bool,
     },
-    /// Remove cache directories of sessions idle for more than a day.
+    /// Remove cache directories (sessions and repositories) idle for more
+    /// than a day, and leftover temporary and stale lock files.
     Gc,
-    /// Regenerate the reference documentation from the module schemas.
+    /// Regenerate the reference documentation from the module schemas (for
+    /// maintainers; `make docs` does it through the docs-sync test).
+    #[command(hide = true)]
     Docs {
-        /// Output directory (default `docs`).
-        #[arg(long, default_value = "docs")]
+        /// Output directory; there is no default, since the pages replace
+        /// same-named files in it.
+        #[arg(long)]
         out: PathBuf,
     },
     /// Wire garnish into Claude Code's settings.json (a backup is kept).
     Install {
-        /// Settings file (default `~/.claude/settings.json`).
+        /// Settings file (default `~/.claude/settings.json`, or
+        /// `$CLAUDE_CONFIG_DIR/settings.json` when that is set).
         #[arg(long, value_name = "FILE")]
         settings: Option<PathBuf>,
-        /// `statusLine.refreshInterval` in seconds.
-        #[arg(long, default_value_t = 1)]
+        /// `statusLine.refreshInterval` in seconds (Claude Code's minimum is 1).
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
         refresh_interval: u64,
         /// `statusLine.padding`; the generated config gets `padding = 2N`
         /// to match (the harness pads both sides).
-        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(0..=32_767))]
+        #[arg(
+            long,
+            value_name = "N",
+            value_parser = clap::value_parser!(u64).range(0..=crate::install::MAX_PADDING)
+        )]
         padding: Option<u64>,
-        /// Write the absolute path of this binary instead of `garnish`.
+        /// Write the path this binary is found by (the launcher on PATH,
+        /// not the file it links to) instead of `garnish`.
         #[arg(long)]
         absolute: bool,
         /// Do not write a default config file when none exists.
@@ -188,7 +219,8 @@ pub enum Command {
 /// `garnish skills …`.
 #[derive(Debug, Subcommand)]
 pub enum SkillsAction {
-    /// Write the skills to `<dir>/<name>/SKILL.md` (default `~/.claude/skills`).
+    /// Write the skills to `<dir>/<name>/SKILL.md` (default `~/.claude/skills`,
+    /// or `$CLAUDE_CONFIG_DIR/skills` when that is set).
     Install {
         /// Target directory.
         #[arg(long, value_name = "DIR")]
@@ -246,12 +278,97 @@ pub fn run() -> Result<std::process::ExitCode> {
     match run_command() {
         Ok(()) => Ok(std::process::ExitCode::SUCCESS),
         Err(e) if e.downcast_ref::<Quiet>().is_some() => Ok(std::process::ExitCode::FAILURE),
+        // A reader that stopped reading (`garnish presets | head`) wanted
+        // no more; that is not a failure worth a report.
+        Err(e) if broken_pipe(&e) => Ok(std::process::ExitCode::SUCCESS),
         Err(e) => Err(e),
     }
 }
 
+/// Whether an error is, at bottom, a write to a pipe nobody reads.
+fn broken_pipe(e: &color_eyre::Report) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
+}
+
+/// A command line clap refused.
+///
+/// On the render path (no subcommand word, and stdin not a terminal: the
+/// harness running `statusLine.command`) a non-zero exit would clear the
+/// status line without a word, so the error's first line becomes the
+/// `⚠ garnish:` row and the exit is 0 (SPEC § 5), the whole error going
+/// to stderr. Anywhere else, and for `--help` and `--version`, clap
+/// reports it and exits as it always does.
+fn parse_failure(e: &clap::Error) -> Result<()> {
+    use clap::error::ErrorKind;
+    let shown = matches!(
+        e.kind(),
+        ErrorKind::DisplayHelp
+            | ErrorKind::DisplayVersion
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    );
+    if shown || names_a_subcommand() || stdin_is_terminal() {
+        e.exit();
+    }
+    let text = e.render().to_string();
+    let first = text.lines().next().unwrap_or_default();
+    let first = first.strip_prefix("error: ").unwrap_or(first);
+    let row = writeln!(std::io::stdout().lock(), "⚠ garnish: {}", crate::ansi::plain_text(first));
+    crate::debug::stderr_line(text.trim_end());
+    Ok(row?)
+}
+
+/// Whether the command line names a subcommand other than `render`, so it
+/// is not the render path whatever else is wrong with it. `render` is the
+/// render path spelled out, for a settings file that wants a subcommand.
+fn names_a_subcommand() -> bool {
+    use clap::CommandFactory as _;
+    let command = Cli::command();
+    let other = |arg: &std::ffi::OsStr| {
+        command.get_subcommands().any(|s| s.get_name() != "render" && arg == s.get_name())
+    };
+    std::env::args_os().skip(1).any(|arg| other(&arg))
+}
+
+/// Debug builds only: set, a tick panics before it renders, so the
+/// internal-error row of SPEC § 5 is testable through the binary.
+pub const TEST_PANIC_ENV: &str = "GARNISH_TEST_PANIC";
+
+/// Make a panic on the render path what SPEC § 5 promises: a `⚠ garnish:
+/// internal error` row and exit 0, since a non-zero exit clears the status
+/// line. The release build aborts on a panic, after this hook has run.
+///
+/// The row goes out before the note on stderr, and neither write may fail
+/// the hook: a panic inside it aborts the process with nothing printed.
+// A panic hook cannot return to the program, and an abort or an unwind
+// both exit non-zero: `exit(0)` is the one way to keep the status line.
+#[allow(clippy::exit)]
+fn render_panics_as_a_row() {
+    std::panic::set_hook(Box::new(|info| {
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all("⚠ garnish: internal error\n".as_bytes());
+        let _ = stdout.flush();
+        crate::debug::stderr_line(&format!("garnish: {info}"));
+        std::process::exit(0);
+    }));
+}
+
+/// The [`TEST_PANIC_ENV`] hook: a panic is its whole job, and a release
+/// build compiles it out.
+fn test_panic() {
+    let armed =
+        cfg!(debug_assertions) && crate::claude_settings::env_flag(TEST_PANIC_ENV) == Some(true);
+    assert!(!armed, "{TEST_PANIC_ENV} is set");
+}
+
 fn run_command() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => return parse_failure(&e),
+    };
     let config_path = cli.config.as_deref();
     let command = match cli.command {
         Some(command) => command,
@@ -276,6 +393,8 @@ fn run_command() -> Result<()> {
     }
     match command {
         Command::Render => {
+            render_panics_as_a_row();
+            test_panic();
             render_stdin(config_path);
             Ok(())
         }
@@ -292,7 +411,7 @@ fn run_command() -> Result<()> {
         Command::Presets => {
             let mut stdout = std::io::stdout().lock();
             for p in crate::gallery::PRESETS.iter() {
-                let needs = p.needs.as_deref().map_or(String::new(), |n| format!(" [{n}]"));
+                let needs = p.needs.map_or(String::new(), |n| format!(" [{n}]"));
                 writeln!(stdout, "{:<24} {} ({} cols){needs}", p.name, p.summary, p.columns)?;
             }
             Ok(())
@@ -315,15 +434,20 @@ fn run_command() -> Result<()> {
             no_config,
             no_skills,
             dry_run,
-        } => install(
-            settings,
-            refresh_interval,
-            padding,
-            InstallSkip { config: no_config, skills: no_skills },
-            absolute,
-            dry_run,
-            config_path,
-        ),
+        } => {
+            let options = crate::install::Options {
+                settings,
+                refresh_interval,
+                padding,
+                absolute,
+                write_config: !no_config,
+                write_skills: !no_skills,
+                config_path: explicit_or_quiet(config_path)?,
+                config_written: None,
+            };
+            let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
+            print_install(&steps, dry_run)
+        }
         Command::Skills { action } => skills(action),
         Command::Setup { preset, install } => {
             crate::setup::run(&crate::setup::Args { preset, install, config_path })
@@ -337,7 +461,7 @@ fn run_command() -> Result<()> {
             let n = cache.gc_sessions(crate::cache::GC_MAX_AGE_MS, usize::MAX);
             writeln!(
                 std::io::stdout().lock(),
-                "removed {n} idle session dir(s) under {}",
+                "removed {n} idle cache dir(s) (sessions and repositories) under {}",
                 cache.root().display()
             )?;
             Ok(())
@@ -347,15 +471,17 @@ fn run_command() -> Result<()> {
 
 /// The tick: the payload on stdin rendered to stdout.
 ///
-/// The render path never fails and never prints nothing (SPEC § 5):
-/// unreadable or non-UTF-8 stdin becomes a warning line, and a closed
-/// stdout (EPIPE) is not worth an error report.
+/// The render path never fails (SPEC § 5): unreadable or non-UTF-8 stdin
+/// becomes a warning line, and a closed stdout (EPIPE) is not worth an
+/// error report. A render whose rows all hid prints one empty line, which
+/// Claude Code trims to nothing and so clears the status line until a
+/// module has something to show.
 fn render_stdin(config_path: Option<&Path>) {
     let mut bytes = Vec::with_capacity(8 * 1024);
     let input = match std::io::stdin().read_to_end(&mut bytes) {
         Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(e) => {
-            eprintln!("garnish: reading stdin: {e}");
+            crate::debug::stderr_line(&format!("garnish: reading stdin: {e}"));
             String::new()
         }
     };
@@ -364,7 +490,7 @@ fn render_stdin(config_path: Option<&Path>) {
         config_path,
         overlay: Overlay::default(),
         columns: env_columns(),
-        no_color: std::env::var_os("NO_COLOR").is_some(),
+        no_color: config::no_color_env(),
         dim: false,
         workers: true,
     };
@@ -383,7 +509,7 @@ fn refresh(
     lock_held: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    use crate::modules::{REGISTRY, RefreshCtx, run_refresh};
+    use crate::modules::{REGISTRY, RefreshCtx, record_lock_failure, run_refresh};
     use rayon::prelude::*;
     let loaded = config::load(config_path, &SCHEMAS);
     let cache = crate::cache::Cache::from_env();
@@ -394,11 +520,19 @@ fn refresh(
     if targets.is_empty() {
         return Err(eyre!("unknown module {}", module.unwrap_or("?")));
     }
+    if let Some(entry) = targets.iter().find(|e| e.schema.refresh == 0) {
+        eprintln!(
+            "{} renders from the payload every tick; there is nothing to refresh",
+            entry.schema.id
+        );
+        return Err(Quiet.into());
+    }
     let results: Vec<Result<()>> = targets
         .par_iter()
         .map(|entry| {
             let Some(cfg) = loaded.config.modules.get(entry.schema.id) else { return Ok(()) };
             let scope = entry.module.scope(session, cwd);
+            let ctx = RefreshCtx { session, cwd, cfg, cache: &cache };
             // Hold (or inherit) the lock while working so ticks do not spawn twice.
             let guard = if lock_held {
                 crate::cache::LockGuard::adopt(cache.lock_path(&scope, entry.schema.id))
@@ -406,17 +540,19 @@ fn refresh(
                 match cache.lock(&scope, entry.schema.id) {
                     crate::cache::LockOutcome::Acquired(g) => g,
                     crate::cache::LockOutcome::Held => return Ok(()),
-                    crate::cache::LockOutcome::Unavailable(e) => return Err(e.into()),
+                    crate::cache::LockOutcome::Unavailable(e) => {
+                        let _ = record_lock_failure(entry.module.as_ref(), &ctx, &e);
+                        return Err(e.into());
+                    }
                 }
             };
-            let ctx = RefreshCtx { session, cwd, cfg, cache: &cache };
             run_refresh(entry.module.as_ref(), &ctx)
                 .with_context(|| format!("refreshing {}", entry.schema.id))?;
             drop(guard);
             Ok(())
         })
         .collect();
-    results.into_iter().collect::<Result<Vec<()>>>().map(|_| ())
+    results.into_iter().collect()
 }
 
 /// `garnish skills list | install [--dir D]` (SPEC § 13).
@@ -432,7 +568,10 @@ fn skills(action: SkillsAction) -> Result<()> {
             let Some(dir) = dir.or_else(|| {
                 crate::install::default_settings_path().map(|s| crate::skills::default_dir(&s))
             }) else {
-                return Err(no_home("--dir <DIR>", "the skills go"));
+                return Err(refusal(Refusal::NoHome {
+                    flag: "--dir <DIR>",
+                    what: "the skills go",
+                }));
             };
             let report = crate::skills::install(&dir)
                 .with_context(|| format!("writing skills to {}", dir.display()))?;
@@ -442,82 +581,37 @@ fn skills(action: SkillsAction) -> Result<()> {
     Ok(())
 }
 
-/// The parts of `garnish install` a flag can switch off.
-#[derive(Debug, Clone, Copy)]
-struct InstallSkip {
-    /// `--no-config`: leave the default config file alone.
-    config: bool,
-    /// `--no-skills`: leave `~/.claude/skills` alone.
-    skills: bool,
-}
-
-fn install(
-    settings: Option<PathBuf>,
-    refresh_interval: u64,
-    padding: Option<u64>,
-    skip: InstallSkip,
-    absolute: bool,
-    dry_run: bool,
-    config_path: Option<&Path>,
-) -> Result<()> {
-    let options = crate::install::Options {
-        settings,
-        refresh_interval,
-        padding,
-        absolute,
-        write_config: !skip.config,
-        write_skills: !skip.skills,
-        config_path: config_path.map(Path::to_path_buf),
-    };
-    let steps = crate::install::Steps::plan(&options).map_err(refusal)?;
-    let mut stdout = std::io::stdout().lock();
+/// Print an install plan's notes on stderr, then apply it (or, for
+/// `--dry-run`, describe it) and print what it did on stdout: `garnish
+/// install` and `setup --preset P --install` alike.
+///
+/// # Errors
+/// An apply's refusal ([`refusal`]), or a closed stdout.
+pub(crate) fn print_install(steps: &crate::install::Steps, dry_run: bool) -> Result<()> {
     // Advice goes to stderr: --dry-run's stdout is the settings preview.
     for note in steps.notes() {
         eprintln!("{note}");
     }
-    let lines = if dry_run { steps.dry_run() } else { steps.apply().map_err(refusal)?.lines };
+    let lines = if dry_run { steps.dry_run() } else { steps.apply().map_err(refusal)? };
+    let mut stdout = std::io::stdout().lock();
     for line in lines {
         writeln!(stdout, "{line}")?;
     }
     Ok(())
 }
 
-/// An install refusal as the CLI reports it: the quiet one-liners of SPEC
-/// § 5 for a missing home or an unparsable file, an error report for I/O.
-fn refusal(r: crate::install::Refusal) -> color_eyre::Report {
-    use crate::install::Refusal;
+/// A refusal as every command reports it (SPEC § 5): the one line
+/// [`Refusal`]'s `Display` words on stderr and a [`Quiet`] exit for what a
+/// person can fix (no home, a file that does not parse, one that exists),
+/// an error report for an I/O failure.
+pub(crate) fn refusal(r: Refusal) -> color_eyre::Report {
     match r {
-        Refusal::NoHome { flag, what } => no_home(flag, what),
-        Refusal::Unparsable { path, problem } => refuse_unparsable(&path, &problem),
         Refusal::Io(e) => eyre!(e),
+        other => {
+            eprintln!("{other}");
+            Quiet.into()
+        }
     }
-}
-
-/// Where a written config goes: `--config`, then `GARNISH_CONFIG`, then the
-/// default location; `None` without a home directory (SPEC § 5: never
-/// guess the current directory).
-fn config_target(explicit: Option<&Path>) -> Option<PathBuf> {
-    explicit
-        .map(Path::to_path_buf)
-        .or_else(|| config::env_path(config::CONFIG_ENV))
-        .or_else(config::default_path)
-}
-
-/// The one-line refusal for a file that does not parse (SPEC § 5: a file
-/// garnish cannot read is never rewritten). The path and the problem on one
-/// line, exit 1, no report.
-fn refuse_unparsable(path: &Path, problem: &str) -> color_eyre::Report {
-    eprintln!(
-        "{}: {problem}; a file that does not parse is never rewritten, fix or move it first",
-        path.display()
-    );
-    Quiet.into()
-}
-
-/// The one-line refusal for a writing command run without `HOME`.
-fn no_home(flag: &str, what: &str) -> color_eyre::Report {
-    eprintln!("HOME is not set; pass {flag} to say where {what}");
-    Quiet.into()
 }
 
 /// The per-tick diagnostic line of SPEC § 5, written only with
@@ -554,11 +648,8 @@ pub const STDIN_TTY_ENV: &str = "GARNISH_STDIN_TTY";
 #[must_use]
 pub fn stdin_is_terminal() -> bool {
     use std::io::IsTerminal as _;
-    match std::env::var(STDIN_TTY_ENV).ok().as_deref().map(str::trim) {
-        Some("1") => true,
-        Some("0") => false,
-        _ => std::io::stdin().is_terminal(),
-    }
+    crate::claude_settings::env_flag(STDIN_TTY_ENV)
+        .unwrap_or_else(|| std::io::stdin().is_terminal())
 }
 
 /// Whether stdout is a terminal, which the `setup` screen needs.
@@ -587,6 +678,11 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
     };
     files.sort();
     let overlay = args.overlay()?;
+    // The config the status line reads (SPEC § 4), not only the one a
+    // bare lookup finds: a preview is a person asking what their line
+    // looks like.
+    let config_file = read_config_or_quiet(config_path)?;
+    let config_path = config_file.as_deref();
     let columns = args.width.or_else(env_columns);
     let mut stdout = std::io::stdout().lock();
     for file in files {
@@ -599,7 +695,7 @@ fn preview(path: &Path, config_path: Option<&Path>, args: &RenderArgs) -> Result
             config_path,
             overlay: overlay.clone(),
             columns,
-            no_color: std::env::var_os("NO_COLOR").is_some(),
+            no_color: config::no_color_env(),
             // Drawn as the screen draws it: every row faint (SPEC § 2.1).
             dim: true,
             // A preview is not a tick: no cache, no worker (SPEC § 14).
@@ -614,13 +710,12 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     match action {
         ConfigAction::Path => {
-            let Some(p) = config::locate(config_path).or_else(|| config_target(config_path)) else {
-                return Err(no_home("--config <FILE>", "the config is"));
-            };
+            let p = target_or_quiet(config_path, "the config is")?;
             writeln!(stdout, "{}", p.display())?;
         }
         ConfigAction::Check => {
-            let loaded = config::load(config_path, &SCHEMAS);
+            let path = read_config_or_quiet(config_path)?;
+            let loaded = config::load(path.as_deref(), &SCHEMAS);
             match (&loaded.path, loaded.errors.is_empty()) {
                 (None, _) => {
                     writeln!(stdout, "no config file found; built-in defaults are in effect")?;
@@ -638,7 +733,8 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
             }
         }
         ConfigAction::Show => {
-            let loaded = config::load(config_path, &SCHEMAS);
+            let path = read_config_or_quiet(config_path)?;
+            let loaded = config::load(path.as_deref(), &SCHEMAS);
             let mut cfg = loaded.config;
             // The animation switch in effect for this directory (SPEC
             // § 4.2): the file, else Claude Code's prefersReducedMotion.
@@ -656,16 +752,9 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
         }
         ConfigAction::Init { force, preset } => {
             let text = preset_text(preset)?;
-            let Some(target) = config_target(config_path) else {
-                return Err(no_home("--config <FILE>", "the config goes"));
-            };
-            let backup = write_config_file(&target, &text, *force)?;
-            match backup {
-                Some(b) => {
-                    writeln!(stdout, "wrote {} (backup: {})", target.display(), b.display())?;
-                }
-                None => writeln!(stdout, "wrote {}", target.display())?,
-            }
+            let target = config_target_or_quiet(config_path)?;
+            let backup = crate::install::write_config(&target, &text, *force).map_err(refusal)?;
+            writeln!(stdout, "{}", crate::install::wrote_line(&target, backup.as_deref()))?;
         }
     }
     Ok(())
@@ -684,9 +773,10 @@ pub fn preset_text(preset: &str) -> Result<String> {
         return Ok(crate::docs::config_toml(&cfg, true));
     }
     let Some(p) = crate::gallery::find(preset) else {
-        // A typo, not a fault: one line, no report (bug 7).
+        // A typo, not a fault: one line, no report.
         eprintln!(
-            "unknown preset {preset:?}; expected default, minimal, full, compact or a gallery name ({})",
+            "unknown preset {preset:?}; expected {} or a gallery name ({})",
+            TopPreset::ALL.map(TopPreset::name).join(", "),
             crate::gallery::PRESETS.iter().map(|p| p.name).collect::<Vec<_>>().join(", ")
         );
         return Err(Quiet.into());
@@ -694,39 +784,75 @@ pub fn preset_text(preset: &str) -> Result<String> {
     Ok(crate::gallery::body(p.source))
 }
 
-/// Write a config file the way every garnish command does (SPEC § 5).
-///
-/// An existing file is refused without `force`, a file that does not parse
-/// is never rewritten, and a replaced file is kept as a backup, whose path
-/// comes back.
+/// Where the config a command writes goes ([`config::write_target`]: the
+/// file the tick reads, else the default location), or a [`Quiet`]
+/// refusal.
 ///
 /// # Errors
-/// The refusals above are one stderr line and [`Quiet`]; an I/O failure is
-/// an error naming the file.
-pub fn write_config_file(target: &Path, text: &str, force: bool) -> Result<Option<PathBuf>> {
-    let existed = target.exists();
-    if existed && !force {
-        eprintln!("{} exists; pass --force to overwrite", target.display());
-        return Err(Quiet.into());
-    }
-    if existed {
-        // A file that does not parse is never rewritten (SPEC § 5): the only
-        // way past is fixing or moving it by hand. A file with bad values
-        // parses, and is replaced under its backup.
-        let current = std::fs::read_to_string(target)
-            .with_context(|| format!("reading {}", target.display()))?;
-        if let Some(problem) = config::syntax_error(&current) {
-            return Err(refuse_unparsable(target, &problem));
-        }
-    }
-    crate::install::replace_file(target, text, existed).map_err(|e| eyre!(e))
+/// [`Quiet`] after the one-line note, without a home or when the
+/// `statusLine.command` passes a `--config` that names no one file or that
+/// a checkout's own settings choose.
+pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
+    target_or_quiet(explicit, "the config goes")
 }
 
-/// Where the config a command writes goes (`--config`, `GARNISH_CONFIG`,
-/// the default), or a [`Quiet`] refusal without a home directory.
+/// The config named explicitly ([`config::hand_explicit`]: `--config`,
+/// else a `GARNISH_CONFIG` the person set), or a [`Quiet`] refusal when a
+/// checkout's settings set that variable.
 ///
 /// # Errors
-/// [`Quiet`] after the one-line note, without a home.
-pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
-    config_target(explicit).ok_or_else(|| no_home("--config <FILE>", "the config goes"))
+/// [`Quiet`] after the one-line note.
+pub fn explicit_or_quiet(flag: Option<&Path>) -> Result<Option<PathBuf>> {
+    config::hand_explicit(flag).map_err(|checkout| refusal(Refusal::CheckoutConfig(checkout)))
+}
+
+/// The config a command run by hand reads ([`config::read_target`]: the
+/// file `config path` prints, or `None` for the built-in defaults), or a
+/// [`Quiet`] refusal where `config path` refuses.
+fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
+    match config::read_target(explicit) {
+        config::ReadTarget::File(path) => Ok(Some(path)),
+        config::ReadTarget::Defaults => Ok(None),
+        config::ReadTarget::Unresolved { settings, key, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, key, word }))
+        }
+        config::ReadTarget::Checkout(checkout) => Err(refusal(Refusal::CheckoutConfig(checkout))),
+    }
+}
+
+/// [`config_target_or_quiet`], with `what` finishing the no-home note.
+fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBuf> {
+    match config::write_target(explicit, config::CommandFrom::Chain) {
+        config::WriteTarget::File(path) => Ok(path),
+        config::WriteTarget::NoHome => {
+            Err(refusal(Refusal::NoHome { flag: "--config <FILE>", what }))
+        }
+        config::WriteTarget::Unresolved { settings, key, word } => {
+            Err(refusal(Refusal::UnresolvedConfig { settings, key, word }))
+        }
+        config::WriteTarget::Checkout(checkout) => Err(refusal(Refusal::CheckoutConfig(checkout))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Vocab;
+
+    /// cfg-14: the `preview` flags that take a vocabulary name its words in
+    /// their help as the parser lists them (the attribute has to be a
+    /// literal, so this is what keeps it honest).
+    #[test]
+    fn the_overlay_flags_name_the_parsers_words() {
+        use clap::CommandFactory;
+        let cli = Cli::command();
+        let preview = cli.find_subcommand("preview").unwrap();
+        let value_name = |id: &str| {
+            let arg = preview.get_arguments().find(|a| a.get_id() == id).unwrap();
+            arg.get_value_names().unwrap().iter().map(ToString::to_string).collect::<String>()
+        };
+        assert_eq!(value_name("preset"), TopPreset::names().join("|"));
+        assert_eq!(value_name("icons"), IconSet::names().join("|"));
+        assert_eq!(value_name("color"), ColorChoice::names().join("|"));
+    }
 }

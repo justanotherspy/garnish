@@ -6,7 +6,7 @@ Vim mode badge.
 
 **Sources:** `vim.mode`
 
-**Refresh:** every tick (payload only)
+**Refresh:** every tick, nothing cached
 
 ## Presets
 
@@ -33,12 +33,12 @@ Vim mode badge.
 |---|---|---|---|---|---|
 | `enabled` | bool | `true` | `true` | `true` | Render this module. |
 | `preset` | `minimal` \| `default` \| `full` | — | — | — | Which preset the options below default to. |
-| `refresh` | integer | `0` | `0` | `0` | Seconds between background refreshes; 0 = every tick. |
+| `refresh` | `0` | `0` | `0` | `0` | This module renders from the payload every tick; any value but 0 is reported. |
 | `hide` | list of `empty` | `[]` | `[]` | `[]` | States that hide the module: `empty` is what `hide_when_empty` hides, and the two combine. |
 | `label` | string ≤ 4096 chars | `""` | `""` | `""` | Dim text before the value. |
 | `prefix` | string ≤ 4096 chars | `""` | `""` | `""` | Text before the module. |
 | `suffix` | string ≤ 4096 chars | `""` | `""` | `""` | Text after the module. |
-| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`). |
+| `hide_when_empty` | bool | `true` | `true` | `true` | Hide the module when it has nothing to show (else a dim `–`, `-` in the ascii set). |
 | `max_width` | integer ≤ 1024 | `0` | `0` | `0` | Cut the whole module (label, prefix and suffix included) to this many cells with `…`, before alignment and before the line is cut; 0 = unlimited. |
 | `style` | `badge` \| `short` | `"short"` | `"badge"` | `"badge"` | Full word or one letter. |
 | `show_icon` | bool | `false` | `false` | `true` | Show the vim icon. |
@@ -49,7 +49,7 @@ Vim mode badge.
 
 | key | nerd | unicode | emoji | ascii | description |
 |---|---|---|---|---|---|
-| `vim` | `U+E62B` | `` | `` | `` | Vim icon. |
+| `vim` | `U+E62B` | — | — | — | Vim icon. |
 
 Also try (`vim`: `U+E7C5` `U+F120` `V`).
 
