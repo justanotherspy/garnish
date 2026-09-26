@@ -237,7 +237,17 @@ Open items only; closed ones are in `WORKLOG.md`.
     `managed-settings.d` drop-in, so a badge, `prefersReducedMotion` or
     the auto-compaction keys an organisation sets there are missed
     (`doctor` says so on the drop-in's row); reading them means a
-    directory listing on the ticks that read settings; a relative `export
+    directory listing on the ticks that read settings. With the hook
+    exported at a checkout's own file (`GARNISH_MANAGED_SETTINGS`, a test
+    hook) and that checkout running another status line, `install`
+    refuses the demoted file's `env` value where `config path` passes
+    over it to the person's own (both safe; they differ). `js_string`
+    differs from JavaScript for a number exactly halfway between two
+    shortest forms, and serde_json without `float_roundtrip` reads a few
+    floats a bit off (`6e26`), which `install` also writes back into the
+    settings file it rewrites (a serde_json feature, Daniel's call); a
+    config key literally named `--config` loses its file on the `⚠`
+    row; a relative `export
     GARNISH_CONFIG=g.toml` that used to work from one directory now
     reads the lookup's file (the tick) or is refused (by hand)
   - modules: the key scan finds a key read but not declared; the reverse,

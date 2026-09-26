@@ -752,16 +752,20 @@ tick read a `~/g.toml` the session's repository shipped). Without
 `GARNISH_CONFIG=` assignment before the program, else the
 `GARNISH_CONFIG` a settings file's `env` block gives it, the first the
 chain sets) names the file instead, since that is the one its ticks
-read. The chain's managed layer is the managed file and, when that is
-the platform's, the `managed-settings.d/*.json` drop-ins beside it,
-which Claude Code applies above it (the last by name first; a hidden
-`.name.json` is switched off, as Claude Code skips it); `doctor` lists
-them as `drop-in`, and says that the keys a tick reads (§ 2.3) come
-from none of them (PLAN backlog). An `env`
-value of any JSON type counts, as the string JavaScript's `String()`
-makes of it and Claude Code puts in the environment (`["/p"]` is `/p`,
-`5` is `5`, `null` is `null`), and an empty one names no file, as for
-the tick. The command is the one
+read. The chain's managed layer is the managed file and the
+`managed-settings.d/*.json` drop-ins beside it, which Claude Code
+applies above it (the last by name first; only a file or a link, and a
+hidden `.name.json` is switched off, as Claude Code skips it; the
+hook's file of § 9 stands in for the platform's, drop-ins and all);
+`doctor` lists them as `drop-in`, and says that the keys a tick reads
+(§ 2.3) come from none of them (PLAN backlog). An `env` value of any
+JSON type counts, as the string JavaScript's `String()` makes of it and
+Claude Code puts in the environment (`["/p"]` is `/p`, `5` and `5.0`
+are `5`, `null` is `null`; a number exactly halfway between two
+shortest forms, and one serde_json reads a bit off, can differ in the
+last digit, and a file serde_json refuses, such as one holding
+`1e999`, is skipped: PLAN backlog), and an empty one names no file, as
+for the tick. The command is the one
 Claude Code runs from the current directory, the first file of the
 settings chain (§ 2.3) that sets one, as `doctor` shows it, for every
 command run by hand: `config path` prints the file, `config check`,
@@ -791,8 +795,9 @@ settings (the user file, the platform's managed file or a
 stands, in `doctor`'s chain too; outside one, a `GARNISH_CONFIG` the
 current directory's checkout files set is refused too. For `install` the command is the one in the file it
 rewrites (`--settings`, else the user file), and its `env` value the
-managed layer's, read as the chain reads it (so a managed file a
-checkout pointed the hook at names nothing), else that file's own;
+managed layer's, read as the chain reads it (so a managed layer a
+checkout pointed the hook at names nothing, whether the checkout is the
+current directory or the file `install` rewrites), else that file's own;
 `install` keeps it, writing
 the default config there when it is missing and checking its `padding`
 against that file, but writes no config a `--settings` file that is not
@@ -2043,7 +2048,7 @@ per-module render cost.
 | `GARNISH_COLUMNS` | width override when `COLUMNS` is absent |
 | `GARNISH_DEBUG` | write `<cache>/debug.log` |
 | `GARNISH_ANIMATE` | `0` freezes every animation at frame 0 for the session and cuts a ticker line with `…` (§ 4.2) |
-| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`); empty means no managed file, which is what every test that runs the binary sets, and a relative path is ignored (§ 4) |
+| `GARNISH_MANAGED_SETTINGS` | the managed settings file read first in Claude Code's chain (§ 2.3, § 4.2, `doctor`) instead of the platform's (`/etc/claude-code/managed-settings.json`; on macOS `/Library/Application Support/ClaudeCode/managed-settings.json`), with the `managed-settings.d` drop-ins beside it for the commands run by hand (§ 4); empty means no managed file, which is what every test that runs the binary sets, and a relative path is ignored (§ 4) |
 | `GARNISH_STDIN_TTY` | `1` or `0` overrides the "is stdin a terminal" check of the bare `garnish` (§ 7, § 14), so the pointer path is testable without a pty |
 | `GARNISH_TEST_PANIC` | debug builds only: a tick panics before it renders, so the `⚠ garnish: internal error` row of § 5 is testable through the binary |
 

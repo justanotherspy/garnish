@@ -1880,26 +1880,45 @@ fn install_follows_the_managed_env_and_never_a_checkouts_managed_file() {
     let install = ["install", "--no-skills", "--absolute"];
     let xdg = home.join(".config/garnish/garnish.toml");
 
-    // The organisation's file: `install` writes its config there, and
+    // The organisation's file, whose drop-in (beside it, as beside the
+    // platform's) wins over it: every command names the drop-in's config,
+    // `doctor` lists the drop-in, `install` writes its config there, and
     // `setup --install` writes it too, with nothing to say.
     let org = dir.path().join("org.json");
     let org_config = dir.path().join("org.toml");
     managed_env(&org, &org_config);
+    let drop_dir = dir.path().join("managed-settings.d");
+    std::fs::create_dir(&drop_dir).unwrap();
+    let drop_in = drop_dir.join("50-garnish.json");
+    let drop_config = dir.path().join("drop.toml");
+    managed_env(&drop_in, &drop_config);
     let hook = [("GARNISH_MANAGED_SETTINGS", org.to_str().unwrap())];
+    let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &hook);
+    assert!(ok && out.trim_end() == drop_config.to_str().unwrap(), "{out}{err}");
+    let (out, err, ok) = run_in(&proj, &["doctor"], &home, &hook);
+    assert!(ok && out.contains("  drop-in  ") && out.contains("50-garnish.json  ok"), "{out}{err}");
     let (out, err, ok) = run_in(&proj, &install, &home, &hook);
-    assert!(ok && org_config.exists() && !xdg.exists(), "{out}{err}");
-    std::fs::remove_file(&org_config).unwrap();
+    assert!(ok && drop_config.exists() && !org_config.exists() && !xdg.exists(), "{out}{err}");
+    std::fs::remove_file(&drop_config).unwrap();
     let args = ["setup", "--preset", "minimal", "--install"];
     let (out, err, ok) = run_in(&proj, &args, &home, &hook);
-    assert!(ok && org_config.exists() && !err.contains("reads "), "{out}{err}");
+    assert!(ok && drop_config.exists() && !err.contains("reads "), "{out}{err}");
+    // A value there that names no one file is reported with its own file.
+    let json = serde_json::json!({"env": {"GARNISH_CONFIG": "~/g.toml"}});
+    std::fs::write(&drop_in, json.to_string()).unwrap();
+    let (out, err, ok) = run_in(&proj, &install, &home, &hook);
+    assert!(ok && err.contains("50-garnish.json: env.GARNISH_CONFIG names"), "{out}{err}");
+    std::fs::remove_dir_all(&drop_dir).unwrap();
 
     // A file of the checkout's own, which its `env` block points the hook
-    // at: no command follows it, `install` included.
+    // at, drop-ins and all: no command follows it, `install` included, and
+    // from any directory.
     let planted = proj.join(".claude/org.json");
     let victim = home.join("victim.toml");
     managed_env(&planted, &victim);
     let names = serde_json::json!({"env": {"GARNISH_MANAGED_SETTINGS": planted}});
-    std::fs::write(proj.join(".claude/settings.json"), names.to_string()).unwrap();
+    let checkout_settings = proj.join(".claude/settings.json");
+    std::fs::write(&checkout_settings, names.to_string()).unwrap();
     let hook = [("GARNISH_MANAGED_SETTINGS", planted.to_str().unwrap())];
     let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &hook);
     assert!(!ok && err.contains("org.json: env.GARNISH_CONFIG names"), "{out}{err}");
@@ -1907,6 +1926,18 @@ fn install_follows_the_managed_env_and_never_a_checkouts_managed_file() {
     assert!(ok && !victim.exists(), "{out}{err}");
     assert!(err.contains("org.json is not your own settings file"), "{out}{err}");
     assert!(err.contains("its env.GARNISH_CONFIG names"), "{out}{err}");
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let args = [&install[..], &["--settings", checkout_settings.to_str().unwrap()]].concat();
+    let (out, err, ok) = run_in(&elsewhere, &args, &home, &hook);
+    assert!(ok && !victim.exists(), "{out}{err}");
+    let planted_drop = proj.join(".claude/managed-settings.d/50.json");
+    std::fs::create_dir(planted_drop.parent().unwrap()).unwrap();
+    let victim_drop = home.join("victim-drop.toml");
+    managed_env(&planted_drop, &victim_drop);
+    let (out, err, ok) = run_in(&proj, &install, &home, &hook);
+    assert!(ok && !victim_drop.exists(), "{out}{err}");
+    assert!(err.contains("50.json is not your own settings file"), "{out}{err}");
 }
 
 /// A home reached through a link is still the person's: a session started

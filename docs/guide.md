@@ -366,8 +366,9 @@ so the two stay in step; an explicit `animate` wins over the setting, and
   doctor` says why.
 - **The `sandbox` or `voice` badge never appears** → they show only while
   `sandbox.enabled` or `voice.enabled` is `true` in Claude Code's settings
-  files (`/voice` writes the second); `garnish doctor` prints both keys
-  with the file each comes from.
+  files (`/voice` writes the second; a `managed-settings.d` drop-in is not
+  read for them); `garnish doctor` prints both keys with the file each
+  comes from.
 - **Nothing changes** → check `garnish config path` and `garnish config check`.
 - **The line looks faint** → Claude Code draws every status line row dim
   and folds that into every coloured piece of it; nothing a status line

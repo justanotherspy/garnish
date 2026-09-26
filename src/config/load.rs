@@ -118,8 +118,8 @@ const MAX_DROP_IN_ENTRIES: usize = 4096;
 /// The `managed-settings.d/*.json` drop-ins beside the managed file
 /// `managed`, which Claude Code applies on top of it, in name order (the
 /// last one wins a key it shares with another); a hidden one (`.x.json`)
-/// is switched off, as Claude Code skips it (verification of 2026-09-26,
-/// 2.1.283).
+/// is switched off and only a file or a link counts, as Claude Code has it
+/// (verification of 2026-09-26, 2.1.283).
 fn drop_ins(managed: &Path) -> Vec<PathBuf> {
     let shown =
         |path: &Path| path.file_name().is_some_and(|name| !name.to_string_lossy().starts_with('.'));
@@ -130,6 +130,7 @@ fn drop_ins(managed: &Path) -> Vec<PathBuf> {
             entries
                 .take(MAX_DROP_IN_ENTRIES)
                 .flatten()
+                .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file() || t.is_symlink()))
                 .map(|entry| entry.path())
                 .filter(|path| path.extension().is_some_and(|ext| ext == "json") && shown(path))
                 .collect()
@@ -358,22 +359,18 @@ struct ChainFile {
 /// The managed layer of the settings chain for a command run by hand.
 ///
 /// Labelled as `doctor` shows it: the managed file ([`hand_managed`],
-/// `managed`) and, when it is the platform's, the drop-ins beside it
-/// (`drop-in`), highest precedence first (the last drop-in by name, then
-/// the others, then the file).
+/// `managed`) and the drop-ins beside it (`drop-in`), highest precedence
+/// first (the last drop-in by name, then the others, then the file). The
+/// hook's file stands in for the platform's, drop-ins and all, which is
+/// also how the tests reach this layer.
 #[must_use]
 pub fn managed_layer() -> Vec<(&'static str, PathBuf)> {
-    let platform = crate::claude_settings::platform_managed_settings();
-    hand_managed().map_or_else(Vec::new, |managed| layer_of(managed, &platform))
+    hand_managed().map_or_else(Vec::new, layer_of)
 }
 
-/// [`managed_layer`] for the managed file `managed` when the platform's
-/// is `platform`.
-fn layer_of(managed: PathBuf, platform: &Path) -> Vec<(&'static str, PathBuf)> {
-    let mut layer: Vec<_> = if managed == platform { drop_ins(&managed) } else { Vec::new() }
-        .into_iter()
-        .map(|file| ("drop-in", file))
-        .collect();
+/// [`managed_layer`] for the managed file `managed`.
+fn layer_of(managed: PathBuf) -> Vec<(&'static str, PathBuf)> {
+    let mut layer: Vec<_> = drop_ins(&managed).into_iter().map(|file| ("drop-in", file)).collect();
     layer.reverse();
     layer.push(("managed", managed));
     layer
@@ -384,6 +381,15 @@ fn layer_of(managed: PathBuf, platform: &Path) -> Vec<(&'static str, PathBuf)> {
 /// only a command run by hand is here: final review of 2026-09-25), a file
 /// Claude Code rejects left out.
 fn chain_files() -> Vec<ChainFile> {
+    chain_files_rewriting(None)
+}
+
+/// [`chain_files`] for `install`, which rewrites `rewritten`: a file that
+/// may lie outside the current directory's chain, and whose `env` block
+/// counts for [`demote_hooked`] as the chain's do (a second verification of
+/// 2026-09-26: `install --settings` a checkout's file, run from elsewhere,
+/// wrote where the managed file it pointed the hook at said).
+fn chain_files_rewriting(rewritten: Option<&Path>) -> Vec<ChainFile> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
     let project = std::env::current_dir().ok();
@@ -392,29 +398,36 @@ fn chain_files() -> Vec<ChainFile> {
     let base = managed.last().map(|(_, file)| file.clone());
     let chain =
         managed.into_iter().chain(cs::settings_chain(None, project.as_deref(), user.as_deref()));
-    let mut files: Vec<ChainFile> = chain
-        .filter_map(|(label, path)| {
-            match cs::read_file_up_to(&path, cs::MAX_COMMAND_SETTINGS_BYTES) {
-                cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
-                    let own = !matches!(label, "local" | "project")
-                        || users(&path, user.as_deref(), home.as_deref());
-                    Some(ChainFile { label, path, keys, own })
-                }
-                _ => None,
-            }
-        })
-        .collect();
+    let read = |(label, path): (&'static str, PathBuf)| match cs::read_file_up_to(
+        &path,
+        cs::MAX_COMMAND_SETTINGS_BYTES,
+    ) {
+        cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
+            let own = !matches!(label, "local" | "project")
+                || users(&path, user.as_deref(), home.as_deref());
+            Some(ChainFile { label, path, keys, own })
+        }
+        _ => None,
+    };
+    let mut files: Vec<ChainFile> = chain.filter_map(read).collect();
+    let extra = rewritten
+        .filter(|path| !files.iter().any(|file| file.path == *path))
+        .and_then(|path| read(("project", path.to_path_buf())));
+    let counted = files.len();
+    files.extend(extra);
     let hook = std::env::var_os(cs::MANAGED_SETTINGS_ENV);
     let platform = cs::platform_managed_settings();
     demote_hooked(&mut files, hook.as_deref(), base.as_deref(), &platform);
+    files.truncate(counted);
     files
 }
 
-/// A managed file that a checkout's `env` block named through the hook is
-/// the checkout's: when the hook is in use at all (`managed`, the file the
-/// layer ends in, is the hook's; inside a session `hand_managed` puts the
-/// platform's in its place), it names a file other than the platform's
-/// own `platform`, and a file that is not the person's own sets it.
+/// A managed layer that a checkout's `env` block named through the hook is
+/// the checkout's, drop-ins and all: when the hook is in use at all
+/// (`managed`, the file the layer ends in, is the hook's; inside a session
+/// `hand_managed` puts the platform's in its place), it names a file other
+/// than the platform's own `platform`, and a file that is not the person's
+/// own sets it.
 fn demote_hooked(
     files: &mut [ChainFile],
     hook: Option<&std::ffi::OsStr>,
@@ -430,7 +443,7 @@ fn demote_hooked(
         file.keys.env(cs::MANAGED_SETTINGS_ENV).is_some_and(|set| std::ffi::OsStr::new(set) == hook)
     };
     if files.iter().any(|file| !file.own && names_hook(file)) {
-        for file in files.iter_mut().filter(|file| file.label == "managed") {
+        for file in files.iter_mut().filter(|file| cs::MANAGED_LABELS.contains(&file.label)) {
             file.own = false;
         }
     }
@@ -500,7 +513,7 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
 pub fn installed_env_target(settings: &Path, env: Option<&str>) -> Option<WriteTarget> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
-    let managed = chain_files().into_iter().find_map(|file| {
+    let managed = chain_files_rewriting(Some(settings)).into_iter().find_map(|file| {
         let managed = cs::MANAGED_LABELS.contains(&file.label);
         let value = file.keys.env(CONFIG_ENV).filter(|_| managed);
         value.map(str::to_owned).map(|value| (file, value))
@@ -785,6 +798,7 @@ mod tests {
             let names = serde_json::json!({"env": {"GARNISH_MANAGED_SETTINGS": named}});
             let names = names.to_string();
             vec![
+                chain_file("drop-in", "{}", true),
                 chain_file("managed", "{}", true),
                 chain_file("project", if checkout_names { &names } else { "{}" }, false),
                 chain_file("user", if checkout_names { "{}" } else { &names }, true),
@@ -793,7 +807,10 @@ mod tests {
         let managed_own = |hook: Option<&std::ffi::OsStr>, managed: &Path, checkout: bool| {
             let mut files = files(hook.map_or(org, Path::new), checkout);
             demote_hooked(&mut files, hook, Some(managed), platform);
-            files.iter().filter(|f| f.label == "managed").all(|f| f.own)
+            let layer = |f: &&ChainFile| crate::claude_settings::MANAGED_LABELS.contains(&f.label);
+            let owns: Vec<bool> = files.iter().filter(layer).map(|f| f.own).collect();
+            assert!(owns.iter().all(|own| *own == owns[0]), "the layer is demoted whole");
+            owns[0]
         };
         assert!(!managed_own(Some(hook), org, true));
         assert!(managed_own(Some(hook), org, false), "the person's own names it");
@@ -821,24 +838,30 @@ mod tests {
         std::fs::write(drop_dir.join("10-garnish.json"), "{}").unwrap();
         std::fs::write(drop_dir.join("notes.txt"), "").unwrap();
         std::fs::write(drop_dir.join(".off.json"), "{}").unwrap();
+        // Claude Code lists files and links only.
+        std::fs::create_dir(drop_dir.join("30-dir.json")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(drop_dir.join("10-garnish.json"), drop_dir.join("20-link.json"))
+            .unwrap();
+        let links = usize::from(cfg!(unix));
         let user = dir.path().join("settings.json");
         let files = own_settings_files_in(&managed, Some(user.clone()));
-        assert_eq!(files.len(), 403, "every drop-in, and no other file");
+        assert_eq!(files.len(), 403 + links, "every drop-in, and no other file");
         assert_eq!(files.first(), Some(&managed));
         assert_eq!(files.get(1), Some(&drop_dir.join("10-garnish.json")), "name order");
-        assert_eq!(files.get(401), Some(&drop_dir.join("x399.json")));
+        assert_eq!(files.get(401 + links), Some(&drop_dir.join("x399.json")));
         assert_eq!(files.last(), Some(&user));
         let alone = dir.path().join("elsewhere/managed-settings.json");
         assert_eq!(own_settings_files_in(&alone, None), std::slice::from_ref(&alone));
         // The chain's managed layer puts them highest precedence first: the
-        // last by name wins, the managed file loses to every drop-in, and a
-        // managed file the hook names brings none.
-        let layer = layer_of(managed.clone(), &managed);
-        assert_eq!(layer.len(), 402);
+        // last by name wins, the managed file loses to every drop-in; a file
+        // with no drop-ins beside it is the layer alone.
+        let layer = layer_of(managed.clone());
+        assert_eq!(layer.len(), 402 + links);
         assert_eq!(layer.first(), Some(&("drop-in", drop_dir.join("x399.json"))));
-        assert_eq!(layer.get(400), Some(&("drop-in", drop_dir.join("10-garnish.json"))));
-        assert_eq!(layer.last(), Some(&("managed", managed.clone())));
-        assert_eq!(layer_of(managed.clone(), &alone), [("managed", managed)]);
+        assert_eq!(layer.get(400 + links), Some(&("drop-in", drop_dir.join("10-garnish.json"))));
+        assert_eq!(layer.last(), Some(&("managed", managed)));
+        assert_eq!(layer_of(alone.clone()), [("managed", alone)]);
     }
 
     /// Verification of 2026-09-26: an empty `GARNISH_CONFIG` names nothing,

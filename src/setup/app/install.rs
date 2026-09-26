@@ -169,6 +169,7 @@ fn tilde_paths(text: &str, home: &str) -> String {
     let mut rest = text;
     let mut starts_path = true;
     let mut quote = None;
+    let mut escaped = false;
     while !rest.is_empty() {
         if starts_path && let Some(after) = rest.strip_prefix(home) {
             out.push_str("~/");
@@ -180,6 +181,14 @@ fn tilde_paths(text: &str, home: &str) -> String {
         let Some(c) = chars.next() else { break };
         out.push(c);
         rest = chars.as_str();
+        // A backslash outside single quotes makes the next character a
+        // plain one, a blank or a quote included (`shell_quote` writes an
+        // apostrophe as `'\''`).
+        if std::mem::take(&mut escaped) {
+            starts_path = false;
+            continue;
+        }
+        escaped = c == '\\' && quote != Some('\'');
         quote = match (quote, c) {
             (None, '\'' | '"') => Some(c),
             (Some(q), c) if c == q => None,
@@ -209,11 +218,19 @@ mod tests {
         assert_eq!(tilde_paths("/home/user/x", home), "/home/user/x");
         // A quoted path keeps its home whatever blanks it holds; the words
         // after the quotes close are paths again.
-        for quoted in ["'/home/u/My /home/u/g.toml'", "\"/home/u/My /home/u/g.toml\""] {
+        for quoted in [
+            "'/home/u/My /home/u/g.toml'",
+            "\"/home/u/My /home/u/g.toml\"",
+            // An apostrophe as `shell_quote` writes it, and an escaped quote.
+            "'/home/u/it'\\''s /home/u/g.toml'",
+            "\"/home/u/a\\\" /home/u/g.toml\"",
+        ] {
             let command = format!("garnish --config {quoted} /home/u/x");
             let shown = format!("garnish --config {quoted} ~/x");
             assert_eq!(tilde_paths(&command, home), shown);
         }
+        // An escaped blank keeps its word whole.
+        assert_eq!(tilde_paths("/home/u/My\\ /home/u/g.toml", home), "~/My\\ /home/u/g.toml");
         assert_eq!(
             tilde_paths("garnish --config=/home/u/g.toml", home),
             "garnish --config=/home/u/g.toml"

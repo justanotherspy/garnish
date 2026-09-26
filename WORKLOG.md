@@ -1159,7 +1159,20 @@ was built, what the reviews found and what was decided, not how.
     file; the ignored `--config` row led with the long path of the file
     read, which cut its reason at 80 columns (the row now names no file);
     and four mutations survived (the platform guard's test was vacuous),
-    each now killed.
+    each now killed. Two macOS runs failed on tests of that work that
+    asserted on text naming a temporary file (a macOS temp path is four
+    times Linux's); the suite now passes under a 136-character `TMPDIR`.
+    A ninth verifier found no way in from a session: `install --settings`
+    a checkout's file, run from elsewhere, still wrote where the managed
+    file that file pointed the hook at said (the rewritten file now
+    counts for the demotion, `chain_files_rewriting`); a directory named
+    `*.json` counted as a drop-in; `tilde_paths` ignored backslash escapes
+    (`shell_quote`'s `'\''`); and four mutations survived that only a
+    platform managed directory could show, so the hook's file now brings
+    its drop-ins too and a CLI test reaches them. Accepted as nits (PLAN):
+    a halfway number, serde_json's inexact floats and `1e999`, a config
+    key named `--config`, and `install` refusing where `config path`
+    passes over a demoted file.
   - *layout*: four of the layout follow-up's fixes held (under fuzz of
     20 000 seeds × 211 widths, custom frames included); a fifth was
     partial and one had regressed. Under uneven `custom` caps a row was

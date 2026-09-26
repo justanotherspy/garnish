@@ -182,7 +182,9 @@ documents *first*, with the reason, then start coding.
   file (`/etc/claude-code/…`, root's), so logic that depends on it takes
   the paths as parameters and is unit-tested pure (`demote_hooked`,
   `layer_of`, `own_settings_files_in`); two mutations of it survived the
-  whole suite until then. Each case of such a test must set up the input
+  whole suite until then. The hook's managed file brings the drop-ins
+  beside it as the platform's does, which is how a CLI test reaches the
+  managed layer (three more mutations survived until it did). Each case of such a test must set up the input
   its guard exists for: the first platform-guard case named another
   file, so it passed with the guard deleted. A macOS temporary path is
   about 60 characters where Linux's is 15, so a test that bounds a
@@ -554,10 +556,11 @@ for the contract and `docs/` for user docs.
   `env` block's `GARNISH_CONFIG` is part of what the ticks read when the
   command passes no `--config`, so `command_target` follows it
   (`env_target`) for a terminal that never sees the block; every reader
-  of the managed layer goes through `chain_files`, which demotes a
-  managed file a checkout named, and `install` reading it on its own
-  wrote where such a file said; `doctor` shows the chain from
-  `config::managed_layer`; `doctor` loads a refused
+  of the managed layer that decides a config goes through `chain_files`
+  (`install` through `chain_files_rewriting`, so the file it rewrites
+  counts too), which demotes a managed layer a checkout named, and
+  `install` reading it on its own wrote where such a file said; `doctor`
+  lists the chain from `config::managed_layer`; `doctor` loads a refused
   config's stand-in through `config::load_exactly`, never `load`, which
   would locate the refused file again) and its twin
   `config::read_target` (the same order without
