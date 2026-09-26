@@ -1626,7 +1626,9 @@ cache dir, last worker errors, and the glyph test grid (§ 7).
   worktree `gitdir`, symref chains capped at 5). Every such read is a
   bounded read of a regular file (a FIFO or a link to `/dev/zero` is
   refused, not opened: an archive can carry either and the tick repeats
-  the read every second), contained in the git directory, and a symbolic
+  the read every second; the open is `O_NONBLOCK` and the handle is
+  checked again, since whoever can write the directory can swap a FIFO in
+  after the check, review 2026-09-25), contained in the git directory, and a symbolic
   ref may only point under `refs/` or at a capitalised pseudo-ref, as git's
   own `refname_is_safe` has it; a `.git` file's `gitdir:` and a `commondir`
   count only when they name a git directory by git's test (a `HEAD`, an
