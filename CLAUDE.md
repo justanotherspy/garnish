@@ -184,7 +184,11 @@ documents *first*, with the reason, then start coding.
   `layer_of`, `own_settings_files_in`); two mutations of it survived the
   whole suite until then. Each case of such a test must set up the input
   its guard exists for: the first platform-guard case named another
-  file, so it passed with the guard deleted. A scratch export of the crate (`git archive` into a directory) built
+  file, so it passed with the guard deleted. A macOS temporary path is
+  about 60 characters where Linux's is 15, so a test that bounds a
+  message or asserts on a row that names a file passes here and fails
+  there (twice on 2026-09-26): run the suite once with `TMPDIR` set to a
+  directory with a path over 100 characters long before pushing such a test. A scratch export of the crate (`git archive` into a directory) built
   with the same `CARGO_TARGET_DIR` clobbers the checkout's artifacts,
   since cargo's metadata hash leaves the path out: give the export
   another `version` in its own `Cargo.toml` (the dependencies stay

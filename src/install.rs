@@ -1411,11 +1411,15 @@ mod tests {
         let command = format!("garnish --config {}", "x".repeat(5000));
         let status = serde_json::json!({"statusLine": {"type": "command", "command": command}});
         std::fs::write(&settings, status.to_string()).unwrap();
+        // The note names the settings file, whose temporary path is long on
+        // macOS; the word is what must be cut.
+        let named = settings.display().to_string().chars().count();
         let options =
             Options { settings: Some(settings), write_skills: false, ..Options::default() };
         let notes = Steps::plan(&options).unwrap().notes();
         let note = notes.iter().find(|n| n.contains("is no one file")).unwrap();
-        assert!(note.chars().count() < 400, "{} characters", note.chars().count());
+        let count = note.chars().count().saturating_sub(named);
+        assert!(count < 400, "{count} characters besides the settings path");
     }
 
     /// The config a garnish command passes is the file its ticks read: an

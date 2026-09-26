@@ -333,8 +333,10 @@ fn preview_of_an_unreadable_config_keeps_the_overrides() {
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/payloads/subscription-full.json");
     for (file, problem) in [(&missing, "cannot read"), (&broken, "broken.toml:2 ")] {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
+        // Wide, since the `⚠ config:` row names the file first and a
+        // temporary path can be long.
         cmd.args(["--config", file.to_str().unwrap(), "preview", payload])
-            .args(["--color", "never", "--icons", "ascii", "--width", "120"])
+            .args(["--color", "never", "--icons", "ascii", "--width", "400"])
             .env("HOME", home)
             .env("GARNISH_CACHE_DIR", home.join("cache"))
             .env("GARNISH_NOW", "1738425600")

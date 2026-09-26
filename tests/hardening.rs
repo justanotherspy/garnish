@@ -241,9 +241,10 @@ fn unreadable_config_and_unwritable_cache_still_render() {
     assert!(ok, "{out}");
     assert!(out.lines().last().unwrap().contains("config"), "{out}");
     assert_eq!(out.lines().count(), 5, "{out}");
+    // The row names the file first, and a temporary path can be long.
     let missing = dir.path().join("nope.toml").to_string_lossy().into_owned();
-    let (out, _, ok) =
-        tick(PAYLOAD.as_bytes(), &[("GARNISH_CONFIG", missing.as_str())], dir.path());
+    let env = [("GARNISH_CONFIG", missing.as_str()), ("COLUMNS", "400")];
+    let (out, _, ok) = tick(PAYLOAD.as_bytes(), &env, dir.path());
     assert!(ok && out.lines().last().unwrap().contains("cannot read"), "{out}");
 
     // A cache root that cannot be created for *any* uid: a regular file
