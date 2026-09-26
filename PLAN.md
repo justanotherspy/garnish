@@ -193,17 +193,17 @@ Open items only; closed ones are in `WORKLOG.md`.
     after the last column's text; under uneven `custom` caps, heights use
     the narrowest cap pair, so a box that fits only on the wider lines is
     drawn as empty cells
-  - config location, Daniel's call (follow-up review of 2026-09-26): the
-    commands that write a config (`config init`, `setup`, `install`)
-    follow the managed and user settings' command only, so a checkout's
-    `.claude/` never chooses a file garnish writes, while the readers
-    (`config path`, `check`, `show`, `preview`, `doctor`) follow the
-    command Claude Code runs here; inside a project whose own settings
-    pass another `--config`, `config path` names that file and `config
-    init` writes the user's. The alternative is to follow the project's
-    command in the writers too and print which settings file chose it;
-    also open: `$HOME$HOME`, `~/$HOME` and `${HOME-x}` name one file to
-    `sh` and are refused as naming none
+  - config location, Daniel's call (verification of 2026-09-26): a
+    `--config` that a checkout's own `.claude/` settings pass (a local or
+    project file outside the user settings directory) is followed by no
+    command run by hand, reading or writing; each refuses on one line and
+    `--config FILE` names it. Alternatives: follow it for the readers only
+    (tried: `config path` then answered for one side, and the
+    `garnish-statusline` skill writes through it), or trust a project
+    Claude Code itself trusts (`hasTrustDialogAccepted` in
+    `~/.claude.json`, an undocumented key). Also open: `$HOME$HOME`,
+    `~/$HOME`, `${HOME-x}` and a `~` after `GARNISH_CONFIG=` name one file
+    to `sh` and are refused as naming none
   - modules: the key scan finds a key read but not declared; the reverse,
     a key declared that nothing reads (how `colors.percent` went unread),
     would need the scan to track a key's kind (icon, colour, option)

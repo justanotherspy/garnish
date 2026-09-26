@@ -526,19 +526,22 @@ for the contract and `docs/` for user docs.
 - **One helper per rule, and new code uses it.** `config::write_target`
   (the file a writing command writes: the explicit one, else the
   `--config` the garnish `statusLine.command` passes, else the one
-  `locate` finds, else the default; the command is `CommandFrom::User`,
-  the managed and user files' alone, since a checkout's `.claude/` never
-  chooses a file garnish writes, except for `install`, which passes the
-  one it read from the file it rewrites as `CommandFrom::Given`; callers
-  resolve `GARNISH_CONFIG` into `Options.config_path`, so a plan reads no
-  environment) and its twin
-  `config::read_target` (the same order without the default, following
-  `CommandFrom::Chain`, the command Claude Code runs here, for the
-  commands a person runs to look at their config: `config path`, `config
-  check`, `config show`, `preview`, `doctor`; they read a settings file
-  whole through `claude_settings::read_file_up_to`, where the tick's
-  `read_file` stops at 1 MiB; the tick and its workers use `locate` alone
-  and never read the settings file for this),
+  `locate` finds, else the default; the command is `CommandFrom::Chain`,
+  the one Claude Code runs here, except for `install`, which passes the
+  one it read from the file it rewrites as `CommandFrom::Given`; a
+  `--config` from a checkout's own `.claude/` is `WriteTarget::Checkout`,
+  refused like `Unresolved`, never followed; callers resolve
+  `GARNISH_CONFIG` into `Options.config_path`, so a plan reads no
+  environment) and its twin `config::read_target` (the same order without
+  the default, for the commands a person runs to look at their config:
+  `config check`, `config show`, `preview`, `doctor`, so they read the
+  file `config path` prints and refuse where it refuses; a command run by
+  hand reads a settings file whole through
+  `claude_settings::read_file_up_to`, where the tick's `read_file` stops
+  at 1 MiB; the tick and its workers use `locate` alone and never read the
+  settings file for this; one reader and one writer following different
+  commands was tried and made `config path` wrong for one of them, and
+  the `garnish-statusline` skill writes through `config path`),
   `install::shell_words` (the one splitter for a `statusLine.command`, as
   `sh` splits it, at space, tab and newline only, past `NAME=value` words
   and a leading `env`; a word records where its one home directory goes,

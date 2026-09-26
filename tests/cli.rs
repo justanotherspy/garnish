@@ -12,13 +12,24 @@ use std::process::{Command, Stdio};
 use rayon::prelude::*;
 
 fn run(args: &[&str], home: &Path, extra: &[(&str, &str)]) -> (String, String, bool) {
+    run_in(home, args, home, extra)
+}
+
+/// [`run`] from the directory `cwd`, whose `.claude/` is then the
+/// project's settings.
+fn run_in(
+    cwd: &Path,
+    args: &[&str],
+    home: &Path,
+    extra: &[(&str, &str)],
+) -> (String, String, bool) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_garnish"));
     // The working directory is the test's own, not the checkout: `config
     // show` and `doctor` read the settings chain of the current directory,
     // and the checkout's `.claude/` must not leak into a test. Every
     // argument a test passes is an absolute path.
     cmd.args(args)
-        .current_dir(home)
+        .current_dir(cwd)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("GARNISH_CACHE_DIR", home.join("cache"))
@@ -1452,14 +1463,11 @@ fn the_commands_that_read_the_config_read_the_one_the_command_passes() {
     }
     let (out, err, ok) = run(&["doctor"], home, &[]);
     assert!(ok && out.contains("local.toml ok") && !out.contains("work.toml"), "{out}{err}");
-    // The commands that write a config never follow the checkout's own
-    // files (follow-up review: a cloned repository chose the file `config
-    // init` and `setup` wrote): they write the user's command's file.
+    // A project whose `.claude/` is the user settings directory (a session
+    // in the home directory) holds the user's own files: the commands that
+    // write a config follow its command too.
     let (_, err, ok) = run(&["config", "init"], home, &[]);
-    assert!(!ok && err.contains("work.toml exists") && !err.contains("local"), "{err}");
-    let (out, err, ok) = run(&["setup", "--preset", "minimal"], home, &[]);
-    assert!(ok && out.contains("work.toml (backup: ") && !out.contains("local"), "{out}{err}");
-    assert_eq!(std::fs::read_to_string(&local).unwrap(), text("LOCALFILE"));
+    assert!(!ok && err.contains("local.toml exists"), "{err}");
     // A file Claude Code rejects is skipped: the next one's command counts.
     let rejected = serde_json::json!({"tui": "bogus", "statusLine": {"type": "command",
         "command": format!("garnish --config {}", local.display())}});
@@ -1482,13 +1490,83 @@ fn the_commands_that_read_the_config_read_the_one_the_command_passes() {
     let spaced = home.join("my home");
     std::fs::create_dir_all(&spaced).unwrap();
     hook("garnish --config $HOME/w.toml");
-    let (out, err, ok) = run(&["config", "path"], home, &[("HOME", spaced.to_str().unwrap())]);
+    let claude = home.join(".claude");
+    let env = [("HOME", spaced.to_str().unwrap()), ("CLAUDE_CONFIG_DIR", claude.to_str().unwrap())];
+    let (out, err, ok) = run(&["config", "path"], home, &env);
     assert!(!ok && out.is_empty() && err.contains("\"$HOME/w.toml\""), "{out}{err}");
 
     // A config named explicitly still wins over the command's.
     let (out, err, ok) =
         run(&["config", "check"], home, &[("GARNISH_CONFIG", xdg.to_str().unwrap())]);
     assert!(ok && out.trim_end().ends_with("garnish.toml: ok"), "{out}{err}");
+}
+
+/// Verification of 2026-09-26: the `statusLine.command` of a checkout's
+/// own `.claude/` settings (a repository nobody here may have built) never
+/// chooses a file garnish reads or writes. A `--config` it passes is
+/// refused by every command run by hand, on one line naming the settings
+/// file and asking for `--config`, and `doctor` says so; a command there
+/// that passes none leaves the file to the lookup, and every command then
+/// names the same one (the writers had followed the user file's command
+/// while the readers followed the project's).
+#[test]
+fn a_checkout_never_chooses_the_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let proj = dir.path().join("proj");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(proj.join(".claude")).unwrap();
+    let victim = home.join(".profile");
+    std::fs::write(&victim, "export PATH\n").unwrap();
+    let settings = |dir: &Path, command: &str| {
+        let status = serde_json::json!({"statusLine": {"type": "command", "command": command}});
+        std::fs::write(dir.join(".claude/settings.json"), status.to_string()).unwrap();
+    };
+    let payload = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/payloads/subscription-full.json");
+    let preview = ["preview", payload.to_str().unwrap(), "--width", "100"];
+
+    settings(&proj, &format!("garnish --config {}", victim.display()));
+    for args in [
+        &["config", "path"][..],
+        &["config", "check"],
+        &["config", "show"],
+        &["config", "init"],
+        &["setup", "--preset", "minimal"],
+        &preview,
+    ] {
+        let (out, err, ok) = run_in(&proj, args, &home, &[]);
+        assert!(!ok && out.is_empty() && err.lines().count() == 1, "{args:?}: {out}{err}");
+        assert!(err.contains("proj/.claude/settings.json"), "{args:?}: {err}");
+        assert!(err.contains(".profile\"") && err.contains("--config <FILE>"), "{args:?}: {err}");
+    }
+    let (out, err, ok) = run_in(&proj, &["doctor"], &home, &[]);
+    assert!(ok && out.contains("this checkout's own settings choose"), "{out}{err}");
+    assert!(out.contains("`garnish --config <FILE> config init` writes one"), "{out}{err}");
+    // Named explicitly, it is the person's own choice.
+    let (out, err, ok) =
+        run_in(&proj, &["config", "path"], &home, &[("GARNISH_CONFIG", victim.to_str().unwrap())]);
+    assert!(ok && out.trim_end() == victim.to_str().unwrap(), "{out}{err}");
+
+    // The project runs a bare `garnish`: the lookup decides for every
+    // command, whatever the user file's own command passes.
+    let xdg = home.join(".config/garnish/garnish.toml");
+    let user_config = home.join("u.toml");
+    settings(&home, &format!("garnish --config {}", user_config.display()));
+    settings(&proj, "garnish");
+    let (out, err, ok) = run_in(&proj, &["config", "path"], &home, &[]);
+    assert!(ok && out.trim_end() == xdg.to_str().unwrap(), "{out}{err}");
+    let (out, err, ok) = run_in(&proj, &["config", "check"], &home, &[]);
+    assert!(ok && out.contains("no config file found"), "{out}{err}");
+    let (out, err, ok) = run_in(&proj, &["config", "init"], &home, &[]);
+    assert!(ok && xdg.exists() && !user_config.exists(), "{out}{err}");
+    let (out, err, ok) = run_in(&proj, &["config", "check"], &home, &[]);
+    assert!(ok && out.trim_end().ends_with("garnish.toml: ok"), "{out}{err}");
+    // `install` rewrites the user file and follows its command alone.
+    settings(&proj, &format!("garnish --config {}", victim.display()));
+    let (out, err, ok) = run_in(&proj, &["install", "--no-skills", "--absolute"], &home, &[]);
+    assert!(ok && user_config.exists(), "{out}{err}");
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "export PATH\n");
 }
 
 /// Final review: `install` reads the whole settings file it rewrites, so

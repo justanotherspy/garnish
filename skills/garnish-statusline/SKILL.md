@@ -81,11 +81,16 @@ every status line row dim), iterate, and write only on approval, keeping
 the previous file as the `.bak-<epoch>` backup garnish itself keeps:
 
 ```sh
-TARGET=$(garnish config path)
-mkdir -p "$(dirname "$TARGET")"
-[ -f "$TARGET" ] && cp "$TARGET" "$TARGET.bak-$(date +%s)"
-cp "$DRAFT" "$TARGET" && garnish config check
+TARGET=$(garnish config path) &&
+  mkdir -p "$(dirname "$TARGET")" &&
+  { [ ! -f "$TARGET" ] || cp "$TARGET" "$TARGET.bak-$(date +%s)"; } &&
+  cp "$DRAFT" "$TARGET" && garnish config check
 ```
+
+When `garnish config path` refuses (this project's own `.claude/` settings
+pass the `--config`, which garnish never follows, or the value names no one
+file), write nothing: show its one-line note and ask which file to use,
+then pass it as `garnish --config <FILE> config path`.
 
 Say where the backup went and explain each key you set in one line.
 `preview` runs on the live clock, so animations move between runs

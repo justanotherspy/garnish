@@ -709,12 +709,7 @@ fn config_cmd(action: &ConfigAction, config_path: Option<&Path>) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     match action {
         ConfigAction::Path => {
-            // The file the other readers read; with none, where one would
-            // be written.
-            let p = match read_config_or_quiet(config_path)? {
-                Some(p) => p,
-                None => target_or_quiet(config_path, "the config is")?,
-            };
+            let p = target_or_quiet(config_path, "the config is")?;
             writeln!(stdout, "{}", p.display())?;
         }
         ConfigAction::Check => {
@@ -788,23 +783,21 @@ pub fn preset_text(preset: &str) -> Result<String> {
     Ok(crate::gallery::body(p.source))
 }
 
-/// Where the config a command writes goes, or a [`Quiet`] refusal.
-///
-/// [`config::write_target`] with [`config::CommandFrom::User`]: the file
-/// the user's own status line command reads, never one a checkout's
-/// settings name, else the default location.
+/// Where the config a command writes goes ([`config::write_target`]: the
+/// file the tick reads, else the default location), or a [`Quiet`]
+/// refusal.
 ///
 /// # Errors
 /// [`Quiet`] after the one-line note, without a home or when the
-/// `statusLine.command` passes a `--config` that names no one file.
+/// `statusLine.command` passes a `--config` that names no one file or that
+/// a checkout's own settings choose.
 pub fn config_target_or_quiet(explicit: Option<&Path>) -> Result<PathBuf> {
     target_or_quiet(explicit, "the config goes")
 }
 
 /// The config a command run by hand reads ([`config::read_target`]: the
-/// file the ticks read here, which `config path` prints, or `None` for the
-/// built-in defaults), or a [`Quiet`] refusal when the `statusLine.command`
-/// passes a `--config` that names no one file.
+/// file `config path` prints, or `None` for the built-in defaults), or a
+/// [`Quiet`] refusal where `config path` refuses.
 fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
     match config::read_target(explicit) {
         config::ReadTarget::File(path) => Ok(Some(path)),
@@ -812,18 +805,24 @@ fn read_config_or_quiet(explicit: Option<&Path>) -> Result<Option<PathBuf>> {
         config::ReadTarget::Unresolved { settings, word } => {
             Err(refusal(Refusal::UnresolvedConfig { settings, word }))
         }
+        config::ReadTarget::Checkout { settings, path } => {
+            Err(refusal(Refusal::CheckoutConfig { settings, path }))
+        }
     }
 }
 
 /// [`config_target_or_quiet`], with `what` finishing the no-home note.
 fn target_or_quiet(explicit: Option<&Path>, what: &'static str) -> Result<PathBuf> {
-    match config::write_target(explicit, config::CommandFrom::User) {
+    match config::write_target(explicit, config::CommandFrom::Chain) {
         config::WriteTarget::File(path) => Ok(path),
         config::WriteTarget::NoHome => {
             Err(refusal(Refusal::NoHome { flag: "--config <FILE>", what }))
         }
         config::WriteTarget::Unresolved { settings, word } => {
             Err(refusal(Refusal::UnresolvedConfig { settings, word }))
+        }
+        config::WriteTarget::Checkout { settings, path } => {
+            Err(refusal(Refusal::CheckoutConfig { settings, path }))
         }
     }
 }

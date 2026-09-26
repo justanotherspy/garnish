@@ -1068,15 +1068,25 @@ was built, what the reviews found and what was decided, not how.
     `LS`, which the pinned CLI no longer has.
   - *config location*: the writers had started following a checkout's
     own `.claude/` settings, so a cloned repository chose where `config
-    init` and `setup` wrote. Decided (the conservative side, Daniel's to
-    revisit, PLAN backlog): writers follow the managed and user files'
-    command only, readers the command Claude Code runs here. A command
-    run by hand reads a settings file whole (64 MiB bound), so past the
-    tick's 1 MiB cap `config path`, `config init` and `doctor` agree with
-    `install`; `doctor` reads the chain as Claude Code does, and the keys
-    the tick reads skip a file past its cap. `shell_words` split at
-    Unicode whitespace (a pasted non-breaking space cut the path) and
-    spliced an unquoted `$HOME` that `sh` would split; both fixed, a second
-    `$HOME` is refused, and a quoted `--config` is cut to 200 characters.
-    The rejected-file skip and the `$HOME` spellings are now tested
-    through the binary.
+    init` and `setup` wrote. A first fix (writers follow the user's files,
+    readers the project's) was attacked by a third verifier: `config path`
+    then answered for one side only, and the `garnish-statusline` skill,
+    which writes through `config path`, still replaced `~/.profile` with
+    TOML when a checkout named it. Decided (the conservative side,
+    Daniel's to revisit, PLAN backlog): a `--config` from a checkout's own
+    files is followed by no command, reading or writing, and refused on
+    one line like an unresolvable one (`WriteTarget::Checkout`); every
+    command otherwise names the same file. A command run by hand reads a
+    settings file whole (64 MiB bound), so past the tick's 1 MiB cap
+    `config path`, `config init` and `doctor` agree with `install`;
+    `doctor` reads the chain as Claude Code does, and the keys the tick
+    reads skip a file past its cap. `shell_words` split at Unicode
+    whitespace (a pasted non-breaking space cut the path) and spliced an
+    unquoted `$HOME` that `sh` would split; both fixed, a second `$HOME`
+    is refused, a quoted `--config` is cut to 200 characters, a
+    `GARNISH_CONFIG=` prefix counts, a program word `sh` would split runs
+    no garnish, and a second `--config` or one after `--` (both clap
+    errors) names no file. `doctor` no longer points `config init` at a
+    file it would refuse. The skill's write step stops on a refusal.
+    Three mutations the tests missed are now caught (the badge rows'
+    skip, the note's cut, the cap's `>`).

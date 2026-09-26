@@ -91,6 +91,17 @@ pub enum WriteTarget {
         /// The value, as the command spells it.
         word: String,
     },
+    /// The garnish `statusLine.command` Claude Code runs here comes from a
+    /// checkout's own `.claude/` settings, and passes `--config path`:
+    /// garnish never reads or writes a file a repository nobody here may
+    /// have built chooses (CLAUDE.md, "The repository is not the user's
+    /// file"), so it is refused like [`WriteTarget::Unresolved`].
+    Checkout {
+        /// The settings file.
+        settings: PathBuf,
+        /// The file its command names.
+        path: PathBuf,
+    },
 }
 
 /// Which `statusLine.command` a config target follows ([`write_target`],
@@ -100,13 +111,9 @@ pub enum CommandFrom<'a> {
     /// The one Claude Code runs from the current directory: the first file
     /// of the settings chain that sets it (managed > local > project >
     /// user, a file Claude Code rejects skipped), as `doctor` shows it.
-    /// For the commands that only read a config.
+    /// A `--config` it passes from a checkout's own files is
+    /// [`WriteTarget::Checkout`].
     Chain,
-    /// The same, from the managed and user files alone: a command that
-    /// writes a config never lets the current directory's checkout, a
-    /// repository nobody here may have built, choose the file it writes
-    /// (CLAUDE.md, "The repository is not the user's file").
-    User,
     /// This command, read from this settings file: `install`, which
     /// rewrites that file and has read all of it already.
     Given {
@@ -122,8 +129,8 @@ pub enum CommandFrom<'a> {
 /// The one named explicitly (`flag`, else `GARNISH_CONFIG`); else the one
 /// the garnish `statusLine.command` of `from` passes with `--config`,
 /// since that is the file its ticks read; else [`locate`]'s; else
-/// [`default_path`]. `config init` and `setup` go through here with
-/// [`CommandFrom::User`], `install`'s default config with
+/// [`default_path`]. `config init`, `config path` and `setup` go through
+/// here with [`CommandFrom::Chain`], `install`'s default config with
 /// [`CommandFrom::Given`].
 ///
 /// A default file written while the command names another would never be
@@ -155,14 +162,21 @@ pub enum ReadTarget {
         /// The value, as the command spells it.
         word: String,
     },
+    /// As [`WriteTarget::Checkout`].
+    Checkout {
+        /// The settings file.
+        settings: PathBuf,
+        /// The file its command names.
+        path: PathBuf,
+    },
 }
 
 /// The config a command run by hand reads (SPEC § 4).
 ///
 /// [`write_target`]'s order without its default path, following the
-/// command of [`CommandFrom::Chain`], so `config path`, `config check`,
-/// `config show`, `preview` and `doctor` look at the file the status
-/// line's ticks read here. The tick itself and its workers use
+/// command of [`CommandFrom::Chain`], so `config check`, `config show`,
+/// `preview` and `doctor` look at the file `config path` prints, the one
+/// the status line's ticks read here. The tick itself and its workers use
 /// [`locate`] alone: the harness hands the tick the command's `--config`,
 /// and the tick passes it on, so neither reads the settings file.
 #[must_use]
@@ -175,6 +189,7 @@ pub fn read_target(flag: Option<&Path>) -> ReadTarget {
         Some(WriteTarget::Unresolved { settings, word }) => {
             ReadTarget::Unresolved { settings, word }
         }
+        Some(WriteTarget::Checkout { settings, path }) => ReadTarget::Checkout { settings, path },
         Some(WriteTarget::NoHome) | None => {
             locate(None).map_or(ReadTarget::Defaults, ReadTarget::File)
         }
@@ -182,18 +197,18 @@ pub fn read_target(flag: Option<&Path>) -> ReadTarget {
 }
 
 /// The `--config` the garnish `statusLine.command` of `from` passes, as a
-/// [`WriteTarget::File`] or [`WriteTarget::Unresolved`]; `None` when there
-/// is no such command or it passes none.
+/// [`WriteTarget::File`], [`WriteTarget::Unresolved`] or
+/// [`WriteTarget::Checkout`]; `None` when there is no such command or it
+/// passes none.
 fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
     use crate::claude_settings as cs;
     let home = cs::home_dir();
-    let (settings, command) = match from {
-        CommandFrom::Given { settings, command } => (settings.to_path_buf(), command?.to_owned()),
-        CommandFrom::Chain | CommandFrom::User => {
-            let project = match from {
-                CommandFrom::Chain => std::env::current_dir().ok(),
-                _ => None,
-            };
+    let (settings, command, checkout) = match from {
+        CommandFrom::Given { settings, command } => {
+            (settings.to_path_buf(), command?.to_owned(), false)
+        }
+        CommandFrom::Chain => {
+            let project = std::env::current_dir().ok();
             let user = cs::user_dir(home.as_deref());
             let managed = cs::managed_settings_path();
             let chain = cs::settings_chain(managed.as_deref(), project.as_deref(), user.as_deref());
@@ -201,22 +216,40 @@ fn command_target(from: CommandFrom<'_>) -> Option<WriteTarget> {
             // file protects the tick, and only a command run by hand is here
             // (final review of 2026-09-25: past the cap `install` and every
             // other command named different configs).
-            chain.into_iter().find_map(|(label, file)| {
+            let (label, file, command) = chain.into_iter().find_map(|(label, file)| {
                 match cs::read_file_up_to(&file, cs::MAX_COMMAND_SETTINGS_BYTES) {
                     cs::FileState::Keys(keys) if cs::rejected(label, &keys).is_none() => {
-                        keys.status_line_command.map(|command| (file, command))
+                        keys.status_line_command.map(|command| (label, file, command))
                     }
                     _ => None,
                 }
-            })?
+            })?;
+            let checkout = matches!(label, "local" | "project")
+                && !user.as_deref().is_some_and(|dir| in_dir(&file, dir));
+            (file, command, checkout)
         }
     };
     match crate::install::command_config(&command, home.as_deref())? {
+        crate::install::CommandConfig::File(path) if checkout => {
+            Some(WriteTarget::Checkout { settings, path })
+        }
         crate::install::CommandConfig::File(p) => Some(WriteTarget::File(p)),
         crate::install::CommandConfig::Unresolved(word) => {
             Some(WriteTarget::Unresolved { settings, word })
         }
     }
+}
+
+/// Whether `file` sits directly in `dir`: a project's `.claude/` that is
+/// the user settings directory itself (a session started in the home
+/// directory) holds the user's own files, not a checkout's.
+fn in_dir(file: &Path, dir: &Path) -> bool {
+    let same = |a: &Path, b: &Path| {
+        a == b
+            || std::fs::canonicalize(a)
+                .is_ok_and(|a| std::fs::canonicalize(b).is_ok_and(|b| a == b))
+    };
+    file.parent().is_some_and(|parent| same(parent, dir))
 }
 
 /// Load and resolve the configuration. Never fails: a bad key is reported

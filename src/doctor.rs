@@ -63,8 +63,9 @@ pub fn report_with(
     );
     let _ = writeln!(o, "git      {}", git_version());
     let _ = writeln!(o);
-    // A `--config` the status line command passes that names no one file
-    // is said once; the report then shows what a bare lookup finds.
+    // A `--config` the status line command passes that names no one file,
+    // or that a checkout chooses, is said once; the report then shows what
+    // a bare lookup finds.
     let (config_path, unresolved) = match config_file {
         config::ReadTarget::File(p) => (Some(p.as_path()), None),
         config::ReadTarget::Defaults => (None, None),
@@ -75,6 +76,13 @@ pub fn report_with(
             };
             (None, Some(refusal.to_string()))
         }
+        config::ReadTarget::Checkout { settings, path } => {
+            let refusal = crate::install::Refusal::CheckoutConfig {
+                settings: settings.clone(),
+                path: path.clone(),
+            };
+            (None, Some(refusal.to_string()))
+        }
     };
     let loaded = config::load(config_path, &SCHEMAS);
     let chain = read_chain(&claude_settings::settings_chain(managed, project, user));
@@ -82,10 +90,10 @@ pub fn report_with(
         let _ = writeln!(o, "{row}");
     }
     let _ = writeln!(o);
-    if let Some(note) = unresolved {
-        let _ = writeln!(o, "config   {}", crate::ansi::plain_text(&note));
+    if let Some(note) = &unresolved {
+        let _ = writeln!(o, "config   {}", crate::ansi::plain_text(note));
     }
-    config_section(&mut o, &loaded);
+    config_section(&mut o, &loaded, unresolved.is_some());
     cache_section(&mut o, cache);
     environment_section(&mut o);
     glyph_section(&mut o, &loaded.config);
@@ -165,7 +173,7 @@ pub fn settings_rows(
             FileState::Keys(keys) => match claude_settings::rejected(label, keys) {
                 Some(why) => format!("{why}; garnish reads none of it"),
                 None if *past_tick_cap => format!(
-                    "ok, but longer than the {} bytes a tick reads: prefersReducedMotion and the badges skip it",
+                    "ok, but longer than the {} bytes a tick reads: the keys a tick reads (prefersReducedMotion, the badges, auto-compaction) skip it",
                     claude_settings::MAX_SETTINGS_BYTES
                 ),
                 None => "ok".to_owned(),
@@ -424,8 +432,17 @@ fn ticks_every_second(config: &Config, animating: bool) -> bool {
     ticking || animated
 }
 
-fn config_section(o: &mut String, loaded: &config::Loaded) {
+/// The `config` rows: the file and its problems. `refused` says the
+/// status line command's `--config` was refused above, where `config init`
+/// refuses too, so the hint for an absent file names the flag instead.
+fn config_section(o: &mut String, loaded: &config::Loaded, refused: bool) {
     match (&loaded.path, loaded.errors.is_empty()) {
+        (None, _) if refused => {
+            let _ = writeln!(
+                o,
+                "config   none (built-in defaults); `garnish --config <FILE> config init` writes one"
+            );
+        }
         (None, _) => {
             let _ = writeln!(
                 o,
@@ -1432,19 +1449,26 @@ mod tests {
         let user = dir.path().join("home/.claude");
         std::fs::create_dir_all(proj.join(".claude")).unwrap();
         std::fs::create_dir_all(&user).unwrap();
-        let filler = "x".repeat(usize::try_from(claude_settings::MAX_SETTINGS_BYTES).unwrap());
-        let big = serde_json::json!({"filler": filler, "prefersReducedMotion": true,
+        let cap = usize::try_from(claude_settings::MAX_SETTINGS_BYTES).unwrap();
+        let big = serde_json::json!({"filler": "x".repeat(cap), "prefersReducedMotion": true,
+            "sandbox": {"enabled": true},
             "statusLine": {"type": "command", "command": "garnish", "padding": 1}});
         std::fs::write(proj.join(".claude/settings.local.json"), big.to_string()).unwrap();
-        std::fs::write(user.join("settings.json"), r#"{"prefersReducedMotion": false}"#).unwrap();
+        // The user file is exactly at the cap, which a tick still reads.
+        let small = r#"{"prefersReducedMotion": false, "sandbox": {"enabled": false}, "#;
+        let at_cap = format!("{small}\"f\": \"{}\"}}", "x".repeat(cap - small.len() - 8));
+        assert_eq!(at_cap.len(), cap);
+        std::fs::write(user.join("settings.json"), at_cap).unwrap();
         let chain = read_chain(&claude_settings::settings_chain(None, Some(&proj), Some(&user)));
         let (cfg, _) = config::parse("padding = 2\n", &SCHEMAS);
         let rows = settings_rows(&chain, Some(&proj), &cfg, true);
         let text = rows.join("\n");
         let row = |key: &str| rows.iter().find(|r| r.starts_with(key)).unwrap();
         assert!(row("  local ").contains("ok, but longer than"), "{text}");
+        assert!(row("  user ").ends_with(" ok"), "{text}");
         assert!(row("statusLine").ends_with("command=garnish (local)"), "{text}");
         assert!(row("  padding").ends_with("1 (local)"), "{text}");
         assert!(row("prefersReducedMotion").ends_with("false (user)"), "{text}");
+        assert!(row("sandbox.enabled").ends_with("false (user)"), "{text}");
     }
 }

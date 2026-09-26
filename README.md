@@ -129,9 +129,10 @@ reads FILE, and a later `install` keeps the arguments and any
 that way is the file every other command then uses: `config path`,
 `config check`, `config show`, `preview`, `doctor`, `config init`, `setup`
 and `install`; inside a project whose own `.claude/` settings run garnish
-with another `--config`, the commands that read a config follow that one,
-as Claude Code does there, while `config init` and `setup` still write
-yours). The equivalent by hand:
+with another `--config`, garnish follows that file for none of them, since
+a cloned repository must not choose a file garnish reads or writes: each
+refuses on one line, and `garnish --config FILE …` says which you mean).
+The equivalent by hand:
 
 ```json
 { "statusLine": { "type": "command", "command": "garnish", "refreshInterval": 1 } }
