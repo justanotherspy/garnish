@@ -5,12 +5,6 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 ## Unreleased
 
-**Gallery**
-
-- A new gallery preset, `my-work-theme` (contributed by @danielatjumo):
-  four aligned rows in a double frame, Catppuccin Mocha, with block-bar
-  limits, a reset countdown and a spinning clock. It needs a Nerd Font.
-
 **Whole-codebase review** (2026-09-25; each fix with a test)
 
 *A repository you did not create*
@@ -373,6 +367,9 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
   the compaction scale, cell and share widths, a boxed column, narrow and
   ASCII-only terminals, half-speed animation, a two-cell ticker and
   animation off. `docs/presets.md` renders every one at its width.
+- `my-work-theme` (contributed by @danielatjumo; 33 presets in all):
+  four aligned rows in a double frame, Catppuccin Mocha, with block-bar
+  limits, a reset countdown and a spinning clock. It needs a Nerd Font.
 - The `garnish-statusline` skill offers `garnish setup` first and keeps
   the conversational path; all three skills are shorter.
 
