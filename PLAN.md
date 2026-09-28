@@ -12,9 +12,11 @@ design, SPEC § 14 says so.
 
 `v0.2.0` (2026-09-06) shipped Phases 0–18. Phases 19–23, the setup
 refinements and the fixes from the 2026-09-25 whole-codebase review (12
-area reviewers, ~270 findings; #85, #86) are `v0.3.0`, the first release
-through the Homebrew pipeline; `CHANGELOG.md` § 0.3.0 is its section and
-its tag message.
+area reviewers, ~270 findings; #85, #86) were tagged `v0.3.0`, but its
+release was published before its archives were attached, and the
+repository's immutable releases refused them: `v0.3.0` has no binaries and
+its tag cannot be reused. The workflow now builds onto a draft; the next
+version is the first release through the Homebrew pipeline.
 
 ## Done
 
@@ -23,7 +25,7 @@ its tag message.
 | 0–9 | scaffold and strict lints; payload, time, ANSI; schema-driven config with presets, themes, icon sets, frames; 21 modules; cache and detached workers; direct `.git` reads; generated docs; `install`, `doctor`, `gc`; benches; hardening; `v0.1.0` | 09-04 |
 | 10–15 | CI on Linux and macOS with SHA-pinned actions; host detection and `setup.sh`; `align`, `durations`; line keys, spacers, bars; per-key config fallback; the ticker and `text.<name>` modules | 09-05 |
 | 16–18 | animation; the presets gallery; three bundled skills; `v0.2.0` | 09-06 |
-| Release pipeline | tag → verify → pre-release → binaries → cask → approval → tap → promote | 09-11 |
+| Release pipeline | tag → verify → draft → binaries → publish pre-release → cask → approval → tap → promote | 09-11, 09-28 |
 | 19 Harness fidelity | `prefersReducedMotion`, `install::replace_file`, doctor's settings chain, faint `preview`, the three-renderer height rule | 09-13 |
 | 20 Presentation | `COMMON_OPTS` with `max_width`, the module matrix test, `path.style = "fish"`, links, `context.scale`, `reset` modes | 09-13 |
 | Audit | code read against its documents: escapes, unbounded reads, wrong renders; 194 → 227 tests | 09-16 |
@@ -40,8 +42,9 @@ Open items only; closed ones are in `WORKLOG.md`.
 
 **Waiting on Daniel**
 
-- [ ] First release (`v0.3.0`): create the `release` environment (required
-  reviewer Daniel) and merge `garnish.sts.yaml` in the tap. Afterwards drop
+- [ ] First release through the pipeline (`v0.3.0` shipped no binaries):
+  the release PR for the next version, with the `release` environment
+  (required reviewer Daniel) and `garnish.sts.yaml` in the tap. Afterwards drop
   the "once the first release is tagged" note from README and guide § 1
   and the tap's README.
 - [ ] Watch a nine-row status line at 24 and 50 rows in the fullscreen and

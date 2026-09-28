@@ -230,14 +230,21 @@ and stops once, before publishing the Homebrew cask, for Daniel's approval.
    `Cargo.lock` agrees, on `main`, CHANGELOG section present, no
    `## Unreleased`; the `release` environment exists with a required
    reviewer, no admin bypass, a custom deployment policy) → `release` (a
-   GitHub pre-release) → `build` (`garnish-<target>.tar.gz` + `.sha256` for
-   x86_64/aarch64 Linux and macOS; rustup only, no cache) → `render` (the
+   **draft** pre-release) → `build` (`garnish-<target>.tar.gz` + `.sha256`
+   for x86_64/aarch64 Linux and macOS, attached to the draft; rustup only,
+   no cache) → `seal` (publishes the pre-release only with all eight assets
+   uploaded) → `render` (the
    cask from the template, printed, `brew fetch`ed, kept as the `cask`
    artifact) → **`publish` waits for Daniel's approval** (read the render
    log first), then pushes `Casks/garnish.rb` to
    `justanotherspy/homebrew-tap` with an octo-sts token → `promote` marks
    the release *Latest*. A settings or transient failure is re-run in the
-   same run; anything needing code is a new version (a tag is never moved).
+   same run (failed jobs only once `seal` has run); anything needing code
+   is a new version (a tag is never moved).
+   **Releases are immutable** (a repository setting): publishing freezes a
+   release's assets and tag, a deleted release's tag can never be used
+   again, and only the title, notes and pre-release/latest flags stay
+   editable. Assets go on a draft; never publish one before its assets.
 4. **Repository state it needs** (settings, before the first tag): the
    `release` environment with Daniel as required reviewer, `v*` tags only,
    admin bypass off; the octo-sts app on the tap with
