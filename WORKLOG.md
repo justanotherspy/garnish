@@ -362,3 +362,5 @@ Compacted on 2026-09-12 and again on 2026-09-26.
   danielatjumo), taken as submitted plus `icons = "nerd"`: the issue's
   sample was rendered with Nerd glyphs and `# needs: nerd-font` must match
   the icon set. Its Nerd glyphs are written as TOML escapes. 33 presets.
+  Release PR for `v0.3.0`: crate version bumped, `## Unreleased` dated as
+  the 0.3.0 section.
