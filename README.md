@@ -86,7 +86,7 @@ The built-ins, rendered with unicode icons. `default` is above.
 ╰─ ⏱ 1h12m since 14:48 │ ⇄ 8m20s (12%) │ ⛁ 91% 1h ✦ 47m 2 misses 352kw ───────────── ⠋ 16:00:00 Sat 01 Feb +00:00 ─╯
 ```
 
-The [gallery](docs/presets.md) has 32 more: panels, grids, tickers,
+The [gallery](docs/presets.md) has 33 more: panels, grids, tickers,
 animation, ASCII-only terminals and more. `setup` previews them all.
 
 ## Modules

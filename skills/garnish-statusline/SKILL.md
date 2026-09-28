@@ -56,7 +56,7 @@ it" answer at any point is mapped onto the same keys.
 | Show the Claude Code version, the account, or badges while sandboxing or voice is on? | the `version`, `account`, `sandbox` and `voice` modules | off |
 | Separators in the colour of the module before them? | `[frame] separator_color = "inherit"` (or a role or colour) | `muted` |
 
-Start from the closest of the 32 gallery presets (`garnish presets`;
+Start from the closest of the 33 gallery presets (`garnish presets`;
 `titled-sections`, `sidebar-panels`, `grid-three`, `boxed-panels`,
 `links-and-shortcuts`, `compaction-watch`, `narrow-unicode` and
 `ascii-only` between them show every layout feature) rather than writing

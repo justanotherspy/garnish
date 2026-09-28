@@ -5,6 +5,12 @@ file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
 ## Unreleased
 
+**Gallery**
+
+- A new gallery preset, `my-work-theme` (contributed by @danielatjumo):
+  four aligned rows in a double frame, Catppuccin Mocha, with block-bar
+  limits, a reset countdown and a spinning clock. It needs a Nerd Font.
+
 **Whole-codebase review** (2026-09-25; each fix with a test)
 
 *A repository you did not create*

@@ -1,0 +1,128 @@
+# name: my-work-theme
+# summary: The status line I use at work: four aligned rows in a double frame (path, clickable branch, worktree and PR; model, effort and a context bar; 5h/7d block-bar limits with a reset countdown, sandbox and lines changed; session, API and cache timers beside a spinning clock), Catppuccin Mocha
+# columns: 130
+# needs: nerd-font
+# author: danielatjumo
+
+preset = "full"
+icons  = "nerd"
+theme  = "catppuccin-mocha"
+align  = true
+
+[frame]
+style = "double"
+
+[[row]]
+modules = ["path", "branch", "sync", "worktree", "pr"]
+right   = ["session_name", "agent"]
+
+[[row]]
+modules = ["model", "effort", "context", "style"]
+right   = ["vim"]
+
+[[row]]
+modules = ["limit5h", "limit7d", "spend", "cost", "sandbox", "account"]
+right   = ["lines"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["clock"]
+
+[modules.path]
+style = "fish"
+
+[modules.branch]
+hide_when_empty = true
+show_sha        = false
+link            = true
+
+[modules.sync]
+enabled = false
+preset  = "minimal"
+
+[modules.worktree.icons]
+worktree = "\U0000F1BB"
+
+[modules.pr.colors]
+icon     = "text"
+approved = "ok"
+pending  = "warn"
+draft    = "muted"
+
+[modules.session_name.icons]
+name = "\U0000F292"
+
+[modules.model]
+show_id = false
+
+[modules.model.icons]
+model = "\U0000F0D0"
+
+[modules.context]
+show_icon               = true
+show_percent            = true
+compaction_marker       = false
+show_compaction_percent = false
+show_window             = false
+exceeds_200k            = false
+bar                     = "line"
+
+[modules.context.icons]
+context = "\U0000F00A"
+fill    = "="
+
+[modules.style]
+hide_default = true
+
+[modules.vim]
+enabled = false
+
+[modules.limit5h]
+bar            = "blocks"
+elapsed_marker = false
+reset          = "countdown"
+bar_width      = 12
+
+[modules.limit5h.icons]
+window = "5h"
+marker = "▏"
+
+[modules.limit5h.colors]
+behind = "ok"
+
+[modules.limit7d]
+bar_width = 12
+
+[modules.limit7d.icons]
+window = "7d"
+
+[modules.spend]
+enabled = false
+
+[modules.cost]
+enabled = false
+
+[modules.sandbox]
+style = "word"
+
+[modules.sandbox.icons]
+sandbox = "\U0000F132"
+
+[modules.sandbox.colors]
+icon = "ok"
+
+[modules.account]
+enabled = false
+style   = "user"
+
+[modules.account.icons]
+account = "\U0000F2BD"
+
+[modules.cache]
+show_writes = false
+
+[modules.clock]
+utc_offset = false
+
+[modules.clock.icons]
+spinner = "⣾⣽⣻⢿⡿⣟⣯⣷"

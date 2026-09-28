@@ -22,6 +22,7 @@ bars-and-limits  needs nerd-font  designed for 130 columns  40-cell line-style c
  links-and-shortcuts      clickable branch and pull request, a fish-style path, two link buttons in fixed boxes
  minimal-clean            one unframed line: path, context, limit, clock
  motd-ticker              repo line plus a scrolling message of the day in a fixed 24-cell box
+ my-work-theme            The status line I use at work: four aligned rows in a double frame (path, clickable branch, worktree and PR; mode…
  narrow-unicode           three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules
  pace-and-eta             the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their b…
  packed-heavy             custom heavy frame, left-packed rows, a separator per row
@@ -35,6 +36,5 @@ bars-and-limits  needs nerd-font  designed for 130 columns  40-cell line-style c
  still-life               nothing moves: animation off, no spinner or seconds, fixed-width timers, plain stale values
  tall-eight-lines         one module per row, eight rows, square frame
  three-lines-double       repo / model / timers in a double frame
- ticker-two-step          a long first row scrolling two cells a tick behind a still clock, a second row that fits, 90 columns
 
 ↑↓ preset  enter use it  e edit it  f payload  w width  esc back  ? help
