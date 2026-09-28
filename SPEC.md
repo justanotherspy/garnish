@@ -1518,7 +1518,7 @@ binary. Everything else is a **gallery preset**: a complete config file
   captures contributed with a preset (the submit-preset skill, § 13). The
   gallery page and `garnish setup` (§ 14) are how presets are browsed; there
   is no website (the picker renders at the person's own width).
-- **The set.** 32 presets, together showing every layout key and most
+- **The set.** 33 presets, together showing every layout key and most
   module options: titles at every position, links, the compaction scale,
   cell and share widths, a boxed column, narrow and ASCII-only terminals,
   half-speed animation, a two-cell ticker, animation off, pace and eta,

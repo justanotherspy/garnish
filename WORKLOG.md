@@ -358,3 +358,7 @@ Compacted on 2026-09-12 and again on 2026-09-26.
   happy path (install, `garnish setup`, start Claude Code) linking to the
   guide and reference. Decided: section numbers in `SPEC.md` and the
   `CLAUDE.md` headings code cites stay fixed.
+- **2026-09-28** — Gallery preset `my-work-theme` from issue #90 (by
+  danielatjumo), taken as submitted plus `icons = "nerd"`: the issue's
+  sample was rendered with Nerd glyphs and `# needs: nerd-font` must match
+  the icon set. Its Nerd glyphs are written as TOML escapes. 33 presets.

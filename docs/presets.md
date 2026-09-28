@@ -20,6 +20,7 @@ Complete configs from [`presets/`](../presets/). Copy one to `~/.config/garnish/
 | [`links-and-shortcuts`](#links-and-shortcuts) | clickable branch and pull request, a fish-style path, two link buttons in fixed boxes | 110 | nerd-font |
 | [`minimal-clean`](#minimal-clean) | one unframed line: path, context, limit, clock | 80 | nerd-font |
 | [`motd-ticker`](#motd-ticker) | repo line plus a scrolling message of the day in a fixed 24-cell box | 100 | nerd-font |
+| [`my-work-theme`](#my-work-theme) | The status line I use at work: four aligned rows in a double frame (path, clickable branch, worktree and PR; model, effort and a context bar; 5h/7d block-bar limits with a reset countdown, sandbox and lines changed; session, API and cache timers beside a spinning clock), Catppuccin Mocha | 130 | nerd-font |
 | [`narrow-unicode`](#narrow-unicode) | three short unframed rows for a 72-column pane, no Nerd Font needed, capped modules | 72 | — |
 | [`pace-and-eta`](#pace-and-eta) | the two rate-limit windows with pace against the clock, a projected time to 100 %, and the time cursor on their bars | 130 | nerd-font |
 | [`packed-heavy`](#packed-heavy) | custom heavy frame, left-packed rows, a separator per row | 130 | nerd-font |
@@ -965,6 +966,154 @@ width    = 24
 overflow = "scroll-wrap"
 gap      = " · "
 color    = "accent2"
+```
+
+</details>
+
+## `my-work-theme`
+
+The status line I use at work: four aligned rows in a double frame (path, clickable branch, worktree and PR; model, effort and a context bar; 5h/7d block-bar limits with a reset countdown, sandbox and lines changed; session, API and cache timers beside a spinning clock), Catppuccin Mocha
+
+At 130 columns, needs nerd-font · by @danielatjumo:
+
+```text
+╔═  ~/p/garnish               │  #42  pending ═══════════════════════════════════════════════════  garnish-dev sess-000 ═╗
+╠═  Opus                     │  ▁▃▅▇█ high  │  ============────────────────── 42% ═══════════════════════════════════════╣
+╠═ 5h ██▊░░░░░░░░░ 24%  2h13m │ 7d ████▉░░░░░░░ 41%  3d4h ═════════════════════════════════════════════  +156 −23 (+133) ═╣
+╚═  1h12m since 14:48         │  8m20s (12%) │  91% 1h  47m 2 misses ════════════════════════════ ⣾ 16:00:00 Sat 01 Feb ═╝
+```
+
+<details><summary><code>presets/my-work-theme.toml</code></summary>
+
+```toml
+# name: my-work-theme
+# summary: The status line I use at work: four aligned rows in a double frame (path, clickable branch, worktree and PR; model, effort and a context bar; 5h/7d block-bar limits with a reset countdown, sandbox and lines changed; session, API and cache timers beside a spinning clock), Catppuccin Mocha
+# columns: 130
+# needs: nerd-font
+# author: danielatjumo
+
+preset = "full"
+icons  = "nerd"
+theme  = "catppuccin-mocha"
+align  = true
+
+[frame]
+style = "double"
+
+[[row]]
+modules = ["path", "branch", "sync", "worktree", "pr"]
+right   = ["session_name", "agent"]
+
+[[row]]
+modules = ["model", "effort", "context", "style"]
+right   = ["vim"]
+
+[[row]]
+modules = ["limit5h", "limit7d", "spend", "cost", "sandbox", "account"]
+right   = ["lines"]
+
+[[row]]
+modules = ["session", "api", "cache"]
+right   = ["clock"]
+
+[modules.path]
+style = "fish"
+
+[modules.branch]
+hide_when_empty = true
+show_sha        = false
+link            = true
+
+[modules.sync]
+enabled = false
+preset  = "minimal"
+
+[modules.worktree.icons]
+worktree = "\U0000F1BB"
+
+[modules.pr.colors]
+icon     = "text"
+approved = "ok"
+pending  = "warn"
+draft    = "muted"
+
+[modules.session_name.icons]
+name = "\U0000F292"
+
+[modules.model]
+show_id = false
+
+[modules.model.icons]
+model = "\U0000F0D0"
+
+[modules.context]
+show_icon               = true
+show_percent            = true
+compaction_marker       = false
+show_compaction_percent = false
+show_window             = false
+exceeds_200k            = false
+bar                     = "line"
+
+[modules.context.icons]
+context = "\U0000F00A"
+fill    = "="
+
+[modules.style]
+hide_default = true
+
+[modules.vim]
+enabled = false
+
+[modules.limit5h]
+bar            = "blocks"
+elapsed_marker = false
+reset          = "countdown"
+bar_width      = 12
+
+[modules.limit5h.icons]
+window = "5h"
+marker = "▏"
+
+[modules.limit5h.colors]
+behind = "ok"
+
+[modules.limit7d]
+bar_width = 12
+
+[modules.limit7d.icons]
+window = "7d"
+
+[modules.spend]
+enabled = false
+
+[modules.cost]
+enabled = false
+
+[modules.sandbox]
+style = "word"
+
+[modules.sandbox.icons]
+sandbox = "\U0000F132"
+
+[modules.sandbox.colors]
+icon = "ok"
+
+[modules.account]
+enabled = false
+style   = "user"
+
+[modules.account.icons]
+account = "\U0000F2BD"
+
+[modules.cache]
+show_writes = false
+
+[modules.clock]
+utc_offset = false
+
+[modules.clock.icons]
+spinner = "⣾⣽⣻⢿⡿⣟⣯⣷"
 ```
 
 </details>
