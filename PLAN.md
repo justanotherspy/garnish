@@ -12,9 +12,9 @@ design, SPEC § 14 says so.
 
 `v0.2.0` (2026-09-06) shipped Phases 0–18. Phases 19–23, the setup
 refinements and the fixes from the 2026-09-25 whole-codebase review (12
-area reviewers, ~270 findings; #85, #86) are on `main`, unreleased. The
-first release through the Homebrew pipeline will be `v0.3.0`;
-`CHANGELOG.md` § Unreleased is its section.
+area reviewers, ~270 findings; #85, #86) are `v0.3.0`, the first release
+through the Homebrew pipeline; `CHANGELOG.md` § 0.3.0 is its section and
+its tag message.
 
 ## Done
 

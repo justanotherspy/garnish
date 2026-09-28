@@ -3,7 +3,7 @@
 User-visible changes per release. The tag message for a release is this
 file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
-## Unreleased
+## 0.3.0 — 2026-09-28 (PLAN Phases 19–23)
 
 **Whole-codebase review** (2026-09-25; each fix with a test)
 
