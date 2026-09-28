@@ -374,3 +374,8 @@ Compacted on 2026-09-12 and again on 2026-09-26.
   eight assets `uploaded`, and `render` follows `seal` because a draft's
   assets have no public URL for `brew fetch`. Release PR for `v0.3.1`, the
   first binary release: the 0.3.0 section renamed, with a line saying so.
+  Tagged: draft, eight assets, `seal`, render and approval all worked; the
+  cask push failed at octo-sts (403), because the repository issues the
+  immutable OIDC subject (`repo:justanotherspy@4822513/garnish@1357344340:…`)
+  and the tap's `garnish.sts.yaml` trusted the name-only form. A settings
+  fix in the tap, then a re-run of the failed jobs; no new version.

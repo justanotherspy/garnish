@@ -248,8 +248,9 @@ and stops once, before publishing the Homebrew cask, for Daniel's approval.
 4. **Repository state it needs** (settings, before the first tag): the
    `release` environment with Daniel as required reviewer, `v*` tags only,
    admin bypass off; the octo-sts app on the tap with
-   `.github/chainguard/garnish.sts.yaml` trusting
-   `repo:justanotherspy/garnish:environment:release`; a `v*` tag ruleset
+   `.github/chainguard/garnish.sts.yaml` trusting the immutable subject
+   `repo:justanotherspy@4822513/garnish@1357344340:environment:release`
+   (like the review's rule; the name-only form is refused); a `v*` tag ruleset
    limited to Daniel with required signatures.
 
 **The cask template is declarative, not Ruby**: `postflight_steps` (the
