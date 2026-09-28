@@ -7,6 +7,13 @@ name: Release
 # is rendered and checked first, then its push waits in the `release`
 # environment until Daniel approves it, so a tag on its own never changes
 # what `brew install` gives people.
+#
+# The repository has immutable releases on: publishing a release (a
+# pre-release too) freezes its assets and its tag, and a deleted release's
+# tag can never be used again. So the release starts as a draft, the build
+# jobs attach every archive to the draft, and it is published only once
+# the whole asset set is there. After that only its title, notes and the
+# pre-release/latest flags can change.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -61,7 +68,7 @@ jobs:
             exit 1
           fi
           # The build runs with --locked, so a lock left at the old version
-          # would fail every build job after the pre-release exists.
+          # would fail every build job after the draft release exists.
           lock="$(awk '/^name = "garnish"$/ { getline; sub(/^version = "/, ""); sub(/"$/, ""); print; exit }' Cargo.lock)"
           if [ "$version" != "$lock" ]; then
             echo "::error::Cargo.lock records garnish $lock, not $version; commit the lock that make check rewrote"
@@ -134,11 +141,13 @@ jobs:
             echo "::warning::GitHub did not verify the signature on $TAG"
           fi
 
-  # The pre-release the build jobs attach their archives to. Notes are the
-  # CHANGELOG section, the same text as the tag message. A re-run keeps an
-  # existing release.
+  # The draft pre-release the build jobs attach their archives to (a
+  # published one would refuse them). Notes are the CHANGELOG section, the
+  # same text as the tag message. A re-run keeps an existing draft; a
+  # release already published is frozen, so a full re-run stops here:
+  # re-run only the failed jobs, and a missing archive needs a new version.
   release:
-    name: github pre-release
+    name: github draft release
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -154,13 +163,17 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "release $TAG already exists; keeping it"
+          if draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null)"; then
+            if [ "$draft" != true ]; then
+              echo "::error::release $TAG is already published and immutable; re-run only the failed jobs, or release a new version"
+              exit 1
+            fi
+            echo "draft release $TAG already exists; keeping it"
             exit 0
           fi
           scripts/changelog-section.sh --body "$VERSION" > notes.md
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --prerelease --title "garnish $VERSION" --notes-file notes.md
+            --draft --prerelease --title "garnish $VERSION" --notes-file notes.md
 
   # One `garnish-<target>.tar.gz` (plus `.sha256`) per target, built on that
   # target's own runner where one exists; only x86_64 macOS is cross-built.
@@ -241,13 +254,48 @@ jobs:
           locked: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Publishes the draft as a pre-release, which freezes it: only with every
+  # archive and checksum attached and fully uploaded, since nothing can be
+  # added or replaced afterwards. The render job needs it published: a
+  # draft's assets have no public download URL for curl or `brew fetch`.
+  # A re-run finds it published and checks the assets again.
+  seal:
+    name: publish pre-release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          want="$(for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+            x86_64-apple-darwin aarch64-apple-darwin; do
+            printf 'garnish-%s.tar.gz\ngarnish-%s.sha256\n' "$target" "$target"
+          done | LC_ALL=C sort)"
+          release="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)"
+          have="$(printf '%s' "$release" | jq -r '.assets[] | select(.state == "uploaded") | .name' | LC_ALL=C sort)"
+          if [ "$have" != "$want" ]; then
+            echo "::error::release $TAG does not hold exactly the eight uploaded assets; it stays unpublished"
+            printf 'want:\n%s\nhave:\n%s\n' "$want" "$have"
+            exit 1
+          fi
+          if [ "$(printf '%s' "$release" | jq -r .isDraft)" != true ]; then
+            echo "release $TAG is already published"
+            exit 0
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+
   # Renders the cask from the published archives and lets Homebrew itself
   # download and verify one (`brew fetch`, blocking) before anyone is asked
   # to approve it. The rendered cask is printed in this job's log and kept
   # as the `cask` artifact: that is what the approval is for.
   render:
     name: render and check cask
-    needs: [verify, build]
+    needs: [verify, seal]
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -350,9 +398,10 @@ jobs:
 
   # Only once the archives and the cask are in place does the release
   # become "Latest", so the badge never points at a half-published version.
+  # Immutability still allows changing these two flags.
   promote:
     name: mark latest
-    needs: [build, publish]
+    needs: [seal, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -363,4 +412,4 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease=false --latest
+            --prerelease=false --latest

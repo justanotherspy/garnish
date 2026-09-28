@@ -363,4 +363,13 @@ Compacted on 2026-09-12 and again on 2026-09-26.
   sample was rendered with Nerd glyphs and `# needs: nerd-font` must match
   the icon set. Its Nerd glyphs are written as TOML escapes. 33 presets.
   Release PR for `v0.3.0`: crate version bumped, `## Unreleased` dated as
-  the 0.3.0 section.
+  the 0.3.0 section. Tagged; the first build job failed with `HTTP 422:
+  Cannot upload assets to an immutable release`. The repository has
+  GitHub's immutable releases on, and the workflow published the
+  pre-release before building, so nothing could be attached, and a
+  deleted immutable release's tag cannot be reused: `v0.3.0` is spent.
+  Fixed per GitHub's guidance (draft, attach, then publish): `release`
+  creates a draft, `build` uploads to it (`gh release upload` finds a
+  draft by its pending tag), a new `seal` job publishes it only with all
+  eight assets `uploaded`, and `render` follows `seal` because a draft's
+  assets have no public URL for `brew fetch`.
