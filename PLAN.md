@@ -15,8 +15,10 @@ refinements and the fixes from the 2026-09-25 whole-codebase review (12
 area reviewers, ~270 findings; #85, #86) were tagged `v0.3.0`, but its
 release was published before its archives were attached, and the
 repository's immutable releases refused them: `v0.3.0` has no binaries and
-its tag cannot be reused. The workflow now builds onto a draft; the next
-version is the first release through the Homebrew pipeline.
+its tag cannot be reused. The workflow now builds onto a draft, and
+`v0.3.1`, the same changes, is the first binary release and the first
+through the Homebrew pipeline; `CHANGELOG.md` § 0.3.1 is its section and
+its tag message.
 
 ## Done
 
@@ -43,8 +45,8 @@ Open items only; closed ones are in `WORKLOG.md`.
 **Waiting on Daniel**
 
 - [ ] First release through the pipeline (`v0.3.0` shipped no binaries):
-  the release PR for the next version, with the `release` environment
-  (required reviewer Daniel) and `garnish.sts.yaml` in the tap. Afterwards drop
+  tag `v0.3.1`, with the `release` environment (required reviewer Daniel)
+  and `garnish.sts.yaml` in the tap. Afterwards drop
   the "once the first release is tagged" note from README and guide § 1
   and the tap's README.
 - [ ] Watch a nine-row status line at 24 and 50 rows in the fullscreen and

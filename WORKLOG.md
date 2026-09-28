@@ -372,4 +372,5 @@ Compacted on 2026-09-12 and again on 2026-09-26.
   creates a draft, `build` uploads to it (`gh release upload` finds a
   draft by its pending tag), a new `seal` job publishes it only with all
   eight assets `uploaded`, and `render` follows `seal` because a draft's
-  assets have no public URL for `brew fetch`.
+  assets have no public URL for `brew fetch`. Release PR for `v0.3.1`, the
+  first binary release: the 0.3.0 section renamed, with a line saying so.
