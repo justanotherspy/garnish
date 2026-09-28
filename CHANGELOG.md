@@ -3,7 +3,11 @@
 User-visible changes per release. The tag message for a release is this
 file's section for it. `WORKLOG.md` holds the day-by-day detail.
 
-## 0.3.0 — 2026-09-28 (PLAN Phases 19–23)
+## 0.3.1 — 2026-09-28 (PLAN Phases 19–23)
+
+The first binary release: prebuilt archives for Linux and macOS (x86_64
+and aarch64) and a Homebrew cask. `v0.3.0` was tagged with these same
+changes but published without binaries; use 0.3.1.
 
 **Whole-codebase review** (2026-09-25; each fix with a test)
 
