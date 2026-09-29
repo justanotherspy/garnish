@@ -365,9 +365,11 @@ jobs:
       # tap alone and valid for the run (the action revokes it in its post
       # step). The grant is .github/chainguard/garnish.sts.yaml in the tap
       # and trusts exactly this job's subject,
-      # repo:justanotherspy/garnish:environment:release: an environment
-      # always overrides the ref in the OIDC subject, and this job only
-      # runs once that environment's reviewer has approved it.
+      # repo:justanotherspy@4822513/garnish@1357344340:environment:release
+      # (the repository issues GitHub's immutable subject, with the owner's
+      # and repository's numeric IDs): an environment always overrides the
+      # ref in the OIDC subject, and this job only runs once that
+      # environment's reviewer has approved it.
       - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
         id: tap-sts
         with:
