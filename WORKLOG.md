@@ -378,4 +378,9 @@ Compacted on 2026-09-12 and again on 2026-09-26.
   cask push failed at octo-sts (403), because the repository issues the
   immutable OIDC subject (`repo:justanotherspy@4822513/garnish@1357344340:…`)
   and the tap's `garnish.sts.yaml` trusted the name-only form. A settings
-  fix in the tap, then a re-run of the failed jobs; no new version.
+  fix in the tap, then a re-run of the failed jobs; no new version. The
+  re-run minted the token, then the push was refused (GH013): the tap's
+  `main` ruleset asks for a PR with its `audit` check, which no publisher
+  pushing straight to `main` can meet. Decided: the octo-sts app becomes a
+  bypass actor on that ruleset (every publisher pushes directly, and the
+  tap's `audit` re-checks each cask on push), not a PR per release.

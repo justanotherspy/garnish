@@ -250,8 +250,11 @@ and stops once, before publishing the Homebrew cask, for Daniel's approval.
    admin bypass off; the octo-sts app on the tap with
    `.github/chainguard/garnish.sts.yaml` trusting the immutable subject
    `repo:justanotherspy@4822513/garnish@1357344340:environment:release`
-   (like the review's rule; the name-only form is refused); a `v*` tag ruleset
-   limited to Daniel with required signatures.
+   (like the review's rule; the name-only form is refused), and the octo-sts
+   app as a bypass actor on the tap's `main` ruleset (which otherwise
+   demands a PR with its `audit` check; the tap's `audit` re-checks every
+   pushed cask instead); a `v*` tag ruleset limited to Daniel with required
+   signatures.
 
 **The cask template is declarative, not Ruby**: `postflight_steps` (the
 `Homebrew::InstallSteps::DSL` vocabulary: `run`, `on_macos`), the staged
