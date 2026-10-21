@@ -146,7 +146,7 @@ jobs:
       - name: Review
         id: review
         if: steps.gate.outputs.review == 'true'
-        uses: anthropics/claude-code-action@e4a6faad497d33dbc7144135c75e41f82f0bf6c0 # v1.0.255
+        uses: anthropics/claude-code-action@a5a423f75c251dcbff8a74e99f83b2cb03c72bfa # v1.0.256
         with:
           # Identifiers, not secrets: the federation rule's subject pattern is
           # what restricts who may exchange a token.
