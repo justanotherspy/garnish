@@ -11,7 +11,7 @@ default-run = "garnish"
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
 color-eyre = "0.6.5"
-jiff = "0.2.35"
+jiff = "1.0.0"
 # The `setup` screen (SPEC § 14); its crossterm backend is the one terminal
 # library, re-exported as `ratatui::crossterm`. No other backend, no macros.
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
